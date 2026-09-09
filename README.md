@@ -37,6 +37,10 @@
 
 ## News
 
+- **2026-09** **Qwen3.8-27B EXL3 gets a mixed-length serving comparison on GB10.**
+  The [measurement](docs/benchmarks/qwen38-27b-exl3-variadic-gb10.md) covers concurrency 1, 4, and 8.
+  Comparator repetitions remain incomplete, configurations differ, and no correctness gate covers the run.
+
 - **2026-09** **More decision models and a C API for scoring.**
   [CLM](docs/models/clm.md), [GLiNER2.5-Decide](docs/models/gliner25-decide.md),
   and [xor](docs/models/xor.md) use `/v1/systemone` and ABI 29's
