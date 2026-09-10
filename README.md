@@ -37,29 +37,10 @@
 
 ## News
 
-- **2026-09** **Qwen3.8-27B EXL3 gets a mixed-length serving comparison on GB10.**
-  The [measurement](docs/benchmarks/qwen38-27b-exl3-variadic-gb10.md) covers concurrency 1, 4, and 8.
-  Comparator repetitions remain incomplete, configurations differ, and no correctness gate covers the run.
-
-- **2026-09** **More decision models and a C API for scoring.**
-  [CLM](docs/models/clm.md), [GLiNER2.5-Decide](docs/models/gliner25-decide.md),
-  and [xor](docs/models/xor.md) use `/v1/systemone` and ABI 29's
-  [`vllm_decide`](docs/reference/c-api.md#decisions-and-option-scoring).
-  [Tev1](docs/models/tev1.md) selects options through `/v1/chat/completions`.
-
-- **2026-09** **GLiNER2.5 extracts entities from text.** Supply your own entity types through
-  `POST /v1/ner` or the C ABI 27 function `vllm_gliner_ner`. The current implementation runs on CPU.
-  See the [GLiNER usage guide](docs/USAGE.md#run-zero-shot-ner-and-structured-extraction-gliner25).
-- **2026-09** **Quantized Qwen completes smoke runs on Tenstorrent.** Qwen3.8-27B and
-  Qwen3.5-0.8B Q4_K_M completed two prompts each on a Blackhole P150 with
-  `VT_TT_KEEPQUANT_INT8DOT=1`. These runs establish completion only.
-  See the [measurements and limits](docs/benchmarks/tt-keepquant-27b-decode.md).
-- **2026-09** **Qwen3.8-Flash-Next generates text on CPU and ROCm.** The released UD-IQ1_S GGUF
-  runs one sequence at a time, with ROCm generation measured on gfx1151. Oracle token correctness
-  and competitive performance remain unverified. See the [model details](docs/FEATURES.md#registered-architectures).
-- **2026-09** **C ABI 26 exposes more engine controls.** Applications can select the KV cache
-  dtype, read speculative acceptance counters, and disable the model-level sliding window.
-  See the [C API reference](docs/reference/c-api.md#recent-abi-additions) for defaults and limits.
+- **2026-09** **Multimodal chat reaches the model through HTTP.** Qwen3-VL accepts images;
+  dots3-note also accepts audio and multiple media items. CPU tests use synthetic weights;
+  real-checkpoint token parity remains unverified. See the [input guide](docs/guides/multimodal-input.md)
+  for formats and limits.
 - **2026-09** **C ABI 26 exposes more engine controls.** Applications can select the KV cache
   dtype, read speculative acceptance counters, and disable the model-level sliding window.
   See the [C API reference](docs/reference/c-api.md#recent-abi-additions) for defaults and limits.
@@ -69,14 +50,9 @@
 - **2026-08** **EXL3 checkpoints now generate on CPU and CUDA.** A stock
   Llama-3.2-1B-Instruct EXL3 checkpoint loads through the shared dense model path and emits text.
   The current CUDA path supports its 3-bit body and 6-bit output head. No speed claim is available.
-- **2026-08** **GLM-5.3-Flash now generates on CPU from a 101.25 GiB GGUF.** The shipped
-  `UD-Q2_K_XL` artifact emits coherent text while keeping IQ2_XS and IQ4_XS blocks compressed.
-  Both formats also have CUDA keep-quant kernels, but this model's CUDA forward and every speed
-  gate remain pending.
-- **2026-08** **GLM-5.3 joins the model registry.** Its GGUF loader and first-token forward run
-  through the shared expert-streaming path. The real 201.83 GiB artifact has not completed a load,
-  and resumed sparse decoding still needs the indexer side cache, so no real-checkpoint token or
-  speed claim is available.
+- **2026-08** **GGUF gains IQ2_XS and IQ4_XS.** Both formats decode and run directly on their
+  compressed blocks on CPU. This lets the 101.25 GiB GLM-5.3-Flash GGUF weight tower load without
+  expanding to 426.72 GiB. Its model forward is still incomplete.
 - **2026-08** **Hybrid CPU/GPU expert placement reaches five architecture families.** Qwen3-MoE,
   Qwen3.5/3.6, Nemotron-H, DeepSeek-V2, and Kimi-Linear can run routed experts on the CPU while the
   rest of the model stays on the selected accelerator. The end-to-end token and speed gates are
@@ -144,8 +120,8 @@ Where that stands today:
 - **Everything.** 44 registered architectures, 38 tool-parser families, structured output including
   GBNF, three speculative decoders, image, video, and audio input, music generation, external KV
   offload, Prometheus metrics, and the SGLang knobs, all in a library you can `dlopen`. Multimodal
-  input runs on the single-sequence drivers. No multimodal request is served over HTTP yet
-  ([#2300](https://github.com/mudler/vllm.cpp/issues/2300)).
+  HTTP input has CPU tests with synthetic weights on Qwen3-VL and dots3-note. Real-checkpoint
+  token parity remains unverified ([formats and limits](docs/guides/multimodal-input.md)).
 
 ## Performance
 
@@ -245,7 +221,7 @@ configs, token-for-token the same output. Switching to it should be boring. Ever
 you get on top, most of it borrowed from whichever engine does it best:
 
 - **One 66 MiB binary instead of a 9.1 GiB install.** A flat, exception-free, llama.cpp-style C ABI
-  ([`include/vllm.h`](include/vllm.h), ABI v27) for C, C++, Go, or Rust. No Python
+  ([`include/vllm.h`](include/vllm.h), ABI v26) for C, C++, Go, or Rust. No Python
   interpreter in the process.
 - **GGUF as a first-class citizen.** Load the same quantized files llama.cpp uses, and on CPU
   **compute directly on the compressed blocks** (Q4_0, Q8_0, Q3_K, Q4_K, Q5_K, Q6_K, IQ2_XS,
@@ -284,13 +260,9 @@ you get on top, most of it borrowed from whichever engine does it best:
 - **Tool calling and reasoning.** 38 tool-parser families (42 accepted names) and 12 reasoning
   parser names, streaming, selectable with `--tool-call-parser` / `--reasoning-parser`. Chat templates
   render through the vendored google/minja engine, the same renderer llama.cpp ships.
-- **Multimodal.** Image, video, and audio to text, token-correct against committed goldens on the
-  single-sequence drivers. The OpenAI server parses image content parts on `/v1/chat/completions`
-  and carries them into the engine, and that seam is gated. Two residuals then stop the request
-  before the model. The server decodes only raw RGB, so a PNG or JPEG data URI is refused first.
-  The GPU runner does not pass image features to the model forward
-  ([#2300](https://github.com/mudler/vllm.cpp/issues/2300)). No multimodal request is served end
-  to end.
+- **Multimodal.** Image, video, and audio to text have committed goldens on the single-sequence
+  drivers. HTTP input reaches the model on Qwen3-VL and dots3-note, with CPU tests using synthetic
+  weights. See [formats, model limits, and remaining gates](docs/guides/multimodal-input.md).
 - **Quantization.** NVFP4 W4A4/W4A16, compressed-tensors NVFP4A16, EXL3 trellis, GGUF F32/F16,
   Q4_0, Q8_0, Q3_K, Q4_K, Q5_K, Q6_K, IQ2_XS, IQ4_XS, and an FP8 W8A8 slice.
 - **External KV.** KV offload to CPU/disk and an `lm://` LMCache client, plus KV-cache events for
@@ -332,7 +304,6 @@ and Voxtral (audio).
 | DeepSeek-V4-Flash (MLA + MHC + DSA) | DeepSeek-V4-Flash-GGUF (80.7 GB, single GB10) | keep-quant | Coherent (near-tie-robust) | Decode beats ds4 1.144x by default (byte-exact) |
 | GLM-4 dense | GLM-4-9B-0414 | - | Token-exact | Speed-pending |
 | GLM-4.7-Flash (MLA MoE) | zai-org/GLM-4.7-Flash | - | Token-exact (near-tie-robust) | Speed-pending |
-| GLM-5.3 / GLM-5.3-Flash | unsloth GLM-5.3 GGUFs | keep-quant | Flash emits coherent text; GLM-5.3 synthetic first token only | Speed-pending |
 | Laguna-S / Laguna-XS 2.1 (MoE) | poolside/Laguna-S-2.1-NVFP4 | NVFP4 + Q4_K | Near-tie (byte-exact) | vLLM parity+ 1.03x by default |
 | Kimi-Linear-48B-A3B (KDA + MLA + MoE) | Kimi-Linear-48B-A3B | - | Near-tie (106/128) | 1.59 tok/s, default off |
 | Nemotron-H hybrid (Mamba2 + GQA + MoE) | Nemotron-3.5-Lightning-30B-A3B-NVFP4 | NVFP4 | Host gate strict 96/96; GB10 rerun pending | Speed-pending |
@@ -383,7 +354,7 @@ hardware-blocked and why, is linked from [Project status](#project-status).
 | **Metal** | Apple Silicon | Two models end to end, 18 of 75 ops native. Prefill ahead of MLX-LM, warm total 97.6% with the MLX provider |
 | **Vulkan** | Portable GPU | `opt-125m` STRICT token-exact; Qwen3.6-27B decode **matches llama.cpp Vulkan** (4.36 vs 4.35, denominator SUPERSEDED, #1003) |
 | **ROCm** | AMD GPUs | Native EXL3 generation on gfx1151, matching the CPU reference. Discrete GPU correctness and competitive performance remain unverified ([evidence](.agents/specs/backend-rocm-exl3.md)) |
-| **Tenstorrent** | Blackhole P150 | OPT-125m strict 6/6. Quantized Qwen smoke completion with an opt-in path ([build and limits](docs/BUILD.md#tenstorrent-build-blackhole)) |
+| **Tenstorrent** | Blackhole | OPT-125m strict 6/6; Qwen3 gate wired, full rerun pending |
 | **Intel XPU / ANE** | Intel, Apple NPU | Spiked or roadmap |
 
 Per-arch build flags, per-op coverage, and the quantization format table:
@@ -420,13 +391,10 @@ All flags, including `--speculative-config`: [docs/USAGE.md](docs/USAGE.md).
 
 ### Multimodal INPUT and video GENERATION
 
-Multimodal INPUT goes through `/v1/chat/completions` content parts. The server parses an
-`image_url` part and carries it into the engine. It refuses a `video_url` or an `input_audio`
-part at that seam with HTTP 400. The served limit is one image and zero of every other modality.
-Two residuals then stop an image request. The server decodes only raw RGB, so a PNG or JPEG data
-URI is refused first. The GPU runner does not pass image features to the model forward
-([#2300](https://github.com/mudler/vllm.cpp/issues/2300)). No multimodal request is served end to
-end. Video GENERATION:
+Send supported image and audio content parts to `/v1/chat/completions`.
+The [multimodal input guide](docs/guides/multimodal-input.md) lists each model's limits and provides
+an image request example. HTTP paths have CPU tests with synthetic weights; real-checkpoint token
+parity remains unverified. PNG/JPEG and video input are unavailable over HTTP. Video GENERATION:
 
 ```sh
 build/examples/minimax-h3-gen --dit MiniMax-H3-FL2VA-Q4_K_M.gguf --dequant-bf16 \
@@ -464,7 +432,7 @@ behind a model gallery, multi-model serving, the full OpenAI API surface, auth, 
 ## Use it as a library (C API)
 
 Link `libvllm` and include [`include/vllm.h`](include/vllm.h): a flat, exception-free,
-llama.cpp-style C ABI (currently `VLLM_ABI_VERSION 27`) suitable for `dlopen` / FFI. Check the
+llama.cpp-style C ABI (currently `VLLM_ABI_VERSION 26`) suitable for `dlopen` / FFI. Check the
 header for the version that your build provides.
 
 ```c
