@@ -72,3 +72,50 @@ Do not promote a single completed benchmark round to an accepted headline.
 HumanEval-style benchmark data is not a correctness gate. Preserve those limits.
 Stop on an ambiguous source claim rather than guessing. Do not modify source,
 tests, checkers, other rows, or unrelated documentation to repair baseline gates.
+
+## Outcome: 13 September 2026
+
+Implemented the three public-document corrections without changing model
+support states or benchmark values. Removed prose is preserved verbatim in
+[the dated archive](../completed/exl3-public-docs-20260913.md). The five edited
+artifact rows retain their first five cells byte-for-byte, including filenames,
+sizes, revisions, and hashes. The CUDA news replaces the older August entry.
+
+Source verification at implementation base `0cf30baae`:
+
+| Statement | Inspected source or existing evidence |
+|---|---|
+| Per-tensor width and codebook selection | `include/vllm/model_executor/models/dense_weight_loaders.h:700` derives bits from trellis shape; `:750` reads `mcg` and `mul1` presence |
+| Shared dense method and long-prefill dispatch | `include/vllm/model_executor/layers/quantization/exl3.h:70` delegates to `dense_attn::Exl3MatmulD`; `include/vllm/model_executor/models/dense_attn_block.h:315` requires both M > 144 and a registered reconstruct op |
+| CUDA GEMM coverage | `src/vt/cuda/cuda_exl3.cu:2132` admits exactly `(3,0)`, `(3,1)`, `(6,0)`, `(3,2)`, `(4,2)`, `(5,2)`, and `(6,2)`; reconstruct dispatch at `:2707` repeats those pairs |
+| GEMV is a separate capability | `src/vt/cuda/cuda_exl3.cu:2284` admits `(3,1)`, `(3,2)`, and `(4,2)`; `:2314` declines uninstantiated arms; `tests/vt/test_exl3_gemv.cpp:161` covers artifact shapes and occupancy constraints |
+| Non-CUDA long-prefill behavior | `tests/vt/test_exl3_matmul_dispatch.cpp:68` exercises M=145 through the shared seam on CPU, with no reconstruct registration. Inspected here, not compiled or executed |
+| Draft uses packed target head | `src/vllm/model_executor/models/qwen3_dflash.cpp:105` selects the EXL3 head before the other formats |
+| DeepSeek-V4 doubled widths no longer fail at load | `src/vllm/model_executor/models/deepseek_v4_weights.cpp:1145` derives compressor width from the ratio; `:1195` loads the indexer compressor at twice its head dimension |
+| DeepSeek-V4 tokenizer caveat is obsolete | `tests/vllm/test_tokenizer_parity_deepseek_v3.cpp:136` compares encoding with HF goldens; `:144` checks round trips. `model-dsv4-exl3.md:53` records the real artifact's tokenizer parity evidence |
+| DeepSeek-V4 MTP exclusion remains | `src/vllm/model_executor/models/deepseek_v4_weights.cpp:1306` explicitly skips and counts `mtp.*` tensors |
+| Generation and performance limits | `docs/benchmarks/qwen38-27b-exl3-gb10.md:3` records generation; `:27` excludes correctness claims for sampled HumanEval legs. `quant-exl3-perf.md:45` records GEMV occupancy limits; `backend-rocm-exl3.md` owns gfx1151 generation evidence |
+
+Focused verification uses Python from `/tmp/vllm-docs-tools/usr/bin`, with
+`LD_LIBRARY_PATH=/tmp/vllm-docs-tools/usr/lib`:
+
+| Command | Result |
+|---|---|
+| `python3 scripts/check-readme-structure.py` | PASS, exit 0 |
+| `python3 scripts/check-supported-models.py` | PASS, exit 0; 44 registered architectures |
+| `python3 scripts/check-quickstart-recipes.py` | PASS, exit 0 |
+| `python3 scripts/check-benchmark-index.py` | PASS, exit 0 |
+| `python3 scripts/check-agent-record.py` | PASS, exit 0 after correcting the new claim's missing lifecycle annotation; initial exit 1 |
+| `python3 -m unittest discover -s tests/scripts -p 'test_check_readme_structure.py'` | PASS, exit 0; 19 tests |
+| `git diff --check` | PASS, exit 0 |
+
+A direct comparison with `git show 0cf30baae:docs/USAGE.md` confirms the five
+artifact rows retain their first five cells. A second comparison confirms every
+removed FEATURES and USAGE line occurs verbatim in the archive. Both pass.
+
+No executable behavior or test guarantee changes, so red-first and negative
+mutation checks are not applicable. No GPU or runtime benchmark was run. The
+operator owns the unchanged-base comparison and full `agent-preflight.sh`
+result; its broad run was still in progress at this implementation handoff.
+Missing compiler, CMake, and readelf are reported environment limitations,
+not passing gates. This helper does not modify unrelated code to repair them.
