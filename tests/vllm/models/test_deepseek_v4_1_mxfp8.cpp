@@ -590,7 +590,7 @@ TEST_CASE("V4.1 MXFP8 emulation linear: matches a double-precision recompute tha
     }
   CHECK(RelL2(got, want) < 1e-6);
 
-  // No bias is the `bias=None` arm (emulation.py:56).
+  // No bias is the `bias=None` arm (emulation.py:54).
   std::vector<float> nob(static_cast<size_t>(m * n));
   Mxfp8LinearEmulation(x.data(), m, k, w.data(), s.data(), n, nullptr, nob.data());
   for (int64_t i = 0; i < m; ++i)
@@ -707,7 +707,7 @@ TEST_CASE("V4.1 MXFP8 emulation linear: the BF16 arm is the model-path arm, and 
   // and it reds if the bf16 arm ever stores something wider or rounds twice.
   for (size_t i = 0; i < got.size(); ++i) CHECK(got[i] == vt::F32ToBF16(ref[i]));
 
-  // The `bias=None` arm (emulation.py:56), and the polarity that says the store
+  // The `bias=None` arm (emulation.py:54), and the polarity that says the store
   // really is bf16: a result bf16 cannot hold comes back rounded.
   std::vector<uint16_t> nob(static_cast<size_t>(m * n));
   Mxfp8LinearEmulationBf16(xb.data(), m, k, w.data(), s.data(), n, nullptr,
