@@ -10282,7 +10282,11 @@ tok/s, i.e. **50x across this campaign**, against the sojufx sparkDash C1
 reference of 66.17 tok/s -- a gap of 264x at the start and **5.2x now**.
 
 **The ranking has changed, and not toward what the pre-W6 trace predicted.**
-`nsys`, 60 s window inside a 3000-token decode (~771 steady-state steps):
+`nsys`, 60 s window inside a 3000-token decode (**527** steady-state steps at
+113.9 ms; the "~771" first written here was wrong, see the W9 correction section).
+**THIS TABLE RANKS A ~1600-TOKEN CONTEXT.** `QsaGatherAttentionKernel`'s cost is
+proportional to `|sel|`, so its rank does NOT transfer to the 400-token workload
+the sojufx gap is quoted on without rescaling:
 
 | kernel | share | instances | avg |
 |---|---|---|---|
@@ -10312,7 +10316,7 @@ Second, and larger: **the allocator is still the top HOST cost.**
 | `cudaLaunchKernel` | 12.4% | 1,349,118 | 4.8 us |
 | `cudaStreamSynchronize` | 0.5% | 198,000 | 1.3 us |
 
-Over ~771 steps that is ~68 `cudaFree` and ~43 ms per step, at 634 us per call. **THAT STEP COUNT IS NOW IN DOUBT (2026-09-13).** It was derived as 60 s / 77.8 ms. The QSA attribution counts 6,319 `QsaGatherAttentionKernel` instances in the same window and the tree has 12 of 48 layers on the QSA path (`qwen4_exp.h:29-33`), which implies **527** steps, not 771 -- a 1.46x disagreement. At 527 the same totals read ~99 calls and ~63 ms per step. Neither derivation is retracted, because neither has been checked against a step counter; the CONFIDENCE is. Resolve the step count by instrumenting it before scoping anything from these per-step figures (`ISSUE-LOCAL-01M2DJ8Y4DFQMDG9GMWEK93142`).
+Over ~771 steps that is ~68 `cudaFree` and ~43 ms per step, at 634 us per call. **THAT STEP COUNT IS WRONG AND WAS CORRECTED THE SAME DAY (2026-09-13): it is 527, the per-step figures are ~99 calls and ~63 ms, and this whole table describes a ~1600-token context rather than the 400-token workload the gap is quoted on. See "### W9: the two numbers this row kept dividing into each other".** The paragraph below is the retracted reasoning, kept because it was published. **IT IS NOW IN DOUBT (2026-09-13).** It was derived as 60 s / 77.8 ms. The QSA attribution counts 6,319 `QsaGatherAttentionKernel` instances in the same window and the tree has 12 of 48 layers on the QSA path (`qwen4_exp.h:29-33`), which implies **527** steps, not 771 -- a 1.46x disagreement. At 527 the same totals read ~99 calls and ~63 ms per step. Neither derivation is retracted, because neither has been checked against a step counter; the CONFIDENCE is. Resolve the step count by instrumenting it before scoping anything from these per-step figures (`ISSUE-LOCAL-01M2DJ8Y4DFQMDG9GMWEK93142`).
 W6 removed the per-step ADAPTER rebuild and its 378 allocations; something still
 frees ~68 objects per step. The candidates are the pooled `DBuf` lifetimes in the
 MoE and attention paths and any `ResidentWeight` whose `d_dev` still does not
@@ -10320,8 +10324,9 @@ memoise. THIS IS NOT A CLAIM ABOUT WHICH -- it is the measurement that says the
 question is open, and it is the first thing the next row should resolve, because
 a 634 us free is itself anomalous.
 
-`cudaLaunchKernel` is 1,349,118 calls over ~771 steps = ~1,750 per step at 4.8 us,
-so ~8.4 ms per step of launch overhead. That is the number W8 exists to attack,
+`cudaLaunchKernel` is 1,349,118 calls over **527** steps = **~2,560 per step** at
+4.8 us, so **~12.3 ms per step** of launch overhead. (The "~1,750 per step at
+~8.4 ms" first written here used the wrong step count; corrected 2026-09-13.) That is the number W8 exists to attack,
 and it is now ~11% of the step rather than 0.5% of it.
 
 **Owed.** A per-step attribution for the `cudaFree` population, before any row
@@ -10402,16 +10407,19 @@ block width. The change makes pass 2 do what pass 1 demonstrably does cheaply.
 **Prediction, written before the work starts, in the W7 style.** With `kSelTile`
 unchanged at 32, the serial dot is spread over 32 threads. If pass-2 dot is 87% of
 the kernel and the remainder is 13%, the kernel goes to `87/32 + 13 = 15.7%` of its
-current cost, i.e. **~6.4x**. At 12 QSA layers x 2.545 ms = 30.5 ms of the 77.8 ms
-step, that removes **~26 ms**, for a step near **52 ms** and **~19 tok/s**. Record
-the measured values against these three numbers and do not adjust the prediction.
+current cost, i.e. **~6.4x ON THE KERNEL**. Measure it on the kernel, at the
+released shape the attribution used (`T=1, HQ=24, HKV=2, DH=256, CR=4,
+block_topk=512`, `|sel| = 2048`), and record the measured value against ~6.4x
+without adjusting the prediction.
 
-**A side observation the step-count question should have.** 6,319 kernel
-instances divided by 12 QSA layers is **526.6 steps**, which is the 527 the
-instance count implies and not the 771 that `60 s / 77.8 ms` implies. It is not a
-step counter and it does not close `ISSUE-LOCAL-01M2DJ8Y4DFQMDG9GMWEK93142`, but
-it is an independent quantity landing on one of the two candidates, and whoever
-instruments the step count should know that before they start.
+**AND DO NOT TURN THAT INTO A STEP TIME BY DIVIDING IT INTO 77.8 ms.** An earlier
+revision of this section did, and it was wrong. See "### W9: the two numbers this
+row kept dividing into each other" below, which is the correction and is the part
+to read before quoting any QSA figure anywhere.
+
+**The step count is RESOLVED, and by arithmetic rather than by instrumenting
+it** -- see the correction section below. It is 527, the window's step was 113.9 ms
+and not 77.8 ms, and the 1.46x "disagreement" was two different context lengths.
 
 Raising `kSelTile` above 32 is IN SCOPE only if it is measured, and it is bounded
 by `blockDim.x` (`BlockWidthFor(DH)`), which is 256 at the released config but is
@@ -10420,6 +10428,101 @@ with no thread. `s_ptile` is a fixed `__shared__ int64_t[kSelTile]` and `s_wtile
 comes out of the dynamic allocation sized at `:610-611`; both must move together
 with the constant. The default stays 32 unless a measurement on `thor:gpu0` says
 otherwise.
+
+### W9: the two numbers this row kept dividing into each other
+
+**The defect in this row's own prose, found 2026-09-13 while dispatching W9.**
+The QSA per-launch cost and the decode step time were measured on DIFFERENT
+WORKLOADS, and several paragraphs above -- including the first revision of the W9
+prediction and the post-W7 re-rank's per-step figures -- divided one into the
+other. Every quantity below is corrected here rather than edited in place, because
+the wrong readings were published and a reader who saw them needs to find the
+refutation, not a silently different number.
+
+**The two workloads.**
+
+| | the nsys profile | the A/B harness | the sojufx reference |
+|---|---|---|---|
+| generated | 3,000 tokens, window `[150 s, 210 s]` | **16 tokens** | 400 tokens |
+| context during measurement | ~1,300-1,900 | **~36** | ~20-420 |
+| what it produced | `2.545 ms` per QSA launch, the 34.5% rank | **`77.8 ms` step, 12.85 tok/s** | 66.17 tok/s |
+
+`QsaGatherAttentionKernel`'s cost is proportional to `|sel|`, which is
+`min(kv_len, block_topk * CR)` -- 2048 at the released config. So `|sel|` is ~1600
+in the profile window and **~36** in the A/B: the same kernel doing 44x less work.
+`12 x 2.545 ms = 30.5 ms` is therefore a share of the PROFILE's step, and nothing
+at all to do with the A/B's 77.8 ms.
+
+**Per decode step, by context:**
+
+| `\|sel\|` | workload | QSA per step |
+|---|---|---|
+| 1600 | nsys window | **30.5 ms** |
+| 220 | 400-token reference, mid-run | **4.2 ms** |
+| 36 | the 16-token A/B | **0.69 ms** |
+
+**THE STEP COUNT IS RESOLVED AT 527, AND THE OTHER FIGURE IS ARITHMETICALLY
+IMPOSSIBLE.** `ISSUE-LOCAL-01M2DJ8Y4DFQMDG9GMWEK93142` left it open between 527
+(from 6,319 instances / 12 QSA layers) and 771 (from `60 s / 77.8 ms`), and said
+to instrument it. Instrumenting it is no longer necessary:
+
+- QSA is 34.5% of GPU kernel time and 16.079 s of the window, so total GPU kernel
+  time in the window is `16.079 / 0.345 = 46.6 s`, i.e. 77.7% of the 60 s.
+- At 527 steps that is **88.5 ms of GPU kernel inside a 113.9 ms step** -- 77.7%
+  busy, consistent.
+- At 771 steps it would be 60.5 ms of kernel inside a 77.8 ms step, which also
+  reads as consistent -- **but 771 steps requires the window's step to BE 77.8 ms,
+  and 88.5 ms of measured kernel cannot fit inside 77.8 ms of wall.** The
+  derivation assumed the short-context step held at long context, and it does not.
+
+So the 1.46x disagreement was never an error in either count. It is the ratio
+between a 36-token context and a ~1600-token one, and the confidence that was
+retracted can be restored to the 527 reading specifically.
+
+**What this does and does not overturn.**
+
+- **W9's fix is untouched.** Pass 2 recomputing on one lane is 86-89% of that
+  kernel at any context; the head_dim-sweep attribution that established it never
+  used the step time. The ~6.4x prediction is a KERNEL prediction and stands.
+- **W9's end-to-end value is much smaller than the first revision claimed**, and
+  it depends on context. At the 400-token reference workload QSA is ~4.2 ms of the
+  step, so W9 is worth roughly 3.6 ms, a few percent -- not the ~26 ms and ~19
+  tok/s that were written here. On the 16-token A/B it is under 1 ms and will not
+  be visible above the noise. **A flat A/B result on that harness does not falsify
+  W9**, and W9 must not be gated on one.
+- **The post-W7 re-rank ranks the PROFILE's workload, not the reference's.** QSA
+  is #1 at ~1600 tokens of context. At 400 tokens it is ~4.2 ms of an ~81 ms step.
+  Nothing in that table transfers to the reference workload without rescaling by
+  `|sel|`, and the table should not be used to pick the next row until it is
+  re-measured at the workload the gap is quoted on.
+- **The `cudaFree` figures inherit the same correction, in the direction that
+  makes them larger per step.** At 527 steps the window's 52,130 calls are ~99 per
+  step at 634 us. Those are HOST costs that do not scale with context, so they are
+  ~99 per step at 400 tokens too -- against a step of ~81 ms. That makes the
+  allocator, not QSA, the leading candidate at the workload this row is judged on,
+  and it is what the next profile should be aimed at. **THIS IS NOT YET A CLAIM
+  THAT IT IS THE COST**: `cudaFree` is host API time which can overlap device
+  work, and the row still owes the per-step attribution `## Owed` already names.
+  It is the reason to measure there next, not a result.
+
+**AND THE COMPARISON TO sojufx IS ITSELF ON THE WRONG WORKLOAD.** The reference
+generates **400** tokens; this row's 12.85 tok/s was measured generating **16**.
+The two are not the same benchmark, and "5.2x" is a ratio between them. Rescaled to
+the reference's workload -- adding the ~4.2 ms of QSA that 400 tokens of context
+costs and that 16 tokens does not -- the step is ~81 ms and the rate is **~12.3
+tok/s, a ~5.4x gap**. That is a small correction to the number and a large one to
+the method: this row cannot keep quoting a 16-token rate against a 400-token
+reference. **THE 400-TOKEN RATE IS OWED AS A MEASUREMENT** and the rescaling above
+is a derivation, not a result. The harness already accepts the token count; the
+next dgx window should spend part of itself on `max_tokens=400` with the
+reference's own prompt, so the headline ratio is finally one benchmark against the
+same benchmark.
+
+**The rule this row now carries.** Never quote a per-launch kernel cost and a step
+time from different runs in the same sentence. Never quote a rate against a
+reference that generated a different number of tokens. For an attention kernel whose work
+is proportional to context, the workload is part of the measurement, and a profile
+taken at 1,600 tokens does not describe a benchmark run at 400.
 
 ### Out of scope for W9
 
@@ -10456,14 +10559,17 @@ is a separate change that cannot be justified from these numbers.
 - The red capture, the focused green, and the full gate.
 - The bit-identity comparison, as the two captured byte streams and the compare.
 - The racecheck run AND its positive control.
-- A same-tree interleaved A/B on `dgx:gpu0` when the box is healthy: BASE
-  `7a9020304` against FIX, one boot per arm, two rounds, released UD-IQ1_S,
-  `--max-num-seqs 1 --device cuda`, 16-token decode, median inter-token -- the
-  identical harness the W6 and W7 rows used, so the numbers are comparable to the
-  table above. `dgx:gpu0` has been unhealthy six times this session; `thor:gpu0`
-  (build `sm_110`, never `121a`) is the development target and its kernel-level
-  before/after is acceptable interim evidence, but the end-to-end tok/s claim is
-  owed on dgx.
+- **The kernel-level before/after IS the gate for this row's speed claim**, not
+  interim evidence. Measure `QsaGatherAttentionKernel` itself on `thor:gpu0` at the
+  released shape the attribution used, and report it against ~6.4x.
+- **The 16-token A/B harness the W6 and W7 rows used DOES NOT APPLY HERE**, and
+  running it would be the mistake the correction section names: at `|sel| = 36`
+  this change moves under 1 ms of a 77.8 ms step. A flat result on that harness is
+  not a W9 result in either direction. Do not gate W9 on it and do not quote it.
+- An end-to-end number is owed at LONG CONTEXT -- the workload where the 2.545 ms
+  was measured -- on `dgx:gpu0` when the box is healthy. `dgx:gpu0` has been
+  unhealthy repeatedly this session; `thor:gpu0` (build `sm_110`, never `121a`) is
+  the development target.
 - A re-rank `nsys` after it lands. The last two rows each overturned what was
   planned next; assume this one does too.
 
