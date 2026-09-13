@@ -22,7 +22,18 @@ for tag in BASE_prof FIX_prof; do
   gunzip -c "$KTZ" > $R/$tag.csv
   # The #3040 bound needs the run's OWN swap-warning count. Read it from the
   # capture log rather than leaving the tool to say UNKNOWN a second time.
-  SW=$(grep -aic "swap" "$W2/$tag-cap.log" 2>/dev/null || echo 0)
+  #
+  # THIS LINE IS NOT WHAT RAN, AND THE DIFFERENCE IS A BUG THIS REPOSITORY HAS A
+  # GATE FOR. The lease executed
+  #   SW=$(grep -aic "swap" "$W2/$tag-cap.log" 2>/dev/null || echo 0)
+  # and `tests/scripts/test_ltx25_ab_memwatch.py` refuses it by name: `grep -c`
+  # prints its count AND exits 1 when the count is zero, so the `|| echo 0`
+  # fires IN ADDITION to the "0" grep already printed and `SW` becomes two
+  # lines. It would have been passed to `--swap-warnings` and the arm would have
+  # died reporting nothing. IT DID NOT FIRE: both logs matched, at 615 and 626,
+  # so the numbers in the evidence are the ones grep printed. The idiom is
+  # repaired here rather than left in the record for the next reader to copy.
+  SW=$(grep -aic "swap" "$W2/$tag-cap.log" 2>/dev/null); SW=${SW:-0}
   echo "$tag swap_warning_lines_in_capture_log=$SW"
   python3 "$SLICE" $R/$tag.csv $R/$tag-win.csv > "$OUT/$tag-slice.log" 2>&1
   grep -E "selected_stretch|wrote" "$OUT/$tag-slice.log" | sed "s/^/$tag  /"
