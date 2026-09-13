@@ -166,44 +166,87 @@ figure is this engine against itself.
 
 ## 5a. What the measurement found, 13 September 2026
 
-The instrument was built and it works. **The profiler cannot write a record on
-the `strix:gpu0` worker as provisioned**, so the qwen4_exp table this row exists
-to produce is UNVERIFIED.
+The instrument was built, it works, and **the qwen4_exp table this row exists to
+produce now exists**. Getting there took two sessions, and the two halves are
+worth keeping apart.
 
-Full account: [`rocm-kernel-attrib-gfx1151-20260913.md`](../../docs/bench-evidence/rocm-kernel-attrib-gfx1151-20260913.md).
-The blocker is `ISSUE-LOCAL-01M2DQC3M3VHKDEZYPA8BSRCAV`.
-
-Three results stand:
+### 5a.1 First session: the profiler wrote nothing
 
 **§3.3's distortion question is ANSWERED and the answer is "almost none".**
 Profiled decode 4.804 tok/s against unprofiled 4.823 tok/s, same binary, same
-artifact, alternating legs: **-0.4%**. rocprofv3 timed its own child at 47.86 s.
-Attaching the profiler does not change what it measures.
+artifact, alternating legs: **-0.4%**. Attaching the profiler does not change
+what it measures.
 
-**Nothing is written.** After the traced process exits, rocprofiler-sdk fails to
-`mmap` its ring buffer with `EINVAL` (`ring_buffer.cpp:106`), logs it at FATAL,
-aborts, and then **deadlocks in its own signal handler**, surviving SIGTERM for
-29 minutes. Both artifacts, both output formats, four leases. The CSV has zero
-rows; the rocpd database has 639 kernel symbols and an empty dispatch table.
+Nothing was written, though. After the traced process exited, rocprofiler-sdk
+failed to `mmap` with `EINVAL` (`ring_buffer.cpp:106`), logged it at FATAL,
+aborted, and deadlocked in its own signal handler, surviving SIGTERM for 29
+minutes. Four leases, both artifacts, both output formats. That session
+correctly identified the ENVIRONMENT as the difference and named the
+2026-09-07 `podman` image as the thing to reproduce.
 
-**It is the environment, not the version.** The installed rocprofv3 is 1.1.0 at
-revision `97f5574fe`, identical to the one that wrote 85,737 rows from this
-board on 2026-09-07 inside a purpose-built podman image. The current worker is
-bare Ubuntu 24.04 with no `podman`, and `ulimit -l` is 8 MiB.
+### 5a.2 Second session: it is a temp DIRECTORY, and no image is required
 
-So §7's third risk was the right one to name and the wrong one to size: the
-2026-09-07 full-trace stall was not specific to the extra trace modes. It
-reproduces on `--kernel-trace` alone.
+**`rocprofv3` spills its records to `$CWD/.rocprofv3/`, and an `rc` job starts
+in `/`.** `output_config.hpp:81` defaults `tmp_directory` to `"%cwd%"`,
+`--output-directory` moves the result files only, and the CLI never sets
+`ROCPROF_TMPDIR`. The spill under `/` does not read back, `ring_buffer::load`
+reads a zero size into an unchecked variable, and `mmap` of length **zero** is
+`EINVAL` by definition -- which `strace` shows and the FATAL message omits.
+
+Setting `ROCPROF_TMPDIR` under `/tmp`, or running from a `/tmp` working
+directory, writes a complete trace on the bare worker. A 50-dispatch HIP program
+reproduces both the failure and the fix in 0.04 s, which is how four hypotheses
+were killed in one lease. Three of the first session's suspects are FALSIFIED:
+the locked-memory limit, seccomp and capabilities, and a missing runtime
+package. The `podman` image is NOT required.
+
+`ISSUE-LOCAL-01M2DQC3M3VHKDEZYPA8BSRCAV` is CLOSED on that evidence, and
+`.agents/environment.md` carries the recipe so the next session does not spend a
+day on it.
+
+### 5a.3 The table
+
+Qwen3.8-Flash-Next UD-IQ1_S on gfx1151, 660,273 dispatch rows, ranked over the
+59 steady decode steps of the third repeat:
+
+| | |
+|---|---:|
+| step wall, median | 197.50 ms |
+| kernel busy per step | 173.24 ms (**87.7%**; the rest is HOST time) |
+| dispatches per step | **3437**, one value across all 59 steps |
+| `HcGroupedNormKernel` | **35.10%** |
+| `Cijk_Alik_Bljk_SB_MT32x32x8_SN_1LDSB0_AP` | 17.27% |
+| `wvSplitKSml` | 11.68% |
+| `QsaGatherAttentionKernel` | 6.55% |
+| `GdnScanK` | 5.01% |
+
+Two kernels carry 52.4% and five carry 75.6%. **`HcGroupedNormKernel` is the
+same kernel a `dgx:gpu0` `nsys` session found at 40.7% of CUDA decode time**
+(§1): two backends, two architectures, one kernel at the top.
+
+Full account: [`rocm-kernel-attrib-gfx1151-20260913.md`](../../docs/bench-evidence/rocm-kernel-attrib-gfx1151-20260913.md)
+sections 8 and 9.
+
+So §7's third risk was named correctly and sized wrongly: the 2026-09-07 stall
+was not specific to the extra trace modes, and it was not a profiler defect
+either. It was where the tool put its scratch file.
 
 ## 6. Owed
 
-- **The qwen4_exp ranked table itself**, which this row exists to produce and
-  which is UNVERIFIED. It is blocked on
-  `ISSUE-LOCAL-01M2DQC3M3VHKDEZYPA8BSRCAV`, not on the instrument.
 - The ranked table's top item gets its own row and spec with a falsifiable
-  predicted gain. Nothing is optimized in this wave. On the 27B capture the top
-  item would be `KQuantGemmK` at 43.01% with AMD's `wvSplitKSml` second at
-  28.13%, but that is a different model and no gain is predicted from it.
+  predicted gain. Nothing is optimized in this wave. On qwen4_exp that item is
+  **`HcGroupedNormKernel` at 35.10%**, and the same kernel is 40.7% of CUDA
+  decode time on `dgx:gpu0`, so the row it earns is not ROCm-only.
+- **The #3040 swap-warning count for the qwen4_exp capture.** The tool printed
+  `NOT SUPPLIED` rather than assuming zero. The count is in the archived
+  `capture.log` on `/workspace` and no conclusion in §5a.3 rests on a margin
+  near the 2.75% bound.
+- **756 `__amd_rocclr_copyBuffer` dispatches per decode token**, 0.70% of GPU
+  time inside a step that is 12.3% host-bound. Settling whether they are the
+  host cost needs a HIP API trace, which this wave did not take.
+- **Why a spill under `/` specifically fails.** `/` is writable and the doubled
+  separator is accepted, so the mechanism is unidentified. The remedy does not
+  depend on it.
 - Per-row timestamp exactness stays with
   [#3040](https://github.com/mudler/vllm.cpp/issues/3040). This spec bounds the
   aggregate error at 2.75% of the kernel budget; it does not close #3040.
