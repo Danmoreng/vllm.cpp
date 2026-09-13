@@ -4050,6 +4050,54 @@ add_test(NAME test_qwen4_exp_moe_sel_fp COMMAND test_qwen4_exp_moe)
 set_tests_properties(test_qwen4_exp_moe_sel_fp PROPERTIES
   ENVIRONMENT "VT_MOE_SEL_FP=4096")
 
+# QUANT-CUDA-GATES W8: the device-resident keep-quant MoE arm. NOT CUDA-only --
+# the arm asks the op table rather than naming a device, so it is default-ON on
+# every backend the three ops are registered on, and the suite has a CPU, a CUDA
+# and a ROCm case. The CPU cases run unconditionally and gate arm SELECTION on a
+# box with no GPU at all; each device case prints a LOUD [SKIP] where its backend
+# is absent, because a device arm that silently vanishes from the gate is the
+# failure this suite exists to stop. It reaches only the public seam header
+# (qwen3_5_moe_block.h) plus the one probe symbol `vllm::MoeKqDeviceCalls()`, so
+# it needs no src/ grant.
+vllm_cpp_add_test(test_qwen35_moe_kq_device vllm/models/test_qwen35_moe_kq_device.cpp)
+# The same binary on the REFERENCE arm, so the fallback the row promises is a
+# gated route and not a claim. The suite forces the variable per case, so this
+# registration proves the process-level default does not change the verdict.
+add_test(NAME test_qwen35_moe_kq_device_ref COMMAND test_qwen35_moe_kq_device)
+set_tests_properties(test_qwen35_moe_kq_device_ref PROPERTIES
+  ENVIRONMENT "VT_MOE_KQ_FAST=0")
+# The same binary with the VT_MOE_SEL_FP TAP ARMED, which is the only way to gate
+# the `MoeSelFpCalls() == 0` term of the arm's predicate. That term is
+# load-bearing: `MoeSelFp` is called only inside the reference path, so without
+# it an operator who arms the tap gets the fast arm and a silently empty tap.
+# It cannot be a case in the suite -- `MoeSelFpCalls()` caches its read in a
+# process-static on first use, so arming it from inside the binary either comes
+# first and disarms every other case or comes later and is ignored. With the tap
+# armed every arm-selection expectation in the suite flips to "must not run", so
+# deleting the term reddens THIS registration while the two above stay green.
+# DELIBERATELY UNFILTERED, for the reason test_qwen4_exp_moe_sel_fp gives above.
+add_test(NAME test_qwen35_moe_kq_device_sel_fp COMMAND test_qwen35_moe_kq_device)
+set_tests_properties(test_qwen35_moe_kq_device_sel_fp PROPERTIES
+  ENVIRONMENT "VT_MOE_SEL_FP=4096")
+# THE ROCm LANE, BECAUSE THE DOCUMENTED ROCm GATE IS A NAME FILTER. `docs/ROCM.md:24`
+# runs `ctest --test-dir build-hip -R 'rocm|cross_device'`, and none of the three
+# registrations above carries either token -- so this suite's ROCm cases never ran in
+# the lane a ROCm operator is told to run, on an arm that is DEFAULT-ON on ROCm with
+# `strix:gpu0` (gfx1151) a live fleet device. Registering the same binary under a name
+# that carries `rocm`, filtered to its ROCm cases, puts them in that lane.
+#
+# A doctest filter that matches NOTHING exits 0, so a renamed case would turn this
+# registration into a green that measured nothing -- the trap
+# `scripts/run-doctest-selected.sh` exists for. ctest cannot run that wrapper on every
+# platform this file is configured on, so the zero-selection case is made RED by the
+# summary line instead: doctest prints `test cases: 0 | ...` when the filter selects
+# none. It is a FAIL_REGULAR_EXPRESSION and NOT a PASS_REGULAR_EXPRESSION, because
+# CMake ignores the exit status of a test that has the latter, which would swap one
+# silent green for another.
+add_test(NAME test_rocm_qwen35_moe_kq_device COMMAND test_qwen35_moe_kq_device "-tc=*(ROCm)*")
+set_tests_properties(test_rocm_qwen35_moe_kq_device PROPERTIES
+  FAIL_REGULAR_EXPRESSION "test cases: +0 [|]")
+
 # The five suites that reach src/vllm/support/platform_compat.h, granted per
 # target rather than globally: the file already carries 123 explicit
 # ${CMAKE_SOURCE_DIR}/src grants, and a blanket one in vllm_cpp_add_test would
