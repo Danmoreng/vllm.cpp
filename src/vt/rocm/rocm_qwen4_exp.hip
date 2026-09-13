@@ -127,8 +127,9 @@
 // `__builtin_amdgcn_wavefrontsize()` and constant-folds per target, so the tree
 // is 5 levels on a wave32 RDNA part and 6 on a wave64 CDNA one from the same
 // source. The shared partial array is sized for the MAXIMUM wave count a
-// `kBlock` block can have (wave32); a wave64 target uses the first quarter of
-// it and the `lane < nwave` guard keeps the fold off the slots no wave wrote.
+// `kBlock` block can have (wave32); a wave64 target uses the first HALF of it
+// -- `kBlock / 32` is 8 slots and a wave64 block of 256 threads has `nwave` 4 --
+// and the `lane < nwave` guard keeps the fold off the slots no wave wrote.
 //
 // ONLY WAVE32 IS MEASURED. `strix:gpu0` (gfx1151, RDNA 3.5) is the only AMD part
 // in this fleet, so the wave64 path is REASONED and not run. The spec's
@@ -308,9 +309,9 @@ __global__ void HcGroupedNormKernel(float* normed, const void* hyper, DTag hyper
                                     const void* hc_norm_w, DTag w_tag, int64_t T, int64_t hc,
                                     int64_t H, float eps) {
   // One slot per WAVE of the block, sized for the largest wave count a `kBlock`
-  // block can have -- that is wave32's `kBlock / 32`. A wave64 target fills the
-  // first quarter and the `lane < nwave` guard below keeps the fold off the
-  // rest. This kernel is in an anonymous namespace and has exactly ONE launch
+  // block can have -- that is wave32's `kBlock / 32`, 8 slots. A wave64 target
+  // has `nwave = 256 / 64 = 4` and so fills the first HALF, and the
+  // `lane < nwave` guard below keeps the fold off the rest. This kernel is in an anonymous namespace and has exactly ONE launch
   // site, which passes `kBlock`, so the array is sized from that constant while
   // every index is still computed from `blockDim.x`; a second launch site with a
   // different block size would have to resize it, and that is why there is not
