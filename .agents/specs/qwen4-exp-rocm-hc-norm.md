@@ -449,32 +449,43 @@ tok/s.
 
 `ACTIVE`. Spec committed; implementation and the `strix:gpu0` measurement
 follow in the same pull request.
+## Adjacent work, filed and not built
+
+Both were already verdict **(b)** in the row spec
+(`.agents/specs/qwen4-exp-flash-next.md:176-178`) carrying "NO issue yet".
+Filing them is what this row owed; building them is not in scope. They are
+ROW-OWNED and are therefore listed HERE and not under `## Owed`: that heading
+carries rowless work, and `scripts/check-agent-record.py` reads a row-owned ID
+beneath it as an owed reference it cannot resolve.
+
+- `ISSUE-LOCAL-01M2E921GPVNYCJNC51CNJXP57` -- vLLM DEFERS the HC combine to the
+  next mix boundary and fuses it with that mix's RMSNorm
+  (`nvidia/hyperconnection.py:152-186`, kernel `nvidia/ops/hc.py:266-375`),
+  materialising it early only where PLE adds into the stream
+  (`nvidia/model.py:288-297`). Upstream reads the 10240-wide residual ONCE per
+  boundary; this tree reads it TWICE (`qwen4_exp_forward.cpp:466`, `:544`, then
+  the norm). **THIS IS THE LARGER OF THE TWO AND THIS ROW DOES NOT REACH IT:**
+  changing how the norm reads the stream does not change how many times the
+  stream is read, so the duplicated read survives this change intact.
+- `ISSUE-LOCAL-01M2E91MVJ9GV3PAKCF144SVZJ` -- vLLM merges HC down and inject
+  into ONE padded `MergedColumnParallelLinear`
+  (`nvidia/hyperconnection.py:98-110`) and keys its decode plan on that shape
+  (`nvidia/low_latency_gemm.py:72-79`); this tree runs three GEMMs. That is the
+  `vt::MergedGemmGroup` seam AGENTS.md mandates.
+
+NEITHER IS MEASURED on this tree. Both are upstream-structure arguments.
 
 ## Owed
 
+ROWLESS work only, for the reason the section above gives.
+
 - **A wave64 measurement.** Only gfx1151 (wave32) is in this fleet, so the
   `warpSize`-derived tree is REASONED correct on wave64 and MEASURED on wave32
-  alone.
-- **TWO LARGER HYPER-CONNECTION LEVERS THIS ROW DOES NOT REACH**, both already
-  verdict (b) in the row spec and both filed rather than built here:
-  - `ISSUE-LOCAL-01M2E921GPVNYCJNC51CNJXP57` -- vLLM DEFERS the HC combine to the
-    next mix boundary and fuses it with that mix's RMSNorm
-    (`nvidia/hyperconnection.py:152-186`, `nvidia/ops/hc.py:266-375`),
-    materialising it early only where PLE adds into the stream
-    (`nvidia/model.py:288-297`). Upstream reads the 10240-wide residual ONCE per
-    boundary; this tree reads it TWICE (`qwen4_exp_forward.cpp:466`, `:544`, then
-    the norm). **This row changes how the norm reads the stream and not how many
-    times the stream is read, so the duplicated read survives this change intact
-    and is the larger lever of the two.**
-  - `ISSUE-LOCAL-01M2E91MVJ9GV3PAKCF144SVZJ` -- vLLM merges HC down and inject
-    into ONE padded `MergedColumnParallelLinear`
-    (`nvidia/hyperconnection.py:98-110`) and keys its decode plan on that shape
-    (`nvidia/low_latency_gemm.py:72-79`); this tree runs three GEMMs. That is the
-    `vt::MergedGemmGroup` seam AGENTS.md mandates.
-
-  NEITHER IS MEASURED on this tree. Both are upstream-structure arguments, and
-  filing them is what this row owed; building them is another row's.
-
-- **A ROCm race check on the shared-memory shape.** The donor gates its barriers
-  with `compute-sanitizer --tool racecheck`; no equivalent was run here, and the
-  ordering argument is carried as an argument.
+  alone. Every lane constant comes from `warpSize`, so it is the same source on
+  both widths; nothing has run it at 64.
+- **A ROCm race check on the shared-memory shape.** The donor gates its two
+  barriers with `compute-sanitizer --tool racecheck` and reports `0 hazards
+  displayed`. No ROCm equivalent was run for this file, so the ordering argument
+  beside the group loop is carried as an ARGUMENT and not as a measurement. The
+  grid-cap case is the only committed case that takes a second trip and is the
+  one to drive any such instrument at.
