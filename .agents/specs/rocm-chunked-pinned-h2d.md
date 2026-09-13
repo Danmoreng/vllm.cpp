@@ -389,16 +389,22 @@ Workload: `examples/vllm-cli --device auto --max-tokens 32 --temperature 0
 
 ### The A/B, ONE BINARY, ONE BOOT, THE KNOB READ AT RUNTIME
 
-| | ARM A — ring ON | ARM B — `VT_ROCM_PINNED_H2D_MIB=0` |
-|---|---|---|
-| token | **YES — 3 x 32, `finish_reason=length`** | **NONE**, killed at the 1200 s deadline (exit 137) |
-| wall | 771 s, exited 0 | 1218 s, `killed_at_deadline=1` |
-| `[vt load] weights` | 61.187 s | 35.909 s (page cache warm from arm A) |
-| peak `VmHWM` | 20,714,504 kB (19.75 GiB) | 27,076,580 kB (25.82 GiB) |
-| peak `RssFile` | 14,516,792 kB (13.84 GiB) | 21,093,296 kB (20.12 GiB) |
-| peak `RssAnon` | 6,190,884 kB (5.90 GiB) | 5,807,020 kB (5.54 GiB) |
-| peak device `mem_info_vram_used` | **77,271,658,496 B** | 31,873,912,832 B |
-| `wchan` over D-state threads | 115 `folio_wait_bit_common`, 1 `wait_for_response`, **0 `svm_range_set_attr`**, 122 samples | **135 `svm_range_set_attr`**, 39 `folio_wait_bit_common`, 20 `do_mprotect_pkey`, 8 `exit_mm`, 1 `wait_for_response`, 197 samples |
+| | ARM A — ring ON, CIFS | ARM B — `VT_ROCM_PINNED_H2D_MIB=0`, CIFS | ARM C — ring ON, LOCAL copy |
+|---|---|---|---|
+| token | **YES — 3 x 32, `finish_reason=length`** | **NONE**, killed at the 1200 s deadline (exit 137) | **YES — 3 x 32** |
+| wall | 771 s, exited 0 | 1218 s, `killed_at_deadline=1` | **62 s**, exited 0 |
+| `[vt load] mmap+header` | 0.568 s | 0.201 s | 0.023 s |
+| `[vt load] weights` | 61.187 s | 35.909 s (page cache warm from arm A) | **8.770 s** |
+| peak `VmHWM` | 20,714,504 kB (19.75 GiB) | 27,076,580 kB (25.82 GiB) | 26,920,604 kB (25.67 GiB) |
+| peak `RssFile` | 14,516,792 kB (13.84 GiB) | 21,093,296 kB (20.12 GiB) | 20,728,476 kB (19.77 GiB) |
+| peak `RssAnon` | 6,190,884 kB (5.90 GiB) | 5,807,020 kB (5.54 GiB) | 6,190,900 kB (5.90 GiB) |
+| peak device `mem_info_vram_used` | **77,271,658,496 B** | 31,873,912,832 B | **77,271,609,344 B** |
+| `wchan` over D-state threads | 115 `folio_wait_bit_common`, 1 `wait_for_response`, **0 `svm_range_set_attr`**, 122 samples | **135 `svm_range_set_attr`**, 39 `folio_wait_bit_common`, 20 `do_mprotect_pkey`, 8 `exit_mm`, 1 `wait_for_response`, 197 samples | 1 `wait_for_response`, 1 unresolved, **0 `svm_range_set_attr`**, 11 samples |
+
+Arm C is arm A with the three shards copied to the worker's local disk first
+(`/tmp/ckpt-iq1s`, same bytes, same sizes), so it answers the confound §6a left
+open: the checkpoint lives on a CIFS mount and page-cache read wait is not device
+work. `VT_ROCM_PINNED_H2D_MIB` is unset in both.
 
 Arm B is `rocm-host-residency-after-upload.md` §6a reproduced to within noise —
 27.08 vs 27.25/27.32 GB `VmHWM`, 21.09 vs 21.21/21.34 GB `RssFile`,
@@ -416,24 +422,34 @@ spec does NOT resolve the discrepancy, it reports both raw numbers.)
 
 ### The generations
 
-| run | tokens | seconds | tok/s |
-|---|---|---|---|
-| 1 | 32 | 695.871 | 0.046 |
-| 2 | 32 | 6.048 | 5.291 |
-| 3 | 32 | 6.069 | 5.273 |
+| arm | run | tokens | seconds | tok/s |
+|---|---|---|---|---|
+| A (CIFS) | 1 | 32 | 695.871 | 0.046 |
+| A | 2 | 32 | 6.048 | 5.291 |
+| A | 3 | 32 | 6.069 | 5.273 |
+| C (local) | 1 | 32 | 38.438 | 0.833 |
+| C | 2 | 32 | 6.067 | 5.274 |
+| C | 3 | 32 | 6.067 | 5.275 |
 
-**Run 1 is not a decode number and must not be quoted as one.** Weight staging
-is lazy — `dense_attn::ResidentWeight` uploads on first use, behind the `d_dev`
-memo — so run 1 carries the one-time 72 GiB host-to-device transfer of the whole
-checkpoint. The steady-state pair is 5.291 and 5.273 tok/s, a spread of 0.34%
-over two samples. TWO warm samples is not three, and this is recorded as thin
-rather than dressed up: `--repeat 3` gives three generations of which exactly one
-is cold. gfx1151 fails about two runs in five with an illegal GPU memory access
-(`ISSUE-LOCAL-01M2BY2M2ATNVR3XQKV2DB1BJD`); neither arm here hit that signature,
-and arm A's three generations all completed with `finish_reason=length`.
+**Run 1 of each arm is not a decode number and must not be quoted as one.**
+Weight staging is lazy — `dense_attn::ResidentWeight` uploads on first use,
+behind the `d_dev` memo — so run 1 carries the one-time 72 GiB host-to-device
+transfer of the whole checkpoint.
+
+**The steady-state number is 5.27-5.29 tok/s, and it is FOUR samples across TWO
+independent process launches on two different source filesystems:** 5.291,
+5.273, 5.274, 5.275. Spread max-to-min 0.34%. That satisfies the row's
+three-repetition rule and it does so across process boundaries rather than three
+times inside one handle, which is the stronger shape. gfx1151 fails about two
+runs in five with an illegal GPU memory access
+(`ISSUE-LOCAL-01M2BY2M2ATNVR3XQKV2DB1BJD`); no arm here hit that signature, and
+all six generations completed with `finish_reason=length`.
 
 No TTFT is recorded: `vllm-cli` in blocking mode reports whole-generation
-seconds, not first-token latency, and no number is invented from it.
+seconds, not first-token latency, and no number is invented from it. What arm C
+does give is a cold-start-to-first-answer figure on local storage:
+0.023 s header + 8.770 s weights + 38.438 s first generation, 62 s of wall for
+the whole process.
 
 ### What this does NOT claim
 
@@ -445,16 +461,25 @@ seconds, not first-token latency, and no number is invented from it.
   dropped cache and was not taken.
 - Nothing about any other family. §3b names them; only Qwen4-Exp was run.
 
-## 7a. Where the remaining time goes, so nobody reads 0.046 as the answer
+## 7a. Where the first generation's time goes — MEASURED, not hypothesised
 
 Arm A spends 695.871 s inside its first generation and 6.05 s inside each
-subsequent one. That 690 s difference is the lazy device staging of a 72 GiB
-checkpoint, which is about 104 MiB/s through the ring — slow, and the next
-question for this row rather than this spec's. The `wchan` histogram says where
-it is: 115 of 122 samples in `folio_wait_bit_common`, which is page-cache read
-wait on the CIFS mount (`//192.168.68.102/Data`), not device work. §6a named that
-mount as an unseparated confound; arm C of this job stages the checkpoint to
-local disk to separate it.
+subsequent one, and the obvious misreading is that the ring stages at about
+104 MiB/s. It does not. Arm A's `wchan` histogram is 115 of 122 samples in
+`folio_wait_bit_common`, which is page-cache read wait on the CIFS mount
+(`//192.168.68.102/Data`), not device work.
+
+**Arm C settles it.** The same binary, the same checkpoint, the same ring, with
+the three shards copied to local disk first: the first generation takes
+**38.438 s instead of 695.871**, an 18.1x reduction, and the D-state histogram
+collapses to 11 samples with nothing in it. Weight load falls the same way,
+8.770 s against 61.187. So 657 of arm A's 696 s were reading the file over CIFS,
+and the ring itself moves the 72 GiB checkpoint onto the board in about 38 s,
+which is roughly 1.9 GiB/s.
+
+**§6a's CIFS confound is therefore separated and closed for this row.** It was
+never the cause of the wedge — arm B wedges off the same mount arm A succeeds
+on — and it accounts for essentially all of the remaining first-generation cost.
 
 ## 8. Stop conditions
 
