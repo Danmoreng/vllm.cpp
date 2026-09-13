@@ -357,8 +357,16 @@ prints `selected=5` before it runs anything), and the tree is restored with
 | M3 | drop the final partial | `9574c8ec2039` | **CONVICTS** 4 of 5 | 1468.95003 vs 1.695e-06 |
 | M4 | drop the group grid stride | `bdcbd0cd9448` | **CONVICTS**, grid cap ONLY | 0.898665845 vs 1.957e-06 |
 | M6 | accumulate in `double` again | `1af9a31a1d28` | MOVED case 5, as §6 required | 9.54e-07 -> 4.77e-07 |
-| M1 | collapse the cross-wave fold | `9d3b61a3e9c2` | **VOID -- the mutation was a NO-OP** | redone as M1b |
-| M5 | broadcast `r` | `720e19116d27` | **VOID -- the mutation was a NO-OP** | redone as M5b |
+| M1c | collapse the cross-wave fold to wave 0's partial (wave 3) | `e990e1391a6b` | **CONVICTS** 4 of 5 | 2890.67087 vs 1e-05 |
+| M5b | the reduction reads token `t` group 0 for every group (wave 2) | `af567167cc51` | **CONVICTS** 4 of 5 | 6.31754637 vs 1e-05 |
+| M1 | (wave 1) collapse the cross-wave fold | `9d3b61a3e9c2` | **VOID -- the mutation was a NO-OP** | redone as M1c |
+| M5 | (wave 1) broadcast `r` | `720e19116d27` | **VOID -- the mutation was a NO-OP** | redone as M5b |
+| M1b | (wave 2) same, without keeping `nwave` live | -- | **VOID -- it did not COMPILE** | redone as M1c |
+
+**ALL FIVE STRUCTURAL MUTATIONS CONVICT.** The fixture is not carrying a hole; it
+took three waves to write two of the mutations correctly, and the two failures in
+between are reported as defects of this row rather than as findings about the
+gate.
 
 M4 convicting the grid-cap case ALONE is the designed result and not a gap: it is
 the only case whose `T * hc` exceeds the 4096-block cap, so it is the only case in
@@ -397,11 +405,140 @@ base arm, so this row reports a green rather than a base-to-head DELTA. The delt
 is what a baseline buys, and it buys it only where something is red; at 0 failed
 of 84841 there is nothing for a baseline to excuse.
 
-### 7.5 Wave 2
+### 7.5 Wave 2 -- the corrected M5b, the decode A/B, and the kernel ranking
 
-> Corrected M1b / M5b, the decode tok/s A/B with the first generation excluded,
-> and the `rocprofv3` kernel ranking before and after. Job launched
-> 2026-09-13 21:07 UTC on `strix:gpu0`.
+`strix:gpu0`, 2026-09-13, `rc` job `ee83eded-7827-43f4-95f8-0c514f271c48`,
+exclusive lease, `--cwd /tmp`, `ulimit -c 0`. Same box, same ROCm, fresh clone of
+`63925eb7f`, archived to `/workspace/q4exp-hcnorm/w2-...`.
+
+**M5b CONVICTS.** Making the reduction read token `t` group 0 for EVERY group --
+the defect the separation probe is aimed at -- reddens 4 of 5 cases: model width
+`2.53170967`, grid cap `2.63860703`, ragged 100 `1.26095539`, ragged 777
+`1.23468596`, magnitude-separated `6.31754637` against a 1e-5 bound, with EVERY
+output element off bit-identity (7680/7680, 614400/614400, 400/400, 3108/3108).
+`5 cases / 45 assertions / 5 failed`.
+
+**M1b DID NOT BUILD AND IS VOID, NOT A SURVIVOR.** Collapsing the cross-wave fold
+to `s_part[0]` dropped the last use of `nwave` into `-Werror=unused-variable`, so
+the arm printed `M1b BUILD FAILED -- VOID` and measured nothing. A mutation that
+does not compile is not a surviving mutation. Wave 3 reran it as M1c with `nwave`
+kept live (`lane < nwave && lane == 0`), and **M1c CONVICTS**: 4 of 5 cases, model
+width `1.56630164`, grid cap `1.77635801`, ragged 100 `0.693549812`, ragged 777
+`1.5891028`, magnitude-separated `2890.67087` against 1e-5, every output element
+off bit-identity. Binary `e990e1391a6b` against the unmutated `535621402104`,
+restored to `535621402104` with `git diff --exit-code` returning 0.
+
+`rc` job `182ea36d-15fb-44e5-8dec-b5f605f6d650`. Its unmutated control is the
+THIRD independent build of these bytes and reproduces waves 1 and 2 DIGIT FOR
+DIGIT on three different binaries (`82ffaf5ed0d3`, `1ffcdf457cfa`,
+`535621402104`).
+
+**THE FIX REPRODUCES ITSELF ACROSS BUILDS.** The re-verification between the two
+mutations is digit-for-digit identical to wave 1 on a DIFFERENT binary
+(`1ffcdf457cfa` against wave 1's `82ffaf5ed0d3`).
+
+#### 7.5.1 Decode throughput, interleaved, first generation excluded
+
+Four launches alternating FIX, BASE, FIX, BASE on one boot, `vllm-cli --model
+/tmp/ckpt-iq1s/...-00001-of-00003.gguf --prompt 'The capital of France is'
+--max-tokens 64 --temperature 0 --max-num-seqs 1 --repeat 4`. **Run 1 of every
+launch is discarded**: this arm stages ~72 GiB lazily and reads 1.27-1.43 tok/s
+there against 5.4-8.1 afterwards. Six usable runs per arm.
+
+| arm | runs (tok/s) | median | min-max | spread |
+|---|---|---:|---|---:|
+| BASE `60990ee78` kernel | 5.364 5.442 5.450 / 5.436 5.431 5.433 | **5.4345** | 5.364-5.450 | 1.60% |
+| FIX `63925eb7f` kernel | 8.129 7.970 8.108 / 8.124 8.114 8.093 | **8.111** | 7.970-8.129 | 2.00% |
+
+**1.49x, and the spread is a tenth of the effect.** Per token that is
+184.01 ms -> 123.29 ms, **60.72 ms removed**. The two FIX blocks agree with each
+other and so do the two BASE blocks, so this is not drift across the lease.
+
+`cli_md5` is IDENTICAL on both arms (`9c3cdf937082`) and that is NOT evidence
+the arms are the same: `vllm-cli` links the library and the kernel lives in the
+library, so the executable's own bytes do not move. The arms are proved different
+by the profile below, where one carries `HcGroupedNormKernel` at 35.68% and the
+other does not carry it in the top twelve at all.
+
+#### 7.5.2 The kernel's share, before and after, same tool and same workload
+
+`rocprofv3 --kernel-trace` from `cwd = /tmp` with `ROCPROF_TMPDIR=/tmp/rpt`,
+windowed by `slice-decode-window.py` and ranked by the committed
+`scripts/rocm-rank-kernels.py`. Both arms selected the same stretch --
+`(128, 187, 3005)`, 59 steady steps of run 3, 177296 rows -- and the tool
+validated each window with **one** dispatch count, `[3005]`.
+
+| | BASE | FIX |
+|---|---:|---:|
+| `HcGroupedNormKernel` share | **35.68%** | **0.56%** |
+| its total over 59 steps | 3625.8 ms | 37.9 ms |
+| its dispatches per step | 97.0 | 97.0 |
+| its mean duration | 633.5 us (min 622.8, max 40076.2) | **6.6 us** (min 1.1, max 16.4) |
+| kernel busy per step | 172.22 ms | **113.63 ms** |
+| step wall median | 185.20 ms | **124.73 ms** |
+| all-kernel total | 10161.1 ms | 6704.4 ms |
+
+It fell out of the top twelve on the FIX arm, so wave 4 re-ranked both archived
+traces at `--top 60` to READ the new share rather than derive it by subtracting
+two totals. **35.68% -> 0.56%, and the mean dispatch goes 633.5 us -> 6.6 us, a
+96x reduction in per-dispatch cost.** THE DISPATCH COUNT DOES NOT MOVE: 97.0 per
+step on both arms. That is the signature of a launch-SHAPE fix and not of a
+kernel that stopped being called, and it is worth asserting because "the kernel
+left the table" would read the same way if the op had simply stopped running.
+
+**58.59 ms of kernel time removed per step, against the 61.45 ms
+(3625.8 / 59) that kernel cost -- 95.3% of it.** The step wall moves 60.47 ms,
+which agrees with the 60.72 ms the unprofiled tok/s says, by two instruments that
+share no arithmetic. The profiled runs are slower on both arms (FIX 7.67-7.78,
+BASE 5.296-5.299, 1.46x) which is the profiler's own overhead and is why the
+throughput claim above is taken from the unprofiled launches.
+
+#### 7.5.3 THE `#3040` BOUND IS VACUOUS ON THESE TRACES, AND THAT IS WHY THE
+TOK/S A/B IS THE LOAD-BEARING MEASUREMENT
+
+Wave 1 and 2 left the bound `NOT SUPPLIED`, which the tool correctly refuses to
+read as zero. Wave 4 counted the swap warnings out of each capture's own stderr
+and passed them in, and the answer is not a comfortable one:
+
+| | adjusted rows | worst-case share of the kernel budget |
+|---|---|---:|
+| BASE | 615 of 177296 (0.3469%) | **242.55%** |
+| FIX | 626 of 177296 (0.3531%) | **1264.49%** |
+
+**Both exceed 100%, so the bound bounds nothing.** It is computed by assuming
+every adjusted row actually cost the trace MAXIMUM, and these traces have
+maxima of 40.076 ms (BASE) and 135.432 ms (FIX) -- themselves almost certainly
+adjustment artefacts -- so the worst case explodes. The 2.75% bound
+`.agents/specs/rocm-decode-kernel-attribution.md` derived for ITS trace does not
+transfer, and it is not borrowed here.
+
+WHAT THIS DOES AND DOES NOT INVALIDATE, stated rather than glossed. **The
+throughput result uses no profiler at all**: §7.5.1's 5.4345 -> 8.111 tok/s is
+four unprofiled launches and is untouched by #3040. The trace's own step-wall
+median independently says 60.47 ms removed against that 60.72 ms, by an
+instrument that shares no arithmetic with it. So the ranking is CORROBORATION and
+the A/B is the claim -- and the ranking is what says WHICH kernel the time came
+out of, which no tok/s number can. **For this kernel specifically the FIX rows
+are clean**: mean 6.6 us, min 1.1, max 16.4, no outlier at all, over 97
+dispatches per step across 59 steps. The two absurd maxima sit on OTHER kernels
+and on the BASE arm's own rows.
+
+NO PER-ROW EXACTNESS IS CLAIMED ANYWHERE IN THIS SPEC, which is what #3040 owns.
+A 35.68% -> 0.56% move and a 96x per-dispatch drop are not margins that a
+0.35% row-adjustment rate can manufacture, and the unprofiled A/B agrees to
+within 0.4%.
+
+#### 7.5.4 Two outliers are visible and are not hidden
+
+The share is a SUM. `HcGroupedNormKernel` shows a 40076.2 us maximum against a
+633.5 us mean on BASE, and `Cijk_Alik_Bljk_SB_MT32x32x8` a 135432.1 us maximum on
+FIX. Neither moves the conclusion at this margin and both are in the archived
+tables. **And this BASE reading is not the inherited 35.10%.** That figure came from a 2026-09-07/13 capture at 3437
+dispatches per step; both arms here run 3005, so the tree has moved and the
+denominator used throughout this section is this row's OWN matched BASE reading
+of 35.68%, not the earlier one. The two agree to 0.6 points on share and to 0.6%
+on kernel-busy-per-step (172.22 against 173.24), which is corroboration rather
+than a reused number.
 
 ## 8. Prediction, stated so it can be falsified
 
@@ -410,8 +547,21 @@ On `strix:gpu0` the kernel is 35.10% of 173.24 ms of kernel-busy, ~60.8 ms of a
 removes the same FRACTION here, the step falls toward ~140 ms and decode moves
 from 5.0-5.3 tok/s toward ~7 tok/s.
 
-THE PREDICTION IS NOT A RESULT, and three things can make the measured number
-smaller. The step is only 88% kernel-busy, so a kernel saving does not convert
+**MEASURED, AND THE PREDICTION HELD ON THE ONE NUMBER IT NAMED.** §8 predicted
+~60.8 ms per step removed, from 35.10% of 173.24 ms of kernel-busy. The matched
+A/B removed **60.47 ms of step wall** and **58.59 ms of kernel busy**, and the
+unprofiled throughput says **60.72 ms per token**. The two SECONDARY predictions
+were both too pessimistic: the step landed at 124.73 ms rather than "toward
+~140", and decode at **8.111 tok/s** rather than "toward ~7", against a BASE of
+5.4345. The paragraph below says why they were hedged, and two of the three
+hedges did not bind -- the step turned out to be 93.0% kernel-busy on the BASE
+arm rather than 88%, so the saving converted almost one-for-one, and nothing
+became bandwidth-bound at this size. The third hedge stands unchanged and is now
+the whole remaining budget: the other 64.3% did not shrink, and
+`ISSUE-LOCAL-01M2E921GPVNYCJNC51CNJXP57` is where the next lever is.
+
+THE PREDICTION WAS NOT A RESULT, and three things could have made the measured
+number smaller. The step is only 88% kernel-busy, so a kernel saving does not convert
 one-for-one. The remaining 64.9% of the budget does not shrink. And gfx1151 is
 an APU whose 40 CUs are fed by host memory, so a kernel that becomes
 bandwidth-bound rather than latency-bound stops improving. The direct evidence
