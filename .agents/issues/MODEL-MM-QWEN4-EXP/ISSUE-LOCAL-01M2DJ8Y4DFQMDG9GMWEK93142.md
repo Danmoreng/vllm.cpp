@@ -100,6 +100,41 @@ here, because neither has been checked against a step counter; what is retracted
 is the confidence. Anyone scoping the `cudaFree` question must resolve the step
 count first, by instrumenting it rather than dividing.
 
+### RESOLVED 2026-09-13, BY ARITHMETIC: 527, AND 771 IS IMPOSSIBLE
+
+The paragraph above asked for a step counter. It is not needed, and the reason the
+two derivations disagreed by 1.46x is that they describe two different CONTEXT
+LENGTHS rather than one being miscounted.
+
+QSA is 34.5% of GPU kernel time and 16.079 s of the 60 s window, so total GPU
+kernel time in the window is `16.079 / 0.345 = 46.6 s`. At 527 steps that is
+**88.5 ms of GPU kernel per step**, inside a 113.9 ms step: 77.7% busy, coherent.
+The 771 figure requires the window's step to have BEEN 77.8 ms, and **88.5 ms of
+measured kernel cannot fit inside 77.8 ms of wall.** So 527 is right and the
+window's step was 113.9 ms.
+
+What made 77.8 ms look like the window's step is that it was measured on a
+DIFFERENT WORKLOAD: `bench_decode.py` generates **16 tokens** off a ~20-token
+prompt, so `kv_len` is about 36, whereas `bench_nsys3000.py` generates 3,000 and
+captures `[150 s, 210 s]`, i.e. roughly 1,300-1,900 tokens of context. This
+kernel's cost is proportional to `|sel| = min(kv_len, block_topk * CR)`, so it
+does ~44x less work in the A/B than in the profile.
+
+**THE CONSEQUENCE FOR THIS ISSUE'S OWN HEADLINE.** "34.5% of decode GPU time at
+2.545 ms a launch" is a ~1600-token-context statement. Per decode step this kernel
+is 30.5 ms at `|sel|=1600`, **4.2 ms** at the 400-token reference workload, and
+**0.69 ms** at the 16-token A/B. It is the top of the budget at long context and a
+few percent of it at the workload the sojufx gap is quoted on. The fix (W9) is
+worth doing either way -- 86-89% of the kernel is 86-89% of it at any context --
+but this issue must not be cited as "the top of the decode budget" without the
+context length attached.
+
+The `cudaFree` population inherits the correction in the direction that makes it
+LARGER per step: ~99 calls and ~63 ms per step rather than ~68 and ~43 ms, and
+those are host costs that do not scale with context. That is where the next
+profile should be aimed. It is still not a claim that it IS the cost -- host API
+time can overlap device work and the per-step attribution is still owed.
+
 ### WHAT THIS DOES NOT ESTABLISH
 
 Not measured on GB10: `dgx:gpu0` was unhealthy throughout, and sm_110 runs this
