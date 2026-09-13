@@ -10510,7 +10510,32 @@ retracted can be restored to the 527 reading specifically.
   `VT_POOL_BYPASS` lane is described as reinstating "the per-op
   `cudaMalloc`/`cudaFree` sync storm this pool exists to remove". So ~99 frees a
   step is not the cost of having no cache -- it is ~99 frees ESCAPING one, which
-  is a narrower and more surprising question. See
+  is a narrower and more surprising question.
+  **AND THE ESCAPE ROUTE IS NAMED, BY THIS ROW'S OWN `## Owed`.**
+  `vt::Qwen4ExpGatedResidual` takes a raw `cudaMalloc` per call
+  (`cuda_qwen4_exp.cu:496`, freed by the `FreeGuard` at `:504-506`), and
+  `qwen4_exp_forward.cpp` calls it unconditionally twice per layer (`:565`,
+  `:638`, both inside the loop at `:491`) plus once after (`:747`). At `L = 48`
+  that is **97 per step against 98.92 measured, a 1.9% residual** -- and at
+  634 us per free, **61.5 ms of the ~63 ms**. The same trace corroborates it from
+  the other side: `cudaMalloc` ran **52,143** times against `cudaFree`'s
+  **52,130** -- a strictly paired population differing by 13 over 60 s -- and the
+  whole cost is on the free: **633.69 us against 4.04 us, 157x**, because
+  `cudaFree` synchronises and `cudaMalloc` does not. **AND THAT NAMES A SMALLER
+  FIX THAN `## Owed` DOES:** the same trace has `cudaFreeAsync` at **1.30 us**
+  over 50,553 calls, so the stream-ordered pair is already carrying a comparable
+  population in this run at negligible cost, with no signature change and no
+  re-entrancy argument -- subject to TWO conditions, both already measured
+  elsewhere: the graph-capture interaction `cuda_mla_attn.cu:454` records, which
+  this row cares about because W8 exists to make capture possible; and
+  `ISSUE-LOCAL-01M2DW8CXYEWWMJSZZ6GRH48SZ` (`abaa79c43`), which measured
+  `DevicePool`'s uncapped retention driving `MemAvailable` from 58.2 to 13.8 GiB
+  in two minutes on GB10. **THOSE TWO FINDINGS PULL OPPOSITE WAYS** -- this one
+  says ~97 allocations a step should be in a pool and are not, that one says the
+  pool already retains more than the box can afford -- and the driver's
+  stream-ordered pool retains by default too, so "put it in a pool" is not on its
+  own an answer. THIS IS AN ARITHMETIC MATCH AND NOT A MEASUREMENT;
+  instrumenting the three call sites settles it in one run. See
   `ISSUE-LOCAL-01M2DQHP2FWXHH7GTHB17QX53Q`, which also refutes a per-step `Drain`
   as the source.
 
@@ -10895,7 +10920,7 @@ test, stated so it can be wrong: ~42 ms per step removed, a step near 77 ms, and
 `vt::RmsNormGroup`, the PLE block's norms, and the cuBLAS `gemvx` path -- the
 latter is the NEXT item at 15.9% and gets its own row.
 
-### W7 measured on thor (sm_110), 2026-09-13: ~1.5x, dgx still owed
+### W7 measured on thor (sm_110), 2026-09-13: ~1.5x, and dgx came in later the same day
 
 **Harness.** An interleaved same-tree A/B on `thor:gpu0` (NVIDIA Thor, sm_110),
 one boot per arm, two rounds alternating BASE and FIX, the released
@@ -10923,7 +10948,16 @@ The rebase onto `43622bc37` then reproduced the commit's patch byte-for-byte:
 A measurement of `ac04275b8` is therefore a measurement of the executable bytes
 this row lands.
 
-**THIS IS THOR, NOT DGX, AND THE DGX MEASUREMENT IS STILL OWED.** Every other
+**THIS WAS THOR, NOT DGX, AND THE DGX MEASUREMENT WAS OWED WHEN THIS WAS
+WRITTEN. IT WAS TAKEN LATER THE SAME DAY (`f97e8451a`) and the paragraphs below
+are kept as written rather than edited, because they were published.** On
+`dgx:gpu0`: 0.1177 -> 0.0778 s per token, 40 ms removed, **1.51x**, 8.50 -> 12.85
+tok/s. The prediction was met on all three axes. The owning issue
+(`ISSUE-LOCAL-01M2C8HBDD9VG6AJMPM9PTN80S`) is CLOSED (`685b856e0`). Read the
+"owed" and "OPEN" statements below as the state on the morning of 2026-09-13, not
+as the state of this row.
+
+Every other
 number in this row -- the 116.9 ms step, the 8.57 tok/s, the `nsys` kernel
 shares -- comes from `dgx:gpu0`, a GB10 at sm_121a. This one comes from
 `thor:gpu0` at sm_110, which is a slower box with a larger step. `dgx:gpu0` read
@@ -10943,6 +10977,12 @@ prediction so it can be wrong: ~42 ms per step removed, a step near 77 ms, and
 ~13 tok/s. It was written for dgx and it has NOT been tested on dgx. On thor the
 step went 0.2140 s -> 0.1459 s. The prediction stands OWED a dgx measurement,
 and the owning issue stays OPEN for it.
+
+> **SUPERSEDED THE SAME DAY.** The dgx measurement was taken at `f97e8451a`:
+> 40 ms removed, a 77.8 ms step, 12.85 tok/s, against a prediction of ~42 ms,
+> ~77 ms and ~13 tok/s. The prediction is retired as MET, and the owning issue is
+> CLOSED. The paragraph above is the state before that run and is kept for
+> provenance.
 
 ### W6 scope: hoist the MoE adapter onto the model
 
