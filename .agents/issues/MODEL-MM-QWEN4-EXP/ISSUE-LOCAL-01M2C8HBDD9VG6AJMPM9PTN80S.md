@@ -48,3 +48,27 @@ THIS IS WHY THE ISSUE STAYS OPEN. The owed evidence above asks for an `nsys` re-
 ## Resolution
 
 -
+
+
+### KERNEL-LEVEL CONFIRMATION, thor sm_110, 2026-09-13
+
+`nsys` over a decode window on the landed W7 binary ranks this kernel at **0.1%
+of GPU kernel time, 16.0 us average over 32 instances** (min 14.3, max 20.7).
+Before W7 the same kernel on `dgx:gpu0` was **40.7% and 435.7 us average**. That
+is a **27x reduction in per-launch cost**, and the kernel has fallen from rank 1
+to roughly rank 14.
+
+THIS IS THE KERNEL FIGURE, NOT A STEP FIGURE, and it is the one that is safe to
+quote from this run. The same capture's per-step totals are NOT usable: the
+window caught ~730 ms of GPU work across 45 s (about 1.6% utilisation) with
+prefill-shaped kernel sizes, and `decode.json` came back empty, so the client did
+not run through the window. Three attempts on that box placed the capture window
+from an ASSUMED model-load time -- first a cold 12-minute figure against a warm
+page cache, which profiled an idle server -- and the per-step ranking is
+therefore still OWED, together with the dgx A/B this issue already owes.
+
+What the 27x does establish is the MECHANISM rather than only the direction: the
+old kernel's cost was a dependent chain of 2 x 2560 serial `double` FMAs on four
+threads, and a log-depth fp32 tree over one block per group is exactly the change
+that collapses it. The end-to-end thor A/B (0.2140 -> 0.1459 s per token) and
+this per-launch figure agree about what moved.
