@@ -1,14 +1,14 @@
 ID: ISSUE-LOCAL-01M2CZX87ZB0WHRW2YZYPW7VRZ
 Title: The variadic harness never restores its cached vllm-server, because the CIFS share is mounted file_mode=0664 and the cache guard tests -x
 Row: -
-State: OPEN
+State: CLOSED
 Kind: bug
 GitHub: -
 Mirror: PENDING
 Availability: FULL
 Created: 2026-09-13
 Updated: 2026-09-13
-Closed: -
+Closed: 2026-09-13
 
 ## Problem
 
@@ -16,32 +16,4 @@ benchmarks/variadic/job.sh:183 guards the binary cache with [ -x "$CACHED_BIN" ]
 
 ## Resolution
 
--
-
-## Progress
-
-2026-09-13: the guard in benchmarks/variadic/job.sh now tests `-f`, and the
-restore branch keeps its chmod on the /tmp copy. The comment that names the
-resume guard now names `-f`. tests/scripts/test_variadic_harness.py
-`BinaryCacheRestores` executes the guard and restore branch cut from job.sh
-against a 0664 cached binary. It failed with `REBUILD` before the fix, passes
-after it, and fails again when `-x` is put back. The other `-x` tests in job.sh
-(nvcc under /usr/local, the venv python under $SCRATCH=/tmp, `find -perm -u+x`
-in the /tmp build tree) read local disk, so they do not have this defect.
-
-2026-09-13: review finding (MEDIUM, with a LOW on the restore's hidden `.so`
-copy errors). With `-f`, a cache cut short by a crash, a full disk, or a failed
-`.so` copy was restored on every resume. It died at startup, and `start_ours`
-read that as a pool that does not fit. Repair: the build branch writes the
-`.so` files, then an md5 manifest (`MANIFEST.md5.partial`, renamed), then the
-binary (`vllm-server.partial`, renamed last) as one `&&` chain with no hidden
-errors. A failed write deletes the pin's cache dir. The restore copies every
-listed file to /tmp, then runs `md5sum -c --strict` on the local copies. A cache
-with no manifest, a manifest that does not list `vllm-server`, a failed copy, or
-an md5 mismatch is deleted with a `REJECTED` RESULT line and rebuilt.
-`BinaryCacheRestores` now has seven cases that execute the real fragments. (a) a
-truncated binary, (b) no manifest, and a missing listed `.so` failed before the
-fix (restored), as did (d) the write (no manifest). Deleting the md5 comparison
-fails (a). Deleting the `rm -rf` of a rejected cache fails three cases.
-Replacing the binary's rename with a direct copy is NOT detected by any test.
-The restore's verification covers that crash window instead.
+2026-09-13: fixed on row/BENCH-QWEN38-EXL3-VARIADIC-CACHE (73e378b06, fd6460123). The guard tests existence, the cache write is .so files, then MANIFEST.md5 renamed into place, then the binary renamed into place, and a restore verifies md5sum -c --strict on the local copies and rebuilds on any mismatch. tests/scripts/test_variadic_harness.py BinaryCacheRestores runs the real job.sh fragments, 7 cases; a fresh re-review returned PASS with M1-M6 mutations, and the operator reran the 35-test harness suite green. Open follow-up, LOW: the cache key is the source pin only, so a build-flag change under an unchanged pin restores the older build; the restore does not log the recipe.
