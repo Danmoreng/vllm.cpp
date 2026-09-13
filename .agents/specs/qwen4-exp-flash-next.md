@@ -10503,7 +10503,16 @@ retracted can be restored to the 527 reading specifically.
   and it is what the next profile should be aimed at. **THIS IS NOT YET A CLAIM
   THAT IT IS THE COST**: `cudaFree` is host API time which can overlap device
   work, and the row still owes the per-step attribution `## Owed` already names.
-  It is the reason to measure there next, not a result.
+  It is the reason to measure there next, not a result. **AND IT IS NOT A REASON
+  TO ADD A CACHING ALLOCATOR**, which is what that sentence first invited: the
+  tree already has one. `DevicePool` (`device_pool.h:111-125`) never returns a
+  block to the driver, `qwen4_exp` routes its temporaries through it, and its own
+  `VT_POOL_BYPASS` lane is described as reinstating "the per-op
+  `cudaMalloc`/`cudaFree` sync storm this pool exists to remove". So ~99 frees a
+  step is not the cost of having no cache -- it is ~99 frees ESCAPING one, which
+  is a narrower and more surprising question. See
+  `ISSUE-LOCAL-01M2DQHP2FWXHH7GTHB17QX53Q`, which also refutes a per-step `Drain`
+  as the source.
 
 **AND THE COMPARISON TO sojufx IS ITSELF ON THE WRONG WORKLOAD.** The reference
 generates **400** tokens; this row's 12.85 tok/s was measured generating **16**.
