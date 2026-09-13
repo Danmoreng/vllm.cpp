@@ -6265,4 +6265,24 @@ void Exl3ReconstructGemm(Queue& q, Tensor& c, const Tensor& a, const Tensor& tre
                           const Tensor& suh, const Tensor& svh, Tensor& a_had,
                           Tensor& w_scratch, const Exl3GemmArgs& args);
 
+// QUANT-EXL3 W7 (.agents/specs/quant-exl3-recon-scratch.md). The same op with no
+// caller scratch: the backend supplies the reconstructed weight from ONE
+// persistent, grow-only buffer per (device, queue) that it owns outside every
+// scratch pool. This is the spelling a model forward uses. A per-call pool
+// scratch is part of a CUDA-graph step's demand profile, so every captured
+// graph pinned its own copy of each [k, min(n, 32768)] class; exllamav3's
+// `torch.empty` in `reconstruct_hgemm` (exl3.py:161-217) is one shared block
+// under torch's caching allocator instead.
+//
+// Growth is refused while the queue's stream is capturing, by name. A driver
+// that runs one eager step at a shape before capturing it never trips that,
+// because the buffer's size depends on the weight and not on m.
+//
+// Internally the registered kernel receives an EMPTY `w_scratch` (data ==
+// nullptr, rank 0). A backend that registers `kExl3ReconstructGemm` must honour
+// that; CUDA is the only one today.
+void Exl3ReconstructGemm(Queue& q, Tensor& c, const Tensor& a, const Tensor& trellis,
+                          const Tensor& suh, const Tensor& svh, Tensor& a_had,
+                          const Exl3GemmArgs& args);
+
 }  // namespace vt
