@@ -1,14 +1,14 @@
 ID: ISSUE-LOCAL-01M2DQC3M3VHKDEZYPA8BSRCAV
 Title: rocprofv3 1.1.0 writes ZERO dispatch records on the bare strix:gpu0 worker: ring_buffer.cpp:106 mmap fails with EINVAL at output generation, FATAL-aborts, then deadlocks in its own signal handler ignoring SIGTERM
 Row: BACKEND-ROCM
-State: OPEN
+State: CLOSED
 Kind: bug
 GitHub: -
 Mirror: PENDING
 Availability: FULL
 Created: 2026-09-13
 Updated: 2026-09-13
-Closed: -
+Closed: 2026-09-13
 
 ## Problem
 
@@ -16,4 +16,4 @@ Measured 2026-09-13 on `strix:gpu0` (gfx1151, ROCm 7.2.4) across four leases, on
 
 ## Resolution
 
--
+FIXED 2026-09-13 by one environment variable, not by a container image. ROOT CAUSE: rocprofv3 spills its trace records to `{tmp_directory}/.rocprofv3/%ppid%-%pid%-<domain>.dat` and `output_config.hpp:81` defaults `tmp_directory = output_path = "%cwd%"`; `--output-directory` moves the RESULT files only and the CLI (`source/bin/rocprofv3.py`) never sets `ROCPROF_TMPDIR`, so the spill follows the working directory. An `rc` job on `strix:gpu0` starts with `cwd = /`, the spill under `/` does not read back, `ring_buffer::load` (`ring_buffer.cpp:229`) reads a zero size into an unchecked `_size` and calls `init(0)`, and `mmap` of length ZERO is EINVAL by definition. `strace` shows the argument the FATAL message omits: `mmap(NULL, 0, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0) = -1 EINVAL`. The `munmap failed` line printed one line ABOVE it is `init`'s own `destroy()` on the MAP_FAILED pointer, not a sequence error. REMEDY: `cd /tmp` or set `ROCPROF_TMPDIR` to a directory under `/tmp`, and set `ulimit -c 0` because the abort dumps an 11.7 GB core into cwd. DISCRIMINATED on one lease with a 50-dispatch HIP program, pass ordered FIRST to rule out cold start: B1 cwd=/ TMPDIR=/tmp/rpt 51 rows; A1 cwd=/ default 0 rows; C1 cwd=/tmp/cdtest default 51 rows; A2 cwd=/ default 0 rows. FALSIFIED, so nobody repeats them: locked memory (`ulimit -l unlimited` is permitted and the mmap is unlocked and anonymous), seccomp and capabilities (`Seccomp: 0`, `CapEff: 000001ffffffffff`), a missing package (rocprofiler-sdk 1.1.0, rocprofiler-register, rocpd, roctx and hsa-amd-aqlprofile all installed), and the 2026-09-07 podman image being required. UNVERIFIED: why a spill under `/` specifically fails; `/` is writable (8 MiB dd at 2.9 GB/s) and the doubled separator `//.rocprofv3` also writes fine. CONSEQUENCE DISCHARGED: a 660,273-row qwen4_exp kernel trace was captured on gfx1151 and ranked. Evidence: `docs/bench-evidence/rocm-kernel-attrib-gfx1151-20260913.md` sections 8 and 9; `.agents/environment.md`.
