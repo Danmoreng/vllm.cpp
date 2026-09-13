@@ -227,8 +227,15 @@ was measured at 1.95 tok/s, 13x slower, so the hybrid split is this oracle's
 production configuration on `gfx1151` and not a fallback to be corrected.
 
 **A number from this oracle is still not a RATIO.** `MODEL-MM-QWEN4-EXP` has no
-declared token-exact gate on ROCm and no primary oracle that could define one,
-which is owned by
+declared token-exact gate on ROCm. **The clause that followed used to read "and no
+primary oracle that could define one", and it is FALSE.** vLLM implements
+`qwen4_exp` in full at the active parity pin `e126687a9a` — `vllm/models/qwen4_exp/`,
+both an `nvidia/` and an `amd/` backend, with `Qwen4ExpForConditionalGeneration`
+registered at `vllm/model_executor/models/registry.py:580` — and the row's spec
+reconciled onto it on 2026-09-01
+([`../specs/qwen4-exp-flash-next.md`](../specs/qwen4-exp-flash-next.md) `:85`).
+The primary oracle can define token-exact; what it has not done on this fleet is
+RUN, for the three reasons the owning issue now names. The gap is owned by
 [`ISSUE-LOCAL-01M2D6MV5RNSSM2GZVZKCZA4EG`](../issues/MODEL-MM-QWEN4-EXP/ISSUE-LOCAL-01M2D6MV5RNSSM2GZVZKCZA4EG.md). Every llama.cpp floor in this tree is still owed by
 [#1003](https://github.com/mudler/vllm.cpp/issues/1003), and the
 `MODEL-MM-QWEN4-EXP` ladder itself has not run.
