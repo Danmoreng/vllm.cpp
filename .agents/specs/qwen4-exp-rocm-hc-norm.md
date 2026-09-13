@@ -597,8 +597,17 @@ tok/s.
 
 ## Now
 
-`ACTIVE`. Spec committed; implementation and the `strix:gpu0` measurement
-follow in the same pull request.
+`ACTIVE`, reviewed-ready on `row/MODEL-MM-QWEN4-EXP-HCNORM`. Spec, kernel, gate
+and four `strix:gpu0` leases are committed in that order. The kernel is one block
+per group in f32; `HcGroupedNormKernel` reads **0.56%** of decode kernel time
+where it read 35.68%, and decode is **8.111 tok/s** against 5.4345.
+
+AWAITING A FRESH REVIEWER. This row wrote both the kernel and its gate, which is
+exactly the pairing AGENTS.md sends to someone else, and three of this row's own
+mutations had to be rewritten before they measured anything -- so the mutation
+discipline here has already been shown to need a second reader. Nothing is
+merged and nothing was pushed to `main`.
+
 ## Adjacent work, filed and not built
 
 Both were already verdict **(b)** in the row spec
