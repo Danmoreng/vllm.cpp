@@ -147,6 +147,18 @@ hold, and anything else takes the existing single call unchanged:
    (`hipMemoryTypeManaged` / `Unified`) never bounces either, because it is
    already device-addressable — which is exactly the `VT_ROCM_MANAGED_ALLOC=1`
    configuration, so that knob's behaviour is unchanged.
+
+   **THIS TERM WAS TRUE OF THE DECISION AND FALSE OF THE PROCESS, AND A REVIEW
+   CAUGHT IT.** The first implementation evaluated `ring_available =
+   EnsureRing(chunk)` BEFORE `ShouldStageH2D`, so a managed destination still
+   built the ring: `VT_ROCM_MANAGED_ALLOC=1` on gfx1151 measured
+   `staged=0 direct=3 chunks=0 ring_bytes=268435456`, and the device case
+   printed that line while asserting nothing about it. The copy was direct, as
+   this term promises, and 256 MiB of pinned host memory was allocated anyway --
+   on exactly the boards that never stage, and out of the resource
+   `.agents/environment.md` measures as gfx1151's real ceiling. `EnsureRing` is
+   now the LAST term evaluated and the managed arm of the device case asserts
+   `ring_bytes` is unmoved.
 4. The stream is NOT capturing a graph. `hipEventSynchronize` inside a capture
    region aborts the capture. The capture contract documented at
    `rocm_backend.hip:334-348` already forbids "host<->device blocking copies"
@@ -274,6 +286,71 @@ having measured nothing.
 | `test_backend_cross_device` | (none — whole binary) | 61 | 84841 | SUCCESS |
 | `test_backend_cross_device` | `-tc=*DSA*` | 2 | 273 | SUCCESS |
 
+### 5a. THE REPAIR WAVE, AND THE ONE ASSERTION THAT WAS MISSING
+
+A fresh review returned FAIL on the eager `EnsureRing` (§3b term 3) and on the
+dead `stream_capturing` field (§6). Both are repaired above. The gate was re-run
+on `strix:gpu0` (gfx1151, ROCm 7.2.4) in the same `/tmp/vllmcpp-chunked-h2d`
+clone, `LD_LIBRARY_PATH=/opt/rocm-7.2.4/lib`, evidence archived at
+`/workspace/vtchunked/repair-20260913-073233/` (`rc` logs age out within a day,
+so the share holds them).
+
+**The SHAs below are the ones the worker checked out and the evidence names.**
+The branch was rebased onto `origin/main` twice afterwards, so `c794b5dda` is
+now `d83c4b1c6` and `33a1eaaf8` is now `a6621c937`. The four files the gate
+reads -- `include/vt/rocm/rocm_pinned_h2d.h`, `src/vt/rocm/rocm_backend.hip`,
+`tests/vt/test_rocm_pinned_h2d.cpp` and
+`tests/vt/test_backend_cross_device.cpp` -- are byte-identical across both
+rewrites, and neither `43622bc37` nor `ee0644eab` touches any of them, so the
+measurement carries.
+
+**RED FIRST, and the selector that produces it is the one nobody had run.** At
+the test commit `c794b5dda` — the new managed-arm assertion, no fix —
+`VT_ROCM_MANAGED_ALLOC=1 test_backend_cross_device -tc='*pinned bounce*'`
+reported **1 case, 0 passed, 1 failed / 4 assertions, 3 passed, 1 failed**,
+`Status: FAILURE!`, exit 1, and printed
+`pinned H2D: managed_alloc=1 staged=0 direct=3 chunks=0 max_chunk=0 ring_bytes=268435456`
+with `pinned H2D case ran on a ROCm board: 1`. That is the defect: a ring
+allocated, never used, on the arm that never stages. Binaries
+`fc26b58276f3e6f9a2cda2a550b0596a` (`test_rocm_pinned_h2d`) and
+`3cc2b9a5a58c76f02807dd6ad42ac007` (`test_backend_cross_device`).
+
+**GREEN AFTER, at the fix commit `33a1eaaf8`**, binaries proven changed:
+`eba82c4b2d73198179ebf29a0fd37461` and `45bacea1a99edb77d508f590532cb03d`. Every
+selector prints its counts and its board line.
+
+| binary | selector | cases | assertions | result |
+|---|---|---|---|---|
+| `test_rocm_pinned_h2d` | (none — whole binary) | 10 | 1527 | SUCCESS |
+| `test_backend_cross_device` | `-tc=*pinned bounce*` | 1 | 8 | SUCCESS |
+| `test_backend_cross_device` | `-tc=*pinned bounce*`, `VT_ROCM_MANAGED_ALLOC=1` | 1 | 4 | SUCCESS, `ring_bytes=0` |
+| `test_backend_cross_device` | (none — whole binary) | 61 | 84841 | SUCCESS |
+| `test_backend_cross_device` | `-tc=*DSA*` | 2 | 273 | SUCCESS |
+
+The unit binary grew by one case and 1443 assertions. That one case is
+"the cheap terms are exactly the decision minus the allocating term", which
+walks 480 inputs and asserts `StagingTermsExceptRing` equals `ShouldStageH2D`
+with `ring_available` held true, so the split the repair introduces cannot
+drift from the decision the truth table gates. Deleting the `dst == kDevice`
+term from the helper fails it (3 assertions, binaries `0f5b26d660f20f7e` clean
+vs `7e301ff417b3d850` mutated, restored build back to `0f5b26d660f20f7e`), run
+off-board because the header is HIP-free. The cross-device binary is unmoved at
+61 / 84841: the repair adds one assertion to an arm that is SKIPPED in the
+default configuration, which is why the managed selector had to be run
+explicitly and is now a declared gate line.
+
+**THE MODEL STILL PRODUCES TOKENS AFTER THE REPAIR**, confirmed once rather
+than re-measured, because §7's result is accepted and the staging decision is
+unchanged for the arm that stages. At `33a1eaaf8`, `/tmp/ckpt-iq1s` (worker-local
+shards), `--device auto --max-tokens 32 --temperature 0 --max-num-seqs 1
+--repeat 3`: three runs, each `finish_reason=length completion_tokens=32`, at
+42.399 s / 6.086 s / 6.074 s, decode **5.258 and 5.269 tok/s**, exit 0. Evidence
+at `/workspace/vtchunked/repair-model-20260913-073358/`. `vllm-cli` reports md5
+`364f11fddc6392feb79cdc23f8d69cf5`, which is byte-identical to §7's — and that
+is NOT a stale build: the executable is a 26,720-byte shim and the code links
+through `libvllm.so.0.0.3`, relinked at 07:33:59 from a `rocm_backend.hip.o`
+rebuilt at 07:32:52 on the fix commit.
+
 Baseline at `98e2cd7da`: `test_backend_cross_device` whole binary **60 cases /
 84833 assertions**, `-tc=*DSA*` **2 / 273**. The whole binary therefore grew by
 exactly one case and eight assertions, which is this spec's case and nothing
@@ -358,7 +435,21 @@ The artifact's compiled feature set is asserted before it is timed: `ldd` for
   oracle's own bound, and it replaces an unbounded pinned range the driver was
   creating per copy.
 - **A qualifying copy inside a graph capture.** Guarded by term 4, and the guard
-  is in the truth table.
+  is in the truth table. **A review found that this was only half true of the
+  first implementation.** `in.stream_capturing` was hardcoded `false` and a
+  separate early `return false` did the work, so the term the truth table gates
+  was a value production never supplied -- the program was safe and the
+  guarantee was in the wrong place. The probe now feeds the field and the
+  predicate IS the guard.
+
+  **WHAT IS STILL NOT MEASURED ON A BOARD, STATED RATHER THAN GLOSSED:**
+  `StreamIsCapturing`'s own return value. No case in
+  `tests/vt/test_backend_cross_device.cpp` opens a capture region, and one was
+  considered and NOT written, because a pageable asynchronous H2D is itself
+  illegal inside a capture region -- such a case would measure HIP's refusal
+  rather than this guard, and a green would not distinguish the two. The term
+  it feeds is gated in the truth table; the probe is not. That is the honest
+  extent of it.
 - **`hipPointerGetAttributes` leaves a sticky error for an unregistered host
   pointer.** It returns `hipErrorInvalidValue` for one, which is the very answer
   we want, and the last error is cleared with `hipGetLastError()` immediately so
@@ -416,9 +507,15 @@ differs is one environment variable this change reads. The ring is the cause.
 **The device memory is the tell.** Arm B stops at 29.69 GiB and stays there,
 exactly as §6a recorded. Arm A reaches 71.96 GiB, which is the whole checkpoint.
 So the wedge was never the model failing to fit; it was the upload never
-finishing. (The 71.96 GiB figure exceeds the 33.27 GB `hipMemGetInfo` total §6a
-quotes; the 96 GiB VRAM carve on this part is the obvious explanation and this
-spec does NOT resolve the discrepancy, it reports both raw numbers.)
+finishing.
+
+**THERE IS NO DISCREPANCY, AND THIS PARAGRAPH USED TO SAY THERE WAS.** It read
+that 71.96 GiB "exceeds the 33.27 GB `hipMemGetInfo` total §6a quotes" and
+declined to resolve it. `.agents/environment.md` §"strix" already resolved it:
+since the 2026-09-11 firmware change this board reports `mem_info_vram_total`
+and `hipMemGetInfo` total of **96.000 GiB**, while 33,270,497,280 B is the
+box's HOST RAM. §6a read one for the other and this spec propagated it. Both
+specs now say so; 71.96 GiB of 96.000 GiB is an unremarkable number.
 
 ### The generations
 
@@ -436,11 +533,18 @@ Weight staging is lazy — `dense_attn::ResidentWeight` uploads on first use,
 behind the `d_dev` memo — so run 1 carries the one-time 72 GiB host-to-device
 transfer of the whole checkpoint.
 
-**The steady-state number is 5.27-5.29 tok/s, and it is FOUR samples across TWO
-independent process launches on two different source filesystems:** 5.291,
-5.273, 5.274, 5.275. Spread max-to-min 0.34%. That satisfies the row's
-three-repetition rule and it does so across process boundaries rather than three
-times inside one handle, which is the stronger shape. gfx1151 fails about two
+**The steady-state number is 5.0-5.3 tok/s.** This spec first wrote
+"5.27-5.29 tok/s ... spread max-to-min 0.34%" off FOUR samples across TWO
+process launches — 5.291, 5.273, 5.274, 5.275 — and **0.34% understates the
+spread of this measurement.** A fresh review launched the process three more
+times on the reviewed head and read 5.002, 5.183 and 5.097 tok/s, a 3.6% spread
+on its own; the repair wave's confirmation run (§5a) read 5.258 and 5.269. Nine
+samples across six independent launches run from **5.002 to 5.291 tok/s**, 5.8%
+max-to-min. Quote the range and the launch count; 5.29 is not reproducible to
+that precision and must not be written as if it were. The row's
+three-repetition rule is satisfied several times over, and it is satisfied
+across process boundaries rather than three times inside one handle, which is
+the stronger shape. gfx1151 fails about two
 runs in five with an illegal GPU memory access
 (`ISSUE-LOCAL-01M2BY2M2ATNVR3XQKV2DB1BJD`); no arm here hit that signature, and
 all six generations completed with `finish_reason=length`.
@@ -454,7 +558,7 @@ the whole process.
 ### What this does NOT claim
 
 - No throughput COMPARISON. There is no llama.cpp or vLLM denominator here, and
-  5.28 tok/s is this engine's first number on this part, not a ratio.
+  5.0-5.3 tok/s is this engine's first number on this part, not a ratio.
 - No load-time verdict for the ring. Arm A's 61.187 s and arm B's 35.909 s are
   not comparable: arm A read the checkpoint cold off CIFS and arm B read it with
   the page cache already warm. A load-time A/B needs interleaved repeats from a
