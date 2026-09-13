@@ -63,6 +63,11 @@
 // mean square. vLLM's own PyTorch reference for the same norm agrees on the
 // width at `common/hyperconnection.py:75`, `hidden_states.float()`.
 //
+// `amd/ops/hc.py` AND `nvidia/ops/hc.py` ARE THE SAME FILE -- diffed at the pin,
+// byte-identical but for one docstring line, 487 lines each -- so this is not an
+// AMD-specific shape a ROCm arm inherits by accident. It is what vLLM computes
+// on both backends, and what our own CUDA arm has computed since `ee0644eab`.
+//
 // So the kernel below is a MIRROR and not an invention: one block per group and
 // an f32 tree is what the oracle computes, and the one-thread-per-group `double`
 // walk this file shipped until now diverged from it on BOTH axes. The remaining
