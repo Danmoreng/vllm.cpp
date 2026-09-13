@@ -327,6 +327,13 @@ against a `2.640087e-06` bound, **252555.5x**.
 
 `5 cases / 45 assertions / 0 failed`, binary `82ffaf5ed0d3`.
 
+**THE COUNT MOVED TO 45 -> 55 IN THE REPAIR ROUND AND THE MEASUREMENTS DID NOT.**
+§7.6's repair routes four reductions through the hardened shared scan, and each
+of those helpers `REQUIRE`s the two operand sizes agree, which is ten more
+assertions. Re-measured on the repaired head at binary `a3d14e3eadd0`:
+`5 cases / 55 assertions / 0 failed`, and every `[MEASURED]` number in the table
+above is byte-for-byte the one wave 1 printed.
+
 **THE §3c QUESTION IS ANSWERED AND THE ANSWER IS THE GOOD ONE.** This f32 TREE
 lands `9.54e-07` on the magnitude-separated case -- inside the `1e-5` bar with
 10x to spare.
@@ -558,6 +565,70 @@ of 35.68%, not the earlier one. The two agree to 0.6 points on share and to 0.6%
 on kernel-busy-per-step (172.22 against 173.24), which is corroboration rather
 than a reused number.
 
+### 7.6 The repair round -- F1's red-then-green, and the gate re-run on the repaired head
+
+WAVES 5 AND 6 -- `strix:gpu0`, 2026-09-13, exclusive leases, `rc` jobs
+`d9a4874b-b507-420e-a80b-4f2a7f492aa8` (wave 5) and
+`2920dca3-62a1-4414-9610-af5472dbef6f` (wave 6), fresh clones of the repaired
+head `7b737f882`, build 274 s and 276 s. Archived to
+`/workspace/q4exp-hcnorm/w5-...` and `w6-...`, and committed as the `w6-*` files
+and `job-wave6.sh` in
+[this row's evidence directory](../../docs/bench-evidence/qwen4exp-rocm-hcnorm-gfx1151-20260913/).
+
+**THE DEFECT WAS REPRODUCED ON THE BOARD, NOT ARGUED.** The mutation poisons
+`HcGroupedNormKernel`'s `s_r` to NaN, so every element of the device `mixed`
+output is NaN while the CPU reference stays correct. One mutation, two test
+trees, three distinct binaries:
+
+| arm | test files | binary | case 5 |
+|---|---|---|---|
+| control | repaired | `5ee7e99e817a` | 1 passed, 12 assertions, `max\|diff\| = 9.53674316e-07` |
+| red-first | PRE-repair (`a449eca85`) | `c18b51f7de8e` | **1 PASSED**, 7 assertions, `max\|diff\| = 0`, `Status: SUCCESS!` |
+| after | repaired (`7b737f882`) | `987d7b7b5042` | **1 FAILED**, 13 assertions, 2 failed, `max\|diff\| = inf` |
+
+The middle row IS the defect: an all-NaN device output printed
+`max|diff| = 0` and passed `worst < 1e-5`. The third row is the same poisoned
+kernel under the repaired assertion, which reports
+`max_abs_diff.h:100: ERROR: max|diff|: NON-FINITE operand at index 0
+(got = nan, want = 6.3341)` and then `CHECK( inf < 1e-05 ) is NOT correct!`.
+
+Case 4's separation probe was changed on the same argument and it convicts too:
+under the identical poison it goes from green to `1 failed / 9 assertions,
+3 failed`, printing `broadcast signal = inf, case bound = inf`.
+
+The tree was restored with `git diff --exit-code` returning 0 and the rebuilt
+binary is `5ee7e99e817a` again, BYTE-IDENTICAL to the control.
+
+**THE DECLARED GATE, RE-RUN ON THE REPAIRED HEAD AFTER MERGING `origin/main`:**
+battery `5 cases / 55 assertions / 0 failed`, cross-device
+`61 cases / 84841 assertions / 0 failed`, `-tc='*DSA*'`
+`2 cases / 273 assertions / 0 failed`, every one `Status: SUCCESS!` with
+`selected=` printed before it ran. The battery's assertion count moved 45 -> 55
+for the reason §7.1 gives, and every `[MEASURED]` number is unchanged.
+
+**WAVE 5 VOIDED ITS OWN MUTATION AND IS REPORTED AS A DEFECT OF THIS ROW.** Its
+poison wrote `s_r = __fmul_rn(v, nanf(""))`, which orphaned the `eps` parameter,
+and `-Wextra -Werror` refused the build: `error: unused parameter 'eps'
+[-Werror,-Wunused-parameter]`. Both red-first arms reported `BUILD FAILED --
+VOID` in under a second and the step-3 run that followed used the CLEAN binary,
+so it measured nothing. That is the M1b failure of wave 2 repeated at a
+different symbol -- the fourth time this row has had to rewrite a mutation
+before it measured anything -- and wave 6 keeps every operand of the real line
+live for exactly that reason. Wave 5's GATE arms are not void and agree with
+wave 6's to the digit.
+
+**UNVERIFIED, AND NOT BLOCKED ON.** `test_qwen4_exp_cuda_reductions` has not been
+RUN on any wave of this row; every lease was HIP. What is known: the branch's
+change to that file is an extraction -- 22 inserted lines are one `#include` and
+21 `using` aliases, 207 deleted lines are the local copies those aliases replace
+-- its `TEST_CASE` list is byte-identical to `origin/main`'s, and the repair
+round adds one inline function to the shared header that the CUDA file does not
+call. It compiles: `g++ -fsyntax-only -std=c++17` on the repaired head returns 0
+for both `test_qwen4_exp_cuda_reductions.cpp` and
+`test_qwen4_exp_rocm_reductions.cpp`, which is the whole compiler for that file
+because it is a `.cpp` and not a `.cu`. What is NOT known is whether its CUDA
+cases still pass on a CUDA board, and no measurement here claims they do.
+
 ## 8. Prediction, stated so it can be falsified
 
 On `strix:gpu0` the kernel is 35.10% of 173.24 ms of kernel-busy, ~60.8 ms of a
@@ -620,11 +691,25 @@ and four `strix:gpu0` leases are committed in that order. The kernel is one bloc
 per group in f32; `HcGroupedNormKernel` reads **0.56%** of decode kernel time
 where it read 35.68%, and decode is **8.111 tok/s** against 5.4345.
 
-AWAITING A FRESH REVIEWER. This row wrote both the kernel and its gate, which is
-exactly the pairing AGENTS.md sends to someone else, and three of this row's own
-mutations had to be rewritten before they measured anything -- so the mutation
-discipline here has already been shown to need a second reader. Nothing is
-merged and nothing was pushed to `main`.
+REVIEWED, AND REPAIRED. A fresh hostile review returned FAIL on the gate and the
+records. The kernel was ACCEPTED unchanged -- the vLLM mirror re-verified at pin
+`e126687a9a`, M0 reproduced exactly, the gate reproduced on a fifth independent
+build, and the 1.4925x re-measured independently at 1.4923x. Six mutations the
+row had not run were added by the reviewer and both barriers convict by value.
+
+Six findings came back and all six are answered. F1, the one that mattered: case
+5's assertion was NaN-blind and an all-NaN device output PASSED it. That is the
+third recurrence of issue #449 in this repository and the second in this model
+family. §7.6 carries its red-then-green on the board, and
+`ISSUE-LOCAL-01M2EG4B4S423M4DE7C47C0TPR` carries the sweep -- eight more gates in
+this row still fail open on the same spelling. F2: the bold 702x was a division
+across two fixtures and is withdrawn for a scale-normalised 135x. F3: this row's
+own issue is closed. F4: two comments said "quarter" where the guard means half.
+F5: `docs/USAGE.md` said 5.0-5.3 tok/s and now says 8.111. F6 is recorded
+UNVERIFIED in §7.6 rather than claimed.
+
+Nothing was pushed to `main` and nothing is merged; the row branch carries the
+repair and the operator lands it.
 
 ## Adjacent work, filed and not built
 
