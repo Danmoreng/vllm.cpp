@@ -10271,10 +10271,11 @@ kernel time, 96 instances per decode step at ~435 us each, ~42 ms of a 101 ms
 kernel budget. With W6 landed the step is 116.9 ms, so this kernel is ~36% of a
 decode token.
 
-**The two defects.** `cuda_qwen4_exp.cu:258` launches ONE THREAD PER (token, hc
-stream), `GridFor(T * hc)` at `:402`. At `hc_count = 4` and decode `T = 1` that
+**The two defects, ANCHORED AT THE PARENT `49ffc61cf` because the fix has since
+landed and moved every line below.** `cuda_qwen4_exp.cu:258` launched ONE THREAD
+PER (token, hc stream), `GridFor(T * hc)` at `:402`. At `hc_count = 4` and decode `T = 1` that
 is FOUR threads on 48 SMs, each walking `H = 2560` twice, and the sum of squares
-accumulates in `double` (`:271-275`). Precision and parallelism are separable and
+accumulated in `double` (`:271-275`). Precision and parallelism are separable and
 both are in scope.
 
 **This is not a parity decision, and the spec says so rather than leaving it to
@@ -10286,7 +10287,8 @@ therefore the outlier, and moving it to fp32 moves it TOWARD the oracle.
 **The existing gates already admit the change, which is what makes it cheap.**
 The device arm is not held bit-exact against the CPU arm.
 `test_qwen4_exp_hc_device.cpp:76` gates the golden widths at `kTol = 1e-5`
-absolute; its model-width case at `:379` gates a RELATIVE `4e-5`, documented
+absolute; its model-width case at `:378` gates a RELATIVE `4e-5` (`:442`),
+documented
 there as "6.6x the sqrt(K)*u random-walk bound for K = 10240" -- a bound derived
 for FP32 unit roundoff, beside the sentence "because torch runs this in fp32
 too". A serial fp32 walk is ~sqrt(K)*u ~= 6e-6 relative; a block tree reduction
@@ -10294,20 +10296,63 @@ is BETTER at ~sqrt(log K)*u. Both sit inside a bound this tree derived before W7
 existed. Do NOT widen either tolerance. If the change cannot meet them, that is a
 finding about the change, not about the bound.
 
+**WHICH FILE IS THE CUDA GATE, because an earlier draft of this section named the
+wrong one.** `test_qwen4_exp_hc_device.cpp` is the CPU ARMS' gate against the
+transformers goldens; its own head says "Nothing below runs on a device", so it
+executes none of this kernel and cannot hold it. The CUDA gate is
+`tests/vllm/models/test_qwen4_exp_cuda_reductions.cpp`. MEASURED on `thor:gpu0`
+(sm_110, CUDA 13.0.88): corrupting the `1 +` gamma fold in `HcGroupedNormKernel`
+reddens `test_qwen4_exp_cuda_reductions` at 7 of 18 cases, worst `max|diff|`
+0.868741 against its 1.95703e-06 bound (the grid-cap case), while
+`test_qwen4_exp_hc_device` stays SUCCESS at 11/11 cases over 516 assertions. The tolerances above still stand as the numerical
+contract; the file that enforces them on the device arm is the CUDA one. Run
+`test_qwen4_exp_hc_device` too -- as the CPU-arm gate that must not regress, not
+as evidence about the kernel.
+
 **Design.** One block per (token, hc) group; a block-wide reduction for the sum
 of squares in fp32; the normalize-and-write loop that follows is
 order-independent and parallelises across the block with no numerical question.
-The `1 +` gamma fold stays f32 and stays where it is (`:288-290`) -- it is
+The `1 +` gamma fold stays f32 and stays where it is (`49ffc61cf:288-290`, now
+`:357-363`) -- it is
 upstream's `1.0 + self.weight.float()` and #2218 records what dropping it looks
 like. `eps` stays INSIDE the rsqrt, added to the mean square, with the narrowing
 point unchanged.
 
-**Tests.** Red-first, and the red must come from the SHAPE rather than from the
-width: a case that fails because the kernel computed one group and broadcast it,
-or walked the wrong stride, is the one that discriminates a bad parallelisation.
-The existing `test_qwen4_exp_hc_device.cpp` cases (golden widths + the model-width
-agreement case) must stay green unmodified -- they are the numerical gate and
-they were written before this change.
+**Tests.** The red must come from the SHAPE rather than from the width: a case
+that fails because the kernel computed one group and broadcast it, or walked the
+wrong stride, is the one that discriminates a bad parallelisation. The CUDA cases
+live in `test_qwen4_exp_cuda_reductions.cpp` under the `CUDA W7:` names, and
+`test_qwen4_exp_hc_device.cpp` must stay green unmodified as the CPU arms' gate.
+
+**NO RED-FIRST WAS AVAILABLE, and this paragraph records why rather than letting
+the sentence above read as an unmet obligation.** The W7 fixture cannot be made
+to fail on the pre-change kernel. Both arms walk the group ASCENDING, the
+pre-change device arm accumulates in `double`, and at the fixture's synthetic
+inputs the pre-change kernel reproduces the CPU reference EXACTLY: an independent
+rebuild of the pre-change kernel against the new fixture measured `max|diff| = 0`
+on every case. A red-first case would therefore have to fail for the width, which
+is the one thing this change is allowed to move, and a case that fails on the
+correct kernel is not a gate.
+
+The discriminating evidence is a MUTATION BATTERY plus an in-gate separation
+probe instead. Four of the five kernel mutations redden
+`test_qwen4_exp_cuda_reductions`, and two of those four -- dropping the group
+grid stride and collapsing the cross-warp fold -- are invisible to every
+committed golden case, which is the property the new fixture exists for. The
+fifth (a trailing `__syncthreads()` on the group loop) is an EQUIVALENT MUTANT:
+the loop's two remaining barriers already order both cross-iteration shared
+accesses on a block-uniform trip count, `compute-sanitizer --tool racecheck` on
+the grid-cap case reports `0 hazards displayed` on the committed bytes, and
+adding the barrier back gives digit-for-digit identical output. The separation
+probe runs inside the gate and measures ONE defect, which is not a member of
+that battery and is not its floor either. It replays the model-width case with
+every group of token 0 forced to group 0's data, which is what a kernel that
+computed one group and broadcast the reciprocal `r` would produce
+(`test_qwen4_exp_cuda_reductions.cpp:1754-1783`), and it reports
+`ratio = 252555.5x` between THAT defect's signal and the case tolerance. So the
+discrimination band for a broadcast `r` is measured rather than asserted. It
+bounds no other defect, and nothing here makes it the smallest signal of the
+five mutations.
 
 **Owed evidence.** An `nsys` re-measurement on `dgx:gpu0`, same harness as the W6
 A/B (interleaved arms, one boot per arm, released UD-IQ1_S staged locally), giving
@@ -10318,6 +10363,55 @@ test, stated so it can be wrong: ~42 ms per step removed, a step near 77 ms, and
 **Out of scope.** The CPU reference's double (it is the oracle these gates use),
 `vt::RmsNormGroup`, the PLE block's norms, and the cuBLAS `gemvx` path -- the
 latter is the NEXT item at 15.9% and gets its own row.
+
+### W7 measured on thor (sm_110), 2026-09-13: ~1.5x, dgx still owed
+
+**Harness.** An interleaved same-tree A/B on `thor:gpu0` (NVIDIA Thor, sm_110),
+one boot per arm, two rounds alternating BASE and FIX, the released
+`unsloth/Qwen3.8-Flash-Next-GGUF` UD-IQ1_S staged to local disk, the server at
+`--max-num-seqs 1 --device cuda` with no other engine flag, a 16-token decode,
+and the median inter-token interval as the statistic.
+
+| arm | commit | round 1 tok/s | round 1 s/token | round 2 tok/s | round 2 s/token |
+|---|---|---|---|---|---|
+| BASE, the W7 parent | `49ffc61cf` | 4.6564 | 0.21372 | 4.9773 | 0.21430 |
+| FIX | `ac04275b8` | 7.3755 | 0.14542 | 7.2675 | 0.14629 |
+
+The median per-token interval goes 0.2140 s -> 0.1459 s. That is ~68 ms removed
+per token, about 1.5x. Peak resident memory is unchanged: `VmHWM` 77,361,940 kB
+on BASE against 77,355,492 kB on FIX. No arm printed `out of memory`,
+`bad_alloc`, or a CUDA error.
+
+**THE BYTES MEASURED ARE THE BYTES THAT LAND.** The A/B ran `ac04275b8`, which is
+an earlier revision of this same commit; the revision that carries this record is
+`d7e0e9cf2`. `git diff ac04275b8 d7e0e9cf2 -- src/` is EMPTY, and the only
+`tests/` difference is one comment block in
+`test_qwen4_exp_cuda_reductions.cpp`. Every later revision was prose and records.
+The rebase onto `43622bc37` then reproduced the commit's patch byte-for-byte:
+`git diff d7e0e9cf2^ d7e0e9cf2` and `git diff HEAD^ HEAD` are identical files.
+A measurement of `ac04275b8` is therefore a measurement of the executable bytes
+this row lands.
+
+**THIS IS THOR, NOT DGX, AND THE DGX MEASUREMENT IS STILL OWED.** Every other
+number in this row -- the 116.9 ms step, the 8.57 tok/s, the `nsys` kernel
+shares -- comes from `dgx:gpu0`, a GB10 at sm_121a. This one comes from
+`thor:gpu0` at sm_110, which is a slower box with a larger step. `dgx:gpu0` read
+`unhealthy (no contact)` across three separate outages on 2026-09-13, so the
+re-measurement against the 116.9 ms step could not be taken. Do NOT read the
+thor figure against the sojufx reference or against the W6 dgx numbers; they are
+different machines and the comparison is not defined.
+
+**THE 42 ms ATTRIBUTION IS NOT CONFIRMED BY THIS.** The `nsys` attribution that
+motivated W7 -- `HcGroupedNormKernel` at 40.7% of GPU kernel time, ~42 ms per
+step -- was measured on dgx. The 68 ms per token removed here was measured on
+thor, on a larger step. The direction and the rough magnitude agree. That is all
+they do. Nothing here confirms the 42 ms figure.
+
+**THE PREDICTION IS NOT RETIRED.** The W7 scope section above states the
+prediction so it can be wrong: ~42 ms per step removed, a step near 77 ms, and
+~13 tok/s. It was written for dgx and it has NOT been tested on dgx. On thor the
+step went 0.2140 s -> 0.1459 s. The prediction stands OWED a dgx measurement,
+and the owning issue stays OPEN for it.
 
 ### W6 scope: hoist the MoE adapter onto the model
 
