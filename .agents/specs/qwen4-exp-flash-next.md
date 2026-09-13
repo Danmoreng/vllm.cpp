@@ -10697,6 +10697,50 @@ reference that generated a different number of tokens. For an attention kernel w
 is proportional to context, the workload is part of the measurement, and a profile
 taken at 1,600 tokens does not describe a benchmark run at 400.
 
+### W9 OUTCOME, as landed at `054a8910c` (operator, 2026-09-13)
+
+**What landed.** Pass 2's tile evaluates one whole dot product per thread; only
+the sum over `s` stays on thread 0, so no reduction was reassociated. Four
+commits: the kernel change, the fold gate the review demanded, and two records.
+
+**The operator's gate, rerun on the final head `af417e4ee` rather than on the
+implementer's report** (`rc` job on `thor:gpu0`, sm_110, fresh clone, selected
+case count asserted for every suite):
+
+| suite | cases | assertions |
+|---|---|---|
+| `test_qwen4_exp_cuda_reductions` | 20/20 | **19,678** |
+| `test_qwen4_exp_qsa` | 14/14 | 7,263 |
+| `test_qwen4_exp_qsa_device` | 12/12 | 4,697 |
+| `test_qwen4_exp_cuda` | 12/12 | 351 |
+| `test_qwen4_exp_qsa_block` | **12/13** | 7,438/7,439 |
+
+The assertion count on the first suite went 213 -> 19,678, and that IS the
+repair: the fold gate now exercises the property W9 rests on. The fifth suite's
+single failure predates W9 and is measured to (`ISSUE-LOCAL-01M2E18YDQ8M5Y5P5SPFXD1D99`).
+
+**Speed: at least 3.62x on the kernel, measured by the operator.** See the
+subsection above; the naive 4.40x mean ratio is invalid because the fix arm runs
+three more instances. The implementer's 6.52x at the released `DH = 256`,
+`|sel| = 2048` shape is not contradicted and is not gated.
+
+**THE ROCm ARM IS COMPILED BY NOTHING, AND THAT WAS FOUND HERE.** W9's repair
+needed the probe field in `include/vt/ops.h` and handling in all three arms, so it
+touched `src/vt/rocm/rocm_qwen4_exp_qsa.hip`. `check-tree-compiles` reports
+`src/vt/cuda/cuda_qwen4_exp_qsa.cu` as "in scope that no target in this
+configuration compiles" and does not see the `.hip` at all, and the operator's
+gate is CUDA. So a typo in that file would have reached `main` unbuilt.
+`hipcc -fsyntax-only --offload-arch=gfx1151` on `strix:gpu0`, both arms, `rc=0`
+each, with different `.hip` sha256 proving the file really differs. **This is a
+standing gap, not a W9 one**: any change touching a `.hip` has the same exposure.
+
+**What the review changed, and why the FAIL was right.** The code was correct
+throughout; what failed was that its central claim was enforced by nothing. Two
+reassociations -- a descending fold, and the warp-shuffle tree this kernel's own
+header declines -- passed all three committed suites while demonstrably moving the
+output. Merging on "the code is correct" would have left the declined lever free
+to be added later with every gate green.
+
 ### Out of scope for W9
 
 The narrow decode grid (24 blocks on 48 SMs) recorded in the issue's structural
