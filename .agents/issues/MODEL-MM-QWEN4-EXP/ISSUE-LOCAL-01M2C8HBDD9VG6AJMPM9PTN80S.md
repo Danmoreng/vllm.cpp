@@ -1,14 +1,14 @@
 ID: ISSUE-LOCAL-01M2C8HBDD9VG6AJMPM9PTN80S
 Title: HcGroupedNormKernel runs four threads and accumulates in double, against its own header's contract, and it is 40.7% of decode kernel time
 Row: MODEL-MM-QWEN4-EXP
-State: OPEN
+State: CLOSED
 Kind: bug
 GitHub: -
 Mirror: PENDING
 Availability: FULL
 Created: 2026-09-13
 Updated: 2026-09-13
-Closed: -
+Closed: 2026-09-13
 
 ## Problem
 
@@ -47,7 +47,37 @@ THIS IS WHY THE ISSUE STAYS OPEN. The owed evidence above asks for an `nsys` re-
 
 ## Resolution
 
--
+FIXED AND LANDED 2026-09-13. The kernel is `HcGroupedNormKernel` in
+`src/vt/cuda/cuda_qwen4_exp.cu`. W7 replaced the four-thread `double` walk with
+one block per group, fp32 `__fadd_rn`/`__fmul_rn` interior and a warp-shuffle
+tree reduction, which is what `qwen4_exp_hc.h:99-104` said the device arm was
+supposed to do all along ("THE DEVICE ARM IS THE THING THAT MUST BE
+FP32-ACCUMULATE"; the `double` was the HOST reference's convention, applied to
+the wrong arm).
+
+- `ee0644eab` -- the fix.
+- `f116751e8` -- the kernel-level evidence, 435.7 us -> 16.0 us per launch, 27x.
+- `f97e8451a` -- the dgx A/B this issue owed, below.
+
+**THE dgx A/B IS NO LONGER OWED; IT WAS MEASURED.** Interleaved same-tree A/B on
+`dgx:gpu0`, BASE `3b3ed716f` (W6 only) against FIX `ee0644eab` (W6+W7), one boot
+per arm, two rounds: **0.1177 -> 0.0778 s per token, 40 ms removed, 1.51x**,
+8.50 -> 12.85 tok/s. The W7 scope had predicted, before the work started, "~42 ms
+per step removed, a step near 77 ms, and ~13 tok/s". The prediction was met and
+not adjusted.
+
+`HcGroupedNormKernel` no longer appears in the top twelve of the post-W7 profile,
+so the 40.7% rank-1 position this issue reported is gone at the ranking level and
+not only end to end.
+
+**ONE FIGURE IN THIS ISSUE IS A LONG-CONTEXT FIGURE and the reader should know
+it:** the "40.7% of decode kernel time" was measured on the same 3000-token
+profile whose workload mismatch is corrected in
+`.agents/specs/qwen4-exp-flash-next.md`, "### W9: the two numbers this row kept
+dividing into each other". Unlike the QSA kernel, this one's cost does not scale
+with context -- it is per-token and per-layer -- so the rank was inflated only by
+whatever the context-scaled kernels around it were doing, and the 27x per-launch
+figure is unaffected either way.
 
 
 ### KERNEL-LEVEL CONFIRMATION, thor sm_110, 2026-09-13
