@@ -48,6 +48,42 @@ G-TOKENS and G-SPEED):
   - CPU: `test_exl3_matmul_dispatch` 4/4, `test_exl3_gemm` 20/20 and
     `test_exl3_linear_method` 7/7.
 
+2026-09-13, review-repair progress (fresh implementer; not a gate result). The
+fresh review of `c83521c20` returned FAIL on four findings:
+
+- Retire on growth was untested (M2, growth always frees). New case: eager
+  growth to B1, capture G1, eager growth to B2, a second queue allocates B1's
+  size, then G1 replays interleaved with that queue's reconstructs.
+- The per-stream key was untested (M3, key by device only). New case: two
+  queues with different (K, N) enqueue interleaved with no sync, and each output
+  is compared with its single-queue reference. B's scratch fits inside A's, so a
+  device-only key is a data race on live bytes and not a fault.
+- `DestroyQueue` did not release the entry. `ReleaseExl3ReconScratch` in
+  `cuda_exl3.cu` now synchronizes the stream, frees the block (or retires it when
+  a capture was handed it), and erases the entry. It is called from
+  `CudaBackend::DestroyQueue`. New case: destroy, then recreate, a queue.
+- The explicit-scratch overload is marked test-only in `include/vt/ops.h`.
+
+Test hooks are in `src/vt/cuda/cuda_exl3_internal.h`. All arms ran on
+`dgx:gpu0` (sm_121a), lease `7f670ed1-0e52-4561-b3fe-140e5012e295`. The clone
+was at `909125d16` plus the diff, and the code tree hash was
+`08b641a2f2e1e5871967b2223b658ad10a11a3e7`:
+
+- FIX: all 7 CUDA dispatch cases green, and `test_exl3_gemm` 20/20.
+- M2: the retire case is red. The retired count is 0, not 1. The second queue
+  received the freed B1. 2 of 8 replays differ from the pre-growth bytes.
+- M3: the per-stream case is red. The hook capacities are wrong, and 1 of 6 of
+  A's interleaved outputs differs. The byte race is probabilistic, and the hook
+  assertions are deterministic.
+- M5 (no release call in `DestroyQueue`): the teardown case is red. The old
+  handle keeps 16 MiB, and the live bytes do not return to baseline.
+- M1 (no capture refusal) and M4 (per-call `DBuf`): still red, on the same cases
+  as before.
+- After each restore, the tree hash equals `08b641a2`. A final FIX rebuild was
+  7/7 green. The binary md5 is not reproducible, so it is not the evidence.
+- CPU: `test_exl3_matmul_dispatch` 4/4, `test_exl3_gemm` 20/20 and
+  `test_exl3_linear_method` 7/7.
+
 ## 1. Scope
 
 `dense_attn::Exl3MatmulD` (`include/vllm/model_executor/models/dense_attn_block.h`)
