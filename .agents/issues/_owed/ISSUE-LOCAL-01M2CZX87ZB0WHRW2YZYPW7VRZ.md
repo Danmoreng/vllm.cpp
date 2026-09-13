@@ -28,3 +28,20 @@ against a 0664 cached binary. It failed with `REBUILD` before the fix, passes
 after it, and fails again when `-x` is put back. The other `-x` tests in job.sh
 (nvcc under /usr/local, the venv python under $SCRATCH=/tmp, `find -perm -u+x`
 in the /tmp build tree) read local disk, so they do not have this defect.
+
+2026-09-13: review finding (MEDIUM, with a LOW on the restore's hidden `.so`
+copy errors). With `-f`, a cache cut short by a crash, a full disk, or a failed
+`.so` copy was restored on every resume. It died at startup, and `start_ours`
+read that as a pool that does not fit. Repair: the build branch writes the
+`.so` files, then an md5 manifest (`MANIFEST.md5.partial`, renamed), then the
+binary (`vllm-server.partial`, renamed last) as one `&&` chain with no hidden
+errors. A failed write deletes the pin's cache dir. The restore copies every
+listed file to /tmp, then runs `md5sum -c --strict` on the local copies. A cache
+with no manifest, a manifest that does not list `vllm-server`, a failed copy, or
+an md5 mismatch is deleted with a `REJECTED` RESULT line and rebuilt.
+`BinaryCacheRestores` now has seven cases that execute the real fragments. (a) a
+truncated binary, (b) no manifest, and a missing listed `.so` failed before the
+fix (restored), as did (d) the write (no manifest). Deleting the md5 comparison
+fails (a). Deleting the `rm -rf` of a rejected cache fails three cases.
+Replacing the binary's rename with a direct copy is NOT detected by any test.
+The restore's verification covers that crash window instead.
