@@ -10359,6 +10359,30 @@ zero. Twelve launches a step makes it the larger half of QSA's bill here. The
 owed instrument is a `|sel|` sweep at fixed shape on this box, which is the same
 head_dim-sweep method the W9 attribution already used and trusts.
 
+**THE SWEEP WAS ATTEMPTED TWICE AND BOTH RUNS DIED THE SAME WAY. Read this before
+taking a lease for it.** `rc` jobs `8ea56726` and `0cfb7294` extended the working
+single-window harness to two legs -- 120 tokens then 1200, one boot, one binary,
+`nsys start`/`stop` around each. In both runs the server came up, answered
+`/v1/models`, and SERVED THE WARMUP CORRECTLY (ttft 111.2 s and 73.1 s
+respectively, decode 12.01 tok/s), and then **both legs got
+`URLError: [Errno 111] Connection refused`** -- including the FIRST leg, before
+any second `nsys start`, so it is not the two-window structure. The server died
+between the warmup completing and the first capture. `nsys stop` still produced
+`.nsys-rep` files, and the self-validation correctly REFUSED both as not
+decode-shaped rather than reporting the empty windows as a result.
+
+The cause is not established and is not guessed here. It is in `$OUT/srv.log` on
+the worker, which needs a lease to read, and the two candidates worth separating
+are an OOM under tracing (the box holds a ~68 GiB model in 128 GiB unified memory,
+and this dev host OOM-killed an unrelated `agent-preflight` the same evening) and
+`dgx:gpu0` itself, which went unhealthy EIGHT times on 2026-09-13. **The next
+attempt should read that log FIRST**, and should print the server's tail on client
+failure the way the leg function now prints the client's.
+
+WHAT IS NOT OWED, because it is already measured: the single-window capture works
+(`4e36bbae`, 1,594,621 launches, 113 MB) and produced everything in this section.
+Only the second context point is missing.
+
 ### THE REFERENCE MEASUREMENT, taken at last: 13.02 tok/s at 400 tokens, a 5.08x gap (2026-09-13)
 
 **This row has never before compared itself to sojufx on sojufx's workload.** Every
@@ -10398,6 +10422,36 @@ Quote the measurement, not the rescaling.
 
 **Cumulative, all on `dgx:gpu0`: 0.257 -> 13.02 tok/s at the reference workload,
 and the gap has gone 264x -> 5.08x.**
+
+**AND THE REFERENCE'S MAIN LEVER IS NOT AVAILABLE TO US ON THIS ARTIFACT.** sojufx
+runs MTP speculative decoding at K=3; the released UD-IQ1_S GGUF **carries no MTP
+head**. Measured from this repository's own committed manifest of the artifact's
+headers (`tests/vllm/models/qwen4_exp_gguf_manifest.inc`): 1,225 tensors, none
+named `mtp`/`nextn`/`draft`/`eh_proj`/`enorm`/`hnorm`, and blocks `blk.0` through
+`blk.47` with nothing higher -- exactly the 48 trunk layers and no folded 49th,
+which is how llama.cpp's converter would carry one (see
+`qwen3_5_gguf_weights.cpp:965-974`). The architecture defines the head and the
+engine implements the method; the BYTES ARE ABSENT.
+
+**AND NO GGUF WE COULD PRODUCE WOULD CARRY IT EITHER.** The pinned
+`llama-cpp-qwen4exp` converter (PR #27742, head `6c5afc86`) is the only llama.cpp
+that converts this architecture, and `conversion/qwen4exp.py:29-31` sets
+`supports_mtp_export = False` / `no_mtp = True` above the comment "the MTP block
+is a separate draft head; vLLM drops it too". The head's absence is the
+converter's design, not a conversion oversight, so "convert one ourselves" is not
+an available route without patching a second unmerged PR -- and that converter's
+own `:151` records the PLE table peaking "near 300 GB of RSS", above this fleet's
+largest box.
+
+The arithmetic any plan must clear: 66.17 tok/s is a **15.1 ms** step against our
+**87.6 ms** at 88% GPU-busy, i.e. **5.8x less step time**, while the two largest
+kernels are 18.16 ms and 17.53 ms -- deleting both entirely leaves ~52 ms, about
+19 tok/s. **No combination of the identified kernel leads reaches 66 on this
+artifact without speculation.** That is not a ceiling claim, and this row's rule
+that an apparent limit is an untraced implementation difference still stands; it
+is the statement of what the remaining leads do and do not contain. See
+`ISSUE-LOCAL-01M2EG6R3MRCB9ENZB9840KAXX`, which lists the three routes and says
+which question to answer first.
 
 #### THE STEP GROWS 34% WITHIN ONE 400-TOKEN RUN, AND QSA EXPLAINS A THIRD OF IT
 
