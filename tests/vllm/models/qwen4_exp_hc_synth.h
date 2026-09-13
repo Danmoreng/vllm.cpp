@@ -96,6 +96,19 @@ inline Agreement Compare(const std::vector<float>& got, const std::vector<float>
   return a;
 }
 
+// max|v| over ONE array, with the SAME NaN polarity `Compare` has: a non-finite
+// element gives +infinity, never 0.0. A scale is not a diff, so it is easy to
+// think the #449 rule does not reach it -- it does, and in the worse direction.
+// A `std::max(worst, std::fabs(v))` scale reduces an all-NaN array to 0.0, and
+// a bound DERIVED from that scale then SHRINKS, so the hand-rolled spelling
+// turns a poisoned run into a stricter-looking green rather than a red. Routed
+// through the same hardened scan so there is one spelling of the reduction in
+// this row, not two.
+inline double MaxAbsFinite(const std::vector<float>& v) {
+  const std::vector<float> zeros(v.size(), 0.0f);
+  return vllm_test::MaxAbsDiff(v, zeros);
+}
+
 // BOTH REPORTERS PRINT ON SUCCESS, not only on failure. doctest's INFO/CAPTURE
 // are emitted only when an assertion fails, so a passing run of a numeric gate
 // says nothing about HOW closely it passed. These numbers are the wave's
