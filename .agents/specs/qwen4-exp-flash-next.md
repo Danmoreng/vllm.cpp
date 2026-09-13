@@ -10327,6 +10327,154 @@ and it is now ~11% of the step rather than 0.5% of it.
 **Owed.** A per-step attribution for the `cudaFree` population, before any row
 scopes a fix for it. Do not scope from this paragraph alone.
 
+### W9 scope: give the QSA pass-2 dot product more than one thread
+
+Owned by `.agents/issues/MODEL-MM-QWEN4-EXP/ISSUE-LOCAL-01M2DJ8Y4DFQMDG9GMWEK93142.md`,
+whose ATTRIBUTED section carries the measurement this scope is built on. That
+attribution is the precondition the issue itself demanded before a fix was
+scoped; do not scope further QSA work from this section without re-measuring.
+
+**What is wrong.** `QsaGatherAttentionKernel` (`src/vt/cuda/cuda_qwen4_exp_qsa.cu`)
+runs two passes over the gathered KV rows. Pass 1 (`:455-478`) computes, for every
+selected key `s`, the dot product `q . k_s` -- and it spreads those keys across the
+block, `for (s = threadIdx.x; s < selcount; s += blockDim.x)`, because the softmax
+max it feeds is associative and commutative and may be reduced in any order. Pass 2
+(`:503-540`) then walks the SAME keys again in tiles of `kSelTile = 32` and
+**recomputes the identical dot product inside `if (threadIdx.x == 0)`** -- on one
+lane of a 256-thread block -- because the softmax denominator it feeds must be
+accumulated in ascending `s`.
+
+Measured on `thor:gpu0` (sm_110) 2026-09-13: **86.4% and 88.8%, in two independent
+runs, of the whole kernel's time is those lines.** Every selected key is dotted
+twice, and the second time is serial.
+
+**Why the obvious objection does not apply.** The kernel's own comment at
+`:500-501` rejects splitting pass 2 across threads: "Thread 0 walks `s` in order
+and accumulates `denom` in order", and a tree reduction of `denom` would
+reassociate the sum and break the bit relation to the CPU arm that this row's
+goldens hold. That objection is about the SUM OVER `s`. It says nothing about the
+dot product over `d` INSIDE one `s`, which is a self-contained sequential
+ascending f32 accumulation whose value does not depend on which thread runs it.
+
+**The fix.** Distribute the tile's dot products one whole dot per thread, and
+leave the accumulation of `denom` exactly where it is.
+
+For each tile of `n <= kSelTile` entries:
+
+1. Thread `u`, for `u < n`, resolves `p` and `base` for `s = s0 + u` by the same
+   arithmetic the current thread-0 loop uses, walks `d` from 0 to `DH` in
+   ascending order with the same `__fmul_rn`/`__fadd_rn` pair, computes
+   `w = expf(__fsub_rn(__fmul_rn(dot, scale), m))`, and writes `s_wtile[u]` and
+   `s_ptile[u]`. The `base < 0` poison path keeps its current behaviour
+   (`s_bad = 1; s_wtile[u] = 0.0f; s_ptile[u] = -1;`).
+2. `__syncthreads()`.
+3. Thread 0 alone walks `u` from 0 to `n` ASCENDING and folds `s_wtile[u]` into
+   `s_denom` with `__fadd_rn` -- the same values, in the same order, into the same
+   accumulator. Nothing here reassociates.
+4. The value accumulation into `acc[d]` is untouched.
+
+**The barrier count does not change, and the implementer should not add one.**
+Today the tile body is: thread 0 writes `s_wtile`/`s_ptile`, `__syncthreads`, the
+block reads them for the value accumulation, `__syncthreads`. After the change it
+is: threads `u < n` write, `__syncthreads`, thread 0 folds `denom` (a READ of
+`s_wtile`) while the block does the value accumulation (also a read),
+`__syncthreads`. Two barriers before, two after. Concurrent reads of `s_wtile` are
+not a hazard; the trailing barrier is what keeps the next tile's writes off them,
+and it is already there.
+
+The `reads` counter moves from thread 0 to the thread that performs the read; the
+block reduction at the end of the kernel already sums per-thread counts, so the
+total is unchanged. `s_bad` is already written racily by pass 1 from many threads
+with the same value, so the new writers introduce no new shape.
+
+**This is a bit-identity-preserving change, and the spec asserts it as the bar.**
+Every float the kernel produces must be unchanged, bit for bit, on every fixture
+the existing suites carry -- not a tolerance. That is the whole argument for
+choosing this lever over the tree reduction the author already declined.
+
+**Why it will work, stated from something already measured rather than predicted.**
+Pass 1 performs exactly the same total dot-product work, with exactly the same
+per-thread memory pattern (each thread walking one whole `DH`-long key row), over
+exactly the same rows -- and pass 1 is inside the 11-14% remainder. The kernel
+therefore already contains a measurement of the proposed access pattern at full
+block width. The change makes pass 2 do what pass 1 demonstrably does cheaply.
+
+**Prediction, written before the work starts, in the W7 style.** With `kSelTile`
+unchanged at 32, the serial dot is spread over 32 threads. If pass-2 dot is 87% of
+the kernel and the remainder is 13%, the kernel goes to `87/32 + 13 = 15.7%` of its
+current cost, i.e. **~6.4x**. At 12 QSA layers x 2.545 ms = 30.5 ms of the 77.8 ms
+step, that removes **~26 ms**, for a step near **52 ms** and **~19 tok/s**. Record
+the measured values against these three numbers and do not adjust the prediction.
+
+**A side observation the step-count question should have.** 6,319 kernel
+instances divided by 12 QSA layers is **526.6 steps**, which is the 527 the
+instance count implies and not the 771 that `60 s / 77.8 ms` implies. It is not a
+step counter and it does not close `ISSUE-LOCAL-01M2DJ8Y4DFQMDG9GMWEK93142`, but
+it is an independent quantity landing on one of the two candidates, and whoever
+instruments the step count should know that before they start.
+
+Raising `kSelTile` above 32 is IN SCOPE only if it is measured, and it is bounded
+by `blockDim.x` (`BlockWidthFor(DH)`), which is 256 at the released config but is
+`DH` rounded up to a warp in general -- a tile wider than the block leaves entries
+with no thread. `s_ptile` is a fixed `__shared__ int64_t[kSelTile]` and `s_wtile`
+comes out of the dynamic allocation sized at `:610-611`; both must move together
+with the constant. The default stays 32 unless a measurement on `thor:gpu0` says
+otherwise.
+
+### Out of scope for W9
+
+The narrow decode grid (24 blocks on 48 SMs) recorded in the issue's structural
+paragraph. The attribution REFUTED it as the dominant cost, and widening the grid
+is a separate change that cannot be justified from these numbers.
+
+### W9 gates
+
+1. `test_qwen4_exp_cuda_reductions` and the QSA device suites, green on
+   `thor:gpu0`. A doctest filter that selects zero cases exits 0; assert the
+   selected case count, never the exit code alone.
+2. **Bit identity, proven as a difference and not asserted as prose, and NO
+   EXISTING CASE GATES IT.** `test_qwen4_exp_cuda_reductions.cpp:37-46` holds
+   `Qwen4ExpQsaGatherAttention`'s CUDA arm to its CPU arm by a DERIVED BOUND, not
+   by equality, because the two spell `exp` differently. That bound is wide
+   enough to swallow a reassociated denominator, so a green run of that suite is
+   NOT evidence for this change -- it is the trap this gate exists to avoid. The
+   required comparison is CUDA-BEFORE against CUDA-AFTER: capture the gather's
+   full output for every QSA fixture at BASE `7a9020304`, capture it again at FIX
+   with the same binary configuration, and require the bytes to compare equal.
+   (`Qwen4ExpQsaCompress` is untouched by this change and its existing byte
+   equality stays green; do not confuse the two ops' bounds.)
+3. Red-first: the smallest test that fails for the intended reason, captured red
+   before the change.
+4. `compute-sanitizer --tool racecheck` over the QSA suite, 0 hazards, with the
+   control that a deliberately deleted `__syncthreads()` between step 1 and step 3
+   above reports hazards. A racecheck run with no positive control proves nothing
+   about the new barrier.
+5. `scripts/agent-preflight.sh` green.
+
+### W9 evidence required
+
+- The red capture, the focused green, and the full gate.
+- The bit-identity comparison, as the two captured byte streams and the compare.
+- The racecheck run AND its positive control.
+- A same-tree interleaved A/B on `dgx:gpu0` when the box is healthy: BASE
+  `7a9020304` against FIX, one boot per arm, two rounds, released UD-IQ1_S,
+  `--max-num-seqs 1 --device cuda`, 16-token decode, median inter-token -- the
+  identical harness the W6 and W7 rows used, so the numbers are comparable to the
+  table above. `dgx:gpu0` has been unhealthy six times this session; `thor:gpu0`
+  (build `sm_110`, never `121a`) is the development target and its kernel-level
+  before/after is acceptable interim evidence, but the end-to-end tok/s claim is
+  owed on dgx.
+- A re-rank `nsys` after it lands. The last two rows each overturned what was
+  planned next; assume this one does too.
+
+### W9 stop conditions
+
+- Any float changes. The bar is bit identity; a drift means the change is not the
+  one this spec scoped, and the finding is a stop, not a tolerance to widen.
+- Racecheck reports a hazard the positive control does not explain.
+- The measured speedup is below 2x on the kernel. That would falsify the
+  attribution, not the fix, and the attribution is what would then need redoing.
+
 ### W8 scope: a device-resident arm for the k-quant MoE block
 
 Owned by `.agents/issues/QUANT-CUDA-GATES/ISSUE-LOCAL-01M2AAACGC0SXYXFN2JQ3GFEAZ.md`.
