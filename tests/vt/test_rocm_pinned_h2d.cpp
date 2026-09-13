@@ -33,6 +33,7 @@ using vt::rocm::RunStagedH2D;
 using vt::rocm::ShouldStageH2D;
 using vt::rocm::StagedH2DInputs;
 using vt::rocm::StagedH2DRing;
+using vt::rocm::StagingTermsExceptRing;
 
 // A fake device: N pinned slots, an ordered event log, and a reassembled
 // destination. Everything the real .hip does, minus HIP.
@@ -298,4 +299,60 @@ TEST_CASE("the ring size and chunk size are llama.cpp's, and bound the residency
   CHECK(kPinnedH2DChunkBytesDefault == (static_cast<size_t>(64) << 20));
   // The number the whole change exists to bound, for a model of ANY size.
   CHECK(vt::rocm::kPinnedH2DRingBytes == (static_cast<size_t>(256) << 20));
+}
+
+// ---------------------------------------------------------------------------
+// 7. The split between the cheap terms and the ALLOCATING one.
+//
+// Production cannot evaluate `ring_available` without allocating 256 MiB of
+// pinned host memory, so it asks StagingTermsExceptRing first and calls
+// EnsureRing only when that passes. That is two expressions where the spec
+// describes one decision, and two expressions drift. This case is what stops
+// them: over the whole input space this file's truth table walks,
+// StagingTermsExceptRing must be exactly ShouldStageH2D with `ring_available`
+// held true -- no more, no less. Deleting a term from either one fails here.
+// ---------------------------------------------------------------------------
+TEST_CASE("the cheap terms are exactly the decision minus the allocating term") {
+  const PtrKind kinds[] = {PtrKind::kUnregisteredHost, PtrKind::kPinnedHost,
+                           PtrKind::kDevice, PtrKind::kOther};
+  const size_t chunks[] = {0, 1024, kPinnedH2DChunkBytesDefault};
+  const size_t sizes[] = {0, 1023, 1024, kPinnedH2DChunkBytesDefault,
+                          kPinnedH2DChunkBytesDefault * 3};
+  size_t staged = 0;
+  size_t total = 0;
+  for (PtrKind s : kinds) {
+    for (PtrKind d : kinds) {
+      for (size_t c : chunks) {
+        for (size_t b : sizes) {
+          for (bool cap : {false, true}) {
+            StagedH2DInputs in;
+            in.src = s;
+            in.dst = d;
+            in.chunk_bytes = c;
+            in.bytes = b;
+            in.stream_capturing = cap;
+
+            // The ring is the ONLY term the split holds back.
+            in.ring_available = true;
+            REQUIRE(StagingTermsExceptRing(in) == ShouldStageH2D(in));
+            if (ShouldStageH2D(in)) ++staged;
+
+            // And with no ring, the decision is always no, while the cheap
+            // terms are unmoved -- which is the whole point: production learns
+            // the answer is no WITHOUT paying for the ring to find out.
+            in.ring_available = false;
+            CHECK_FALSE(ShouldStageH2D(in));
+            in.ring_available = true;
+            CHECK(StagingTermsExceptRing(in) == ShouldStageH2D(in));
+            ++total;
+          }
+        }
+      }
+    }
+  }
+  // The table is not degenerate: some rows stage and most do not. A helper that
+  // returned a constant would satisfy the equality above and fail here.
+  CHECK(total == 480);
+  CHECK(staged > 0);
+  CHECK(staged < total);
 }

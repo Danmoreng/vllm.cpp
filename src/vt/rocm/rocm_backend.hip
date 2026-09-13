@@ -579,17 +579,29 @@ class RocmBackend final : public Backend {
   // src/llama-model-loader.cpp:1440 (n_buffers = 4), :1449 (64 MiB), :1591-1642
   // (wait on the slot's event, fill it, upload from it, record, advance).
   //
-  // Returns true when it handled the copy. The four cheap terms are checked
-  // before any HIP probe, deliberately: about 1,361 ResidentWeight calls per
-  // forward step reach Copy on this row's checkpoint, and a 4 KiB norm weight
-  // must not pay two hipPointerGetAttributes calls to learn that it is small.
-  // Those same two terms are then part of ShouldStageH2D, which stays the single
-  // authority on the decision and is the thing the truth table gates.
+  // Returns true when it handled the copy. THE ORDER OF THE TERMS IS THE
+  // DESIGN, cheapest first, and each step is paid for only by the copies that
+  // got past the previous one:
+  //
+  //   1. the two size terms, with no HIP call at all -- about 1,361
+  //      ResidentWeight calls per forward step reach Copy on this row's
+  //      checkpoint, and a 4 KiB norm weight must not pay two
+  //      hipPointerGetAttributes calls to learn that it is small;
+  //   2. one hipStreamIsCapturing and two hipPointerGetAttributes;
+  //   3. EnsureRing, which is not a probe but an ALLOCATION.
+  //
+  // Those terms are the same terms ShouldStageH2D spells, which stays the
+  // single authority on the decision and is the thing the truth table gates.
   bool StagedCopy(Queue& q, void* dst, const void* src, size_t bytes) {
     const size_t chunk = vt::rocm::PinnedH2DChunkBytes();
     if (chunk == 0 || bytes < chunk) return false;
     hipStream_t stream = AsStream(q);
-    if (StreamIsCapturing(stream)) return false;
+    // Probed OUTSIDE the lock, and then handed to the predicate as term 4
+    // rather than being a second, separate guard. An early `return false` here
+    // would leave `in.stream_capturing` hardcoded false, which makes the term
+    // the truth table gates a value production never supplies -- the guard
+    // would be real but it would not be the guard the table describes.
+    const bool capturing = StreamIsCapturing(stream);
 
     std::lock_guard<std::mutex> lock(h2d_mutex_);
     vt::rocm::StagedH2DInputs in;
@@ -597,7 +609,20 @@ class RocmBackend final : public Backend {
     in.dst = ClassifyPointer(dst);
     in.bytes = bytes;
     in.chunk_bytes = chunk;
-    in.stream_capturing = false;  // probed above, outside the lock
+    in.stream_capturing = capturing;
+    // THE RING IS ALLOCATED LAST, AND ONLY WHEN EVERY OTHER TERM ALREADY HOLDS.
+    // `EnsureRing` is not a question, it is 256 MiB of pinned host memory and
+    // four events. Asking it first -- as the first implementation did -- built
+    // the ring in every ROCm process that ever copies 64 MiB, including the ones
+    // that then take the direct path anyway because the source is already
+    // pinned, the destination is managed, or the copy is D2D.
+    // `VT_ROCM_MANAGED_ALLOC=1` on gfx1151 measured exactly that:
+    // `staged=0 direct=3 chunks=0 ring_bytes=268435456`. On that board the
+    // managed ceiling is bounded by HOST RAM (.agents/environment.md:95-100),
+    // so the wasted bytes come out of the resource that decides whether the
+    // model fits.
+    in.ring_available = false;
+    if (!vt::rocm::StagingTermsExceptRing(in)) return false;
     in.ring_available = EnsureRing(chunk);
     if (!vt::rocm::ShouldStageH2D(in)) return false;
 
