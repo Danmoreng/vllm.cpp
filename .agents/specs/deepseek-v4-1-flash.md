@@ -744,6 +744,23 @@ that ends in a claim.
   upstream**, and there is no v4_1 end-to-end model test at `e77daef89e` at all.
   W3a's layout gate has no upstream counterpart to preserve, so it is ours and
   it is the only thing holding those 48 primes.
+- **One upstream test case is DROPPED by W3a, and this bullet is its record**:
+  `tests/kernels/test_engram.py::test_v2_model_state_gathers_lookback_window`
+  (`:479-517` at `e77daef89e`). It exercises
+  `DeepseekV41ModelState.prepare_inputs`, the runner-side gather that BUILDS
+  `lookback_token_ids` from `all_token_ids` and `num_computed_tokens`, and W3a
+  lands no model-state surface for it to drive. What it gates is the
+  **newest-at-column-0** ordering of that window (`:509-514` expects
+  `[22, 21, 16]` for a request whose history ends `..., 16, 21, 22`, and
+  `:516-517` pins that graph-capture dummies share the same buffer). That
+  ordering is exactly the contract `NgramHashState::Forward`'s tier 2 consumes
+  at
+  [`deepseek_v4_1_engram.cpp:417-425`](../../src/vllm/model_executor/models/deepseek_v4_1_engram.cpp#L417)
+  (`col = chunk_start - 1 - lookback`), so W3a ASSUMES the producer's ordering
+  on its own fixtures and proves nothing about the producer. Owed to **W4**,
+  which is where the model state and its `prepare_inputs` land. Owned by this
+  row, so it is deliberately NOT written as an owed local ID here, for the
+  reason the `QUANT-GGUF-Q1_0` bullet above states.
 
 ## Stop conditions
 

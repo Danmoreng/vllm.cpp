@@ -84,8 +84,13 @@
 //    ARITHMETIC form, `ldexp(1, byte - 127)`, and gives 2^-127 at byte 0. Both
 //    are correct for their own arm — MXFP8 decodes arithmetically at
 //    `quantization/utils/mxfp8_utils.py:66` — so this wave adds a SECOND entry
-//    point, `vllm::E8M0BitsToF32`, and leaves `E8M0ToF32` and its six callers
-//    untouched. Upstream's own test never reaches the difference: its scale
+//    point, `vllm::E8M0BitsToF32`, and leaves `E8M0ToF32` and its TWO
+//    production callers untouched: `mxfp4_dequant.cpp:63` and
+//    `nvfp4_dequant.cpp:122`. That count is invocations of `vllm::E8M0ToF32`
+//    under `src/` and `include/`; tests, comments and the unrelated
+//    `E8M0ToF32Half` / `DE8M0ToF32Half` GGUF helpers are not callers of it.
+//    An earlier revision of this comment said "six".
+//    Upstream's own test never reaches the difference: its scale
 //    bytes come from `randint(120, 134)` (test_engram.py:557,571), so byte 0
 //    never occurs. Our port adds a deliberate byte-0 case beside the ported
 //    parameters and says so at the call site.
@@ -152,12 +157,24 @@ struct EngramGeometry {
   // the safety argument for why depth 3 can never outrun window eviction.
   int64_t max_ngram_size = 4;
   int64_t n_heads = 8;
-  int64_t head_dim = 128;
+  // 256, and it is the largest number in this struct by consequence. It is the
+  // width of a row of the two ~384M-row tables
+  // (`engram.embed.weight` is `F8_E4M3 [384006168, 256]`) and, through
+  // `n_hash_cols() * head_dim`, the `wkv` INPUT width: 24 * 256 = 6144, which is
+  // what `engram.wkv.weight F8_E4M3 [25600, 6144]` carries. An earlier revision
+  // of this struct defaulted it to 128 and halved both.
+  int64_t head_dim = 256;
   // 16,000,000. Seeds the per-bucket prime search ONLY (engram.py:193).
   int64_t vocab_size = 16000000;
   // 99,092. Bounds the hash multiplier ONLY (engram.py:155).
   int64_t compressed_vocab_size = 99092;
-  int64_t pad_token_id = 0;
+  // 2, and NOT 0. `engram.py:422` is `self.pad_id = token_map[pad_token_id]`,
+  // so this is a TOKEN id that still has to be compressed, never a compressed
+  // id. An earlier revision defaulted it to 0, which is the value at which
+  // upstream's own fixtures send the pad to itself and the distinction
+  // disappears. `text_config.engram_pad_token_id` is 2, and the artifact's
+  // top-level `pad_token_id` agrees.
+  int64_t pad_token_id = 2;
 
   // From the model config, read by `Engram.__init__` (engram.py:900-903).
   int64_t hidden_size = 5120;
@@ -369,8 +386,10 @@ class NgramHashState {
 // `tp_size` does not divide `n_hash_cols` the last ranks own PADDED heads:
 // `head_start` can reach or pass `n_hash_cols` and the rank then owns ZERO
 // rows. Those padded columns write zeros so the all-gather stays rectangular
-// (engram.py:600,619 and the `count_nonzero == 0` assertion at
-// test_engram.py:610).
+// (engram.py:600 bounds `owned` by `head < TOTAL_HEADS` and :606 is the
+// `other=0.0` that an unowned row therefore loads; :619 is a bare `)` and an
+// earlier revision of this comment cited it by mistake. The
+// `count_nonzero == 0` assertion is at test_engram.py:610.)
 struct EngramEmbeddingShard {
   int64_t dim = 0;
   int64_t quant_block = kEngramQuantBlock;

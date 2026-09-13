@@ -56,6 +56,19 @@
 //     than transcribed from torch, so the port is checked against the
 //     mathematical definition and not only against a second copy of itself.
 //
+// ONE UPSTREAM CASE IS DROPPED, and it is named here because the heading above
+// promises that every adaptation is:
+//   * `::test_v2_model_state_gathers_lookback_window` (:479-517) is NOT ported.
+//     It drives `DeepseekV41ModelState.prepare_inputs`, the runner-side gather
+//     that BUILDS `lookback_token_ids` out of `all_token_ids` and
+//     `num_computed_tokens` — a model-state surface W3a lands nothing of. What
+//     it gates is the NEWEST-AT-COLUMN-0 ordering (:509-514 expects
+//     `[22, 21, 16]` for a request whose history ends `..., 16, 21, 22`), which
+//     is the contract `NgramHashState::Forward`'s tier 2 CONSUMES. This file
+//     therefore assumes that ordering on its own fixtures and cannot prove the
+//     producer agrees. Owed to W4, and recorded under `## Owed` in
+//     `.agents/specs/deepseek-v4-1-flash.md`.
+//
 // DELIBERATE EXTENSIONS BEYOND THE PORT, both stated because they are not
 // upstream's:
 //   * A ue8m0 scale byte of ZERO. Upstream draws its scale bytes from
@@ -305,10 +318,11 @@ EngramGeometry ReleasedGeometry() {
   g.num_embeddings = {384006168, 384016682};
   g.max_ngram_size = 4;
   g.n_heads = 8;
-  g.head_dim = 128;
+  g.head_dim = 256;
   g.vocab_size = 16000000;
   g.compressed_vocab_size = 99092;
-  g.pad_token_id = 0;
+  // The pad TOKEN, which `NgramHashState` then compresses (engram.py:422).
+  g.pad_token_id = 2;
   g.hidden_size = 5120;
   g.hc_mult = 4;
   g.rms_norm_eps = 1e-20F;
@@ -329,6 +343,53 @@ std::vector<int32_t> SyntheticTokenMap(int64_t tokens, int64_t compressed) {
 }
 
 }  // namespace
+
+// ═══ (0) the config surface ═════════════════════════════════════════════════
+// NO UPSTREAM COUNTERPART, and it is ours because the claim is ours.
+// `EngramGeometry`'s own header says its defaults are "named and defaulted from
+// the released `deepseek-ai/DeepSeek-V4.1-Flash` `config.json` at revision
+// `dba1be0a`", and nothing held them to it. Two were wrong at W3a's first head:
+// `head_dim` read 128 against the artifact's 256, and `pad_token_id` read 0
+// against its 2. Neither is reachable from any assertion elsewhere in this file
+// — `head_dim` only flows into `EngramLayout::head_dim` and is read by no W3a
+// case at all — so a silent default is exactly the kind of value a comment
+// cannot hold. The artifact values below are re-derived from TWO independent
+// reads of the released checkpoint, neither of them from memory:
+//   * `tests/vllm/models/fixtures/deepseek_v4_1/config.json`, the `text_config`
+//     block W1 checked in at `3c3c0a9bb` — that fixture lands with W1 and is
+//     not on this branch yet, so read it with `git show`. It gives
+//     `engram_head_dim = 256` and `engram_pad_token_id = 2` (and its top-level
+//     `pad_token_id` is 2 as well, which the row spec quotes at `:626`).
+//   * The safetensors header read the row spec records under `## Risks`:
+//     `layers.{1,14}.engram.embed.weight` is `F8_E4M3 [384006168, 256]` and
+//     `[384016682, 256]`, and `engram.wkv.weight` is `F8_E4M3 [25600, 6144]`.
+//     256 is the table row, and 6144 is 24 * 256.
+TEST_CASE("engram config: the defaults are the released artifact's") {
+  const EngramGeometry defaults;
+  CHECK(defaults.max_ngram_size == 4);     // text_config.engram_max_ngram_size
+  CHECK(defaults.n_heads == 8);            // text_config.engram_n_heads
+  // text_config.engram_head_dim, and also the table ROW width:
+  // `engram.embed.weight` is `F8_E4M3 [384006168, 256]`.
+  CHECK(defaults.head_dim == 256);
+  CHECK(defaults.vocab_size == 16000000);  // text_config.engram_vocab_size
+  CHECK(defaults.compressed_vocab_size == 99092);
+  CHECK(defaults.pad_token_id == 2);  // text_config.engram_pad_token_id
+
+  // The two shapes those defaults SIZE, and the reason a wrong one is not a
+  // cosmetic error. `n_hash_cols * head_dim` is the `wkv` input width and
+  // `(hc_mult + 1) * hidden_size` is its output width; the artifact's
+  // `layers.{1,14}.engram.wkv.weight` is `F8_E4M3 [25600, 6144]`, which is
+  // 5 * 5120 by 24 * 256. With `head_dim` 128 the input width reads 3072 and
+  // every W4/W5/W8 buffer derived from it is half the size it must be.
+  CHECK(defaults.n_hash_cols() * defaults.head_dim == 6144);
+  CHECK((defaults.hc_mult + 1) * defaults.hidden_size == 25600);
+
+  // The fixture this file runs its released-geometry cases on carries the same
+  // two values, so neither can drift away from the artifact on its own.
+  const EngramGeometry released = ReleasedGeometry();
+  CHECK(released.head_dim == defaults.head_dim);
+  CHECK(released.pad_token_id == defaults.pad_token_id);
+}
 
 // ═══ (1) the prime bucket layout ════════════════════════════════════════════
 // NO UPSTREAM COUNTERPART: `EngramLayout`'s prime loop is ungated at
@@ -357,18 +418,14 @@ TEST_CASE("engram layout: prime buckets are disjoint, ordered and tiled") {
   std::sort(sorted.begin(), sorted.end());
   CHECK(std::adjacent_find(sorted.begin(), sorted.end()) == sorted.end());
 
-  // The search restarts at `vocab_size - 1` for every n-gram group, so within a
-  // layer each group of `n_heads` primes is strictly increasing but the groups
-  // are NOT globally sorted. Gate that shape, because a reader who "fixes" the
-  // restart changes every bucket offset.
-  for (int64_t layer = 0; layer < layout.n_layers(); ++layer) {
-    for (int64_t group = 0; group < g.max_ngram_size - 1; ++group) {
-      for (int64_t head = 1; head < g.n_heads; ++head) {
-        const size_t idx =
-            static_cast<size_t>(layer * layout.n_hash_cols + group * g.n_heads + head);
-        CHECK(layout.primes[idx] > layout.primes[idx - 1]);
-      }
-    }
+  // The search restarts at `vocab_size - 1` for every n-gram group (:193), and
+  // that restart is INERT: `find_next_prime` walks UPWARD and skips everything
+  // in `seen`, so it climbs back past every prime already taken. All 48
+  // columns therefore come out strictly increasing ACROSS the groups and
+  // across both layers, not only within a group. Gate the global shape, since
+  // it is the one the tree actually has.
+  for (size_t idx = 1; idx < layout.primes.size(); ++idx) {
+    CHECK(layout.primes[idx] > layout.primes[idx - 1]);
   }
 
   // Offsets are the exclusive prefix sum WITHIN a layer (engram.py:203), so
@@ -1262,8 +1319,18 @@ TEST_CASE("engram gate: the fused post-wkv injection matches the definition") {
     // `Engram.forward:984-996` slices both kv and the mask to this rank before
     // the kernel runs, and the kernel then indexes them by the LOCAL token.
     const int64_t row = (c.hc_mult + 1) * c.dim;
-    std::vector<uint16_t> kv(static_cast<size_t>(c.num_tokens * row), 0);
-    std::vector<uint8_t> mask(static_cast<size_t>(std::max<int64_t>(c.num_tokens, 0)), 0);
+    // THE TAIL IS GARBAGE ON PURPOSE, and this is the only thing that pins
+    // `source_valid`. Both buffers are sized by `num_tokens` while only the
+    // first `local_kv` rows are the rank's own slice; the rest is past the
+    // SP-local token count and `engram.py:798-799` makes the kernel read it as
+    // zero. Value-initialising the tail to 0 makes the guard INVISIBLE —
+    // `source_valid ? load : 0.0F` and an unconditional load return the same
+    // zeros, so deleting the guard changes no output and the whole case stays
+    // green. Non-zero here, and a kept mask bit beside it, makes a missing
+    // guard a numeric difference instead.
+    std::vector<uint16_t> kv(static_cast<size_t>(c.num_tokens * row));
+    for (uint16_t& v : kv) v = Bf16(normal(rng) + 8.0F);
+    std::vector<uint8_t> mask(static_cast<size_t>(std::max<int64_t>(c.num_tokens, 0)), 1U);
     for (int64_t t = 0; t < c.num_tokens && t < local_kv; ++t) {
       std::memcpy(&kv[static_cast<size_t>(t * row)],
                   &full_kv[static_cast<size_t>((kv_start + t) * row)],

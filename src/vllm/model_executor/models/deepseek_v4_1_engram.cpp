@@ -145,7 +145,13 @@ std::optional<EngramLayout> EngramLayoutFromConfig(const EngramGeometry& geometr
   // engram.py:188-200. `seen` is threaded across EVERY layer and every n-gram
   // group, so no two of the 48 columns share a prime and the bucket ranges stay
   // disjoint. `current` restarts at `vocab_size - 1` per n-gram group (:193),
-  // which is why the primes are increasing within a group and not across them.
+  // and that restart is INERT: `FindNextEngramPrime` searches UPWARD from
+  // `start + 1` and skips every value already in `seen` (:96-106 above), so a
+  // restarted search walks back past all of them and still returns the next
+  // prime above the whole `seen` set. Hoisting `current` out of the group loop
+  // would therefore produce byte-identical primes, and all 48 columns come out
+  // globally increasing — not merely increasing within a group. Keep the
+  // restart because it is what upstream writes, not because it changes a value.
   std::vector<int64_t> seen;
   layout.primes.reserve(
       static_cast<size_t>(layout.n_layers() * layout.n_hash_cols));
