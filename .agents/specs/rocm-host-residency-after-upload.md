@@ -225,6 +225,58 @@ as an ungated guarantee rather than chased with a contorted test.
   is recorded and the thread's `/proc/<tid>/stat` state and `wchan` are reported
   instead.
 
+## 6a. The model gate: MEASURED, AND THE STALL SURVIVES BOTH FIXES
+
+Measured 2026-09-13 on `strix:gpu0` (gfx1151, Radeon 8060S, ROCm 7.2.4 / HIP
+7.2.53211, 30 GiB host, `mem_total_bytes` 33,270,497,280), under `rc` job
+`cd38c438-e5a7-487f-9aab-27324f04f2d7`, box idle and exclusively leased. Built on
+the worker from a clean clone of `969dd6f` with
+`cmake -G Ninja -DCMAKE_BUILD_TYPE=Release -DVLLM_CPP_HIP=ON`
+`-DVLLM_CPP_HIP_ARCHITECTURES=gfx1151 -DROCM_PATH=/opt/rocm`, `ninja -j 6
+vllm-cli`, 210 s. The artifact was ASSERTED HIP-linked before it was timed:
+`ldd` shows `libamdhip64.so.7`, `libhsa-runtime64.so.1`, `libhipblaslt.so.1` and
+`librocblas.so.5`, all from `/opt/rocm-7.2.4/lib`. Run through
+`examples/vllm-cli --device auto --max-tokens 8 --temperature 0
+--max-num-seqs 1` over
+`/workspace/ckpt/qwen4exp-flash-next-iq1s/Qwen3.8-Flash-Next-UD-IQ1_S-00001-of-00003.gguf`
+(shard 1 of 3; 10,946,624 + 49,990,818,368 + 22,544,696,352 bytes).
+`VT_ROCM_MANAGED_ALLOC` unset.
+
+**NO TOKEN, TWICE.** Each run was killed at a 1200 s deadline (`SIGKILL`, exit
+137) having produced no output past the auto-fit line. Two runs, not three: the
+result is the same failure in both and the axis is not a number.
+
+| | run 1 | run 2 |
+|---|---|---|
+| peak `VmHWM` | 27,250,548 kB (25.99 GiB) | 27,320,420 kB (26.05 GiB) |
+| peak `RssFile` | 21,207,224 kB (20.22 GiB) | 21,338,160 kB (20.35 GiB) |
+| peak `RssAnon` | 5,821,836 kB (5.55 GiB) | 5,821,172 kB (5.55 GiB) |
+| peak device memory | 31,878,860,800 B (29.69 GiB) | 31,880,183,808 B (29.69 GiB) |
+| token | none, killed at 1200 s | none, killed at 1200 s |
+
+**Device memory is no longer UNVERIFIED.** `rocm-smi` is not on `PATH` in the
+leased container, so this is read from
+`/sys/class/drm/card0/device/mem_info_vram_used`: 154,816,512 B at rest, climbing
+to 31.88 GB of the board's 33.27 GB total. The earlier "717 MB of 103 GB" figure
+does not describe this board and is withdrawn rather than carried forward.
+
+**Where it blocks.** Sampling `/proc/<tid>/{stat,wchan}` every 6 s over both
+runs, the uninterruptible thread is in `svm_range_set_attr` for 153 of 196
+samples in run 1 and 148 of 198 in run 2, in `folio_wait_bit_common` for 41 and
+47, and in `lock_mm_and_find_vma` for 3. So the KFD SVM path is still the
+dominant blocker, and a second, smaller share is plain page-cache read wait —
+the checkpoint is on a CIFS mount (`//192.168.68.102/Data`), which is its own
+confound and is NOT separated here.
+
+**THIS IS §7's FOURTH RISK, REALISED.** The release is wired into both staging
+arms and gated, and the checkpoint still does not forward. Host `RssFile` during
+the forward is 20.2-20.4 GiB, essentially unchanged from the 21.08 GB the
+one-arm build showed, so releasing the spent source pages is not by itself
+sufficient on this board. The pageable, file-backed source is therefore the next
+suspect and `ISSUE-LOCAL-01M2BZ5QK4XRETK48CXKSHKRDW` (chunked H2D through a
+pinned bounce buffer) is required, not optional. No throughput, latency or
+prefill number is recorded, because no token was produced.
+
 ## 7. Risks
 
 - **A released page that something still reads.** The borrow stays valid, so a
