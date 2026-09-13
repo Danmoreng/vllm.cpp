@@ -327,13 +327,31 @@ against a `2.640087e-06` bound, **252555.5x**.
 
 `5 cases / 45 assertions / 0 failed`, binary `82ffaf5ed0d3`.
 
-**THE §3c QUESTION IS ANSWERED AND THE ANSWER IS THE GOOD ONE.** On
-magnitude-separated data a SERIAL f32 walk lands `6.702e-04` and misses the
-`1e-5` bar by 67x. This f32 TREE lands `9.54e-07` -- inside the bar with 10x to
-spare, and **702x better than the serial f32 walk** the 571x figure was measured
-on. The width change does not cost what the CPU case's numbers suggested it
-might, because the tree is ~10 deep at H 2560 and not 2560 deep. That was
-predicted in §3c and it is now measured rather than argued.
+**THE §3c QUESTION IS ANSWERED AND THE ANSWER IS THE GOOD ONE.** This f32 TREE
+lands `9.54e-07` on the magnitude-separated case -- inside the `1e-5` bar with
+10x to spare.
+
+**THE COMPARISON AGAINST THE SERIAL f32 WALK IS SCALE-NORMALISED, AND THE
+NORMALISATION IS SHOWN, BECAUSE THE TWO NUMBERS COME FROM TWO DIFFERENT
+FIXTURES.** `6.702e-04` was measured on `test_qwen4_exp_hc_device.cpp:504`,
+whose peak `|reference|` is `32.895` with the dominant element at index 0. This
+row's case is a DIFFERENT fixture: its scale is `6.335` and its dominants sit at
+`(j*37) % H`. Dividing `6.702e-04` by `9.54e-07` across that boundary gives
+`702x` and is not a measurement of anything; the earlier draft of this section
+printed that figure in bold and it is withdrawn.
+
+Normalised by scale, the serial walk's error is `6.702e-04 / 32.895 =
+2.037e-05` per unit of reference magnitude, which at this case's `6.335` scale
+predicts `1.291e-04`. Against our measured `9.537e-07` that is **135x**, and
+135x is the number this section stands behind.
+
+NO SERIAL-f32 ARM WAS RUN ON THIS FIXTURE. The 135x is therefore a normalised
+PREDICTION compared against one measurement, not a measured A/B, and it is
+labelled that way rather than promoted. What is measured without qualification
+is the left-hand side: `9.537e-07` against a `1e-5` bar, 9.5% of budget. The
+width change does not cost what the CPU case's numbers suggested it might,
+because the tree is ~10 deep at H 2560 and not 2560 deep. That was predicted in
+§3c and it is now measured rather than argued.
 
 ### 7.2 Red-first: UNAVAILABLE, and measured rather than assumed
 
