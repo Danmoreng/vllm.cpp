@@ -180,7 +180,10 @@ res "OURS TREE PIN $PIN"
 CACHED_BIN=$W/bin/$PIN/vllm-server
 BIN=$SCRATCH/bin/vllm-server
 mkdir -p "$SCRATCH/bin"
-if [ -x "$CACHED_BIN" ]; then
+# -f, not -x: /workspace is CIFS mounted file_mode=0664,nounix, so no file on
+# it carries an execute bit and a -x guard never holds (the restored local
+# copy gets its chmod below). ISSUE-LOCAL-01M2CZX87ZB0WHRW2YZYPW7VRZ.
+if [ -f "$CACHED_BIN" ]; then
     # Restore to /tmp and run from there. A measured binary is never executed
     # off the share: /workspace is CIFS, and a network filesystem in the load
     # path is exactly the confound this campaign has been bitten by.
@@ -223,7 +226,7 @@ else
     cp -L "$BIN" "$CACHED_BIN" 2>/dev/null
     cp -L "$SCRATCH"/bin/*.so* "$W/bin/$PIN/" 2>/dev/null
     # No marker here on purpose. The guard for this phase is the cached binary
-    # itself (`[ -x "$CACHED_BIN" ]` above), which is the thing a resume needs;
+    # itself (`[ -f "$CACHED_BIN" ]` above), which is the thing a resume needs;
     # a marker beside it would be a second source of truth that can disagree.
 fi
 

@@ -26,6 +26,8 @@ What each case pins:
   AcceptanceFromMetrics   the /metrics delta becomes an acceptance rate, and an
                           engine with no /metrics reports absent rather than 0
   CorpusIsDeterministic   the corpus is a function of (sources, seed, weights)
+  BinaryCacheRestores     job.sh restores a cached vllm-server from a share that
+                          carries no execute bit, instead of rebuilding it
 """
 
 from __future__ import annotations
@@ -646,6 +648,71 @@ class CorpusIsDeterministic(unittest.TestCase):
         med = {b: v["median"] for b, v in man["realised_chars"].items()}
         self.assertLess(med["S"], med["L"])
         self.assertLess(med["L"], med["XL"])
+
+
+class BinaryCacheRestores(unittest.TestCase):
+    """ISSUE-LOCAL-01M2CZX87ZB0WHRW2YZYPW7VRZ.
+
+    The rc share is CIFS mounted `file_mode=0664,nounix`, so no file on it is
+    executable. A cache guard that tests `-x` never holds there, and every
+    resume rebuilds the pinned engine from source. This case executes the real
+    guard and the real restore branch, cut from job.sh, against a cached binary
+    whose mode is 0664. The build branch is replaced by a marker, because the
+    question is only which branch the guard selects.
+    """
+
+    JOB = HARNESS / "job.sh"
+
+    def _restore_fragment(self):
+        lines = self.JOB.read_text().splitlines()
+        guard = [i for i, l in enumerate(lines)
+                 if l.startswith("if [") and '"$CACHED_BIN" ]; then' in l]
+        self.assertEqual(len(guard), 1, "job.sh must carry one cache guard")
+        start = guard[0]
+        end = lines.index("else", start)
+        return "\n".join(lines[start:end] + ["else", "    echo REBUILD", "fi"])
+
+    def test_a_cached_binary_without_an_execute_bit_is_restored(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            pin = "39d3af455866bc47d76b0e0bd27fc3693e9e6ff5"
+            cached = tmp / "share" / "bin" / pin / "vllm-server"
+            cached.parent.mkdir(parents=True)
+            cached.write_bytes(b"cached-engine-bytes")
+            cached.chmod(0o664)                    # what the CIFS mount reports
+            scratch = tmp / "scratch"
+            (scratch / "bin").mkdir(parents=True)
+            script = "\n".join([
+                "res() { echo \"RES $*\"; }",
+                f"W={tmp / 'share'}",
+                f"PIN={pin}",
+                f"SCRATCH={scratch}",
+                'CACHED_BIN=$W/bin/$PIN/vllm-server',
+                'BIN=$SCRATCH/bin/vllm-server',
+                self._restore_fragment(),
+            ])
+            out = subprocess.run(["bash", "-c", script], capture_output=True,
+                                 text=True, check=True).stdout
+            self.assertNotIn("REBUILD", out)
+            self.assertIn("OURS binary restored from the share", out)
+            restored = scratch / "bin" / "vllm-server"
+            self.assertEqual(restored.read_bytes(), b"cached-engine-bytes")
+            self.assertTrue(restored.stat().st_mode & 0o100,
+                            "the restored local copy must be executable")
+
+    def test_an_absent_cached_binary_is_rebuilt(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            script = "\n".join([
+                "res() { echo \"RES $*\"; }",
+                f"W={tmp}", "PIN=deadbeef", f"SCRATCH={tmp}",
+                'CACHED_BIN=$W/bin/$PIN/vllm-server',
+                'BIN=$SCRATCH/vllm-server',
+                self._restore_fragment(),
+            ])
+            out = subprocess.run(["bash", "-c", script], capture_output=True,
+                                 text=True, check=True).stdout
+            self.assertIn("REBUILD", out)
 
 
 if __name__ == "__main__":
