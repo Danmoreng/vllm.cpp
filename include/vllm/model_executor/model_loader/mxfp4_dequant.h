@@ -67,7 +67,12 @@ float E8M0ToF32(uint8_t byte);
 // Neither is wrong; they belong to different arms. MXFP8 decodes arithmetically
 // (`quantization/utils/mxfp8_utils.py:66`, and `:129-130` comments that it is
 // aware `sb == 0` yields 2^-127), and `E8M0ToF32` above serves that arm and its
-// six callers. Engram decodes by bitcast and needs +0.0 at byte 0. Do NOT merge
+// two production callers — `mxfp4_dequant.cpp:63` and `nvfp4_dequant.cpp:122`,
+// counting invocations of `vllm::E8M0ToF32` under `src/` and `include/` and
+// excluding tests, comments and the unrelated `E8M0ToF32Half` /
+// `DE8M0ToF32Half` GGUF helpers. An earlier revision of this comment said
+// "six", which nothing in the tree supported.
+// Engram decodes by bitcast and needs +0.0 at byte 0. Do NOT merge
 // the two: nothing upstream pins them against each other, so no ported test
 // would catch a wrong choice. Row
 // `MODEL-MM-deepseek-v4-1-deepseek-v41-for-causal-lm`, issue
