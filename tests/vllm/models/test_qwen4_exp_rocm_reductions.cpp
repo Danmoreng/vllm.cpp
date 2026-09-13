@@ -67,9 +67,11 @@ namespace {
 
 using q4hc::CheckBitwise;
 using q4hc::CheckWithin;
+using q4hc::Compare;
 using q4hc::kAbsFloor;
 using q4hc::MakeMagnitudeSeparatedHc;
 using q4hc::MakeSynthHc;
+using q4hc::MaxAbsFinite;
 using q4hc::MixerResult;
 using q4hc::RunSynthMixer;
 using q4hc::SynthHc;
@@ -204,12 +206,14 @@ TEST_CASE("vt::Qwen4ExpGatedResidual ROCM W7: the per-group scales SEPARATE, so 
   (void)flat;
   const MixerResult good = RunSynthMixer(DeviceType::kROCM, c);
   const MixerResult bad = RunSynthMixer(DeviceType::kROCM, broadcast);
-  double sep = 0.0, scale = 0.0;
-  for (size_t i = 0; i < good.mixed.size(); ++i) {
-    sep = std::max(sep, std::fabs(static_cast<double>(good.mixed[i]) -
-                                  static_cast<double>(bad.mixed[i])));
-    scale = std::max(scale, std::fabs(static_cast<double>(good.mixed[i])));
-  }
+  // NOT a hand-rolled `std::max(worst, std::fabs(a - b))`. That spelling is
+  // issue #449's form B, it is NaN-BLIND, and `max_abs_diff.h:36-41` records it
+  // recurring in THIS model family (#1988). This case is fail-CLOSED against a
+  // NaN today -- a blind `sep` of 0.0 misses a `> bound * 1000` bar -- but the
+  // spelling is the next recurrence waiting to happen, so it goes too. Both
+  // reductions route through the shared hardened scan.
+  const double sep = Compare(good.mixed, bad.mixed).worst;
+  const double scale = MaxAbsFinite(good.mixed);
   const double bound = kAbsFloor + W7NormRel(c.hidden) * scale;
   std::printf("[MEASURED] ROCM W7 separation probe: broadcast signal = %.9g, case bound = %.9g,"
               " ratio = %.1fx\n", sep, bound, sep / bound);
@@ -245,8 +249,10 @@ TEST_CASE("vt::Qwen4ExpGatedResidual ROCM W7: MAGNITUDE-SEPARATED data, where th
   // is about ten deep at H = 2560 rather than 2560 deep, so it should give most
   // of that back. HOW MUCH IS THE MEASUREMENT, PRINTED BELOW. The bar is the
   // CPU case's own 1e-5, unmoved: if a block tree in f32 cannot hold the bound
-  // that a serial f32 walk misses by 67x, that is a finding about this kernel
-  // and not a reason to widen anything.
+  // that a serial f32 walk misses by 67x ON THAT FIXTURE -- this one is a
+  // different fixture at a ~5.2x smaller scale, so the 67x is not restated as
+  // if it were measured here -- that is a finding about this kernel and not a
+  // reason to widen anything.
   TierWatch tier;
   constexpr int64_t kH = 2560, kHc = 4, kR = 1, kT = 1;
   constexpr double kAccumBound = 1e-5;  // `test_qwen4_exp_hc_device.cpp:606`
@@ -254,15 +260,31 @@ TEST_CASE("vt::Qwen4ExpGatedResidual ROCM W7: MAGNITUDE-SEPARATED data, where th
                                              {4096.0f, 2048.0f, 8192.0f, 1024.0f});
   const MixerResult gpu = RunSynthMixer(DeviceType::kROCM, c);
   const MixerResult cpu = RunSynthMixer(DeviceType::kCPU, c);
-  double worst = 0.0, scale = 0.0;
-  for (size_t i = 0; i < cpu.mixed.size(); ++i) {
-    worst = std::max(worst, std::fabs(static_cast<double>(gpu.mixed[i]) -
-                                      static_cast<double>(cpu.mixed[i])));
-    scale = std::max(scale, std::fabs(static_cast<double>(cpu.mixed[i])));
-  }
+  // THE ASSERTION BELOW MUST BE ABLE TO SEE A NaN. It could not until now: the
+  // reduction here was `worst = std::max(worst, std::fabs(gpu - cpu))`, which
+  // is issue #449's form B. `std::max(a, b)` is `a < b ? b : a` and `a < NaN`
+  // is false, so an ALL-NaN device output reduced to `worst = 0.0` and passed
+  // `worst < 1e-5`. An Inf output was caught; a NaN was not. That is the third
+  // recurrence of one defect -- #449, then #1988 in `test_qwen4_exp_hc.cpp` in
+  // this same model family, then here -- in a file whose own shared header
+  // forbids the spelling by name eleven lines above the `Compare()` it exports.
+  // `Compare` returns +infinity AND raises its own doctest failure naming the
+  // offending index, so a poisoned device arm now reds this case.
+  const q4hc::Agreement agree = Compare(gpu.mixed, cpu.mixed);
+  const double worst = agree.worst;
+  const double scale = MaxAbsFinite(cpu.mixed);
+  // THE `6.702e-04` IS FROM A DIFFERENT FIXTURE AND IS LABELLED AS SUCH. It was
+  // measured on `test_qwen4_exp_hc_device.cpp:504`, whose peak |reference| is
+  // 32.895; this case's scale is ~6.335, so the two numbers are not directly
+  // comparable and dividing them is not a result. Scale-normalised, that walk
+  // predicts 6.702e-04 / 32.895 * `scale` here, which is what the last column
+  // prints -- a normalised PREDICTION beside our measurement, never a measured
+  // serial-f32 arm on this fixture. No such arm has been run here.
+  const double serial_f32_normalised = 6.702e-04 / 32.895 * scale;
   std::printf("[MEASURED] ROCM W7 magnitude-separated: max|diff| = %.9g  scale = %.9g"
-              "  bound = %.9g  (serial-f32 reference point: 6.702e-04)\n",
-              worst, scale, kAccumBound);
+              "  bound = %.9g  (serial-f32 walk from hc_device.cpp:504, SCALE-NORMALISED to"
+              " this fixture: %.9g)\n",
+              worst, scale, kAccumBound, serial_f32_normalised);
   INFO("ROCm f32 tree vs CPU double reference on magnitude-separated data: max|diff| = "
        << worst << " against the CPU case's own bound " << kAccumBound);
   CHECK(worst < kAccumBound);
