@@ -756,6 +756,52 @@ and was inside a readiness poll, and it blocked its own owner's restart for abou
 50 minutes as well as the queued gate. Read the whole process chain and
 `/proc/<pid>/fd` before you call a lock stale, and never kill an unowned PID.
 
+### Two ways a `strix:gpu0` job dies before it measures anything, 13 September 2026
+
+Both cost a lease on that date and neither names itself in the failure.
+
+**Ubuntu noble's own ROCm packages outrank `repo.radeon.com`, and
+`rocm-hip-sdk` is unsatisfiable until you pin.** The `strix` worker is a bare
+Ubuntu 24.04 container: no `/opt/rocm`, no `rocprofv3`, no `podman`, `apt-get`
+and `/dev/kfd` present, and `repo.radeon.com` reachable. Adding the ROCm
+repository is not enough, because noble ships `rocminfo` 5.7.1, `rocm-cmake`
+6.0.0 and `hipcc` 5.7.1 in universe and apt prefers them:
+
+```text
+rocm-hip-runtime : Depends: rocminfo (= 1.0.0.70204-93~24.04)
+                   but 5.7.1-3build1 is to be installed
+```
+
+The install then fails with "you have held broken packages", which names
+neither ROCm nor Ubuntu. Pin the vendor repository above the distribution:
+
+```sh
+printf 'Package: *\nPin: origin repo.radeon.com\nPin-Priority: 1000\n' \
+  > /etc/apt/preferences.d/rocm-radeon-first
+```
+
+With the pin, `rocm-hip-sdk rocprofiler-sdk hsa-amd-aqlprofile libdw1t64`
+installs in **431 s** and `rocprofv3` runs. `rocprofiler-sdk` alone was already
+satisfiable without the pin, so a job that only profiles will not see this and a
+job that also builds will.
+
+**`exec >"$LOG" 2>&1` in a job script gets the job REAPED by `rc`.** Redirecting
+the script's own stdout to a file closes the job's stdout, and `rc` treats that
+as the end of the process:
+
+```text
+rc: log stream ended: unexpected EOF
+rc: job b4e2330a-...: stragglers reaped after exit
+```
+
+Lease `b4e2330a` died that way about one second in, before it installed
+anything, and `rc ps` showed no job. This is worth stating because the idiom is
+in committed job scripts here, paired with a background loop that copies the log
+to `/workspace`, and it reads as the careful thing to do. Stream to `rc`'s own
+stdout instead and let `rc` keep the log; copy to `/workspace` at the end,
+because `rc` logs age out within a day. Process substitution is worse, not
+better: `exec > >(tee ...)` wedges the lease at exit.
+
 ## Registering your own environment
 
 The profiles below are per-developer facts, not requirements: nothing here is

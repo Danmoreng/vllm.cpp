@@ -164,10 +164,46 @@ figure is this engine against itself.
   `-tc=` line, because a selector matching zero cases prints `Status: SUCCESS!`
   and exits 0, and this row has shipped two such greens.
 
+## 5a. What the measurement found, 13 September 2026
+
+The instrument was built and it works. **The profiler cannot write a record on
+the `strix:gpu0` worker as provisioned**, so the qwen4_exp table this row exists
+to produce is UNVERIFIED.
+
+Full account: [`rocm-kernel-attrib-gfx1151-20260913.md`](../../docs/bench-evidence/rocm-kernel-attrib-gfx1151-20260913.md).
+The blocker is `ISSUE-LOCAL-01M2DQC3M3VHKDEZYPA8BSRCAV`.
+
+Three results stand:
+
+**§3.3's distortion question is ANSWERED and the answer is "almost none".**
+Profiled decode 4.804 tok/s against unprofiled 4.823 tok/s, same binary, same
+artifact, alternating legs: **-0.4%**. rocprofv3 timed its own child at 47.86 s.
+Attaching the profiler does not change what it measures.
+
+**Nothing is written.** After the traced process exits, rocprofiler-sdk fails to
+`mmap` its ring buffer with `EINVAL` (`ring_buffer.cpp:106`), logs it at FATAL,
+aborts, and then **deadlocks in its own signal handler**, surviving SIGTERM for
+29 minutes. Both artifacts, both output formats, four leases. The CSV has zero
+rows; the rocpd database has 639 kernel symbols and an empty dispatch table.
+
+**It is the environment, not the version.** The installed rocprofv3 is 1.1.0 at
+revision `97f5574fe`, identical to the one that wrote 85,737 rows from this
+board on 2026-09-07 inside a purpose-built podman image. The current worker is
+bare Ubuntu 24.04 with no `podman`, and `ulimit -l` is 8 MiB.
+
+So §7's third risk was the right one to name and the wrong one to size: the
+2026-09-07 full-trace stall was not specific to the extra trace modes. It
+reproduces on `--kernel-trace` alone.
+
 ## 6. Owed
 
+- **The qwen4_exp ranked table itself**, which this row exists to produce and
+  which is UNVERIFIED. It is blocked on
+  `ISSUE-LOCAL-01M2DQC3M3VHKDEZYPA8BSRCAV`, not on the instrument.
 - The ranked table's top item gets its own row and spec with a falsifiable
-  predicted gain. Nothing is optimized in this wave.
+  predicted gain. Nothing is optimized in this wave. On the 27B capture the top
+  item would be `KQuantGemmK` at 43.01% with AMD's `wvSplitKSml` second at
+  28.13%, but that is a different model and no gain is predicted from it.
 - Per-row timestamp exactness stays with
   [#3040](https://github.com/mudler/vllm.cpp/issues/3040). This spec bounds the
   aggregate error at 2.75% of the kernel budget; it does not close #3040.
