@@ -14,6 +14,40 @@ oracle [`exllamav3`](../oracles/exllamav3.md); the benchmarked revision is
 
 W7 `ACTIVE` on `row/QUANT-EXL3-W7`. Spec committed before implementation.
 
+2026-09-13, implementer progress (not a gate result; the operator owes G-MEM,
+G-TOKENS and G-SPEED):
+
+- Seam: the scratch lives in the CUDA kernel, not in `Exl3MatmulD`.
+  `vt::Exl3ReconstructGemm` gains an overload without `w_scratch`, and
+  `src/vt/cuda/cuda_exl3.cu` resolves it to one grow-only fp16 buffer per
+  (device index, stream). This is the house per-stream scratch idiom
+  (`cuda_mla_attn.cu` `EnsureMidScratch`, `cuda_dropin.cu` workspace), and the
+  capture query (`cudaStreamIsCapturing`) is only visible there. The
+  explicit-scratch overload is unchanged, and it now refuses an empty scratch.
+- Growth under capture throws `exl3 reconstruct scratch growth is forbidden
+  during CUDA graph capture`, before the kernel launches anything. On growth, a
+  block that was handed out while its stream was capturing is retired
+  (`graph_safe_scratch.h`). A block that never was is freed on the stream, so
+  the intermediate classes of the first eager step are not kept resident.
+- §6 risk check: no production path enqueues EXL3 linears on one queue from two
+  host threads. Every model forward, the DFlash2 draft included, runs on the
+  engine busy-loop thread. The MoE shared-expert aux queue runs no EXL3.
+- Tests, `tests/vt/test_exl3_matmul_dispatch.cpp`, through `Exl3MatmulD` on
+  `thor:gpu0` (sm_110). Lease `195340a3-0ade-4dc9-810f-bf9f69fb4c32`, base
+  `909125d16`:
+  - (1) no pool demand for a scratch class: red at base, green with the change.
+  - (2) byte-identical to the per-call-scratch call, and within 1.0e-3 of
+    `Exl3Gemm` (unfused) or of the f64 chain (fused): green at base and with the
+    change. This is an invariance test, so it has no red arm. The fused path
+    measures 9.62e-4 against f64 at M = 1024 and 1.01e-3 against `Exl3Gemm`.
+  - (3) named refusal under capture: red at base, where the capture fails in the
+    cuBLASLt workspace and poisons the stream. Green with the change.
+  - Mutation, a per-call `DBuf` restored in `Exl3MatmulD`: (1) and (3) red. The
+    header was restored byte-for-byte, and the rebuilt binary md5 equals the
+    unmutated one.
+  - CPU: `test_exl3_matmul_dispatch` 4/4, `test_exl3_gemm` 20/20 and
+    `test_exl3_linear_method` 7/7.
+
 ## 1. Scope
 
 `dense_attn::Exl3MatmulD` (`include/vllm/model_executor/models/dense_attn_block.h`)

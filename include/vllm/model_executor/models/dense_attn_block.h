@@ -372,11 +372,13 @@ inline DBuf Exl3MatmulD(Dev d, const vt::Tensor& x, const Exl3Weight& w,
   const bool use_reconstruct =
       M > kReconstructThreshold &&
       vt::OpRegistered(vt::OpId::kExl3ReconstructGemm, d.q.device.type);
-  const int64_t w_cols = N <= 32768 ? N : 32768;
-  DBuf w_scratch;
-  if (use_reconstruct) {
-    w_scratch = DBuf(d, vt::DType::kF16, {K, w_cols});
-  }
+  // THE WEIGHT SCRATCH IS NOT A POOL BLOCK (QUANT-EXL3 W7,
+  // .agents/specs/quant-exl3-recon-scratch.md). The fp16 [K, min(N, 32768)]
+  // reconstructed weight comes from the backend's ONE persistent buffer per
+  // (device, queue). As a per-call `DBuf` it was part of every CUDA-graph step's
+  // demand profile, so each captured graph pinned its own block of every class,
+  // about 786 MiB per slot on Qwen3.8-27B EXL3, and GB10 ran out of host memory
+  // at c = 32 (ISSUE-LOCAL-01M2DW8CXYEWWMJSZZ6GRH48SZ).
 
   vt::Tensor trellis = ResidentWeight(d, w.trellis);
   vt::Tensor suh = ResidentWeight(d, w.suh);
@@ -388,8 +390,7 @@ inline DBuf Exl3MatmulD(Dev d, const vt::Tensor& x, const Exl3Weight& w,
 
   auto run_gemm = [&](vt::Tensor& out) {
     if (use_reconstruct) {
-      vt::Exl3ReconstructGemm(d.q, out, a, trellis, suh, svh, a_had.t(),
-                               w_scratch.t(), args);
+      vt::Exl3ReconstructGemm(d.q, out, a, trellis, suh, svh, a_had.t(), args);
     } else {
       vt::Exl3Gemm(d.q, out, a, trellis, suh, svh, a_had.t(), args);
     }
