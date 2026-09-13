@@ -34,6 +34,7 @@
 #include "vllm/model_executor/model_loader/safetensors_reader.h"
 #include "vllm/model_executor/models/clip_mmproj_gguf.h"  // LOAD-GGUF-MMPROJ, #821
 #include "vllm/model_executor/models/deepseek_v4.h"  // deepseek4 GGUF dispatch arm
+#include "vllm/model_executor/models/deepseek_v4_1.h"  // the OWED deepseek41 GGUF refusal (W8)
 #include "vllm/model_executor/models/dots3_note.h"  // the OWED dots3note GGUF refusal (#2882)
 #include "vllm/model_executor/models/interfaces.h"  // #607 L3 SkipTowerForModalities
 #include "vllm/model_executor/models/glm5_next_weights.h"  // glm5next GGUF arm
@@ -1292,6 +1293,13 @@ HfConfig HfConfigFromGgufDispatch(const vllm::GgufFile& gguf) {
   }
   if (vllm::IsDots3NoteGguf(gguf)) {
     throw std::runtime_error(vllm::Dots3NoteGgufRefusal());
+  }
+  // DeepSeek-V4.1: this build RESOLVES the architecture and VALIDATES its
+  // config.json (W1), so a `deepseek41` container is a file this project knows
+  // about and the generic "unrecognized architecture" below would understate
+  // it. The GGUF arm itself is OWED to W8.
+  if (vllm::IsDeepseekV41Gguf(gguf)) {
+    throw std::runtime_error(vllm::DeepseekV41GgufRefusal());
   }
   throw std::runtime_error(
       "GGUF architecture '" + arch +

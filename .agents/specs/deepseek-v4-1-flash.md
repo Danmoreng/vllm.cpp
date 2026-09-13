@@ -14,23 +14,36 @@ Matrices: [model-matrix.md](../model-matrix.md) (the two registry arches),
 [kernel-matrix.md](../kernel-matrix.md) (the two checkpoint campaigns),
 [quantization-matrix.md](../quantization-matrix.md) (`QUANT-GGUF-Q1_0`).
 
-This spec lands records only. It carries no product code, and no row here is
-`READY`. The header names **five** rows: the four V4.1 rows are each `BLOCKED`,
-and the fifth, `QUANT-GGUF-Q1_0`, is not a V4.1 row at all — it stays
-`INVENTORIED`, as `## Owed` records, because this scope only corrects the
-evidence on it. This document says what blocks each of the four.
+This spec landed as records only and carries the campaign's product code from
+W1 onwards; no row here is `READY`. The header names **five** rows. Of the four
+V4.1 rows, `MODEL-MM-deepseek-v4-1-deepseek-v41-for-causal-lm` is `PARTIAL`
+since W1 landed on 2026-09-13 and the other three are `BLOCKED`; the fifth,
+`QUANT-GGUF-Q1_0`, is not a V4.1 row at all — it stays `INVENTORIED`, as
+`## Owed` records, because this scope only corrects the evidence on it. This
+document says what blocks each of the four.
 
 ## Now
 
-`BLOCKED`, all four rows, and **not one of them is blocked on a single thing**.
-Three take the vLLM-pin blocker, one does not, and every one of the four carries
-at least one further blocker that no pin advance touches:
+One row is `PARTIAL` and three are `BLOCKED`, and **not one of the four is
+blocked on a single thing**. Three take the vLLM-pin blocker, one does not, and
+every one of the four carries at least one further blocker that no pin advance
+touches:
 
-- `MODEL-MM-deepseek-v4-1-deepseek-v41-for-causal-lm` — the **pin**, AND
-  hardware. The release is 475.27 GiB against `dgx:gpu0`'s 119 GiB (3.99x) and
+- `MODEL-MM-deepseek-v4-1-deepseek-v41-for-causal-lm` — **`PARTIAL` since
+  2026-09-13**, and still blocked for its GATE on the **pin**, AND hardware.
+  W1 landed: the architecture RESOLVES through `ModelRegistry` and the real
+  published `config.json` PARSES and VALIDATES; the loader, the forward, the
+  KV-cache spec and the `deepseek41` GGUF container each refuse BY NAME. It
+  does not load and does not forward. That moved the row off `BLOCKED` because
+  `BLOCKED` bounds the gate rather than the work (below), and W1 claims no gate:
+  registration and config validation produce no denominator. **Both gate
+  blockers stand unchanged.** The pin: `DeepseekV41ForCausalLM` does not exist
+  at `e126687a9a`, so there is no primary oracle to run W2 onwards against. The
+  hardware: the release is 475.27 GiB against `dgx:gpu0`'s 119 GiB (3.99x) and
   neither quantized arm rescues it; `## Scope`'s table answers
   "Fits one GB10 (119 GiB)?" with `no` for the release, and
-  `model-matrix.md:159` and `:547` carry the same.
+  `model-matrix.md:159` and `:547` carry the same. `## Work breakdown` W2-W10
+  is what remains.
 - `MODEL-SPEC-deepseek-v4-1-dspark-v41-draft-model` — the **pin**, AND the
   target row. A draft head is not portable before the model it drafts for
   (`model-matrix.md:160` and `:586`).
@@ -43,13 +56,15 @@ at least one further blocker that no pin advance touches:
   and `kernel-matrix.md:162`, which leads with the no-released-engine half).
 
 So a pin advance removes exactly one blocker — the **oracle**, and only on the
-three rows that take it. It leaves all four rows `BLOCKED`: on hardware, on
+three rows that take it. It leaves every gate here blocked: on hardware, on
 ordering, and on the published artifacts themselves. `## Scope`, `## Gates` and
 `## Dependencies` carry the evidence for each; this section only says which row
 takes which.
 
 **`BLOCKED` bounds the GATE, not the work, and `## Work breakdown` says which
-waves proceed anyway.** An earlier revision of that section put W1 "after a pin
+waves proceed anyway. W1 is that claim, executed.** The primary row's move to
+`PARTIAL` is not a blocker lifting; it is this paragraph being true. An earlier
+revision of that section put W1 "after a pin
 advance", and the tree falsifies that: `Qwen3_5ForCausalLM` and
 `Qwen3_5MoeForCausalLM` sit at `PARTIAL` today as an explicit **"Ahead-of-pin
 forward port … REGISTERED, NOT RUN-GATED"**
@@ -535,7 +550,7 @@ its own fresh implementer and fresh reviewer, and each states what gates it.
 
 | Wave | Scope | Needs the pin? | Needs a device? |
 |---|---|---|---|
-| W1 | Resolve and register `deepseek_v41`; parse and VALIDATE the nested config; refuse every unimplemented arm BY NAME | no | no |
+| W1 | **LANDED 2026-09-13.** Resolve and register `deepseek_v41`; parse and VALIDATE the nested config; refuse every unimplemented arm BY NAME. Moved the row to `PARTIAL`; closed `ISSUE-LOCAL-01M2C04E8N4NTXYNS584M1TSFP` | no | no |
 | W2 | Advance the vLLM parity pin to `e77daef89e` or later, reconciling every affected row and gate | it IS the pin | yes, for revalidation |
 | W3a | **Engram** host reference: the n-gram hash state, the compressed token map, the two ~384M-row tables, and the gate into the hyper-connection stream | no | no |
 | W3b | **MXFP8 32x32 UE8M0** host reference: block dequant and the linear arm, against V4's 128x128 fp8 | no | no |
@@ -551,7 +566,7 @@ its own fresh implementer and fresh reviewer, and each states what gates it.
 | W9 | **A rung that both fits and speaks.** Requantize so `token_embd` and `output` stay out of the 1-bit format, the way the published file already keeps `output.weight` at Q6_K and the router at BF16. This is the ONLY identified path to running this model on this hardware at all | no | yes, to produce and verify |
 | W10 | End-to-end run and whatever gate is then reachable | yes | yes |
 
-**Sequencing.** W1 starts immediately and blocks nothing else. W3a-W3f are
+**Sequencing.** W1 started immediately and blocked nothing else; it has landed. W3a-W3f are
 mutually independent and are the parallel bulk of the campaign. W4 needs all of
 W3. W5, W6 and W7 each need W4 for the composition gate but their per-family
 ports need only the matching W3 family, so a family can go host-then-CUDA-then-
