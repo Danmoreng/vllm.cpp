@@ -22,11 +22,28 @@ THE DOUBLE CONTRADICTS THE CONTRACT ITS OWN HEADER STATES. `qwen4_exp_hc.h:99-10
 
 TWO DEFECTS, SEPARABLE. (1) PRECISION: double-rate throughput is a fraction of fp32 and the accumulation is 2 x 2560 serial double FMAs per thread. (2) PARALLELISM: four threads is the larger scandal. One block per (token, hc) group with a block-wide reduction is the ordinary shape, and the elementwise normalize-and-write loop after the reduction is order-independent and parallelises with no numerical question at all.
 
-THE GATES ALREADY ADMIT THIS, WHICH IS WHY IT IS NOT A PARITY DECISION. The device arm is NOT held bit-exact against the CPU arm. `tests/vllm/models/test_qwen4_exp_hc_device.cpp:76` gates the golden widths at `kTol = 1e-5` absolute, and its model-width case (`:379`) gates a RELATIVE `4e-5`, documented there as "6.6x the sqrt(K)*u random-walk bound for K = 10240" -- a bound derived for FP32 unit roundoff, with the comment saying so directly: "the oracle itself sits at the same ORDER as 1e-5 against an exact double evaluation of its own algorithm, because torch runs this in fp32 too". A serial fp32 walk sits at sqrt(K)*u ~= 6e-6 relative; a block tree reduction is BETTER, at ~sqrt(log K)*u. Both land inside a bound the tree derived before this work existed.
+THE GATES ALREADY ADMIT THIS, WHICH IS WHY IT IS NOT A PARITY DECISION. The device arm is NOT held bit-exact against the CPU arm. `tests/vllm/models/test_qwen4_exp_hc_device.cpp:76` gates the golden widths at `kTol = 1e-5` absolute, and its model-width case (`:378`, the tolerance at `:442`) gates a RELATIVE `4e-5`, documented there as "6.6x the sqrt(K)*u random-walk bound for K = 10240" -- a bound derived for FP32 unit roundoff, with the comment saying so directly: "the oracle itself sits at the same ORDER as 1e-5 against an exact double evaluation of its own algorithm, because torch runs this in fp32 too". A serial fp32 walk sits at sqrt(K)*u ~= 6e-6 relative; a block tree reduction is BETTER, at ~sqrt(log K)*u. Both land inside a bound the tree derived before this work existed.
 
 The goldens' discriminating power is also already measured and does not depend on the accumulator width: `test_qwen4_exp_hc.cpp` separates the narrowest single-character defect at 6.63e-3 against the 1e-5 tolerance, a 663x band.
 
-OWED BY THE FIX: a red-first case that fails for the intended reason, the two existing gates green, and an nsys re-measurement on `dgx:gpu0` against the NEW 116.9 ms step -- never against the retired 3.95 s one.
+WHICH FILE GATES THE CUDA ARM, corrected 2026-09-13. The paragraph above cites `test_qwen4_exp_hc_device.cpp` for the tolerances, and those tolerances are right, but that file is NOT the gate for this kernel: it says at its own head "Nothing below runs on a device" and it holds the CPU arms against the transformers goldens. The CUDA gate is `tests/vllm/models/test_qwen4_exp_cuda_reductions.cpp`, under the `CUDA W7:` case names. MEASURED on `thor:gpu0` (sm_110, CUDA 13.0.88): corrupting the `1 +` gamma fold in `HcGroupedNormKernel` reddens `test_qwen4_exp_cuda_reductions` at 7 of 18 cases, worst `max|diff|` 0.868741 against its 1.95703e-06 bound (the grid-cap case), while `test_qwen4_exp_hc_device` stays SUCCESS at 11/11 cases over 516 assertions. Read a green `hc_device` as a statement about the CPU arms only.
+
+OWED BY THE FIX: discriminating evidence that fails for the intended reason, the CUDA gate and the CPU-arm gate both green, and an nsys re-measurement on `dgx:gpu0` against the NEW 116.9 ms step -- never against the retired 3.95 s one. NO RED-FIRST IS AVAILABLE and the spec's W7 section records why: the pre-change kernel reproduces the CPU reference EXACTLY on the new fixture (`max|diff| = 0`, measured on an independent rebuild), because both arms walk the group ascending in `double`. The evidence is a mutation battery plus the in-gate separation probe instead.
+
+MEASURED ON THOR, 2026-09-13, AND THE ISSUE STAYS OPEN. An interleaved same-tree A/B on `thor:gpu0` (NVIDIA Thor, sm_110), one boot per arm, two rounds alternating BASE and FIX, the released `unsloth/Qwen3.8-Flash-Next-GGUF` UD-IQ1_S staged to local disk, the server at `--max-num-seqs 1 --device cuda` with no other engine flag, a 16-token decode, and the median inter-token interval as the statistic:
+
+| arm | commit | round 1 tok/s | round 1 s/token | round 2 tok/s | round 2 s/token |
+|---|---|---|---|---|---|
+| BASE, the W7 parent | `49ffc61cf` | 4.6564 | 0.21372 | 4.9773 | 0.21430 |
+| FIX | `ac04275b8` | 7.3755 | 0.14542 | 7.2675 | 0.14629 |
+
+The median per-token interval goes 0.2140 s -> 0.1459 s: ~68 ms removed per token, about 1.5x. Peak resident memory is unchanged, `VmHWM` 77,361,940 kB on BASE against 77,355,492 kB on FIX, and no arm printed `out of memory`, `bad_alloc`, or a CUDA error.
+
+THE BYTES MEASURED ARE THE BYTES THAT LAND. `ac04275b8` is an earlier revision of the same commit; `git diff ac04275b8 d7e0e9cf2 -- src/` is EMPTY and the only `tests/` difference is one comment block in `test_qwen4_exp_cuda_reductions.cpp`. The rebase onto `43622bc37` reproduced the patch byte-for-byte.
+
+THREE LIMITS, STATED SO THE NUMBER IS NOT OVER-READ. (1) This is THOR at sm_110, not the `dgx:gpu0` GB10 at sm_121a that every other number in this issue comes from; it is a slower box with a larger step, and the thor figure is not comparable to the sojufx reference or to the W6 dgx numbers. (2) The 40.7% / ~42 ms per step attribution above was measured on DGX. The 68 ms per token removed here was measured on thor. Direction and rough magnitude agree; nothing here CONFIRMS the 42 ms figure. (3) The spec's prediction -- ~42 ms per step removed, a step near 77 ms, ~13 tok/s -- was written for dgx and has NOT been tested there.
+
+THIS IS WHY THE ISSUE STAYS OPEN. The owed evidence above asks for an `nsys` re-measurement on `dgx:gpu0` against the NEW 116.9 ms step. `dgx:gpu0` read `unhealthy (no contact)` across three separate outages on 2026-09-13 and that measurement could not be taken. It remains owed.
 
 ## Resolution
 
