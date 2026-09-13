@@ -1,14 +1,14 @@
 ID: ISSUE-LOCAL-01M2EAQ6R63BSRF1GVZ3JAR4A4
 Title: The OpenAI chat path re-parses the Jinja chat template on every request, which is most of the short-prompt TTFT gap to exllamav3 on GB10
 Row: SERVE-CHAT-TEMPLATE
-State: OPEN
+State: CLOSED
 Kind: bug
 GitHub: -
 Mirror: PENDING
 Availability: FULL
 Created: 2026-09-13
 Updated: 2026-09-13
-Closed: -
+Closed: 2026-09-13
 
 ## Problem
 
@@ -24,16 +24,4 @@ Upstream compiles a chat template once and caches it. transformers' `_compile_ji
 
 ## Resolution
 
--
-
-## Progress 2026-09-13: parse once per prompt fn (branch row/SERVE-CHAT-TEMPLATE-PARSE-CACHE, not yet reviewed)
-
-`MakeChatTemplatePromptFn` now parses the template once when it is built and renders the shared parsed tree per request. A template that does not parse still fails per request, with the same `ChatTemplateError` text a fresh parse gives, because transformers compiles inside `apply_chat_template` and upstream reports a broken template per request. `apply_chat_template(template_str, ...)` keeps its behaviour and still parses on each call.
-
-**Thread safety.** A minja render does not write to the tree. `TemplateNode::do_render` and `Expression::do_evaluate` are `const` (`third_party/minja/minja.hpp:865`, `:656`), and no node has a `mutable` member. Every name a render binds goes into the per-call `Context` or a `Value` it owns: `SetNode` `:1149` and `:1152`, `ForNode` `:1010-1013`, `MacroNode` `:1106`, `SetTemplateNode` `:1166`, `CallNode` `:1736`. `LiteralExpr` (`:1190`) holds only scalars (`parseConstant`, `:1891-1912`) and returns them by value. List and dict literals build a new `Value` on each evaluation (`:1204`, `:1219`). `Context::builtins()` builds a new globals object on each call (`:2818`).
-
-**Tests** (`tests/vllm/entrypoints/test_chat_template.cpp`): one parse across 18 renders through one prompt fn, observed through the `ChatTemplateParseCountForTesting()` seam; before the fix this read 18 == 1 and failed. Byte equality against the fresh-parse path for the Qwen3.8 fixture (six shapes: reasoning default, on, off with an effort, tools, multi-turn with a tool call, its result and prior reasoning, and no generation prompt), the Qwen3.5 and Gemma4 fixtures and the two in-file templates. Per-request parse errors equal to a fresh parse's. Eight threads rendering different requests through one prompt fn. Mutation: re-parsing per call in the prompt fn read 19 == 1 and failed; restored byte for byte (sha256 checked).
-
-**Measurement** (AMD Ryzen 9 9950X3D, CPU-only Release `-O3`, same machine and binary recipe; the real 8952-char Qwen3.8 template and the 592-char S-band prompt with `enable_thinking=true`; the prompt fn called 35 times, mean of the last 30). Before: 46.19 ms and 48.03 ms per request over two runs. After: 0.031 ms and 0.041 ms per request, plus one 50 ms parse when the prompt fn is built. The rendered bytes of six shapes are identical before and after.
-
-**Sanitizers.** `test_chat_template` passes 41 of 41 under `-DVLLM_CPP_SANITIZE=thread` (run with `setarch -R`, because TSan otherwise aborts on this kernel's mmap layout) with no ThreadSanitizer report, and under `address,undefined` with no report. TSan is live on this test: a scratch mutation that added an unsynchronised static counter to the render path produced `WARNING: ThreadSanitizer: data race` in `RenderChatTemplate`; the file was restored byte for byte. `test_chat_prompt`, `test_capi`, `test_chat_mm`, `test_openai_api_server` and `test_openai_serving` also pass on the CPU Release build.
+2026-09-14: fixed by 7c5ce4eab on row/SERVE-CHAT-TEMPLATE-PARSE-CACHE. MakeChatTemplatePromptFn parses once at build and renders the shared minja TemplateNode per request; parse errors still throw per request with the same ChatTemplateError. On the Qwen3.8 template (x86 -O3) a request went from 46.19/48.03 ms to 0.031/0.041 ms with byte-identical output on six shapes. TSan and ASan/UBSan clean on 41/41. A fresh review returned PASS (M1 re-parse, M3 shared Context and M4 build-time throw killed; M2 benign; M5 error ordering survived and is recorded as untested). The operator reran test_chat_template, test_chat_prompt, test_capi, test_chat_mm, test_openai_api_server and test_openai_serving: 6/6. The GB10 end-to-end TTFT effect is measured by the EXL3 benchmark rerun, not here.
