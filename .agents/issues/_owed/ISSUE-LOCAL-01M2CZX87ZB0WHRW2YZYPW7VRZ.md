@@ -17,3 +17,14 @@ benchmarks/variadic/job.sh:183 guards the binary cache with [ -x "$CACHED_BIN" ]
 ## Resolution
 
 -
+
+## Progress
+
+2026-09-13: the guard in benchmarks/variadic/job.sh now tests `-f`, and the
+restore branch keeps its chmod on the /tmp copy. The comment that names the
+resume guard now names `-f`. tests/scripts/test_variadic_harness.py
+`BinaryCacheRestores` executes the guard and restore branch cut from job.sh
+against a 0664 cached binary. It failed with `REBUILD` before the fix, passes
+after it, and fails again when `-x` is put back. The other `-x` tests in job.sh
+(nvcc under /usr/local, the venv python under $SCRATCH=/tmp, `find -perm -u+x`
+in the /tmp build tree) read local disk, so they do not have this defect.
