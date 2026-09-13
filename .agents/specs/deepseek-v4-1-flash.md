@@ -704,6 +704,46 @@ that ends in a claim.
   KV split with its SWA Bounded Replay. The last one was missing from this list
   while `## Our baseline` was already calling it out as the polarity a later port
   must not discover late.
+- **W3a's Engram host reference lands UNREACHED**, and this bullet is the record
+  AGENTS.md §"Nothing lands dead" requires. `src/vllm/model_executor/models/`
+  `deepseek_v4_1_engram.cpp` and its header are reached today only by
+  `tests/vllm/models/test_deepseek_v4_1_engram.cpp`. There is no registry entry
+  for `deepseek_v41` (W1), no loader arm (W8) and no `ModelRegistry::Forward`
+  arm (W4), so no production entry point can reach it at its own merge commit.
+  The wiring is owned by this row, whose W3a issue is named in the commit that
+  landed the reference; it is deliberately NOT written as an owed local ID
+  here, for the reason the `QUANT-GGUF-Q1_0` bullet above states — `## Owed`
+  carries ROWLESS issues, and this one has a row.
+- **The compressed token map CONSTRUCTION**, and it is owed rather than
+  half-implemented. `build_compressed_token_map` (`common/engram.py:96-144`)
+  needs `tokenizers`' NFKC, NFD, StripAccents and Lowercase normalizers, none of
+  which this tree has, plus the `` (U+E000) private-use sentinel at `:109` that
+  keeps a one-space token alive through `Strip()`. W3a therefore READS the map
+  the published GGUF artifact carries as metadata
+  (`deepseek41.engram.token_map`, 129,280 entries) and validates it. A
+  partly-correct Unicode chain yields a plausible map that silently rehashes
+  both tables, and upstream's own `build_compressed_token_map` is UNGATED — no
+  test at `e77daef89e` touches it — so nothing ported would catch it. The
+  sentinel is documented at our call site and is NOT gated by W3a.
+- **The hash multiplier DERIVATION**, for the same reason. Upstream draws them
+  from NumPy PCG64 seeded `10007 * layer_id`
+  (`common/engram.py:147-166`); the artifact carries them
+  (`multipliers`, 8 x u64), so W3a reads and validates instead of
+  reimplementing one PRNG's bounded-integer path. The BOUND is ported, because
+  the bound is what keeps `value * multiplier` inside int64. The upstream test
+  parameter `compute_hash_multipliers((1, 14), 4, 99092)` is preserved by baking
+  the eight values the oracle's own generator produces, with the recipe beside
+  them.
+- **An upstream defect W3a mirrors rather than fixes**:
+  `common/engram.py:63-85` reports **61 composite**, because the witness 61 is
+  a multiple of it. It is unreachable at the only call site, which starts its
+  search at `engram_vocab_size - 1` = 15,999,999. Our port mirrors it and pins
+  it in the gate. Revisit it only if a config ever lowers `engram_vocab_size`
+  below 62.
+- **`EngramLayout`'s prime loop and `build_compressed_token_map` are UNGATED
+  upstream**, and there is no v4_1 end-to-end model test at `e77daef89e` at all.
+  W3a's layout gate has no upstream counterpart to preserve, so it is ours and
+  it is the only thing holding those 48 primes.
 
 ## Stop conditions
 
