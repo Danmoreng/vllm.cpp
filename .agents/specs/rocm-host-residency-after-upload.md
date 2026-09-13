@@ -28,7 +28,25 @@ weight is copied to the device once at load and the host pages are never read
 again. There is nothing to keep warm.
 
 **Two. Nothing releases the source pages after the device upload.**
-`ResidentWeight` (`src/vllm/model_executor/models/qwen3_5.cpp`) stages the weight
+
+THERE ARE TWO `ResidentWeight`s AND THIS ROW'S MODEL USES THE OTHER ONE. The
+first draft of this spec named only the `ResidentWeight` in the unnamed namespace
+of `src/vllm/model_executor/models/qwen3_5.cpp`, which is true of Qwen3.5 and
+false of `qwen4_exp`. That function shadows the header one inside its own
+translation unit, so it serves the Qwen3.5 dense weights and — through
+`KqResidentSlice` and `KqGrouped` — the shared MoE seam's keep-quant expert
+towers, which `qwen4_exp` does reach via `RunQwen4ExpMoeBlock` ->
+`RunMoeBlock` -> `MoeBlock`. Everything else in `qwen4_exp` stages through
+`dense_attn::ResidentWeight`
+(`include/vllm/model_executor/models/dense_attn_block.h`): 12 call sites in
+`qwen4_exp_forward.cpp`, 10 in `qwen4_exp_qsa_block.cpp`, 7 in
+`qwen4_exp_ple_block.cpp`, 1 in `qwen4_exp_registry.cpp`, and not one reference
+to the `qwen3_5.cpp` function anywhere in that model. Fixing one arm and not the
+other was measured, not argued: with the release in `qwen3_5.cpp` alone, the load
+peak on `strix:gpu0` fell from 27.67 GB to 8.18 GB and host `RssFile` still
+climbed to 21.08 GB during the forward and stayed there.
+
+BOTH arms have the same body and the same defect. Each stages the weight
 with `Alloc` + `Copy` and then calls `AdoptDeviceBytesAsHost`, which returns
 immediately for a GGUF borrow. `OwnedTensor::ReleaseHost()` likewise refuses to
 `madvise` a BORROWED buffer, arguing that the pages are clean and file-backed and
@@ -91,7 +109,9 @@ during load and zero after it. Ours is O(whole model) for the process lifetime.
 
 ### Fix 1 — release the source pages after a staging upload
 
-In `ResidentWeight`'s staging arm, once the device copy exists and has completed,
+In BOTH `ResidentWeight` staging arms — the one in `qwen3_5.cpp`'s unnamed
+namespace and `dense_attn::ResidentWeight` in `dense_attn_block.h`, which is the
+one `qwen4_exp` takes — once the device copy exists and has completed,
 drop the resident interior pages of a BORROWED, file-backed source span when the
 platform is NOT host-addressable. The borrow itself is untouched and stays a
 valid, re-faultable `PROT_READ MAP_PRIVATE` view, so a later read re-faults from
@@ -106,10 +126,12 @@ times per forward step on this checkpoint. A release that re-tests its condition
 on every call would `MADV_DONTNEED` the very pages the GPU is about to read, on
 every step, and the kernel would fault them straight back in. Correctness
 survives that; throughput does not. The release therefore goes inside
-`AdoptDeviceBytesAsHost`, which is reached only from behind `if (!w.d_dev)` — the
-same memo that made the aligned-borrow branch of `MakeHostBytesDeviceAliasable`
-a repeat hazard when it had none. The red test covers the REPEAT call, not only
-the first.
+`if (!w.d_dev)`, immediately before the `AdoptDeviceBytesAsHost` call and NOT
+inside it — the same memo that made the aligned-borrow branch of
+`MakeHostBytesDeviceAliasable` a repeat hazard when it had none. It is a separate
+helper because `AdoptDeviceBytesAsHost` returns early for a GGUF borrow by
+design, which is exactly the case this release exists for. The red test covers
+the REPEAT call, not only the first, on both arms.
 
 **The copy must have completed.** `RocmBackend::Copy` is `hipMemcpyAsync` on a
 stream. Dropping the source pages while the copy may still be reading them is a
@@ -156,6 +178,17 @@ cases there:
    memo away must fail this case.
 3. **A host-addressable platform is unchanged.** The alias arm never reaches the
    release, and the existing cases in this file must stay green.
+4. **The SECOND arm, which is the one this row's model takes.** Three more cases
+   repeat 1-3 against `dense_attn::ResidentWeight`. They call that seam directly,
+   as `test_resident_weight_f32_copy_retires.cpp:263` already does for
+   `dense_attn::ResidentWeightF32` and for the same reason: the fake backend
+   implements memory operations only and registers no `Embedding`, `MatmulBT` or
+   `RmsNorm` for `kXPU`, so every `qwen4_exp` entry point above that seam refuses
+   on a missing op before residency is asked about. The seam is production code
+   in a production header, not a test hook; reachability is carried by the 31
+   production call sites named in §1, and the mutation that convicts the wiring
+   is deleting the `MaybeReleaseStagedBorrowSource` call from
+   `dense_attn_block.h`.
 
 For fix 2 the instrument already exists: `NoteGgufPrefaultedSpan` /
 `GgufPrefaultSnapshot` in `include/vllm/config/weight_residency.h` count spans
@@ -163,13 +196,21 @@ actually prefaulted, and were added precisely because a prefault changes no byte
 and a byte-transparency case cannot see it. A truth-table case over the new
 device helper pins the default per device and pins that an explicit knob wins.
 
-Every added assertion is mutation-proven: delete the release, delete the memo,
-delete the synchronize, delete the device term, and the focused suite must go
-red for each.
+Every added assertion is mutation-proven for the release, the memo and the
+platform term, on both arms. The synchronize and the BACKEND half of the
+host-addressability pair are NOT convicted by this harness and are recorded
+as an ungated guarantee rather than chased with a contorted test.
 
 ## 6. Gates
 
-- Focused: `-tc=*resident*`, `-tc=*prefault*`, `-tc=*DSA*` (273 assertions).
+- Focused: `-tc=*release*`, `-tc=*prefault*`, `-tc=*DSA*`.
+  `-tc=*resident*` was the first draft of this line and it SELECTED NOTHING:
+  no case name in `test_resident_weight_host_addressable.cpp` contains the
+  substring `resident` (`residency` does not, the `t` is missing), so doctest
+  reported 0 cases, 0 assertions and `Status: SUCCESS!` — a third of the declared
+  focused gate passing without measuring anything. Every declared selector's case
+  and assertion counts are printed with the evidence, because a selector that
+  matches nothing is indistinguishable from one that passes.
 - Full ROCm cross-device suite: 60 cases / 84833 assertions, unchanged.
 - `scripts/check-agent-record.py`, `scripts/check-commit-style.py`,
   `scripts/check-commit-trailers.py`, `scripts/check-pr-size.py`.
@@ -198,6 +239,30 @@ red for each.
   itself the trigger and the owed chunked-H2D change is required. That is a
   legitimate result and is reported with `wchan` evidence rather than papered
   over.
+
+## Ungated guarantees
+
+Two preconditions of `MaybeReleaseStagedBorrowSource` that this tree's harness
+cannot convict. This section is deliberately NOT spelled `## Owed`: that heading
+is the ownership surface for a ROWLESS issue under `.agents/issues/_owed`, and
+`scripts/issue_records.py` refuses a row-owned issue that appears under it.
+Nothing here is unreached code; both call sites are production and both are
+gated. What is owed is an INSTRUMENT. The code is correct and the gap is in the instrument, so neither
+test is contorted to manufacture a conviction. `ISSUE-LOCAL-01M2CCNA0S74WT5WBV50B3VD0W`
+owns both.
+
+- **The `backend.DeviceMemoryIsHostAddressable()` term is UNGATED.** Deleting it
+  leaves 25/25 green with the binary proven changed. The fake backend in
+  `test_resident_weight_host_addressable.cpp` answers `false` unconditionally, so
+  only the platform half of the pair is ever exercised. The helper does refuse on
+  either — that claim is about the code and is true — but only one arm is
+  measured. Convicting the other needs a fake backend that answers `true` while
+  the platform answers `false`, which is a combination no device in this fleet
+  presents and which the file's registrar cannot hold alongside the existing one.
+- **The `backend.Synchronize(queue)` call is UNGATED.** Deleting it also leaves
+  25/25 green. `HostBackend::Copy` is a synchronous `memcpy` and the class does
+  not override `Synchronize`, so no case in this tree can express a DMA still
+  reading the source pages. Convicting it needs a backend whose `Copy` defers.
 
 ## Deferred, with an issue
 

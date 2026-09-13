@@ -140,18 +140,33 @@ class RocmPlatform final : public Platform {
   // on a 31 GiB host until the load wedged in `svm_range_set_attr`
   // (.agents/specs/rocm-host-residency-after-upload.md).
   //
-  // THE FLAG NONETHELESS STAYS FALSE, for a different and checkable reason.
-  // Nothing reads it except `ShouldReleaseHostWeights` and
-  // `ShouldInterleaveLoadStream` (`platforms/interface.h`), and BOTH also
-  // require `marlin_committed`, which no ROCm path sets. Flipping it here would
-  // therefore change no behaviour while asserting a release/pool measurement
-  // nobody has taken on this board. The host-residency release that defect
-  // needed is gated instead on the property that is load-bearing and checkable
-  // at the call site — the device cannot dereference host memory and the source
-  // is a re-faultable read-only file mapping — in
-  // `MaybeReleaseStagedBorrowSource` (qwen3_5_weights.h). Flip these two when a
-  // board's release/pool behavior is actually measured, not as a side effect of
-  // making the budget check reachable.
+  // THE FLAG NONETHELESS STAYS FALSE, and the reason is that flipping it WOULD
+  // change behaviour on this board, not that it would change none.
+  //
+  // A first draft of this comment said the flag had two readers,
+  // `ShouldReleaseHostWeights` and `ShouldInterleaveLoadStream`
+  // (`platforms/interface.h:88-96`), that both also require `marlin_committed`,
+  // which no ROCm path sets, and that flipping it here was therefore inert.
+  // That is false and a fresh review measured it. There is a THIRD reader and it
+  // requires no `marlin_committed`: `DirectDeviceLoadEligible`
+  // (`qwen3_5_dense_weights.cpp:146-180`) returns
+  // `platform.residency_policy().release_host_weights_after_upload` as its last
+  // term, and it is what gates `StageAndReleaseLoadedDense` at
+  // `qwen3_5_dense_weights.cpp:1205-1212` for every Qwen3.5-dense safetensors
+  // load. `needs_weight_staging()` is true on ROCm, so flipping this bit would
+  // arm a whole staging-and-release load path on gfx1151 that nobody has
+  // measured there. Correcting a false comment and installing a new one is the
+  // failure this file has now produced twice; the enumeration above is the whole
+  // of it, from `grep -rn release_host_weights_after_upload src include tests`.
+  //
+  // The host-residency release that the defect needed is gated instead on the
+  // property that is load-bearing and checkable at the call site — the device
+  // cannot dereference host memory and the source is a re-faultable read-only
+  // file mapping — in `MaybeReleaseStagedBorrowSource` (qwen3_5_weights.h),
+  // called from BOTH staging arms (`qwen3_5.cpp`'s `ResidentWeight` and
+  // `dense_attn_block.h`'s). Flip these two when a board's release/pool
+  // behavior is actually measured, not as a side effect of making the budget
+  // check reachable.
   ResidencyPolicy residency_policy() const override {
     ResidencyPolicy p;
     p.device_memory_total_bytes = device_memory_total_bytes_;
