@@ -317,6 +317,16 @@ TEST_CASE("a large pageable H2D takes the pinned bounce ring, and a small one do
       // deliberately not engaged and every copy is direct.
       CHECK(after_small.staged_copies == before.staged_copies);
       CHECK(after_small.direct_copies > before.direct_copies);
+      // AND NOT ONE PINNED BYTE IS ALLOCATED. A ring that is built and then
+      // never used is invisible to every other assertion here -- the bytes are
+      // right, the copies are direct, the case is green -- and it costs 256 MiB
+      // of PINNED HOST memory on exactly the boards that never stage. That is
+      // not free on this part: .agents/environment.md:95-100 measures gfx1151's
+      // managed ceiling as bounded by HOST RAM (27 GiB reached against 29.3 GiB
+      // available), so pinned host is the binding resource. The instrument
+      // printed ring_bytes=268435456 on this arm for a whole review cycle and
+      // nothing read it; this is the line that reads it.
+      CHECK(after_small.ring_bytes == before.ring_bytes);
     } else {
       // The staging arm. This is the assertion the whole change is for.
       CHECK(after_big.staged_copies == before.staged_copies + 1);
