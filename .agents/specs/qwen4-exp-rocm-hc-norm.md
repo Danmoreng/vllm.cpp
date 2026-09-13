@@ -95,6 +95,46 @@ This row does not ship a reassociation into a path whose numerics nothing
 measures. §5 adds the fixture that can see the shape first.
 
 
+### 3b-bis. THE ORACLE WAS READ, AND IT DEFINES BOTH THE SHAPE AND THE WIDTH
+
+The two subsections above argue from this tree's own records. AGENTS.md requires
+the oracle itself, and vLLM implements this behaviour, so it binds.
+
+`vllm/models/qwen4_exp/amd/ops/hc.py` at the pin `e126687a9a` is vLLM's own
+first-party ROCm arm of this architecture, and `_grouped_gemma_rmsnorm_kernel`
+(`:13-51`) is this exact norm:
+
+| what | vLLM at `e126687a9a` | this file before | this file after |
+|---|---|---|---|
+| launch | `[(N * num_groups,)]` -- one PROGRAM per (token, group), `hc.py:66` | one THREAD per (token, group) | one BLOCK per (token, group) |
+| group walk | one vector, `BLOCK_SIZE = next_power_of_2(GROUP_DIM)` | serial `h = 0..H` | strided per thread |
+| reduction | `tl.sum(x * x)` -- a TREE, `hc.py:45` | serial ascending chain | wave tree + cross-wave fold |
+| accumulate | `tl.float32`, `hc.py:42` | `double` | `float` |
+| eps | inside the rsqrt, on the mean square, `hc.py:45` | same | same |
+
+So the change is a MIRROR on both axes, not an invention, and the pre-change
+kernel diverged from the oracle on both. vLLM's own PyTorch reference agrees on
+the width independently at `common/hyperconnection.py:75`
+(`hidden_states = hidden_states.float()`).
+
+THERE IS NO CONFLICT TO ESCALATE. The oracle's contract and our CPU arm's own
+stated contract (`qwen4_exp_hc.h:99-104`, §3a) say the same thing: fp32 on the
+device arm, `double` as a host-reference convention only. Had they disagreed
+this row would have stopped and returned `NEEDS_DECISION`, because which
+reference binds is a product decision and not an implementation detail.
+
+ONE vLLM SPELLING IS DELIBERATELY NOT ADOPTED and it is out of this row's scope.
+`hc.py:47-48` writes the Gemma affine as `y = x*rrms; y += y*w` "to lower to an
+FMA"; we write `(x*rrms) * (1 + w)`, which is what vLLM's own reference DEFINES
+at `common/hyperconnection.py:87`. D3a of `.agents/specs/qwen4-exp-rocm-ops.md`
+already made that call and measured it; this change touches neither.
+
+SGLANG IS NOT CONSULTED, AND THAT IS THE RULE RATHER THAN AN OMISSION. AGENTS.md
+admits a secondary oracle only "where vLLM implements nothing", and says a
+secondary "never outranks vLLM, and it never becomes the mirror source". vLLM
+implements this behaviour in a first-party ROCm kernel, so it is the whole
+answer here.
+
 ### 3c. There IS a fixture that convicts an f32 accumulator, and it runs CPU-ONLY
 
 `tests/vllm/models/test_qwen4_exp_hc_device.cpp:504`, "the grouped norm needs a
