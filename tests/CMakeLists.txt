@@ -2685,6 +2685,13 @@ set_tests_properties(test_backend_cross_device_vt_attn_decode_d128 PROPERTIES
 # of that skeleton carrying a DECISION is gated on a CPU-only CI runner with no
 # AMD GPU. The rest of the ROCm skeleton is under VLLM_CPP_HIP below.
 vllm_cpp_add_test(test_rocm_arch vt/test_rocm_arch.cpp)
+# The pure half of the ROCm pinned H2D bounce ring (chunk plan, cross-call slot
+# reuse, the five-term predicate). UNCONDITIONAL for exactly the reason
+# test_rocm_arch is: include/vt/rocm/rocm_pinned_h2d.h carries no HIP header, and
+# a ring that silently never engages produces identical bytes -- only the host
+# residency differs -- so the decision has to be gated on a runner with no AMD
+# GPU. The reachability half is in test_backend_cross_device.
+vllm_cpp_add_test(test_rocm_pinned_h2d vt/test_rocm_pinned_h2d.cpp)
 vllm_cpp_add_test(test_rocm_f16_contract vt/test_rocm_f16_contract.cpp)
 # The grow-only per-stream device scratch pool (#2712). UNCONDITIONAL for the
 # same reason test_rocm_arch is: src/vt/grow_only_stream_scratch.h is free of
