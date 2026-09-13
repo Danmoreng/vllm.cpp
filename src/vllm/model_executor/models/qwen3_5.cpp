@@ -7197,6 +7197,155 @@ void MoeSelFp(int dev_type, int64_t T, int64_t E, int64_t top_k,
   ++MoeSelFpCall();
 }
 
+// ─── W8: the DEVICE-RESIDENT keep-quant grouped MoE arm (QUANT-CUDA-GATES) ───
+//
+// Owned by `.agents/issues/QUANT-CUDA-GATES/ISSUE-LOCAL-01M2AAACGC0SXYXFN2JQ3GFEAZ.md`;
+// scoped by `.agents/specs/qwen4-exp-flash-next.md` §"W8 scope".
+//
+// WHAT THIS REPLACES, and it is a STRUCTURE rather than a kernel. The reference
+// arm below is the only arm a GGUF k-quant checkpoint can take, because it has
+// neither fp4 nor bf16 experts. That arm copies the hidden to host and
+// synchronizes, downloads the router top-k, and then makes three `KqGrouped`
+// calls that each upload an activation, launch ONE grouped GEMM and `Download`
+// an f32 result — a blocking drain — with the SwiGLU in a host loop between
+// them and the routed output assembled in a host `std::vector`. Nothing in that
+// sequence needs the host: `vt::MatmulBTQuantGrouped`, `vt::MoeSiluMul`,
+// `vt::CastBf16`, `vt::MoeRouterTopK` and `vt::MoeCombine` are all registered
+// device ops. What was missing is an arm that keeps the intermediates on device
+// BETWEEN them, and this is that arm. NO new kernel is added.
+//
+// THE BAR IS PER-PAIR BIT IDENTITY WITH THE REFERENCE ARM, EXCEPT AT THE
+// SwiGLU, where it is one bf16 ULP. Not a tolerance anywhere else, and the
+// whole shape of this function is chosen to make that reachable rather than
+// hoped for. Each step below reaches the SAME op on the SAME bytes as the
+// reference step it replaces, and the one that does not is named as such:
+//
+//   * router GEMM — `vt::Matmul`/`vt::MatmulBT` over the SAME `ResidentWeight`,
+//     branched on `w.router_gate.nk` exactly as `MatmulBf16` branches. The
+//     reference downloads the bf16 logits and re-uploads them into `dlog`; that
+//     round trip moves no bits, so the tensor `MoeRouterTopK` reads is the same
+//     one.
+//   * top-k — the same `vt::MoeRouterTopK` on the same logits.
+//   * gate/up — the same `vt::MatmulBTQuantGrouped` over the same
+//     `ResidentWeight`-staged tower with the same `eids`. The reference
+//     materialises `act[P,H]` by copying `h[t]` into every routed pair's row;
+//     at `T == 1` every row is the same row, which is exactly the broadcast the
+//     grouped kernel already implements (`Pa == 1 && P > 1`,
+//     `cuda_quant_dot.cu`). The kernel SELECTION does not depend on `bcast` —
+//     it is passed as a row-index flag — and the activation quantizer produces
+//     the same Q8_K/Q8_0 block from the same bytes, so broadcasting is
+//     bit-identical to P copies rather than merely close.
+//   * SwiGLU — `vt::MoeSiluMul`, whose CUDA kernel computes
+//     `g/(1+expf(-g)) * u` in f32 and stores through `__float2bfloat16`
+//     (round-to-nearest-even, the same rounding as the host `vt::F32ToBF16`).
+//     THIS IS THE ONE STEP THAT IS NOT BIT-IDENTICAL BY CONSTRUCTION: the
+//     reference computes `Silu()` with `std::exp` and this computes it with
+//     `expf`, and the two are not required to agree to the last f32 ULP. The
+//     op's own comment (`cuda_moe.cu:823-827`) calls that an ACCEPTED
+//     deviation, so this arm cannot claim identity for it.
+//
+//     IT IS GATED AT THE OP RATHER THAN THROUGH THIS BLOCK, because the block
+//     comparison has almost no power over that class: a 1-f32-ULP move in
+//     `silu(g)` changes `bf16(silu(g)*u)` in 1.44e-5 of N(0,3) samples
+//     (288/20,000,000, measured), so a fixture's handful of SwiGLU elements
+//     would miss a kernel that disagreed everywhere. The
+//     `SwiGLU expf deviation, bounded` cases in
+//     `tests/vllm/models/test_qwen35_moe_kq_device.cpp` sweep 2^22 pairs
+//     against this arm's own host formula and hold the result to ONE bf16 ULP,
+//     printing the observed disagreement count on the green run. The CPU case
+//     of that sweep must be EXACTLY equal, because `cpu_ops.cpp:733` is the
+//     same `std::exp` formula the reference arm runs.
+//   * down GEMM — the same grouped op, `Pa == P` on both arms.
+//   * the bf16 narrowing of the routed output — `vt::CastBf16` is
+//     `__float2bfloat16`, which is `vt::F32ToBF16`.
+//   * shared expert + combine — the same calls the reference makes, on the same
+//     `dh` and the same `dtw`.
+//
+// T == 1 ONLY, and that is a scope statement rather than an oversight. The
+// broadcast is what removes the host gather, and it exists only for one hidden
+// row. Prefill (`T > 1`) needs a device row-gather that `MatmulBTQuantGrouped`
+// has no row-map argument for, so it keeps the reference loop; decode is the
+// capture target and decode is `T == 1`.
+//
+// This arm does NOT gate on the weight dtype. An encoding the CUDA grouped
+// kernel cannot read falls back to the CPU provider INSIDE `vt` (with its own
+// drain) on both arms identically, so refusing it here would change nothing
+// except which of two identical answers is computed.
+int64_t& MoeKqDeviceCallCount() {
+  static int64_t n = 0;
+  return n;
+}
+
+// The ship gate. DEFAULT ON, `VT_MOE_KQ_FAST=0` restores the reference loop in
+// the same binary — the polarity `MoeBf16FastEnabled()` set.
+//
+// IT IS READ ON EVERY CALL AND NOT CACHED IN A PROCESS-STATIC, which is where
+// this deliberately departs from `MoeBf16FastEnabled()`. The bar this arm has
+// to clear is BYTE EQUALITY WITH THE OTHER ARM, and a process-static makes that
+// unmeasurable: one process can then only ever run one arm, so the comparison
+// would have to cross two processes through a golden file and the assertion
+// would live in neither run. One `getenv` per MoE layer — 48 per decode token,
+// beside three grouped GEMMs — is not a cost worth trading that for.
+bool MoeKqFastEnabled() {
+  const char* e = std::getenv("VT_MOE_KQ_FAST");
+  return !(e != nullptr && e[0] == '0');  // default ON; =0 rolls back
+}
+
+DBuf MoeBlockKqDevice(Dev d, const MoeBlockWeights& w, const HfConfig& cfg,
+                    const Tensor& dh, int64_t T) {
+  const int64_t H = cfg.hidden_size;
+  const int64_t E = cfg.num_experts;
+  const int64_t top_k = cfg.num_experts_per_tok;
+  const int64_t I = cfg.moe_intermediate_size;
+  const int64_t P = T * top_k;
+  ++MoeKqDeviceCallCount();
+
+  // Router: logits = dh @ gate, then softmax/top-k/renormalize — both on device.
+  // The `nk` branch mirrors `MatmulBf16`, which is what the reference arm calls.
+  Tensor drg = ResidentWeight(d, w.router_gate);
+  DBuf dlog(d, DType::kBF16, {T, E});
+  if (w.router_gate.nk)
+    vt::MatmulBT(d.q, dlog.t(), dh, drg);
+  else
+    vt::Matmul(d.q, dlog.t(), dh, drg);
+  DBuf dtw(d, DType::kF32, {T, top_k});
+  DBuf dtid(d, DType::kI32, {T, top_k});
+  vt::MoeRouterTopK(d.q, dtw.t(), dtid.t(), dlog.t(),
+                    vt::MoeRouterTopKArgs{static_cast<int>(top_k), true});
+  Tensor eids = Reshape(dtid.t(), {P});  // [P] i32, pair p = t*top_k + j
+
+  // gate/up over the BROADCAST hidden. `dh` is already the [1,H] row the
+  // grouped kernel wants for `Pa == 1`; nothing is gathered and nothing is
+  // copied.
+  Tensor wg = ResidentWeight(d, w.expert_gate_kq);
+  Tensor wu = ResidentWeight(d, w.expert_up_kq);
+  Tensor wd = ResidentWeight(d, w.expert_down_kq);
+  DBuf dg(d, DType::kF32, {P, I});
+  DBuf du(d, DType::kF32, {P, I});
+  vt::MatmulBTQuantGrouped(d.q, dg.t(), dh, wg, eids);
+  vt::MatmulBTQuantGrouped(d.q, du.t(), dh, wu, eids);
+
+  // SwiGLU, on device: eact = bf16(silu(g) * u) — the host loop's exact shape.
+  DBuf dact(d, DType::kBF16, {P, I});
+  vt::MoeSiluMul(d.q, dact.t(), dg.t(), du.t());
+
+  // down, then the f32 -> bf16 narrowing the host loop did with F32ToBF16.
+  DBuf ddn(d, DType::kF32, {P, H});
+  vt::MatmulBTQuantGrouped(d.q, ddn.t(), dact.t(), wd, eids);
+  DBuf deo(d, DType::kBF16, {P, H});
+  vt::CastBf16(d.q, deo.t(), ddn.t());
+  Tensor expert_out = Reshape(deo.t(), {T, top_k, H});
+
+  // Shared expert + combine: the reference arm's own calls, unchanged.
+  const bool has_shared = cfg.shared_expert_intermediate_size > 0;
+  std::optional<DBuf> shared;
+  if (has_shared) shared.emplace(SharedExpert(d, w, cfg, dh, T, /*fp4=*/false));
+  DBuf dout(d, DType::kBF16, {T, H});
+  vt::MoeCombine(d.q, dout.t(), expert_out, dtw.t(),
+                 has_shared ? &shared->t() : nullptr);
+  return dout;
+}
+
 DBuf MoeBlock(Dev d, const MoeBlockWeights& w, const HfConfig& cfg,
               const Tensor& dh, int64_t T) {
   const int64_t H = cfg.hidden_size;
@@ -7229,6 +7378,42 @@ DBuf MoeBlock(Dev d, const MoeBlockWeights& w, const HfConfig& cfg,
       vt::OpRegistered(vt::OpId::kMoeGroupedGemmBf16GateUpSilu, d.q.device.type) && MoeBf16FastEnabled() &&
       !w.expert_gate.empty() && MoeBf16FastLayoutOk(w, cfg))
     return MoeBlockBf16Cuda(d, w, cfg, dh, T);
+
+  // W8 (QUANT-CUDA-GATES): device-resident keep-quant grouped MoE — the GGUF
+  // k-quant analog of the bf16 arm above, selected at the same site and under
+  // the same shape of condition. DEFAULT ON (VT_MOE_KQ_FAST); =0 falls through
+  // to the reference loop below, which stays intact as BOTH the fallback and
+  // the correctness oracle the arm is gated byte-for-byte against.
+  //
+  // Three of the five conditions are the arm's preconditions: a keep-quant tower
+  // set, every op it calls registered on THIS queue's device, and T == 1 for the
+  // broadcast. It asks the op table rather than naming CUDA — the same question
+  // the bf16 arm asks, and the one `check-device-leakage.py` requires of the
+  // device-agnostic layer. Every op it calls has a CPU provider too, and the CPU
+  // grouped kernel implements the same `act.shape[0] == 1` broadcast
+  // (`cpu_quant_gemm.cpp:244`), so the arm is correct wherever it is registered
+  // and the suite exercises it on CPU, CUDA and ROCm.
+  //
+  // THAT MAKES IT DEFAULT-ON ON TENSTORRENT TOO, which registers all three ops
+  // (`tenstorrent_ops.cpp:8298, 8307, 8309`) and which no suite here runs a MoE
+  // block on. The bf16 arm above does NOT reach that backend — Tenstorrent
+  // registers no `kMoeGroupedGemmBf16` — so this gap is this arm's alone and is
+  // tracked by
+  // `.agents/issues/QUANT-CUDA-GATES/ISSUE-LOCAL-01M2D7X94RTPJ453QGHYKQZPY8.md`. The other two conditions are
+  // refusals of an INVISIBLE FALLBACK rather than of a defect.
+  // `Qwen35GroupedMoeEnabled()` is the existing grouped-vs-per-expert route
+  // switch, and it is already false when expert streaming was asked for; taking
+  // this arm anyway would silently do neither. `MoeSelFpCalls()` is the
+  // VT_MOE_SEL_FP selection tap, which reads the host `h`/`logits`/`ids`/
+  // `expert_out` the reference arm downloads and this arm never materialises —
+  // so an operator who turned the tap on gets the reference arm and a real tap,
+  // not this arm and a silent nothing.
+  if (!fp4 && !w.expert_gate_kq.Empty() && T == 1 &&
+      vt::OpRegistered(vt::OpId::kMatmulBTQuantGrouped, d.q.device.type) &&
+      vt::OpRegistered(vt::OpId::kMoeSiluMul, d.q.device.type) &&
+      vt::OpRegistered(vt::OpId::kCastBf16, d.q.device.type) &&
+      Qwen35GroupedMoeEnabled() && MoeSelFpCalls() == 0 && MoeKqFastEnabled())
+    return MoeBlockKqDevice(d, w, cfg, dh, T);
 
   // Reference path: download the hidden once, then gather + per-expert MLP.
   std::vector<uint16_t> h(static_cast<size_t>(T) * H);
@@ -8148,6 +8333,15 @@ MoeBlockOutput RunMoeBlock(vt::Queue& queue, const MoeBlockWeights& weights,
   r.storage = out.ReleaseShared();
   return r;
 }
+
+// How many times the W8 device-resident keep-quant arm (`MoeBlockKqDevice`) has
+// run in this process. The ARM-SELECTION probe, and the only thing that can see
+// the defect this row closes: the two arms agree on every byte they produce, so
+// an output comparison alone cannot say WHICH one ran, and a gate that cannot
+// say that would have stayed green through the whole history of this bug. The
+// `qwen3_5.cpp`-internal `MoeBlock` has internal linkage, so this is the same
+// cross-TU shape `RunMoeBlock` above already uses to expose it.
+int64_t MoeKqDeviceCalls() { return MoeKqDeviceCallCount(); }
 
 
 // Exposed wrapper over the anon-ns `GdnBlockPaged` (row MODEL-MM-QWEN4-EXP W5b,

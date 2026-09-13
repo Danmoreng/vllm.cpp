@@ -10364,14 +10364,48 @@ signature this needs, `(Queue&, Tensor& out, const Tensor& a, const Tensor& b)`.
 `MoeRouterTopK` and the combine are already device ops. What is missing is an arm
 that keeps the intermediates on device BETWEEN them.
 
-**Design, and it is the bf16 arm's shape rather than a new invention.** Add a
-`MoeBlockKqCuda` selected exactly where `MoeBlockBf16Cuda` is (`:7204-7208`),
-under the same three conditions that arm uses: CUDA, the required ops
-registered, and a default-ON environment gate (`VT_MOE_KQ_FAST`, with `=0`
-restoring the reference loop for a same-binary A/B and as the correctness
-oracle). That gate is the precedent at `MoeBf16FastEnabled()` (`:909`) and it is
-what makes this reviewable: the reference path stays, and the new arm is
-compared against it rather than replacing it unobserved.
+**Design, and it is the bf16 arm's shape rather than a new invention.** Add an
+arm selected exactly where `MoeBlockBf16Cuda` is, under the same shape of
+condition that arm uses: the required ops registered, and a default-ON
+environment gate (`VT_MOE_KQ_FAST`, with `=0` restoring the reference loop for a
+same-binary A/B and as the correctness oracle). That gate is the precedent at
+`MoeBf16FastEnabled()` (`:909`) and it is what makes this reviewable: the
+reference path stays, and the new arm is compared against it rather than
+replacing it unobserved.
+
+**WHAT LANDED DIFFERS FROM THE PARAGRAPH ABOVE IN TWO WAYS, AND THIS SECTION
+RECORDS THE LANDED SHAPE RATHER THAN THE SCOPED ONE.** The commit argues each
+deviation; the spec is corrected here so that a reader is not told a shape was
+built that was not.
+
+*The name is `MoeBlockKqDevice`, not `MoeBlockKqCuda`.* The scoped name says
+CUDA and the arm does not: it asks `vt::OpRegistered(..., d.q.device.type)` for
+each op it calls, which is what `check-device-leakage.py` requires of this
+device-agnostic layer and what the bf16 arm above it already does. A `Cuda`
+suffix on a predicate that never names CUDA would be the wrong name for the
+code. The consequence is that the arm is live on every backend the three ops are
+registered on — CPU, CUDA, ROCm and Tenstorrent — which is why the suite gates
+three of those four and why the fourth is filed
+(`.agents/issues/QUANT-CUDA-GATES/ISSUE-LOCAL-01M2D7X94RTPJ453QGHYKQZPY8.md`).
+
+*There are SEVEN conditions, not three, and none of them is a device term.*
+Counted at `qwen3_5.cpp:7411-7415`, the predicate is NINE `&&`-joined terms:
+`!fp4`, `!w.expert_gate_kq.Empty()`, `T == 1`, three `vt::OpRegistered` calls
+(`kMatmulBTQuantGrouped`, `kMoeSiluMul`, `kCastBf16`), `Qwen35GroupedMoeEnabled()`,
+`MoeSelFpCalls() == 0` and `MoeKqFastEnabled()` — seven conditions if the three
+op-table questions are read as the one condition "the arm's ops are registered
+here", which is how the prose below groups them. An earlier version of this
+paragraph said FIVE and that was simply a miscount. Two of the extra ones are the
+arm's own preconditions: a non-empty keep-quant tower set, and `T == 1`, which is
+the broadcast's scope (below). The other two refuse an INVISIBLE FALLBACK rather
+than a defect. `Qwen35GroupedMoeEnabled()` is the
+existing grouped-vs-per-expert route switch and is already false when expert
+streaming was asked for, so taking this arm anyway would silently do neither.
+`MoeSelFpCalls() == 0` is the `VT_MOE_SEL_FP` tap, which reads host buffers this
+arm never materialises — an operator who armed the tap would otherwise get the
+fast arm and a silently empty tap. That term is load-bearing and it is gated by
+its own ctest registration (`test_qwen35_moe_kq_device_sel_fp`), because the tap
+count is cached in a process-static and cannot be armed from inside a case.
 
 The broadcast the grouped kernel already implements (`Pa == 1 && P > 1`,
 `cuda_quant_dot.cu`) means the routed activation need not be gathered on host at
@@ -10386,16 +10420,103 @@ here would hide a routing or ordering defect, which is the class of bug this
 seam has produced before (#2249 item 4, the rank-3 tower that "matched" by
 shape).
 
+**THE LANDED BAR IS THAT, EXCEPT AT THE SwiGLU, WHERE IT IS ONE bf16 ULP.** The
+reference computes `Silu()` with `std::exp` and the device op computes it with
+`expf`, so identity is not this arm's to claim. It is also not something the
+block comparison can measure: a 1-f32-ULP move in `silu(g)` changes
+`bf16(silu(g)*u)` in 1.44e-5 of N(0,3) samples (288 of 20,000,000, measured), so
+the block fixture's 96 SwiGLU elements would pass with probability ~0.9986
+against a kernel that disagreed on every input. The step is therefore gated AT
+THE OP, over 2^22 pairs per backend, against the reference arm's own host
+formula, with the observed disagreement count printed on the green run. The CPU
+sweep must be EXACTLY equal, because `cpu_ops.cpp:733` is that same formula.
+
+*The device `expf` IS THE ORACLE'S OWN SPELLING, and that — not a local
+precedent — is why this arm is default-ON.* An earlier version of this section
+justified the deviation by citing `cuda_moe.cu:823-827`, which calls it an
+ACCEPTED deviation. That is a fact about THIS tree and it is the wrong argument:
+a default-ON, token-visible change cannot rest on our own precedent. The oracle
+settles it. vLLM's `silu_kernel` is
+`return (T)(((float)x) / (1.0f + expf((float)-x * alpha)));`
+(`csrc/libtorch_stable/activation_kernels.cu:158`, anchored in this tree at
+`.agents/specs/vt-act-round-polarity.md:90`), and `expf` there is the CUDA
+device `expf` — the same function `vt::MoeSiluMul` calls
+(`src/vt/rocm/rocm_moe_router.hip:24`, `Silu(float x) { return x / (1.0f +
+expf(-x)); }`, whose own comment quotes that upstream line at `:44-45`). The
+host `std::exp` in the reference arm is OUR artifact, introduced by a host loop
+vLLM does not have. So this arm does not move AWAY from the oracle at the
+SwiGLU; it moves TOWARD it, and the one-ULP band is the distance between our
+host reference and the oracle rather than the distance between this arm and
+correctness.
+
+*The bf16 precedent is default-ON on a WEAKER claim than this one.*
+`MoeBlockBf16Cuda` ships default-ON behind `MoeBf16FastEnabled()`
+(`qwen3_5.cpp:909-915`) and its header states only that each output row "stays
+within the near-tie band of the reference path it replaces"
+(`qwen3_5.cpp:6883-6884`) — a band it measured nothing against. This arm makes
+the same trade with a measured bound and an oracle anchor, so default-ON here is
+strictly better supported than a default that already ships.
+
 **Tests.** A red-first case that fails for the intended reason: run one MoE
 block through both arms on the same inputs and assert byte equality of the
 routed output, with the new arm forced on and off by the gate. The red must come
 from the ARM SELECTION, not from a numerical bound -- a test that only checks
 tokens cannot see this, exactly as it could not see W6.
 
+**What landed is `tests/vllm/models/test_qwen35_moe_kq_device.cpp` plus four
+ctest registrations of it:** the default one, `..._ref` with `VT_MOE_KQ_FAST=0`,
+`..._sel_fp` with `VT_MOE_SEL_FP=4096`, and `test_rocm_qwen35_moe_kq_device`,
+which runs the same binary filtered to its ROCm cases. Arm selection is read
+through the `vllm::MoeKqDeviceCalls()` probe on CPU, CUDA and ROCm; the SwiGLU
+sweep above is in the same file on the same three; Tenstorrent is unreached and
+filed.
+
+*The fourth registration exists because the documented ROCm gate is a NAME
+filter.* `docs/ROCM.md:24` runs `ctest --test-dir build-hip -R
+'rocm|cross_device'`, and none of the first three names carries either token, so
+the ROCm cases never ran in the lane a ROCm operator is told to run — while the
+arm is DEFAULT-ON on ROCm and `strix:gpu0` (gfx1151) is a live fleet device. A
+doctest filter that selects nothing exits 0, so that registration also carries
+`FAIL_REGULAR_EXPRESSION "test cases: +0 [|]"`, which reddens a zero-selection
+run rather than letting a renamed case turn it into a green that measured
+nothing.
+
+*The SwiGLU sweep asserts a disagreement RATE as well as a magnitude.*
+`worst_ulp <= 1` bounds how far a disagreement goes and says nothing about how
+many elements disagree. MEASURED on `thor:gpu0`: with `MoeSiluMulKernel`
+multiplied by `1.001953125f` (1 + 2^-9, half a bf16 ULP) the CUDA sweep reports
+`disagreements=1510125 (3.600e-01) worst=1 bf16 ulp`, and the ULP bound PASSES
+while 36.0% of the op's outputs have moved. `kSweepMaxDiff` is therefore
+`kSweepN / 1024` (4,096 elements, 9.77e-04): ~455x above the measured 2.146e-06
+so that an unmeasured backend's `expf` has room, and ~369x below that 36.0%.
+Restored byte-for-byte afterwards (`cuda_moe.cu` back to
+`95930fec20051876525e951ade1b93e758f951f8357be608fa19b99ed04db2ba`), with the
+binary proved changed either side (`c766c68e…` mutant vs `16d1d4e3…` restored).
+
+**WHAT THE PER-ELEMENT RATE MEANS ON THE ARTIFACT THIS ARM SERVES.** The
+conversion above is onto the 96-element block fixture, which is the reassuring
+direction and not the production one. Qwen3.8-Flash-Next is 48 layers with a MoE
+block on every one, routed at top-10 into experts of `moe_intermediate_size =
+640` (this spec, `:18-20`, `:373`, `:1042`), so ONE decode token pushes
+`48 x 10 x 640 = 307,200` elements through `vt::MoeSiluMul`. At the measured
+2.146e-06 that is **0.66 perturbed elements per decode token**, each up to one
+bf16 ULP before the down GEMM's q8_0 activation quantizer; treating the sites as
+independent, about 48% of tokens carry at least one. This is a real, routine,
+per-token deviation from the reference arm and not a rounding curiosity — which
+is exactly why the sweep, and not the block fixture, is the instrument.
+
+**NOTHING IN THIS ROW GATES TOKENS.** The Gate below is ctest suites only; the
+arm has no token-exact run, on any artifact, on either arm of `VT_MOE_KQ_FAST`.
+The per-token figure above says what such a run would be measuring, and the row
+does not claim one. It is owed by
+`.agents/issues/QUANT-CUDA-GATES/ISSUE-LOCAL-01M2AAACGC0SXYXFN2JQ3GFEAZ.md`
+alongside the `nsys` A/B.
+
 **Gate.** `test_qwen4_exp_moe`, `test_qwen4_exp_moe_sel_fp` (the pair that pins
 the borrow identity, per the W6 review's M5), plus the qwen3_5 MoE suites, since
 `MoeBlock` is shared. The CUDA arm needs a lease; `test_qwen4_exp_hc_device` is
-NOT a device gate despite its name.
+NOT a device gate despite its name. These are ctest suites; see the paragraph
+above for what is NOT here.
 
 **Owed evidence.** An `nsys` A/B on `dgx:gpu0`, arms interleaved, reporting the
 per-step `cudaLaunchKernel` count and `cudaStreamSynchronize` count on both
