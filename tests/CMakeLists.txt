@@ -865,6 +865,13 @@ vllm_cpp_add_test(test_deepseek_v4_1_engram vllm/models/test_deepseek_v4_1_engra
 # references. Full-model gate multi-Spark-blocked (156.7 GiB); device-kernel +
 # forward assembly are W7 (.agents/specs/deepseek-v4-flash.md).
 vllm_cpp_add_test(test_deepseek_v4_moe vllm/models/test_deepseek_v4_moe.cpp)
+# DeepSeek-V4.1-Flash W3b — the MXFP8 32x32 UE8M0 linear family host reference.
+# Ports tests/quantization/test_fp8.py:67-238 @ vLLM e77daef89e (a BIT-EXACT
+# oracle for the scale expansion) and derives the quantizer / emulation-linear
+# cases from first principles in double precision, because every upstream mxfp8
+# linear test is CUDA/ROCm-gated. No e2e gate exists: no published V4.1 artifact
+# fits any device this project reaches (.agents/specs/deepseek-v4-1-flash.md).
+vllm_cpp_add_test(test_deepseek_v4_1_mxfp8 vllm/models/test_deepseek_v4_1_mxfp8.cpp)
 # DeepSeek-V4-Flash W7 — the DeepseekV4Model::Forward ASSEMBLY: composes the four
 # landed host primitives (W3 DSA/MLA seams, W4 compressor + fp8_ds_mla KV, W5 MHC
 # + Sinkhorn, W6 sqrtsoftplus/hash MoE) into an end-to-end logits producer at a

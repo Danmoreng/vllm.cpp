@@ -669,6 +669,34 @@ that ends in a claim.
 
 - `QUANT-GGUF-Q1_0` stays `INVENTORIED`: the type is recognised and no
   executable path consumes it. Named here so the id-41 evidence has an owner.
+- **W3b's MXFP8 host reference lands UNREACHED**, and this bullet is the
+  AGENTS.md §"Nothing lands dead" record for it. `deepseek_v4_1_mxfp8.{h,cpp}`
+  carries the five pieces of the MXFP8 32x32 UE8M0 linear family — the
+  checkpoint-to-runtime scale row expansion, the runtime per-32-column dequant,
+  the dynamic activation quantizer, the emulation linear arm and the
+  `weight_scale` / `weight_scale_inv` name split. Nothing calls any of them,
+  because `deepseek_v41` is not registered: that is **W1**. The wiring is owned
+  by this row, split across **W8** (the loader arm, which calls the expansion and
+  the name split) and **W4** (the host forward assembly, which calls the dequant
+  and the linear arm). The W3b issue under this row's directory in
+  [`.agents/issues/`](../issues/MODEL-MM-deepseek-v4-1-deepseek-v41-for-causal-lm/)
+  tracks it and stays OPEN until a production entry point reaches the family; the
+  landing commit names its ID. **It is deliberately not spelled here**, because
+  `## Owed` carries ROWLESS issue IDs and `issue_records.py:518` refuses a
+  row-owned ID in this section. AGENTS.md §"Nothing lands dead" and that checker
+  are compatible in exactly one way: this section names the unreached SLICE, and
+  the commit and pull-request bodies name the issue.
+- **Two W3b guarantees are not gateable on a host, and both were measured, not
+  assumed.** Mirroring upstream's MULTIPLY by `exp2(127 - sb)` rather than a
+  divide by `exp2(sb - 127)` survives mutation with the binary proved changed,
+  because the two forms are exact powers of two and only CDNA's flush-to-zero
+  separates them (`mxfp8_utils.py:130-135`). The `amax` TINY floor survives for
+  the same kind of reason: the low clamp already maps `log2(0) == -inf` to
+  `sb == 0`. **W5's CUDA/ROCm arm owes both measurements**; until then the two
+  are source-level fidelity decisions and this spec does not claim a gate holds
+  them. A third fact belongs beside them: the upper clamp `254` is unreachable
+  from any finite f32 (`ceil(log2(FLT_MAX / 448)) + 127 == 247`), so it bounds
+  only a non-finite `amax`.
 - The stale killgate-fork provenance in the reader, which lives at **three**
   comment sites and not one:
   [`gguf_reader.cpp:194`](../../src/vllm/model_executor/model_loader/gguf_reader.cpp#L194),
