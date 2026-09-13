@@ -41,14 +41,24 @@ the recipe that produced them is stated once here and nowhere else:
     host      x86_64, Ubuntu 24.04, g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0
     config    CMAKE_BUILD_TYPE=Release (-O3 -DNDEBUG -std=c++20 -ffp-contract=off
               -Wall -Wextra -Werror), VLLM_CPP_CUDA=OFF, VLLM_CPP_TRITON=OFF
+    tree      /home/mudler/_git/vllm.cpp/.wt/dsv41-w3b
     build     ninja test_deepseek_v4_1_mxfp8 -j 4
     binary    build-cpu/tests/test_deepseek_v4_1_mxfp8
     BASELINE  md5 90e498e6f3325cfb5f60729a3f289342 — 16/16, 7940 assertions
 
-A different compiler, build type or flag set gives different digits for the same
-source; a digest alone proves nothing without the four lines above. Each mutant
-digest below differs from the baseline, so every row is a mutation the compiler
-actually applied and not a no-op the optimiser erased.
+The `tree` line is load-bearing and not decoration. `VT_CHECK` and doctest both
+expand `__FILE__`, and CMake feeds the compiler absolute paths, so the linked
+binary carries **257** copies of that worktree prefix. A build of identical
+source in a differently named directory therefore hashes differently. A
+different compiler, build type or flag set does the same. A digest alone proves
+nothing without the five lines above, and no reader should expect to reproduce
+these exact digits outside that path.
+
+**What the table claims is the DIFFERENCE, not the digits.** Each mutant digest
+below differs from the baseline taken in the same tree by the same compiler, so
+every row is a mutation the compiler actually applied and not a no-op the
+optimiser erased. That comparison is reproducible anywhere; only its absolute
+values are tree-relative.
 
 | # | mutation | mutant md5 | result |
 |---|---|---|---|
@@ -109,7 +119,8 @@ carry them and why they are named here rather than left to be rediscovered:
    this as a property of a test that shards by hand; no shipped code encodes it,
    because no shipped code shards. W8's loader is where it becomes real.
 
-WHAT IS STILL OPEN: nothing calls any of it. `deepseek_v41` is not registered
-(W1), so the wiring is owed by W8 (loader) and W4 (host forward assembly) on
+WHAT IS STILL OPEN: nothing calls any of it. W1 registered `deepseek_v41`, but
+its forward and its loader refuse by name, so no production entry point reaches
+this file; the wiring is owed by W8 (loader) and W4 (host forward assembly) on
 this row. W4 wires `Mxfp8LinearEmulationBf16`, not the f32 reference beside it.
 `.agents/specs/deepseek-v4-1-flash.md` `## Owed` carries the same record.

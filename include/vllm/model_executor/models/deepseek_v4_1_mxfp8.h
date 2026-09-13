@@ -130,9 +130,10 @@
 // test's own bit-exact oracle plus from-first-principles double-precision
 // references, exactly as V4's W3-W7 host references were gated.
 //
-// **Nothing in this file has a production caller yet.** `deepseek_v41` is not
-// registered — that is W1 — so there is no loader and no forward that reaches
-// these functions. The wiring is owned by row
+// **Nothing in this file has a production caller yet.** `deepseek_v41` IS
+// registered — W1 landed that — but its forward, loader, prepare and KV-cache
+// hooks all refuse by name, so no production entry point reaches these
+// functions. The wiring is owned by row
 // `MODEL-MM-deepseek-v4-1-deepseek-v41-for-causal-lm`: W8 (the loader arm that
 // calls (1) and (5)) and W4 (the host forward assembly that calls (2) and (4)).
 // Tracked by `ISSUE-LOCAL-01M2C2QSFZWCXNQBJFBWYFNV2P` and recorded under
