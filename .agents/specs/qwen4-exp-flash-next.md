@@ -10312,7 +10312,7 @@ Second, and larger: **the allocator is still the top HOST cost.**
 | `cudaLaunchKernel` | 12.4% | 1,349,118 | 4.8 us |
 | `cudaStreamSynchronize` | 0.5% | 198,000 | 1.3 us |
 
-Over ~771 steps that is ~68 `cudaFree` and ~43 ms per step, at 634 us per call.
+Over ~771 steps that is ~68 `cudaFree` and ~43 ms per step, at 634 us per call. **THAT STEP COUNT IS NOW IN DOUBT (2026-09-13).** It was derived as 60 s / 77.8 ms. The QSA attribution counts 6,319 `QsaGatherAttentionKernel` instances in the same window and the tree has 12 of 48 layers on the QSA path (`qwen4_exp.h:29-33`), which implies **527** steps, not 771 -- a 1.46x disagreement. At 527 the same totals read ~99 calls and ~63 ms per step. Neither derivation is retracted, because neither has been checked against a step counter; the CONFIDENCE is. Resolve the step count by instrumenting it before scoping anything from these per-step figures (`ISSUE-LOCAL-01M2DJ8Y4DFQMDG9GMWEK93142`).
 W6 removed the per-step ADAPTER rebuild and its 378 allocations; something still
 frees ~68 objects per step. The candidates are the pooled `DBuf` lifetimes in the
 MoE and attention paths and any `ResidentWeight` whose `d_dev` still does not

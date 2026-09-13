@@ -25,3 +25,99 @@ OWED BEFORE A FIX IS SCOPED: an `nsys`/Nsight-Compute attribution of where the 2
 ## Resolution
 
 -
+
+### ATTRIBUTED 2026-09-13 on `thor:gpu0` (sm_110): 86-89% is a dot product on ONE THREAD
+
+Measured at `ce51eeea6`, CUDA 13.0.88, through the production op
+`vt::Qwen4ExpQsaGatherAttention` linked against the real `libvllm.a`, 15 timed
+reps after 3 warm-ups, median. Released decode shape: `T=1, HQ=24, HKV=2,
+DH=256, CR=4, block_topk=512`, so `|sel| = 2048`.
+
+**The dominant term is the pass-2 dot at `cuda_qwen4_exp_qsa.cu:517-521`, which
+`if (threadIdx.x == 0)` runs on a SINGLE LANE** -- `|sel| x head_dim = 524,288`
+dependent `__fadd_rn`/`__fmul_rn` pairs, each fed by its own scalar bf16 global
+load, while the block's other 255 threads wait at `__syncthreads()`.
+
+The identification is FORCED rather than argued. `blockDim = BlockWidthFor(DH) =
+ceil32(DH)` scales with `DH`, so every other term's per-thread serial length is
+independent of `head_dim` and only this one is proportional to it. A head_dim
+sweep at fixed `|sel|` therefore isolates it: slope **0.04767 ms per unit
+head_dim**, R2 = 0.99998 and 0.99970 across two independent runs, giving a
+DH-proportional share of **86.4%** and **88.8%** at the released `DH=256`. That
+the term is per selected row and not a fixed per-call cost is confirmed
+independently: `slope(|sel|=2048) / slope(|sel|=512) = 4.03` against a selection
+ratio of 4.00.
+
+**CANDIDATE (a), THE NARROW GRID, IS REFUTED AS THE COST.** Holding per-block
+work fixed and varying the grid: 2 blocks 13.481 ms, 24 blocks 14.156, 48 blocks
+14.670, 96 blocks 30.322. **Two blocks take the same wall time as twenty-four.**
+The machine saturates between 48 and 96 blocks, so at the released `grid=24`
+there is no parallelism to recover across (token, head) pairs. The idle SMs are a
+symptom. The same defect family is one level down: for ~86% of the wall time,
+255 of 256 threads are idle INSIDE the block.
+
+Candidate (c), the gather's address pattern, is **~5%**: spreading the selected
+blocks over a 16x larger cache moves 13.784 -> 14.442 ms, and `keys_visited`
+reads 98,304 in every case, so the gather is honest. Candidate (d), the paged
+path, is **+9.4%** (14.127 -> 15.455 ms). Candidate (b) is the whole cost and is
+localised by the above.
+
+### WHAT NONE OF THE FOUR CANDIDATES NAMED: every selected key is dotted TWICE
+
+`keys_visited = 98,304 = 2048 rows x 24 heads x 2 passes`. Pass 1 computes each
+selected key's dot SPREAD ACROSS 256 THREADS to find the softmax max; pass 2
+recomputes the identical value on thread 0. They are bit-identical by
+construction -- same `s_q`, same ascending order over `d`, same `__fmul_rn` /
+`__fadd_rn` -- and pass 1's copy costs about 1/256th of pass 2's, which is the
+intercept in the fit. The expensive half is the RECOMPUTATION.
+
+This matters for what a fix may do. The kernel's own header names a tree
+reduction over `d` as the lever and declines it because it would break the
+CPU-vs-CUDA bit relation. **Reusing pass 1's already-computed dot would not
+require that reassociation**, so it is a different lever than the one the header
+rejected. Stated as a measured property of the code; NOTHING WAS IMPLEMENTED and
+no speedup is claimed.
+
+### TWO CORRECTIONS TO THIS ISSUE'S OWN TEXT
+
+1. The decode launch is **24 blocks x 256 threads**, not 128. `DH = query.shape[2]`
+   is the MODEL's `head_dim` (`qwen4_exp.h:216-218`, and `qsa_block.cpp:797` says
+   so in words); the 128 at `qwen4_exp.h:45` is the INDEXER's head_dim. The
+   original text read the wrong field.
+2. "~8 of the 48 layers are QSA" is wrong. `qwen4_exp.h:29-33` has the
+   `__post_init__` rewrite covering **12 of 48**. At 12 the per-step QSA total is
+   12 x 2.545 = **30.5 ms of the 77.8 ms step**, not the 20.4 ms this issue
+   derived.
+
+### AND THAT FALSIFIES A STEP COUNT THIS ROW PUBLISHED
+
+The re-rank record (`f97e8451a`) derived "~771 steps" in the nsys window from
+60 s / 77.8 ms. The QSA instance count implies **6,319 / 12 = 527**. The two
+disagree by **1.46x**, and every per-step figure derived from 771 inherits that
+uncertainty -- notably `cudaFree`, quoted there as ~68 calls and ~43 ms per step,
+which at 527 steps would be ~99 calls and ~63 ms. NEITHER derivation is retracted
+here, because neither has been checked against a step counter; what is retracted
+is the confidence. Anyone scoping the `cudaFree` question must resolve the step
+count first, by instrumenting it rather than dividing.
+
+### WHAT THIS DOES NOT ESTABLISH
+
+Not measured on GB10: `dgx:gpu0` was unhealthy throughout, and sm_110 runs this
+shape at 13.78 ms against GB10's 2.545 ms, a 5.4x difference. The IDENTIFICATION
+of the dominant term is architecture-independent (it rests on which code path
+scales with `head_dim`); the 86-89% FRACTION is an sm_110 number.
+
+`ncu` produced nothing: every capture died with `ERR_NVGPUCTRPERM`, the driver
+refusing performance counters to the container. There is no occupancy, stall or
+memory-throughput reading here, and the empty capture is recorded as a FAILURE
+and not as a result. So within the 86% the arithmetic-latency and load-latency
+halves are not separated -- 6.914 us per selected row over 256 elements is 27 ns
+per element, far above a bare dependent FADD, so a load component is certainly
+present but is unsized.
+
+Synthetic call, not the engine: random bf16 K/V, one query token, contiguous
+ascending block ids, no ragged tail. Nothing here speaks to per-step launch
+counts or the step budget, and no correctness comparison against goldens was run.
+
+Artifacts: `/workspace/qsa-attrib/20260913T145638Z/`, `...T145839Z/`,
+`...T150040Z/` on the shared NAS; `rc` jobs `3ea9b1c5`, `3ef2fe85`, `130642f7`.
