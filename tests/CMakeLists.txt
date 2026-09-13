@@ -783,6 +783,20 @@ target_include_directories(test_deepseek_v2_forward PRIVATE ${CMAKE_SOURCE_DIR}/
 vllm_cpp_add_test(test_deepseek_v4_scaffold vllm/models/test_deepseek_v4_scaffold.cpp)
 target_include_directories(test_deepseek_v4_scaffold PRIVATE ${CMAKE_SOURCE_DIR}/src)
 
+# DeepSeek-V4.1-Flash (DeepseekV41ForCausalLM) W1 scaffolding gate: the arch
+# RESOLVES through the registry, the REAL published config.json descends and
+# validates through ParseDeepseekV41Params (nested text_config/vision_config ->
+# flat, the vision_* lift and the expert_dtype lift out of quantization_config),
+# and every unimplemented arm -- load, forward, KV-cache spec and the GGUF
+# `deepseek41` container -- refuses BY NAME. No checkpoint / GPU: W1 claims no
+# load and no forward (.agents/specs/deepseek-v4-1-flash.md `## Work breakdown`).
+vllm_cpp_add_test(test_deepseek_v4_1_scaffold vllm/models/test_deepseek_v4_1_scaffold.cpp)
+target_compile_definitions(test_deepseek_v4_1_scaffold PRIVATE
+  DEEPSEEK_V4_1_CKPT_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/vllm/models/fixtures/deepseek_v4_1")
+target_include_directories(test_deepseek_v4_1_scaffold PRIVATE ${CMAKE_SOURCE_DIR}/src)
+# `gguf_builder.h` is the shared in-memory GGUF fixture builder under tests/vllm.
+target_include_directories(test_deepseek_v4_1_scaffold PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/vllm)
+
 # DeepSeek-V4-Pro shape-generality gate (#504): the Pro config descends through
 # the SAME ParseDeepseekV4Params with zero new keys, and compress_ratios alone
 # reproduces the compressor/indexer layer counts of BOTH real checkpoints
