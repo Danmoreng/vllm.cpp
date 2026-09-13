@@ -2,7 +2,12 @@
 
 Row: `MODEL-MM-QWEN4-EXP`
 Issues: `ISSUE-LOCAL-01M2BZ5DZ2710201WMH9TNSVH3` (the defect),
-`ISSUE-LOCAL-01M2BZ5QK4XRETK48CXKSHKRDW` (owed: chunked H2D)
+`ISSUE-LOCAL-01M2BZ5QK4XRETK48CXKSHKRDW` (owed: chunked H2D),
+`ISSUE-LOCAL-01M2CCNA0S74WT5WBV50B3VD0W` (owed: two ungated helper terms),
+`ISSUE-LOCAL-01M2CKN5516AKE7W2JVDV86Z8X` (owed: the four other families that
+execute this seam are uncovered),
+`ISSUE-LOCAL-01M2CKNHVKJXT29XN8WM11KF6W` (owed: three latent second-reader
+hazards)
 
 ## 1. The defect
 
@@ -159,6 +164,100 @@ NOT built here. See `## Deferred, with an issue`.
 
 The stale comment at `src/vllm/platforms/rocm.cpp` (§2).
 
+## 4a. The shared seam's blast radius — WHO ELSE EXECUTES FIX 1
+
+Fix 1's release sits in `dense_attn::ResidentWeight`
+(`include/vllm/model_executor/models/dense_attn_block.h:246-274`), which is a
+SHARED seam in a production header. §1 and §5 above state the reach as "12 call
+sites in `qwen4_exp_forward.cpp`, 10 in `qwen4_exp_qsa_block.cpp`, 7 in
+`qwen4_exp_ple_block.cpp`, 1 in `qwen4_exp_registry.cpp`" (30, not the 31 §5
+previously said — the four numbers sum to 30 and each was recounted by
+occurrence, not by line). That is the reach WITHIN THIS ROW'S MODEL, and reading
+it as the reach of the change is the mistake this section exists to correct.
+`grep -rn 'ResidentWeight(' src include`, with `ResidentWeightF32` and the two
+definitions removed, names 42 calling files. Four of them are qwen4_exp's. The
+other 38 are 36 production translation units plus two shared headers,
+`layers/linear.h` and `qwen3_5_weights.h`, and four other model families reach
+the function with weights that satisfy the release's predicates.
+
+**The release fires only where BOTH hold.** Anything else returns at
+`qwen3_5_weights.cpp:402-404` before it touches a page.
+
+1. The weight is a BORROWED span with `mmap_fd >= 0`. Only the GGUF keep-quant
+   borrow producers set that field: `OwnGgufQuantBlocks`
+   (`qwen3_5_gguf_weights.cpp:174`) and `OwnGgufF16` (`:244`), with
+   `qwen3_5_weights.cpp:363` and `qwen4_exp_moe.cpp:69` propagating it to a
+   slice view. The safetensors borrow sets `mmap_src` / `mmap_src_bytes` and
+   never `mmap_fd`, so every safetensors-only model is refused.
+2. Neither the platform (`host_memory_is_device_addressable()`) nor the backend
+   (`DeviceMemoryIsHostAddressable()`) can dereference host memory. CPU returns
+   before the staging arm entirely; Vulkan (`vulkan_backend.cpp:135`), Metal and
+   a unified ROCm part (`rocm_backend.hip:488`) refuse on one of the two.
+
+**So it fires on discrete CUDA and on non-unified ROCm — `dgx`, `thor`, `orin`
+and `strix`, which is the whole measurement fleet.**
+
+**The families, enumerated rather than sampled.** Every caller of
+`OwnGgufQuantBlocks` / `OwnGgufF16` was listed, and each was traced forward to
+whether its borrowed tensors reach this function.
+
+| family | loader that sets `mmap_fd` | consumed at |
+|---|---|---|
+| Qwen4-Exp (this row) | `qwen4_exp_weights.cpp:140`, `:734` and five `OwnGgufQuantBlocks` sites; `qwen4_exp_moe.cpp:69` propagates | `qwen4_exp_forward.cpp` (12), `qwen4_exp_qsa_block.cpp` (10), `qwen4_exp_ple_block.cpp` (7), `qwen4_exp_registry.cpp` (1) |
+| GLM-MoE-DSA | `glm_moe_dsa_loader.cpp:308`, `:356`, `:417`, `:442` and five `OwnGgufQuantBlocks` sites | `glm_moe_dsa_forward.cpp:162-186` (the MLA block: `q_a_proj`, `q_a_layernorm`, `q_b_proj`, `kv_a_proj_with_mqa`, `kv_a_layernorm`, `kv_b_proj`, `w_uk_t`, `w_uv`, `o_proj`, and the indexer's `wq_b` / `wk` / `weights_proj` / `k_norm_weight` / `k_norm_bias`), `:269` (`down_proj`), `:334` (the router), `:359` (`e_score_correction_bias`), `:443`, `:462` (the layer norms), `:548` (the rope cache), `:598` (`final_norm`), `:606-607` (`lm_head`, tied or not), `:672` (`embed_tokens`) — 24 sites in all |
+| GLM5-Next | `glm5_next_loader.cpp:190` and five `OwnGgufQuantBlocks` sites; `glm5_next_bridge.cpp` two more | `glm5_next_moe.cpp:243-245` (`gate_exps`, `up_exps`, `down_exps`) |
+| Muse-Glimmer | `muse_glimmer_gguf_weights.cpp:190` and two `OwnGgufQuantBlocks` sites | `muse_glimmer.cpp:156`, `:251`, `:259`, `:273`, `:295`, `:309`, `:315`, `:326`, `:395`, `:421`, `:434`, `:435`; `muse_glimmer_mm.cpp:264` |
+| Qwen3.5 DFlash draft head | the TARGET's kept-F16 embedding table, `qwen3_5_gguf_weights.cpp:826`, rebound onto the draft by `model_loader.cpp:2010-2060` | `qwen3_dflash.cpp:597`, `:906`, `:1851`, `:1956`, all four through `Qwen3DflashWeights::EmbedTable()` |
+
+**One exclusion inside a listed family is load-bearing.** GLM-MoE-DSA's 228
+routed-expert towers do NOT reach the release: `GlmResidentExpertSlice`
+(`glm_moe_dsa_forward.cpp:112-122`) refuses a discrete device by name before any
+`ResidentWeight` call, because the expert-stream lane serves those towers out of
+host slot storage. Its MLA, MLP `down_proj`, router, norms, rope cache,
+embedding and head weights all reach it; its expert mass does not.
+
+**Checked and EXCLUDED, with the reason, so a later reader does not re-derive
+them.**
+
+- **DeepSeek-V4** has a GGUF loader (`deepseek_v4_weights.cpp`, four
+  `OwnGgufQuantBlocks` sites), but every one of its header-`ResidentWeight` call
+  sites — `deepseek_v4.cpp:1330-1332` and `:1476`,
+  `deepseek_v4_exl3_device.cpp:70-72` — takes an EXL3 trellis field
+  (`d_trellis` / `d_suh` / `d_svh`) that the EXL3 loader owns and that never
+  carries `mmap_fd >= 0`. A future GGUF trellis arm would make it reachable.
+- **Laguna** has a GGUF loader (`laguna_weights.cpp`, five sites) and calls
+  `dense_attn::ResidentWeight` nowhere.
+- **`layers/linear.h`**, the shared LinearMethod seam, calls the function seven
+  times (`:63`, `:97`, `:142`, `:143`, `:207`, `:213`, `:243`), so it was
+  checked separately. Of its consumers only `glm_moe_dsa_forward.cpp` and
+  `muse_glimmer.cpp` are in the GGUF-borrow set, so it adds no family that this
+  table does not already name.
+- **Every other model** — gemma, phi, minicpm, olmo2, stablelm, commandr,
+  deepseek_v2, dots3, nemotron_h, qwen3_vl and the rest — loads from
+  safetensors, so `mmap_fd` is -1 and the helper returns at `:404`.
+
+**NO TEST COVERS ANY FAMILY BUT QWEN4-EXP, AND THAT IS RECORDED AS OWED RATHER
+THAN CLOSED HERE.** `ISSUE-LOCAL-01M2CKN5516AKE7W2JVDV86Z8X` owns it. The reason
+is the same wall §5 names: the focused harness's fake backend implements memory
+operations only and registers no `Embedding`, `MatmulBT` or `RmsNorm` for
+`kXPU`, so a GLM5-Next or Muse-Glimmer entry point refuses on a missing op long
+before residency is asked about, and its process-global registrar cannot hold a
+second fake backend beside the existing one. A case that called
+`dense_attn::ResidentWeight` directly with a GLM5-Next-shaped tensor would add a
+family's NAME and not a family's CALL SITE, which is the shape of green this
+protocol exists to refuse. What is owed is a harness that can drive a second
+family's production entry point, and that is a row of its own.
+
+**The one repair that looked cheap was NOT taken, for the same reason.** The
+header `ResidentWeight` has no `VT_CHECK(!w.expert_streamed)` although its
+translation-unit-local twin at `qwen3_5.cpp:1181` does. Adding it would make the
+shared seam REFUSE a weight it accepts today, and GLM5-Next stages three expert
+banks through it at `glm5_next_moe.cpp:243-245` with no test on any staging
+device — so the one-liner could remove a working path instead of closing a
+hazard, and there is no gate here that would say which.
+`ISSUE-LOCAL-01M2CKNHVKJXT29XN8WM11KF6W` owns it together with two other latent
+second-reader hazards.
+
 ## 5. Tests — red first
 
 `tests/vllm/model_executor/test_resident_weight_host_addressable.cpp` already
@@ -185,8 +284,9 @@ cases there:
    implements memory operations only and registers no `Embedding`, `MatmulBT` or
    `RmsNorm` for `kXPU`, so every `qwen4_exp` entry point above that seam refuses
    on a missing op before residency is asked about. The seam is production code
-   in a production header, not a test hook; reachability is carried by the 31
-   production call sites named in §1, and the mutation that convicts the wiring
+   in a production header, not a test hook; reachability is carried by the 30
+   production call sites named in §1 (and §4a names the OTHER families that
+   execute the same seam), and the mutation that convicts the wiring
    is deleting the `MaybeReleaseStagedBorrowSource` call from
    `dense_attn_block.h`.
 
@@ -203,17 +303,72 @@ as an ungated guarantee rather than chased with a contorted test.
 
 ## 6. Gates
 
-- Focused: `-tc=*release*`, `-tc=*prefault*`, `-tc=*DSA*`.
-  `-tc=*resident*` was the first draft of this line and it SELECTED NOTHING:
-  no case name in `test_resident_weight_host_addressable.cpp` contains the
-  substring `resident` (`residency` does not, the `t` is missing), so doctest
-  reported 0 cases, 0 assertions and `Status: SUCCESS!` — a third of the declared
-  focused gate passing without measuring anything. Every declared selector's case
-  and assertion counts are printed with the evidence, because a selector that
-  matches nothing is indistinguishable from one that passes.
-- Full ROCm cross-device suite: 60 cases / 84833 assertions, unchanged.
-- `scripts/check-agent-record.py`, `scripts/check-commit-style.py`,
-  `scripts/check-commit-trailers.py`, `scripts/check-pr-size.py`.
+**EVERY SELECTOR NAMES ITS BINARY AND PRINTS ITS COUNTS, AND THE REASON IS THAT
+THIS SECTION HAS NOW SHIPPED THE SAME DUD TWICE.** `-tc=*resident*` was the
+first draft of the focused line and it SELECTED NOTHING: no case name in
+`tests/vllm/model_executor/test_resident_weight_host_addressable.cpp` contains
+the substring `resident` (`residency` does not — the `t` is missing), so doctest
+reported 0 cases, 0 assertions and `Status: SUCCESS!`. The line that replaced it
+carried `-tc=*DSA*` beside `-tc=*release*` and `-tc=*prefault*`, and `DSA`
+selects nothing in that binary EITHER — it matches two cases in
+`test_backend_cross_device`, which is a SEPARATE line below, and this section
+named no binary at all, so nothing in the text said which of the two a reader
+should run it against. A selector that matches nothing is indistinguishable from
+one that passes. So each line below states its binary, its selector and the
+case and assertion counts that selector actually produced.
+
+Measured on `strix:gpu0` (gfx1151, ROCm 7.2.4) under `rc` job
+`f8a6ceec-d8bf-4e99-b6e4-3b2cbf71f8b9`, from a clean clone at
+`a6e243eea4f0c8394d90a54608cfe14193fff146` built in a private `/tmp` tree with
+`cmake -G Ninja -DCMAKE_BUILD_TYPE=Release -DVLLM_CPP_HIP=ON`
+`-DVLLM_CPP_HIP_ARCHITECTURES=gfx1151 -DROCM_PATH=/opt/rocm`
+`-DVLLM_CPP_BUILD_TESTS=ON`, `ninja -j 4`, and run with
+`LD_LIBRARY_PATH=/opt/rocm-7.2.4/lib` — without which the binary exits 127
+having measured nothing. Every later commit on this branch touches `.agents/`
+markdown only, so `git diff --stat a6e243ee..HEAD -- src include tests` is empty
+and these binaries are the branch's.
+
+| binary | selector | cases | assertions |
+|---|---|---|---|
+| `test_resident_weight_host_addressable` | (none — whole binary) | 28 | 139 |
+| `test_resident_weight_host_addressable` | `-tc=*release*` | 9 | 52 |
+| `test_resident_weight_host_addressable` | `-tc=*prefault*` | 2 | 11 |
+| `test_resident_weight_host_addressable` | `-tc=*dense_attn*` | 3 | 19 |
+| `test_backend_cross_device` | (none — whole binary) | 60 | 84833 |
+| `test_backend_cross_device` | `-tc=*DSA*` | 2 | 273 |
+
+`-tc=*DSA*` against `test_resident_weight_host_addressable` is recorded here as
+the DUD it is rather than deleted: 0 cases, 0 assertions,
+`Status: SUCCESS!`. It is not a gate line. It is the measurement that proves the
+previous revision of this section declared one that measured nothing.
+
+**THE REST OF THIS SECTION WAS SWEPT FOR A THIRD DUD, AND THE SWEEP IS REPORTED
+RATHER THAN ASSERTED.** Every remaining gate line in this spec is a checker
+invocation, and a checker cannot produce the silent-success shape unless it
+accepts a selector or defaults to one. Each was run with no arguments to see
+what it does: `check-commit-style.py` refuses (`the following arguments are
+required: --range`), `check-commit-trailers.py` refuses (`pass exactly one of
+--range or --message-file`), `check-pr-size.py` refuses (`the following
+arguments are required: --base, --head`) and `check-agent-record.py` takes no
+selector and validates the whole tree. None of the four can pass while measuring
+nothing, so there is no third dud — but all four were previously named in this
+section WITHOUT an invocation, and a bare `check-commit-style.py` in a gate line
+is a line nobody can reproduce. Each now carries the exact invocation, and each
+measures the BRANCH rather than the one commit at `HEAD`:
+
+```sh
+python3 scripts/check-agent-record.py
+python3 scripts/check-commit-style.py --range origin/main..HEAD
+python3 scripts/check-commit-trailers.py --range origin/main..HEAD
+python3 scripts/check-pr-size.py --base origin/main --head HEAD \
+  --branch row/MODEL-MM-QWEN4-EXP-ROCM-RESIDENCY
+python3 scripts/agent-pr-body.py --pr 3173
+```
+
+`agent-pr-body.py` exits 0 when the body will land clean, 1 when the body fails
+the contract and 3 when it could not be read. A 3 is `REMOTE_UNVERIFIED` and is
+never a pass.
+
 - The model gate: does the 67.56 GiB UD-IQ1_S at
   `/workspace/ckpt/qwen4exp-flash-next-iq1s` forward on `strix:gpu0` and produce
   a token? If it does, that is this row's G3, and load time, peak host and device
@@ -223,7 +378,7 @@ as an ungated guarantee rather than chased with a contorted test.
   (`ISSUE-LOCAL-01M2BY2M2ATNVR3XQKV2DB1BJD`), so every measurement is repeated at
   least three times and reported as a spread. If it does not forward, NO number
   is recorded and the thread's `/proc/<tid>/stat` state and `wchan` are reported
-  instead.
+  instead. §6a is that measurement.
 
 ## 6a. The model gate: MEASURED, AND THE STALL SURVIVES BOTH FIXES
 
