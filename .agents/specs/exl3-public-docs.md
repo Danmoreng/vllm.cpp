@@ -119,3 +119,20 @@ operator owns the unchanged-base comparison and full `agent-preflight.sh`
 result; its broad run was still in progress at this implementation handoff.
 Missing compiler, CMake, and readelf are reported environment limitations,
 not passing gates. This helper does not modify unrelated code to repair them.
+
+### Review corrections: 13 September 2026
+
+The MTP bit width applies to its trellis modules, not every companion tensor.
+`quant-exl3-mul1.md:246-248` records eight 4-bit MTP modules.
+`dense_weight_loaders.h:722-723` requires F16 sign vectors, and `:765-767`
+requires an I32 `mul1` marker. The usage description now names the trellis
+modules explicitly.
+
+The ROCm evidence includes a subsequent successful BF16 control at
+`backend-rocm-exl3.md:81-104`. The usage limitation now names missing AMD clock
+attribution and discrete-GPU validation. No benchmark values or artifact pins
+changed. Both corrections address the existing documentation issue.
+
+All seven focused gates passed again after these corrections, including all
+19 README checker tests. The first five cells of both artifact rows remain
+byte-identical to repair base `752b9628b`. No GPU work was run.
