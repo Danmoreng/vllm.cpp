@@ -89,7 +89,34 @@ MUTATION M0, run against the UNCHANGED kernel to answer this empirically rather
 than by argument: reverse the per-group walk (`for h = H-1 down to 0`) in
 `HcGroupedNormKernel`'s sum-of-squares loop, leaving everything else alone.
 
-> `[RESULT M0 -- filled from the measurement, see §7]`
+**MEASURED, and the answer is sharper than "no".** `strix:gpu0`, 2026-09-13,
+job `6b5fe700-74e6-45a8-adc5-12c8eff19516`, gfx1151, wavefront size 32, ROCm
+7.2.4, Release build for `gfx1151`. M0's binary is PROVEN CHANGED (battery binary
+`a7da670bd5e3` mutated against `89fedeb6c1cc` restored), so this is a measurement
+and not a no-op.
+
+| suite | on the unchanged kernel | with the walk REVERSED |
+|---|---|---|
+| `test_backend_cross_device -tc='*qwen4_exp*'` | 7 cases / 281 assertions PASS | 7 / 281 PASS |
+| the new `*ROCM W7*` battery | 5 / 45 PASS, every `max\|diff\|` **0** | 5 / 45 PASS, every `max\|diff\|` **0** |
+
+NOTHING CONVICTS IT, AND THE REASON IS NOT THAT THE SUITE IS WEAK. The reversed
+walk is BIT-IDENTICAL to the ascending one at every width tested, including
+`hidden = 2560`. It is an EQUIVALENT MUTANT at f32 resolution, and that follows
+from the accumulator: reassociating 2560 terms in `double` perturbs the sum by
+O(1e-16) relative, the quotient is then narrowed to f32 whose resolution is
+6e-8, and a perturbation eight orders below the representable step cannot change
+the stored `r`. **So in the pre-change kernel the summation ORDER was not
+load-bearing at all -- it was unobservable.**
+
+THE CONSEQUENCE FOR THIS CHANGE IS THE OPPOSITE OF REASSURING, AND IT IS WHY §5
+ADDS CASES RATHER THAN RELYING ON THIS. What this change moves is the WIDTH, and
+at f32 the order STOPS being absorbed: the same model-width case that reads
+`max|diff| = 0` on both arms above reads `5.96e-08` with 967 of 7680 elements off
+bit-identity after the change. That difference is real, it is what the derived
+bound exists to hold, and NO COMMITTED SUITE COULD SEE IT BEFORE THIS ROW --
+`test_backend_cross_device`'s `hidden_size = 7` puts one thread on the whole
+group in either kernel.
 
 This row does not ship a reassociation into a path whose numerics nothing
 measures. §5 adds the fixture that can see the shape first.
@@ -116,6 +143,14 @@ So the change is a MIRROR on both axes, not an invention, and the pre-change
 kernel diverged from the oracle on both. vLLM's own PyTorch reference agrees on
 the width independently at `common/hyperconnection.py:75`
 (`hidden_states = hidden_states.float()`).
+
+`amd/ops/hc.py` AND `nvidia/ops/hc.py` ARE THE SAME FILE. Diffed at the pin, the
+two are byte-identical but for one docstring line (`:3`, "AMD ROCm" against
+"NVIDIA"), 487 lines each. So one block per (token, group) and an f32 tree is not
+an AMD-specific choice that a ROCm arm inherits by accident -- it is what vLLM
+computes on BOTH backends, and it is also what our own CUDA arm already does
+since `ee0644eab`. Three independent arms of this kernel now agree on the shape
+and the width, and the ROCm arm was the only one that did not.
 
 THERE IS NO CONFLICT TO ESCALATE. The oracle's contract and our CPU arm's own
 stated contract (`qwen4_exp_hc.h:99-104`, §3a) say the same thing: fp32 on the
@@ -266,9 +301,107 @@ restored byte-for-byte (`git diff --exit-code`).
 
 ## 7. Evidence
 
-> filled by the measurement. Archived under
-> `docs/bench-evidence/qwen4exp-rocm-hcnorm-gfx1151-20260913/` and to
-> `/workspace/`, because `rc` logs age out within a day.
+WAVE 1 -- `strix:gpu0`, 2026-09-13, `rc` job
+`6b5fe700-74e6-45a8-adc5-12c8eff19516`, exclusive lease, `--cwd /tmp`. gfx1151,
+**wavefront size 32** (`rocminfo`), ROCm 7.2.4 / HIP 7.2.53211. Tree cloned at
+`63925eb7f`, Release, `-DVLLM_CPP_HIP=ON -DVLLM_CPP_HIP_ARCHITECTURES=gfx1151`,
+build 275 s. Archived to `/workspace/q4exp-hcnorm/20260913T205820Z`.
+
+### 7.1 The new battery on the FIX, and how much of each budget it uses
+
+Every line is the binary's own `[MEASURED]` print, not a verdict.
+
+| case | `max\|diff\|` | derived bound | % of budget | not bitwise equal |
+|---|---:|---:|---:|---:|
+| model width (H 2560) | 5.96046448e-08 | 2.640087e-06 | **2.3%** | 967 / 7680 |
+| past the grid cap (H 512, 4800 groups) | 1.78813934e-07 | 1.95702654e-06 | **9.1%** | 75436 / 614400 |
+| ragged H 100 | 1.1920929e-07 | 1.69501057e-06 | **7.0%** | 30 / 400 |
+| ragged H 777 | 1.1920929e-07 | 2.11831818e-06 | **5.6%** | 168 / 3108 |
+| magnitude-separated (§3c) | 9.53674316e-07 | 1e-05 | **9.5%** | -- |
+
+READ THE MARGIN, NOT THE VERDICT: the worst case uses 9.5% of its budget, so
+nothing here passes by sitting against its bound. The stream came back
+byte-identical on all five (`0/30720`, `0/2457600`, `0/1200`, `0/9324`,
+`0/10240` differing). The separation probe reads `broadcast signal 0.666768516`
+against a `2.640087e-06` bound, **252555.5x**.
+
+`5 cases / 45 assertions / 0 failed`, binary `82ffaf5ed0d3`.
+
+**THE §3c QUESTION IS ANSWERED AND THE ANSWER IS THE GOOD ONE.** On
+magnitude-separated data a SERIAL f32 walk lands `6.702e-04` and misses the
+`1e-5` bar by 67x. This f32 TREE lands `9.54e-07` -- inside the bar with 10x to
+spare, and **702x better than the serial f32 walk** the 571x figure was measured
+on. The width change does not cost what the CPU case's numbers suggested it
+might, because the tree is ~10 deep at H 2560 and not 2560 deep. That was
+predicted in §3c and it is now measured rather than argued.
+
+### 7.2 Red-first: UNAVAILABLE, and measured rather than assumed
+
+The same battery run against the pre-change kernel (`89fedeb6c1cc`) reports
+`5 / 45 PASS` with **`max|diff| = 0` and `0` non-bitwise-equal elements on every
+case**. The pre-change kernel reproduces the CPU reference EXACTLY here, because
+both walk the group ascending in `double`. No red was available, exactly as the
+CUDA twin recorded for its own fixture. The discriminating evidence is therefore
+§7.3, and these cases are justified by WHICH mutations they convict.
+
+### 7.3 The mutation battery
+
+Every mutation is applied alone to the FIXED kernel, the binary is proved changed
+by `md5`, the battery runs through `scripts/run-doctest-selected.sh` (which
+prints `selected=5` before it runs anything), and the tree is restored with
+`git diff --exit-code` returning 0.
+
+| | mutation | binary | verdict | worst signal vs bound |
+|---|---|---|---|---|
+| M2 | off-by-one the strided walk | `c18b20fcf866` | **CONVICTS** 4 of 5 | 2.29674578e-03 vs 1.957e-06 |
+| M3 | drop the final partial | `9574c8ec2039` | **CONVICTS** 4 of 5 | 1468.95003 vs 1.695e-06 |
+| M4 | drop the group grid stride | `bdcbd0cd9448` | **CONVICTS**, grid cap ONLY | 0.898665845 vs 1.957e-06 |
+| M6 | accumulate in `double` again | `1af9a31a1d28` | MOVED case 5, as §6 required | 9.54e-07 -> 4.77e-07 |
+| M1 | collapse the cross-wave fold | `9d3b61a3e9c2` | **VOID -- the mutation was a NO-OP** | redone as M1b |
+| M5 | broadcast `r` | `720e19116d27` | **VOID -- the mutation was a NO-OP** | redone as M5b |
+
+M4 convicting the grid-cap case ALONE is the designed result and not a gap: it is
+the only case whose `T * hc` exceeds the 4096-block cap, so it is the only case in
+which the group loop takes a second trip at all.
+
+M6 IS NOT A SURVIVOR AND IT IS NOT A GATE HOLE. Its criterion in §6 is that case
+5 MOVE, and it moved, from `9.54e-07` to `4.77e-07`; the grid-cap case's
+non-bitwise-equal count moved 75436 -> 72973 and ragged-777's 168 -> 333. No case
+FAILS, and that is correct rather than disappointing: M6 makes the arm a closer
+approximation of the `double` reference, and a bound on the distance to that
+reference cannot convict something for shrinking it. It confirms case 5 measures
+the width; it does not claim the width is gated in the fail-closed direction, and
+nothing here says it is.
+
+**M1 AND M5 MEASURED NOTHING AND ARE REPORTED AS VOID RATHER THAN AS SURVIVORS.**
+Both binaries changed, so both were real builds -- and both mutations were
+semantic no-ops written by this row, which is a defect in the mutation and not a
+finding about the gate. M1 added `if (threadIdx.x == 0) s_part[0] = part;` beside
+`if (lane == 0) s_part[wave] = part;`, and thread 0 IS lane 0 of wave 0, so it
+rewrote the slot it had just written with the same value. M5 replaced
+`const float r = s_r;` with `__shfl(s_r, 0)`, and every lane already held the
+identical `s_r`. Their outputs are digit-for-digit identical to the unmutated
+arm, which is the signature. Wave 2 reruns them as M1b (`v = (lane == 0) ?
+s_part[0] : 0.0f`, so wave 0's partial becomes the whole sum) and M5b (the
+reduction reads `t * flat + h`, token `t` group 0, for every group).
+
+### 7.4 The full ROCm cross-device suite
+
+`test_backend_cross_device` on the FIX: **61 cases / 84841 assertions / 0
+failed**, `Status: SUCCESS!`. The `-tc='*DSA*'` control: **2 cases / 273
+assertions / 0 failed**, UNMOVED. On the pre-change kernel the `*qwen4_exp*`
+filter reads 7 / 281, identical to the FIX's.
+
+ONE HONEST GAP: the FULL suite was run on the FIX arm and not separately on the
+base arm, so this row reports a green rather than a base-to-head DELTA. The delta
+is what a baseline buys, and it buys it only where something is red; at 0 failed
+of 84841 there is nothing for a baseline to excuse.
+
+### 7.5 Wave 2
+
+> Corrected M1b / M5b, the decode tok/s A/B with the first generation excluded,
+> and the `rocprofv3` kernel ranking before and after. Job launched
+> 2026-09-13 21:07 UTC on `strix:gpu0`.
 
 ## 8. Prediction, stated so it can be falsified
 
@@ -322,6 +455,26 @@ follow in the same pull request.
 - **A wave64 measurement.** Only gfx1151 (wave32) is in this fleet, so the
   `warpSize`-derived tree is REASONED correct on wave64 and MEASURED on wave32
   alone.
+- **TWO LARGER HYPER-CONNECTION LEVERS THIS ROW DOES NOT REACH**, both already
+  verdict (b) in the row spec and both filed rather than built here:
+  - `ISSUE-LOCAL-01M2E921GPVNYCJNC51CNJXP57` -- vLLM DEFERS the HC combine to the
+    next mix boundary and fuses it with that mix's RMSNorm
+    (`nvidia/hyperconnection.py:152-186`, `nvidia/ops/hc.py:266-375`),
+    materialising it early only where PLE adds into the stream
+    (`nvidia/model.py:288-297`). Upstream reads the 10240-wide residual ONCE per
+    boundary; this tree reads it TWICE (`qwen4_exp_forward.cpp:466`, `:544`, then
+    the norm). **This row changes how the norm reads the stream and not how many
+    times the stream is read, so the duplicated read survives this change intact
+    and is the larger lever of the two.**
+  - `ISSUE-LOCAL-01M2E91MVJ9GV3PAKCF144SVZJ` -- vLLM merges HC down and inject
+    into ONE padded `MergedColumnParallelLinear`
+    (`nvidia/hyperconnection.py:98-110`) and keys its decode plan on that shape
+    (`nvidia/low_latency_gemm.py:72-79`); this tree runs three GEMMs. That is the
+    `vt::MergedGemmGroup` seam AGENTS.md mandates.
+
+  NEITHER IS MEASURED on this tree. Both are upstream-structure arguments, and
+  filing them is what this row owed; building them is another row's.
+
 - **A ROCm race check on the shared-memory shape.** The donor gates its barriers
   with `compute-sanitizer --tool racecheck`; no equivalent was run here, and the
   ordering argument is carried as an argument.

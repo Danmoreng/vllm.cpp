@@ -4626,9 +4626,15 @@ needs to claim bit-identity should compare bytes, not an aggregate.
     projections are unquantized bf16 by explicit construction. Owned by #2406.
   - **The merged HC down-plus-inject GEMM (verdict (b)).** Upstream stacks them
     into one padded `MergedColumnParallelLinear`; this tree runs three GEMMs. It
-    is a `vt::MergedGemmGroup` seam question and has NO issue yet.
+    is a `vt::MergedGemmGroup` seam question and is now
+    `ISSUE-LOCAL-01M2E91MVJ9GV3PAKCF144SVZJ`.
   - **The deferred, norm-fused HC combine (verdict (b)).** Upstream reads the
-    residual once; this tree reads it twice. NO issue yet.
+    residual once; this tree reads it twice. Now
+    `ISSUE-LOCAL-01M2E921GPVNYCJNC51CNJXP57`. It is the LARGER of the two
+    hyper-connection levers and the ROCm grouped-norm launch-shape fix
+    (`ISSUE-LOCAL-01M2CJXQMV9R9JGRSKZMW4W21F`) does not reach it: that one
+    changes how the norm reads the stream, not how many times the stream is
+    read.
   - **The f32 QSA output gate (verdict (b)).** Upstream sigmoids a bf16 gate. It
     rides with #2477 because it is the same buffer.
   - **The single indexer side cache and the every-step re-pool (verdict (b)).**
