@@ -80,6 +80,7 @@
 #include "vt/ops.h"
 #include "vt/cuda/cublas_lt_hgemm.h"
 #include "vt/cuda/cuda_device_caps.h"
+#include "vt/cuda/cuda_exl3_internal.h"
 #include "vt/cuda/graph_safe_scratch.h"
 
 namespace vt::cuda {
@@ -3179,4 +3180,59 @@ struct Registrar {
 } registrar;
 
 }  // namespace
+
+// QUANT-EXL3 W7 review repair: the queue-teardown release, the house pattern of
+// ReleaseFa2Scratch (cuda_flash_attn_fa2.cu) and ReleaseGdnTritonScratch.
+// Without it a destroyed queue kept its [k, min(n, 32768)] block for the process,
+// and a new stream whose handle value equals the old one inherited the entry.
+void ReleaseExl3ReconScratch(int device, void* stream_handle) {
+  const cudaStream_t stream = static_cast<cudaStream_t>(stream_handle);
+  Exl3ReconScratch sc;
+  {
+    std::lock_guard<std::mutex> lock(Exl3ReconScratchMutex());
+    auto& table = Exl3ReconScratchTable();
+    const auto it = table.find({device, stream});
+    if (it == table.end()) return;
+    sc = it->second;
+    table.erase(it);
+  }
+  if (sc.buf == nullptr) return;
+  // Every launch this stream enqueued against the block completes before the
+  // block leaves the entry's ownership.
+  Check(cudaStreamSynchronize(stream), "cudaStreamSynchronize(exl3 reconstruct scratch release)");
+  if (sc.exposed_to_capture) {
+    // A graph captured on this stream may outlive the queue and still hold the
+    // pointer; the retire list keeps it valid for the process.
+    RetireGraphScratch(sc.buf);
+  } else {
+    Check(cudaFreeAsync(sc.buf, stream), "cudaFreeAsync(exl3 reconstruct scratch release)");
+  }
+}
+
+namespace testing {
+
+size_t Exl3ReconScratchBytesForTesting(int device, void* stream_handle) {
+  std::lock_guard<std::mutex> lock(Exl3ReconScratchMutex());
+  const auto& table = Exl3ReconScratchTable();
+  const auto it = table.find({device, static_cast<cudaStream_t>(stream_handle)});
+  return it == table.end() ? 0 : it->second.bytes;
+}
+
+void* Exl3ReconScratchPtrForTesting(int device, void* stream_handle) {
+  std::lock_guard<std::mutex> lock(Exl3ReconScratchMutex());
+  const auto& table = Exl3ReconScratchTable();
+  const auto it = table.find({device, static_cast<cudaStream_t>(stream_handle)});
+  return it == table.end() ? nullptr : it->second.buf;
+}
+
+size_t Exl3ReconScratchLiveBytesForTesting() {
+  std::lock_guard<std::mutex> lock(Exl3ReconScratchMutex());
+  size_t total = 0;
+  for (const auto& entry : Exl3ReconScratchTable()) total += entry.second.bytes;
+  return total;
+}
+
+size_t RetiredGraphScratchCountForTesting() { return RetiredGraphScratchCount(); }
+
+}  // namespace testing
 }  // namespace vt::cuda
