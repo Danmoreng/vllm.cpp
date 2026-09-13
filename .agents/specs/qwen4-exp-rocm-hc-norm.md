@@ -567,24 +567,38 @@ than a reused number.
 
 ### 7.6 The repair round -- F1's red-then-green, and the gate re-run on the repaired head
 
-WAVES 5 AND 6 -- `strix:gpu0`, 2026-09-13, exclusive leases, `rc` jobs
-`d9a4874b-b507-420e-a80b-4f2a7f492aa8` (wave 5) and
-`2920dca3-62a1-4414-9610-af5472dbef6f` (wave 6), fresh clones of the repaired
-head `7b737f882`, build 274 s and 276 s. Archived to
-`/workspace/q4exp-hcnorm/w5-...` and `w6-...`, and committed as the `w6-*` files
-and `job-wave6.sh` in
+WAVES 5, 6 AND 7 -- `strix:gpu0`, 2026-09-13, exclusive leases, fresh clones,
+build 274-276 s each, archived to `/workspace/q4exp-hcnorm/w{5,6,7}-...` and
+committed as the `w6-*`, `w7-*`, `job-wave6.sh` and `job-wave7.sh` files in
 [this row's evidence directory](../../docs/bench-evidence/qwen4exp-rocm-hcnorm-gfx1151-20260913/).
+
+**WAVE 7 IS THE ONE THAT COUNTS, BECAUSE WAVE 6'S BASE WENT STALE WHILE IT RAN.**
+`origin/main` moved to `7588c1e6f` after wave 6, this branch merged it at
+`0515493e8`, and the whole of §7.6 was re-run against THAT head rather than
+re-argued from a diff. Wave 7 reproduces every line below to the digit on three
+fresh binaries. The merge is records-only -- `git diff 7b737f882 HEAD -- src/
+include/ tests/` is empty -- and that is a description of the merge, not the
+evidence; the evidence is the re-run.
+
+| wave | `rc` job | head measured | verdict |
+|---|---|---|---|
+| 5 | `d9a4874b-b507-420e-a80b-4f2a7f492aa8` | `7b737f882` | gate arms valid, red-first arms VOID (below) |
+| 6 | `2920dca3-62a1-4414-9610-af5472dbef6f` | `7b737f882` | full red-then-green, now a stale base |
+| 7 | `9e2e6d3e-80aa-4c67-bcbb-64627b0d8783` | **`0515493e8`, post-merge** | **the reported result** |
 
 **THE DEFECT WAS REPRODUCED ON THE BOARD, NOT ARGUED.** The mutation poisons
 `HcGroupedNormKernel`'s `s_r` to NaN, so every element of the device `mixed`
 output is NaN while the CPU reference stays correct. One mutation, two test
 trees, three distinct binaries:
 
-| arm | test files | binary | case 5 |
+| arm | test files | binary (wave 7) | case 5 |
 |---|---|---|---|
-| control | repaired | `5ee7e99e817a` | 1 passed, 12 assertions, `max\|diff\| = 9.53674316e-07` |
-| red-first | PRE-repair (`a449eca85`) | `c18b51f7de8e` | **1 PASSED**, 7 assertions, `max\|diff\| = 0`, `Status: SUCCESS!` |
-| after | repaired (`7b737f882`) | `987d7b7b5042` | **1 FAILED**, 13 assertions, 2 failed, `max\|diff\| = inf` |
+| control | repaired | `710e32f91116` | 1 passed, 12 assertions, `max\|diff\| = 9.53674316e-07` |
+| red-first | PRE-repair (`a449eca85`) | `bdf962e1d7c2` | **1 PASSED**, 7 assertions, `max\|diff\| = 0`, `Status: SUCCESS!` |
+| after | repaired (`0515493e8`) | `2659722482e2` | **1 FAILED**, 13 assertions, 2 failed, `max\|diff\| = inf` |
+
+Wave 6 read the same three verdicts and the same two `max|diff|` values at
+`5ee7e99e817a`, `c18b51f7de8e` and `987d7b7b5042` on the pre-merge head.
 
 The middle row IS the defect: an all-NaN device output printed
 `max|diff| = 0` and passed `worst < 1e-5`. The third row is the same poisoned
@@ -597,9 +611,11 @@ under the identical poison it goes from green to `1 failed / 9 assertions,
 3 failed`, printing `broadcast signal = inf, case bound = inf`.
 
 The tree was restored with `git diff --exit-code` returning 0 and the rebuilt
-binary is `5ee7e99e817a` again, BYTE-IDENTICAL to the control.
+binary is `710e32f91116` again, BYTE-IDENTICAL to the control (wave 6:
+`5ee7e99e817a`, likewise identical to its own control).
 
-**THE DECLARED GATE, RE-RUN ON THE REPAIRED HEAD AFTER MERGING `origin/main`:**
+**THE DECLARED GATE, ON THE POST-MERGE HEAD `0515493e8` (`origin/main`
+`7588c1e6f`):**
 battery `5 cases / 55 assertions / 0 failed`, cross-device
 `61 cases / 84841 assertions / 0 failed`, `-tc='*DSA*'`
 `2 cases / 273 assertions / 0 failed`, every one `Status: SUCCESS!` with
@@ -691,8 +707,8 @@ and four `strix:gpu0` leases are committed in that order. The kernel is one bloc
 per group in f32; `HcGroupedNormKernel` reads **0.56%** of decode kernel time
 where it read 35.68%, and decode is **8.111 tok/s** against 5.4345.
 
-REVIEWED, AND REPAIRED. A fresh hostile review returned FAIL on the gate and the
-records. The kernel was ACCEPTED unchanged -- the vLLM mirror re-verified at pin
+REVIEWED, AND REPAIRED, on `origin/main` `7588c1e6f` (merged at `0515493e8`).
+A fresh hostile review returned FAIL on the gate and the records. The kernel was ACCEPTED unchanged -- the vLLM mirror re-verified at pin
 `e126687a9a`, M0 reproduced exactly, the gate reproduced on a fifth independent
 build, and the 1.4925x re-measured independently at 1.4923x. Six mutations the
 row had not run were added by the reviewer and both barriers convict by value.
