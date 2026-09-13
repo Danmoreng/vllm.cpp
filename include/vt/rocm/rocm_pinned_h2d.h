@@ -61,6 +61,32 @@ struct StagedH2DInputs {
   bool ring_available = false;
 };
 
+// THE FOUR TERMS THAT COST NOTHING TO ANSWER, split out so the caller can ask
+// them BEFORE it allocates anything.
+//
+// `ring_available` is the one term a caller cannot answer by looking: on the
+// first qualifying copy, answering it MEANS allocating 256 MiB of pinned host
+// memory and four events. Evaluating it eagerly -- as this file's first
+// implementation did -- charges that allocation to every ROCm process that ever
+// hands `Copy` one buffer of 64 MiB or more, including the processes that then
+// take the direct path because the source is already pinned, the destination is
+// managed, or the copy is D2D. Measured: `VT_ROCM_MANAGED_ALLOC=1` on gfx1151
+// printed `staged=0 direct=3 chunks=0 ring_bytes=268435456`, a ring built and
+// never touched. `.agents/environment.md:95-100` measures that board's managed
+// ceiling as bounded by HOST RAM, so those bytes come out of the binding
+// resource on the arm that never stages.
+//
+// So the production path asks THIS first and calls the allocator only when it
+// passes. `ShouldStageH2D` stays the single authority on the decision and the
+// thing the truth table gates; this is that expression with `ring_available`
+// held true, and a case in tests/vt/test_rocm_pinned_h2d.cpp asserts the two
+// agree over the whole table so the split cannot drift.
+constexpr bool StagingTermsExceptRing(const StagedH2DInputs& in) {
+  return in.chunk_bytes != 0 && !in.stream_capturing &&
+         in.dst == PtrKind::kDevice && in.src == PtrKind::kUnregisteredHost &&
+         in.bytes >= in.chunk_bytes;
+}
+
 // FIVE terms, all required. Spelled as one expression so the truth table in
 // tests/vt/test_rocm_pinned_h2d.cpp can flip exactly one at a time.
 //
@@ -81,10 +107,11 @@ struct StagedH2DInputs {
 //  * `bytes >= chunk_bytes` — below one chunk the ring is strictly one extra
 //                           copy of the bytes with no overlap and no second slot
 //                           ever used. A 4 KiB norm weight must not pay a bounce.
+//
+// The first four are `StagingTermsExceptRing` above, which is what production
+// evaluates before it lets `EnsureRing` allocate anything.
 constexpr bool ShouldStageH2D(const StagedH2DInputs& in) {
-  return in.chunk_bytes != 0 && in.ring_available && !in.stream_capturing &&
-         in.dst == PtrKind::kDevice && in.src == PtrKind::kUnregisteredHost &&
-         in.bytes >= in.chunk_bytes;
+  return StagingTermsExceptRing(in) && in.ring_available;
 }
 
 // VT_ROCM_PINNED_H2D_MIB, in MiB. Absent or empty takes the default; an
