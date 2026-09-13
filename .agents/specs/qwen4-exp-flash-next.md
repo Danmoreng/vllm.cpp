@@ -10260,6 +10260,86 @@ negligible. Issue
 [#1958](https://github.com/mudler/vllm.cpp/issues/1958) is closed; the fix is
 owned by row `SAMPLE-CORE` (spec: `.agents/specs/sampling-controls-c7.md`).
 
+### W8 scope: a device-resident arm for the k-quant MoE block
+
+Owned by `.agents/issues/QUANT-CUDA-GATES/ISSUE-LOCAL-01M2AAACGC0SXYXFN2JQ3GFEAZ.md`.
+Scoped from the dgx trace that ranked W6 and W7; re-rank against the CURRENT step
+before accepting any number here.
+
+**What is wrong.** `MoeBlock` (`qwen3_5.cpp:7178`) has three arms: NVFP4 fused,
+bf16 fused, and a "reference path" for everything else. A GGUF k-quant
+checkpoint has neither fp4 nor bf16 experts, so EVERY GGUF MoE model this tree
+serves takes the third. That arm copies the hidden state to host and
+synchronizes once per layer, downloads the router top-k, and makes three
+`KqGrouped` calls (`:6133-6145`) that each upload an activation, launch ONE
+grouped GEMM and `Download` an f32 result -- a blocking drain -- with the SwiGLU
+in a host loop between them, and the routed output assembled in a host
+`std::vector` before being uploaded again for the combine.
+
+**Why it is worth doing now rather than earlier.** When the decode step was
+3.95 s this was 1 ms of it. The trace measured `cudaStreamSynchronize` at 367
+calls and 0.001 s per step against 2.25 s of `cudaMalloc`, which is why W6 came
+first and why this issue was explicitly recorded as a CAPTURABILITY defect
+rather than a speed one. W6 removed the allocator and W7 removed the norm, so
+the step is now dominated by what is left, and the same trace counted **2,534
+`cudaLaunchKernel` per step at ~20 ms** -- 0.5% of a 3.95 s step and a much
+larger share of a ~100 ms one. The tree states the consequence at `:7191-7193`:
+the fused arms are "capturable", the reference path is "not the capture target".
+While the MoE block leaves and re-enters the device every layer, CUDA graph
+capture is impossible for the whole model.
+
+**No new kernels are required, and that is what makes this tractable.**
+`vt::MatmulBTQuantGrouped` already runs the three grouped GEMMs on device for the
+encodings the shipped artifacts use (`IsCuda32BlockKeepQuantSupported` covers
+IQ4_NL / Q5_0 / Q4_0; `IsCudaKeepQuantSupported` covers the Q8_K family).
+`vt::OpId::kMoeSiluMul` is registered on CUDA (`cuda_moe.cu:941`) with the
+signature this needs, `(Queue&, Tensor& out, const Tensor& a, const Tensor& b)`.
+`MoeRouterTopK` and the combine are already device ops. What is missing is an arm
+that keeps the intermediates on device BETWEEN them.
+
+**Design, and it is the bf16 arm's shape rather than a new invention.** Add a
+`MoeBlockKqCuda` selected exactly where `MoeBlockBf16Cuda` is (`:7204-7208`),
+under the same three conditions that arm uses: CUDA, the required ops
+registered, and a default-ON environment gate (`VT_MOE_KQ_FAST`, with `=0`
+restoring the reference loop for a same-binary A/B and as the correctness
+oracle). That gate is the precedent at `MoeBf16FastEnabled()` (`:909`) and it is
+what makes this reviewable: the reference path stays, and the new arm is
+compared against it rather than replacing it unobserved.
+
+The broadcast the grouped kernel already implements (`Pa == 1 && P > 1`,
+`cuda_quant_dot.cu`) means the routed activation need not be gathered on host at
+all when `T == 1`: the hidden is one row and every routed pair reads it.
+
+**The bar this must clear, stated before the work starts.** PER-PAIR BIT
+IDENTITY with the reference arm, not a tolerance. The bf16 arm's own comment
+claims exactly that of itself ("the fused output is per-pair bit-identical to
+it"), and the k-quant path has the same property available because both arms
+reach the same `kMatmulBTQuant` core with the same `eids` slice. A tolerance
+here would hide a routing or ordering defect, which is the class of bug this
+seam has produced before (#2249 item 4, the rank-3 tower that "matched" by
+shape).
+
+**Tests.** A red-first case that fails for the intended reason: run one MoE
+block through both arms on the same inputs and assert byte equality of the
+routed output, with the new arm forced on and off by the gate. The red must come
+from the ARM SELECTION, not from a numerical bound -- a test that only checks
+tokens cannot see this, exactly as it could not see W6.
+
+**Gate.** `test_qwen4_exp_moe`, `test_qwen4_exp_moe_sel_fp` (the pair that pins
+the borrow identity, per the W6 review's M5), plus the qwen3_5 MoE suites, since
+`MoeBlock` is shared. The CUDA arm needs a lease; `test_qwen4_exp_hc_device` is
+NOT a device gate despite its name.
+
+**Owed evidence.** An `nsys` A/B on `dgx:gpu0`, arms interleaved, reporting the
+per-step `cudaLaunchKernel` count and `cudaStreamSynchronize` count on both
+arms, not only tok/s. The launch count is the number that says whether graph
+capture became possible; tok/s alone would not distinguish this change from a
+kernel that merely got faster.
+
+**Out of scope.** CUDA graph capture itself -- this change makes it POSSIBLE and
+a separate row does it. The NVFP4 and bf16 arms. `KqResidentSlice` and the
+per-expert path, which stays as the `VT_QWEN35_GROUPED_MOE=0` fallback.
+
 ### W7 scope: make the hyper-connection grouped norm fp32 and parallel
 
 Owned by `.agents/issues/MODEL-MM-QWEN4-EXP/ISSUE-LOCAL-01M2C8HBDD9VG6AJMPM9PTN80S.md`.
