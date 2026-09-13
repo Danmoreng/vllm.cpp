@@ -892,6 +892,17 @@ skips with that refusal quoted.
 - On ROCm, decode-shaped GEMMs (batch of 4 or fewer, bf16) run on a split-K
   skinny-GEMM kernel rather than the tiled BLAS path. Set `VT_ROCM_SKINNY=0`
   to restore the BLAS path when you want to compare the two.
+- On ROCm, a host-to-device copy of 64 MiB or more out of ordinary host storage
+  is staged through four pinned 64 MiB buffers rather than handed to the driver
+  as one pageable transfer, so host residency for the copy is 256 MiB whatever
+  the model's size. Every smaller copy, every readback, every device-to-device
+  copy, an already-pinned or managed source, and anything inside a graph capture
+  take the previous single call unchanged. Set `VT_ROCM_PINNED_H2D_MIB=0` to
+  restore that single call for every copy, or to another number of MiB to change
+  the chunk. On an integrated part with no pageable-memory access this is what
+  makes a large GGUF checkpoint load at all: with the ring off, a 67.56 GiB
+  artifact on gfx1151 stops at 29.69 GiB of device memory and never produces a
+  token. See [Environment variables](ENVIRONMENT.md).
 - On ROCm, Gemma-4 FP8 mixture-of-experts decode uses the device-indexed
   expert gate for batches up to 63 tokens; wider batches use the
   prefill-batch path. Set `VT_GEMMA4_DECODE_INDEXED_MAX_T=1` to restore the

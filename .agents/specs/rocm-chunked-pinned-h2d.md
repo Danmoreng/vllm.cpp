@@ -258,15 +258,64 @@ row has already shipped two selectors that matched nothing and reported
 `Status: SUCCESS!`; a selector that matches nothing is indistinguishable from
 one that passes.
 
-| binary | selector | cases | assertions |
-|---|---|---|---|
-| `test_rocm_pinned_h2d` | (none — whole binary) | RECORDED AT §7 | RECORDED AT §7 |
-| `test_backend_cross_device` | `-tc=*pinned bounce*` | RECORDED AT §7 | RECORDED AT §7 |
-| `test_backend_cross_device` | (none — whole binary) | RECORDED AT §7 | RECORDED AT §7 |
-| `test_backend_cross_device` | `-tc=*DSA*` | RECORDED AT §7 | RECORDED AT §7 |
+Measured on `strix:gpu0` (gfx1151, ROCm 7.2.4) under `rc` job
+`e8bf3b66-eb80-4659-8e6e-48167eb6bf60`, from a clean clone built in
+`/tmp/vllmcpp-chunked-h2d` with
+`cmake -G Ninja -DCMAKE_BUILD_TYPE=Release -DVLLM_CPP_HIP=ON`
+`-DVLLM_CPP_HIP_ARCHITECTURES=gfx1151 -DROCM_PATH=/opt/rocm`
+`-DVLLM_CPP_BUILD_TESTS=ON`, `ninja -j 4`, run with
+`LD_LIBRARY_PATH=/opt/rocm-7.2.4/lib` — without which the binary exits 127
+having measured nothing.
 
-Baseline to hold at `98e2cd7da`: `test_backend_cross_device` whole binary
-**60 cases / 84833 assertions**, `-tc=*DSA*` **2 / 273**.
+| binary | selector | cases | assertions | result |
+|---|---|---|---|---|
+| `test_rocm_pinned_h2d` | (none — whole binary) | 9 | 84 | SUCCESS |
+| `test_backend_cross_device` | `-tc=*pinned bounce*` | 1 | 8 | SUCCESS |
+| `test_backend_cross_device` | (none — whole binary) | 61 | 84841 | SUCCESS |
+| `test_backend_cross_device` | `-tc=*DSA*` | 2 | 273 | SUCCESS |
+
+Baseline at `98e2cd7da`: `test_backend_cross_device` whole binary **60 cases /
+84833 assertions**, `-tc=*DSA*` **2 / 273**. The whole binary therefore grew by
+exactly one case and eight assertions, which is this spec's case and nothing
+else, and `-tc=*DSA*` is unmoved.
+
+**RED, at the test commit `e1bf7fd1d`, same binary, same board.**
+`-tc=*pinned bounce*` reported **1 case, 0 passed, 1 failed / 8 assertions, 3
+passed, 5 failed**, `Status: FAILURE!`, exit 1, and printed
+`staged=0 direct=0 chunks=0 max_chunk=0 ring_bytes=0`. At the implementation
+commit `81f91b600` the same selector on the same board printed
+`staged=1 direct=2 chunks=3 max_chunk=67108864 ring_bytes=268435456` and
+`Status: SUCCESS!`. Both runs printed `pinned H2D case ran on a ROCm board: 1`,
+so neither is the shape where a selector matched nothing.
+
+**MUTATIONS, on the board, each with the binary proven changed by md5.** The
+clean implementation build is `88efb430a22c65c4` (`test_backend_cross_device`)
+and `fc26b58276f3e6f9` (`test_rocm_pinned_h2d`).
+
+| mutation | binaries | device selector | unit binary |
+|---|---|---|---|
+| delete `if (StagedCopy(...)) return;` from `RocmBackend::Copy` | `006c453cce2b25fb` / `8f82b9f94db909aa` | FAILURE, 4 of 8 assertions failed, `staged=0 direct=3 chunks=0 ring_bytes=0` | n/a |
+| widen the chunk to the whole buffer | `74949cfa593d0843` / `f3720497fdbe96ca` | FAILURE, SIGSEGV (exit 139) before any assertion | FAILURE, 10 of 19 assertions failed, then SIGSEGV |
+
+The second mutation convicts by CRASH rather than by assertion, and that is
+reported as what it is rather than dressed up: with the chunk widened, both the
+fake ring's slot buffers and the real pinned slots are one chunk long and the
+copy reads past them, so the process dies. It is still caused by the mutation and
+still red, and the arm that matters — the first one — fails cleanly on the
+instrument.
+
+**The tree was restored byte for byte, and the proof is the binary, not
+`git status`.** The rebuild after both mutations produced md5
+`88efb430a22c65c4` and `fc26b58276f3e6f9` — identical to the clean
+implementation build — and re-ran 9/84 and 1/8 green. `git status` reported one
+dirty path after the second mutation; that is the `core` file the SIGSEGV
+dumped into the checkout, not a source edit, and the identical binary hashes are
+what settle it.
+
+Eight further mutations of the pure header were run off-board before the branch
+was pushed, each convicting and each with a distinct binary md5: the chunk size
+widened, the slot wait deleted, each of the four predicate terms deleted, the
+cross-call in-flight state reset, and the knob parse made to answer 0 on a typo.
 
 ```sh
 python3 scripts/check-agent-record.py
@@ -315,9 +364,97 @@ The artifact's compiled feature set is asserted before it is timed: `ldd` for
   we want, and the last error is cleared with `hipGetLastError()` immediately so
   it cannot poison the next `Check`.
 
-## 7. Outcome
+## 7. Outcome — THE MODEL GATE IS MET, AND THE RING IS WHAT MEETS IT
 
-RECORDED ON LANDING.
+Measured 2026-09-13 on `strix:gpu0` (gfx1151, Radeon 8060S, ROCm 7.2.4, 30 GiB
+host, 32 CPUs), box exclusively leased, under `rc` job
+`672093bc-932b-4e54-b319-e15529f70256`. Built on the worker in
+`/tmp/vllmcpp-chunked-h2d` from a clean clone at `81f91b6005c7e8` with
+`cmake -G Ninja -DCMAKE_BUILD_TYPE=Release -DVLLM_CPP_HIP=ON`
+`-DVLLM_CPP_HIP_ARCHITECTURES=gfx1151 -DROCM_PATH=/opt/rocm -DVLLM_CPP_SERVER=ON`,
+`ninja -j 4 vllm-cli vllm-server`, run with
+`LD_LIBRARY_PATH=/opt/rocm-7.2.4/lib`. `VT_ROCM_MANAGED_ALLOC` unset.
+
+**The artifact was asserted before it was timed.** `ldd` on `vllm-cli` resolves
+`libamdhip64.so.7`, `libhsa-runtime64.so.1`, `libhipblaslt.so.1`,
+`libhipblas.so.3` and `librocblas.so.5`, all from `/opt/rocm-7.2.4/lib`, and
+CMake reported `ROCm backend: ENABLED for arch(es) [gfx1151]`. `vllm-cli` md5
+`364f11fddc6392feb79cdc23f8d69cf5`, `vllm-server` md5
+`aab04a1549ad3a5a543b1a6012834054`.
+
+Workload: `examples/vllm-cli --device auto --max-tokens 32 --temperature 0
+--max-num-seqs 1 --repeat 3 --prompt "Say hello"` over
+`/workspace/ckpt/qwen4exp-flash-next-iq1s/Qwen3.8-Flash-Next-UD-IQ1_S-00001-of-00003.gguf`
+(shard 1 of 3; 10,946,624 + 49,990,818,368 + 22,544,696,352 bytes).
+
+### The A/B, ONE BINARY, ONE BOOT, THE KNOB READ AT RUNTIME
+
+| | ARM A — ring ON | ARM B — `VT_ROCM_PINNED_H2D_MIB=0` |
+|---|---|---|
+| token | **YES — 3 x 32, `finish_reason=length`** | **NONE**, killed at the 1200 s deadline (exit 137) |
+| wall | 771 s, exited 0 | 1218 s, `killed_at_deadline=1` |
+| `[vt load] weights` | 61.187 s | 35.909 s (page cache warm from arm A) |
+| peak `VmHWM` | 20,714,504 kB (19.75 GiB) | 27,076,580 kB (25.82 GiB) |
+| peak `RssFile` | 14,516,792 kB (13.84 GiB) | 21,093,296 kB (20.12 GiB) |
+| peak `RssAnon` | 6,190,884 kB (5.90 GiB) | 5,807,020 kB (5.54 GiB) |
+| peak device `mem_info_vram_used` | **77,271,658,496 B** | 31,873,912,832 B |
+| `wchan` over D-state threads | 115 `folio_wait_bit_common`, 1 `wait_for_response`, **0 `svm_range_set_attr`**, 122 samples | **135 `svm_range_set_attr`**, 39 `folio_wait_bit_common`, 20 `do_mprotect_pkey`, 8 `exit_mm`, 1 `wait_for_response`, 197 samples |
+
+Arm B is `rocm-host-residency-after-upload.md` §6a reproduced to within noise —
+27.08 vs 27.25/27.32 GB `VmHWM`, 21.09 vs 21.21/21.34 GB `RssFile`,
+31,873,912,832 vs 31,878,860,800/31,880,183,808 B of device memory, and the same
+`svm_range_set_attr` majority. That is what makes arm A attributable: the two
+arms are the SAME BINARY minutes apart on the same board, and the only thing that
+differs is one environment variable this change reads. The ring is the cause.
+
+**The device memory is the tell.** Arm B stops at 29.69 GiB and stays there,
+exactly as §6a recorded. Arm A reaches 71.96 GiB, which is the whole checkpoint.
+So the wedge was never the model failing to fit; it was the upload never
+finishing. (The 71.96 GiB figure exceeds the 33.27 GB `hipMemGetInfo` total §6a
+quotes; the 96 GiB VRAM carve on this part is the obvious explanation and this
+spec does NOT resolve the discrepancy, it reports both raw numbers.)
+
+### The generations
+
+| run | tokens | seconds | tok/s |
+|---|---|---|---|
+| 1 | 32 | 695.871 | 0.046 |
+| 2 | 32 | 6.048 | 5.291 |
+| 3 | 32 | 6.069 | 5.273 |
+
+**Run 1 is not a decode number and must not be quoted as one.** Weight staging
+is lazy — `dense_attn::ResidentWeight` uploads on first use, behind the `d_dev`
+memo — so run 1 carries the one-time 72 GiB host-to-device transfer of the whole
+checkpoint. The steady-state pair is 5.291 and 5.273 tok/s, a spread of 0.34%
+over two samples. TWO warm samples is not three, and this is recorded as thin
+rather than dressed up: `--repeat 3` gives three generations of which exactly one
+is cold. gfx1151 fails about two runs in five with an illegal GPU memory access
+(`ISSUE-LOCAL-01M2BY2M2ATNVR3XQKV2DB1BJD`); neither arm here hit that signature,
+and arm A's three generations all completed with `finish_reason=length`.
+
+No TTFT is recorded: `vllm-cli` in blocking mode reports whole-generation
+seconds, not first-token latency, and no number is invented from it.
+
+### What this does NOT claim
+
+- No throughput COMPARISON. There is no llama.cpp or vLLM denominator here, and
+  5.28 tok/s is this engine's first number on this part, not a ratio.
+- No load-time verdict for the ring. Arm A's 61.187 s and arm B's 35.909 s are
+  not comparable: arm A read the checkpoint cold off CIFS and arm B read it with
+  the page cache already warm. A load-time A/B needs interleaved repeats from a
+  dropped cache and was not taken.
+- Nothing about any other family. §3b names them; only Qwen4-Exp was run.
+
+## 7a. Where the remaining time goes, so nobody reads 0.046 as the answer
+
+Arm A spends 695.871 s inside its first generation and 6.05 s inside each
+subsequent one. That 690 s difference is the lazy device staging of a 72 GiB
+checkpoint, which is about 104 MiB/s through the ring — slow, and the next
+question for this row rather than this spec's. The `wchan` histogram says where
+it is: 115 of 122 samples in `folio_wait_bit_common`, which is page-cache read
+wait on the CIFS mount (`//192.168.68.102/Data`), not device work. §6a named that
+mount as an unseparated confound; arm C of this job stages the checkpoint to
+local disk to separate it.
 
 ## 8. Stop conditions
 
