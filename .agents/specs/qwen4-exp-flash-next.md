@@ -10260,6 +10260,122 @@ negligible. Issue
 [#1958](https://github.com/mudler/vllm.cpp/issues/1958) is closed; the fix is
 owned by row `SAMPLE-CORE` (spec: `.agents/specs/sampling-controls-c7.md`).
 
+### THE REFERENCE MEASUREMENT, taken at last: 13.02 tok/s at 400 tokens, a 5.08x gap (2026-09-13)
+
+**This row has never before compared itself to sojufx on sojufx's workload.** Every
+figure it quoted -- 0.257, 8.50, 12.85 -- came from a 16-token decode, while the
+reference generates 400. The correction section above derives why that is not a
+comparison. This is the measurement that replaces the derivation.
+
+`dgx:gpu0` (GB10, sm_121a), `rc` job `4844371b`, source `abaa79c43`, built
+`-DVLLM_CPP_CUDA_ARCHITECTURES=121a`, released UD-IQ1_S staged locally,
+`--max-num-seqs 1 --device cuda --no-enable-thinking --enable-force-include-usage`.
+The request body is sparkDash's own (`max_tokens=400, min_tokens=400,
+ignore_eos, stop=[], temperature=0, top_p=1, stream, include_usage,
+chat_template_kwargs thinking disabled`) and the rate is sparkDash's own formula,
+`(completion_tokens - 1) / (tLast - tFirst)`. Prompt: "Count from 1 to 200.
+Output only the numbers, separated by spaces. No other text."
+
+| leg | tokens | tok/s | wall |
+|---|---|---|---|
+| `ref400_a` | 400 | **13.0215** | 31.63 s |
+| `ref400_b` | 400 | **13.0176** | 31.64 s |
+| `decode16`, SAME BOOT | 16 | 15.1305 | 2.19 s |
+
+Two 400-token runs **0.030% apart**. The 16-token leg ran on the same boot
+deliberately, so the comparison to this row's older numbers cannot be blamed on a
+boot.
+
+| | tok/s |
+|---|---|
+| sojufx sparkDash Decode Bench C1 | **66.17** |
+| vllm.cpp, same workload, same formula | **13.0195** |
+| **gap** | **5.08x** |
+
+**THE DERIVATION IT REPLACES WAS CLOSE, AND IS NOW RETIRED.** The correction
+section rescaled 12.85 tok/s to "~12.3 tok/s, a ~5.4x gap" by adding the QSA cost
+that 400 tokens of context carries and 16 does not. Measured: 13.02 and 5.08x.
+Quote the measurement, not the rescaling.
+
+**Cumulative, all on `dgx:gpu0`: 0.257 -> 13.02 tok/s at the reference workload,
+and the gap has gone 264x -> 5.08x.**
+
+#### THE STEP GROWS 34% WITHIN ONE 400-TOKEN RUN, AND QSA EXPLAINS A THIRD OF IT
+
+The per-token deltas of `ref400_a` rise monotonically from **0.06630 s** at the
+first token to **0.08885 s** at the last -- 15.08 tok/s falling to 11.25 tok/s,
+**+22.6 ms, +34.0%** -- and `ref400_b` reproduces the shape. This is the
+context-scaling the correction section argued, observed directly rather than
+inferred from two runs.
+
+**But QSA cannot account for most of it.** `|sel| = min(kv_len, block_topk * CR)`
+gives 36 at the first token and 435 at the last, so against the profile's
+30.5 ms at `|sel| = 1600` the gather grows **0.69 ms -> 8.30 ms = 7.6 ms**.
+Measured growth is 22.6 ms. **~14.9 ms is something else that also scales with
+context**, and it is now the larger unexplained term at this workload.
+
+ONE CANDIDATE, NAMED AND NOT ASSERTED: the indexer scores EVERY complete block,
+`kv_len / CR`, and that count is NOT capped by `block_topk` -- 9 blocks at
+kv_len 36 against 108 at kv_len 435. The gather is capped and the scorer is not.
+**DO NOT SCOPE FROM THIS PARAGRAPH.** It is a hypothesis with the right shape and
+no measurement; the owed instrument is a per-kernel attribution at two context
+lengths in one run, which is the same instrument
+`ISSUE-LOCAL-01M2DQHP2FWXHH7GTHB17QX53Q` already owes for the `cudaFree`
+population.
+
+#### THE W9 SPEED CLAIM, MEASURED BY THE OPERATOR: at least 3.62x on the suite's own fixtures
+
+The review noted that the operator's correctness gate (`d80f84a7`) ran pass/fail
+only, so **6.52x was still an implementer report**. `rc` job `c4e4e2cb` on
+`thor:gpu0` measures it instead: one clone, `test_qwen4_exp_cuda_reductions`
+built and run under `nsys` at each arm, reading `QsaGatherAttentionKernel`'s own
+mean from `cuda_gpu_kern_sum`.
+
+| arm | HEAD | instances | total | mean |
+|---|---|---|---|---|
+| base | `6a47d4370` | 14 | 32,033,760 ns | 2.2881 ms |
+| fix | `7d0d74c2c` | 17 | 8,849,920 ns | 0.5206 ms |
+
+**THE MEANS ARE NOT COMPARABLE AND THE NAIVE 4.40x MUST NOT BE QUOTED.** The fix
+arm runs THREE MORE instances than the base arm -- the new `DH` 8/16/1 case -- and
+they are small shapes that drag its mean down. What the numbers support is a
+bound: the 14 shared instances cost at most the whole fix total, since the three
+new ones cost more than zero, so the shared mean is at most 0.6321 ms and the
+speedup is **at least 3.62x**.
+
+**3.62x IS A LOWER BOUND ON A DIFFERENT SHAPE MIX, NOT A REFUTATION OF 6.52x.**
+This suite's fixtures are mostly small, and its largest runs `DH = 32`; the
+implementer's 6.52x was measured at the RELEASED decode shape, `DH = 256` and
+`|sel| = 2048`, where the per-row dot is 8x longer and fixed overheads are a
+smaller share. Both can hold. What the operator has verified is that the kernel
+got at least 3.6x cheaper on fixtures the committed suite actually runs; the
+released-shape figure remains an implementer measurement, and a gate for it needs
+a released-shape harness this suite does not contain.
+
+#### What this run did NOT establish
+
+- **The `nsys` leg FAILED, and the cause is the profiler flag rather than the
+  server.** The profiled boot came up (`ready ~55s`), its first request returned
+  ZERO chunks, and the next got `Connection refused`; `nsys stats` then refused
+  the capture with "file does not contain StringIds table". **`nsys profile
+  --duration N` TERMINATES THE PROFILED APPLICATION when the window closes** --
+  the default `--kill` is a signal, not `none` -- so the 25 s window killed the
+  server mid-load and left a truncated capture. The retry needs `--kill none`,
+  and a window placed to open AFTER the server is serving rather than while it is
+  still loading. Recorded here because the failure looks like a dead server and
+  is not one. So the `cudaFree`-per-step count at the 400-token workload, and the
+  GPU-busy fraction that bounds the allocator fix, are STILL OWED. The unprofiled
+  legs above are unaffected -- they ran on a separate boot that served all 816
+  tokens.
+- **The 16-token rate moved and this run cannot say why.** It is 15.13 tok/s here
+  against the 12.85 tok/s recorded at `ee0644eab`. `a69470a7f` (W8's
+  device-resident k-quant MoE arm, default-ON) landed in between and is the
+  obvious candidate, but **this is not an A/B** -- one boot at one SHA against a
+  boot at another, weeks of commits apart in tree terms. Attributing it needs the
+  interleaved same-tree harness W6 and W7 used. Recorded as an observation, not a
+  result.
+- W9 is NOT in this binary. `abaa79c43` predates it.
+
 ### The post-W7 profile on dgx, 2026-09-13: what W6 and W7 were worth, and what is next
 
 **W7 on the reference box.** Interleaved same-tree A/B, BASE `3b3ed716f` (W6 only)
@@ -10538,6 +10654,12 @@ retracted can be restored to the 527 reading specifically.
   instrumenting the three call sites settles it in one run. See
   `ISSUE-LOCAL-01M2DQHP2FWXHH7GTHB17QX53Q`, which also refutes a per-step `Drain`
   as the source.
+
+**MEASURED 2026-09-13, AND THIS PARAGRAPH'S RESCALING IS RETIRED BY IT:** at the
+reference's own 400-token workload we run **13.0195 tok/s**, a **5.08x** gap, two
+runs 0.030% apart on `dgx:gpu0`. See "### THE REFERENCE MEASUREMENT, taken at
+last". The reasoning below is kept because it is why the measurement was taken;
+its ~12.3 tok/s and ~5.4x are a derivation and must not be quoted as a result.
 
 **AND THE COMPARISON TO sojufx IS ITSELF ON THE WRONG WORKLOAD.** The reference
 generates **400** tokens; this row's 12.85 tok/s was measured generating **16**.
