@@ -9,7 +9,8 @@
 //   :202-238 `test_deepseek_v41_vl_mapper_routes_linear_scales` — the three
 //            `(weight_block_size, expert_dtype) -> scale name` cases.
 //
-// HARNESS ADAPTATIONS, and there are exactly three:
+// HARNESS ADAPTATIONS — three, and they are adaptations of HOW the same
+// assertion is spelled, not of WHAT is asserted:
 //   * Upstream parametrizes `scale_dtype in [torch.uint8, torch.float8_e8m0fnu]`
 //     and applies it with `.view(scale_dtype)`, a REINTERPRET of the same bytes
 //     with no conversion. On the host both arms are the identical `uint8_t`
@@ -27,6 +28,30 @@
 //     explicitly along the same axis each of those classes shards along, which
 //     is what `dequant.chunk(2, dim=axis)[tp_rank]` on the reference side does
 //     upstream.
+//
+// NOT PORTED — three upstream assertions this gate does NOT carry, each named
+// with what it guarantees and who owes it. Every one of them asserts a property
+// of the LOADER, which this tree does not have yet; none of them is a property
+// of the functions W3b lands, so there is nothing here they could be attached
+// to. All three are owed by the wiring waves on this row and are
+// recorded in `ISSUE-LOCAL-01M2C2QSFZWCXNQBJFBWYFNV2P`:
+//   * `test_fp8.py:186-188` — the OTHER half of the expansion guarantee. The
+//     MoE expert scale (`layers.0.ffn.experts.0.w1.weight_scale`) and the engram
+//     scale (`layers.0.engram.weight_scale_inv`) are asserted EQUAL to the raw
+//     3x4 checkpoint bytes, which is to say the row expansion must NOT be
+//     applied to them. `ExpandMxfp8CheckpointScale` is an explicit call, so
+//     nothing here can apply it by accident; what can apply it by accident is a
+//     loader that wires it onto the wrong parameter. **Owed by W8.**
+//   * `test_fp8.py:191` — `isinstance(linear.quant_method, ModelOptLinearMethod)`:
+//     the routing assertion. `quant_config.py:186-201` is listed in the header's
+//     port table as the ROUTING that selects this family, and W3b ports no
+//     routing predicate at all, only the five leaves it routes to. **Owed by W8**
+//     together with the `get_quant_method` port itself.
+//   * `test_fp8.py:226-237` — the mapper-rename half of the name split. This
+//     gate holds `_linear_scale_param_name` (`:223-224`); it does not hold that
+//     `_make_deepseek_v4_vl_weights_mapper` then renames `...attn.wq_a.scale` to
+//     `...attn.wq_a.<that name>` while leaving `...attn.wkv.weight` alone.
+//     **Owed by W8** (the mapper is loader-side).
 //
 // DERIVED, because upstream has no test that can be transcribed: no upstream
 // test exercises the emulation kernel by name, and every mxfp8 linear test is
@@ -198,7 +223,12 @@ TEST_CASE(
   // rtol=0, atol=0)` — BIT-exact, not a tolerance.
   for (int tp_rank : {0, 1}) {
     CAPTURE(tp_rank);
-    std::mt19937 rng(0xD54100U + static_cast<unsigned>(tp_rank));
+    // The SAME seed for both ranks, deliberately: upstream draws its tensors
+    // once and then takes `chunk(2, dim=axis)[tp_rank]` of that one tensor, so
+    // the two ranks are two shards of ONE checkpoint. Seeding per rank would
+    // give each rank a different tensor and would stop the pair from saying
+    // anything about sharding at all.
+    std::mt19937 rng(0xD54100U);
     for (const auto& t : kCheckpoints) {
       CAPTURE(t.source);
       const auto w = DrawWeightBytes(rng, t.n, t.k);
@@ -216,7 +246,7 @@ TEST_CASE(
       reference = Chunk2(reference, rn, rk, t.axis, tp_rank);
 
       // ACTUAL side, the way the loader builds it: EXPAND the scale rows first
-      // (modelopt.py:2186-2200), then pad, then shard, then dequant with the
+      // (modelopt.py:2186-2201), then pad, then shard, then dequant with the
       // RUNTIME per-32-column rule (test_fp8.py:193-196).
       auto es = ExpandMxfp8CheckpointScale(s.data(), t.n / kMxfp8BlockSize,
                                            t.k / kMxfp8BlockSize, kMxfp8BlockSize,
@@ -303,14 +333,14 @@ TEST_CASE("V4.1 MXFP8: the expansion must precede the TP shard, and the padded "
 }
 
 TEST_CASE("V4.1 MXFP8: a checkpoint scale block that is not 32 columns is refused") {
-  // modelopt.py:2191-2194 raises NotImplementedError when
+  // modelopt.py:2189-2192 raises NotImplementedError when
   // `block_cols != MXFP8_BLOCK_SIZE` or `block_rows < 1`.
   const std::vector<uint8_t> s = {1U, 2U, 3U, 4U};
   CHECK_THROWS(ExpandMxfp8CheckpointScale(s.data(), 2, 2, 32, 128));
   CHECK_THROWS(ExpandMxfp8CheckpointScale(s.data(), 2, 2, 32, 16));
   CHECK_THROWS(ExpandMxfp8CheckpointScale(s.data(), 2, 2, 0, 32));
   CHECK_THROWS(ExpandMxfp8CheckpointScale(s.data(), 2, 2, -1, 32));
-  // block_rows == 1 is legal and is the identity (modelopt.py:2200 returns the
+  // block_rows == 1 is legal and is the identity (modelopt.py:2201 returns the
   // unwrapped loader in that case).
   const auto e = ExpandMxfp8CheckpointScale(s.data(), 2, 2, 1, 32);
   CHECK(e == s);
@@ -356,6 +386,37 @@ TEST_CASE("V4.1 MXFP8: runtime dequant matches a double-precision recompute, and
     CHECK(vt::BF16ToF32(gotb[i]) == vt::BF16ToF32(vt::F32ToBF16(got[i])));
 }
 
+TEST_CASE("V4.1 MXFP8: scale byte 0 decodes ARITHMETICALLY to 2^-127, not to the "
+          "bitcast decode's zero") {
+  // THE DECODE CHOICE, held here and nowhere else. Two E8M0 decodes exist in
+  // this tree's reach and they agree on every byte except 0 and 0xFF:
+  //   arithmetic  `exp2(byte - 127)`  — `vllm::E8M0ToF32` (mxfp4_dequant.cpp:15-22),
+  //                                     which this family uses, and which
+  //                                     mirrors `torch.exp2(scales - 127)`
+  //                                     (mxfp8_utils.py:237);
+  //   bitcast     `(byte << 23)` read as f32 — upstream's Engram kernel
+  //                                     (`deepseek_v4_1/common/engram.py:613-614`),
+  //                                     which W3a owns.
+  // Byte 0 separates them: arithmetic gives 2^-127, bitcast gives +0.0. The
+  // suite's drawn scale bytes are `randint(124, 131)` (upstream's range,
+  // `DrawScaleBytes` below), so without this case the only byte that separated
+  // the two decodes anywhere in the file was 0xFF — and 0xFF is itself a
+  // recorded, revisitable divergence. Reconciling 0xFF to upstream's `+inf`
+  // would then leave NOTHING holding the decode on this arm.
+  CHECK(vllm::E8M0ToF32(0U) == std::ldexp(1.0F, -127));
+  CHECK(vllm::E8M0ToF32(0U) != 0.0F);
+  // And through the family's own entry point, on a NONZERO weight, because a
+  // zero weight makes both decodes agree at 0.
+  const std::vector<uint8_t> w(kMxfp8BlockSize, vllm::F32ToF8E4M3(1.0F));
+  const std::vector<uint8_t> s = {0U};
+  std::vector<float> out(kMxfp8BlockSize);
+  DequantMxfp8ToF32(w.data(), s.data(), 1, kMxfp8BlockSize, out.data());
+  for (float v : out) {
+    CHECK(v == std::ldexp(1.0F, -127));
+    CHECK(v != 0.0F);
+  }
+}
+
 TEST_CASE("V4.1 MXFP8: scale byte 0xFF is the OCP NaN encoding, a NAMED divergence "
           "from upstream's exp2(255-127) == +inf") {
   // The quantizer clamps sb to 254 so it cannot PRODUCE 0xFF; only a hand-written
@@ -375,7 +436,7 @@ TEST_CASE("V4.1 MXFP8: scale byte 0xFF is the OCP NaN encoding, a NAMED divergen
 
 TEST_CASE("V4.1 MXFP8 dynamic quant: the exponent byte is ceil(log2(amax/448))+127, "
           "clamped to [0, 254]") {
-  // mxfp8_utils.py:127-129. Hand-derived literals: with amax == 448 exactly,
+  // mxfp8_utils.py:127-128. Hand-derived literals: with amax == 448 exactly,
   // log2(1) == 0, so sb == 127 (scale 2^0). With amax == 896, sb == 128.
   const int64_t k = kMxfp8BlockSize;
   auto sb_of = [&](float amax) {
@@ -389,6 +450,16 @@ TEST_CASE("V4.1 MXFP8 dynamic quant: the exponent byte is ceil(log2(amax/448))+1
   CHECK(sb_of(448.0F) == 127);
   CHECK(sb_of(896.0F) == 128);
   CHECK(sb_of(224.0F) == 126);
+  // CEIL, not floor, and these are the only literals here that can tell them
+  // apart. Every literal above is 448 * 2^k, where `log2(amax / 448)` is an
+  // INTEGER and `ceil == floor`; the case is silent about the rounding it
+  // names. 300 / 448 == 0.6696, log2 == -0.5787: ceil gives 0 and sb == 127,
+  // floor would give -1 and sb == 126. 500 / 448 == 1.1161, log2 == 0.1583:
+  // ceil gives 1 and sb == 128, floor would give 0 and sb == 127. The
+  // polarity matters — ceil is what keeps the scaled amax at or below 448
+  // rather than one binade above it, which the round-trip case below checks.
+  CHECK(sb_of(300.0F) == 127);
+  CHECK(sb_of(500.0F) == 128);
   // Clamp LOW: a tiny amax would drive sb far negative; 0 is the floor.
   CHECK(sb_of(std::numeric_limits<float>::min()) == 0);
   CHECK(sb_of(0.0F) == 0);
@@ -405,21 +476,25 @@ TEST_CASE("V4.1 MXFP8 dynamic quant: the exponent byte is ceil(log2(amax/448))+1
 }
 
 TEST_CASE("V4.1 MXFP8 dynamic quant: an all-zero block stays ZERO and FINITE") {
-  // mxfp8_utils.py:130-136 states the hazard in upstream's own words: sb == 0
+  // mxfp8_utils.py:129-135 states the hazard in upstream's own words: sb == 0
   // makes the DIVISOR 2**-127, subnormal in fp32, which flushes to zero on CDNA
   // and turns the block's zeros into 0/0 == NaN. The reciprocal 2^(127-0) == 2^127
   // is a normal float, which is why the port multiplies.
   //
   // **WHAT THIS CASE DOES NOT GATE, measured rather than assumed.** Replacing
-  // the multiply with a true divide by `exp2(sb - 127)` leaves this suite at
-  // 13/13 with the binary proved changed (md5 d860475... against the baseline
-  // 6b27143...). The two forms are exact powers of two and x86 has no
-  // flush-to-zero here, so they are bit-identical on every host this gate runs
-  // on; upstream's own comment says as much ("both forms are exact powers of
-  // two, so nothing else changes"). The multiply is therefore a SOURCE-level
-  // decision whose difference only a CDNA device arm can measure, and W5 owes
-  // that measurement. This case gates what it can: sb == 0 and a finite zero
-  // result, which the LOW CLAMP produces and which the M5 mutation does kill.
+  // the multiply with a true divide by `exp2(sb - 127)` leaves this suite GREEN
+  // with the binary proved changed. See the `## Mutations` table in
+  // `ISSUE-LOCAL-01M2C2QSFZWCXNQBJFBWYFNV2P`, which carries every digest beside
+  // the build recipe that produced it; digests are not repeated here, because a
+  // digest without its recipe is not reproducible and a digest stored in two
+  // files drifts. The two forms are exact powers of two and x86 has no
+  // flush-to-zero here, so they are bit-identical on every host WITHOUT
+  // flush-to-zero, which is every host this gate runs on; upstream's own comment
+  // says the weaker "nothing else changes". The multiply is therefore a
+  // SOURCE-level decision whose difference only a CDNA device arm can measure,
+  // and W5 owes that measurement. This case gates what it can: sb == 0 and a
+  // finite zero result, which the LOW CLAMP produces and which the low-clamp
+  // mutation does kill.
   const int64_t k = kMxfp8BlockSize;
   const std::vector<float> x(static_cast<size_t>(k), 0.0F);
   std::vector<uint8_t> q(static_cast<size_t>(k));
@@ -436,7 +511,7 @@ TEST_CASE("V4.1 MXFP8 dynamic quant: an all-zero block stays ZERO and FINITE") {
 
 TEST_CASE("V4.1 MXFP8 dynamic quant: the scale puts the block amax at the TOP of the "
           "e4m3 range, so the block round-trips inside one e4m3 step") {
-  // mxfp8_utils.py:124-126: "the scale has to put the block amax at the top of
+  // mxfp8_utils.py:123-125: "the scale has to put the block amax at the top of
   // the e4m3 range rather than at 1.0, or small elements of the block end up in
   // the subnormals". Derived: after scaling, |amax| lands in (224, 448], and e4m3
   // has 3 mantissa bits, so the worst-case relative error of the round is
@@ -485,8 +560,8 @@ TEST_CASE("V4.1 MXFP8 dynamic quant: the scale puts the block amax at the TOP of
 
 TEST_CASE("V4.1 MXFP8 emulation linear: matches a double-precision recompute that "
           "narrows the weight through BF16 first") {
-  // emulation.py:46-48 replaces the 1-byte MXFP8 weight with the BF16 dequant at
-  // load, then :60-63 runs a plain `F.linear`. The bf16 narrowing is part of the
+  // emulation.py:45-48 replaces the 1-byte MXFP8 weight with the BF16 dequant at
+  // load, then :59-63 runs a plain `F.linear`. The bf16 narrowing is part of the
   // arm's numerics: it is the dtype the emulated weight actually has.
   std::mt19937 rng(0xD54104U);
   std::uniform_real_distribution<float> dx(-1.0F, 1.0F);
@@ -523,23 +598,152 @@ TEST_CASE("V4.1 MXFP8 emulation linear: matches a double-precision recompute tha
       CHECK(nob[i * n + j] == doctest::Approx(got[i * n + j] - bias[j]));
 }
 
-TEST_CASE("V4.1 MXFP8 emulation linear: the weight IS narrowed to bf16, and a weight "
-          "bf16 cannot hold proves it") {
+TEST_CASE("V4.1 MXFP8: the bf16 narrowing is a NO-OP on all but the bottom of the "
+          "range, and the one value that separates it is 2^-136") {
   // A dtype that is too WIDE is invisible to a token gate (AGENTS.md), so the
-  // narrowing needs its own assertion. e4m3 byte for 1.75 at scale 2^0 is exactly
-  // 1.75, which bf16 holds; 1.875 (mantissa 111) at scale 2^0 also fits bf16 (8
-  // mantissa bits). Use a value the PRODUCT pushes past bf16: e4m3 0.9375 * 2^-6.
-  // Instead, assert the polarity directly: a single k, x == 1, out == bf16(w*s).
-  const int64_t m = 1, k = kMxfp8BlockSize, n = 1;
+  // narrowing needs an assertion that can actually SEE it. Most candidate values
+  // cannot: an e4m3 datum is an integer in [1, 15] times a power of two (3
+  // explicit mantissa bits, or 3 subnormal bits), the scale is a power of two,
+  // so EVERY dequant product carries at most 4 significant bits where bf16 holds
+  // 8. Over the whole product space `bf16(v) == v`, and the earlier version of
+  // this case — `1.875 * 2^-6` — was therefore vacuous: 1.875 is `1.111b`, which
+  // bf16 holds exactly.
+  //
+  // What DOES separate f32 from bf16 is the EXPONENT floor, not the mantissa.
+  // f32's smallest subnormal is 2^-149; bf16's is 2^-133, because its 8-bit
+  // significand eats 7 of the 8 exponent steps below 2^-126. So the smallest
+  // product this format can build — the smallest e4m3 subnormal `0x01` == 2^-9
+  // times scale byte 0 == 2^-127 — is 2^-136: exact in f32, and ZERO in bf16.
+  const float kTiniest = std::ldexp(1.0F, -136);
+  REQUIRE(vllm::F8E4M3ToF32(0x01U) == std::ldexp(1.0F, -9));
+  REQUIRE(vllm::E8M0ToF32(0U) == std::ldexp(1.0F, -127));
+  REQUIRE(kTiniest != 0.0F);                            // f32 holds it
+  REQUIRE(vt::BF16ToF32(vt::F32ToBF16(kTiniest)) == 0.0F);  // bf16 does not
+
+  const int64_t k = kMxfp8BlockSize;
   std::vector<uint8_t> w(static_cast<size_t>(k), 0U);
-  w[0] = vllm::F32ToF8E4M3(1.875F);  // e4m3 exact: 1.111b
-  const std::vector<uint8_t> s = {127U - 6U};  // 2^-6
+  w[0] = 0x01U;                        // e4m3 smallest subnormal, 2^-9
+  const std::vector<uint8_t> s = {0U};  // 2^-127
+
+  // (a) The f32 emitter keeps it and the bf16 emitter loses it. This is the
+  // MEMORY-FORMAT assertion: delete the `F32ToBF16` in `DequantMxfp8ToBf16` and
+  // this reds.
+  std::vector<float> df(static_cast<size_t>(k));
+  DequantMxfp8ToF32(w.data(), s.data(), 1, k, df.data());
+  CHECK(df[0] == kTiniest);
+  std::vector<uint16_t> db(static_cast<size_t>(k));
+  DequantMxfp8ToBf16(w.data(), s.data(), 1, k, db.data());
+  CHECK(vt::BF16ToF32(db[0]) == 0.0F);
+
+  // (b) The emulation arm inherits it, because it dequantizes the weight to
+  // BF16 once (emulation.py:45-46) rather than holding an f32 weight. Delete
+  // that narrowing and the product is 2^-136 instead of 0.
   std::vector<float> x(static_cast<size_t>(k), 0.0F);
   x[0] = 1.0F;
   std::vector<float> out(1);
-  Mxfp8LinearEmulation(x.data(), m, k, w.data(), s.data(), n, nullptr, out.data());
-  const float exact = 1.875F * std::exp2f(-6.0F);
-  CHECK(out[0] == vt::BF16ToF32(vt::F32ToBF16(exact)));
+  Mxfp8LinearEmulation(x.data(), 1, k, w.data(), s.data(), 1, nullptr, out.data());
+  CHECK(out[0] == 0.0F);
+
+  // (c) The narrowing ROUNDS to nearest even, it does not truncate, and the
+  // bf16 subnormal range is again the only place that can tell the two apart.
+  // e4m3 `0x03` is the subnormal 3 * 2^-9; scale byte 2 is 2^-125; the product
+  // is 3 * 2^-134 == 1.5 bf16 subnormal steps, a dead tie. RNE takes the even
+  // neighbour 2^-132; a truncating high-half store takes 2^-133. Without this,
+  // a "narrowing" that merely drops the low 16 bits passes (a) and (b), because
+  // 2^-136 truncates to zero as well.
+  std::vector<uint8_t> w3(static_cast<size_t>(k), 0U);
+  w3[0] = 0x03U;
+  const std::vector<uint8_t> s2 = {2U};
+  REQUIRE(vllm::F8E4M3ToF32(0x03U) == 3.0F * std::ldexp(1.0F, -9));
+  std::vector<uint16_t> tie(static_cast<size_t>(k));
+  DequantMxfp8ToBf16(w3.data(), s2.data(), 1, k, tie.data());
+  CHECK(vt::BF16ToF32(tie[0]) == std::ldexp(1.0F, -132));
+  CHECK(vt::BF16ToF32(tie[0]) != std::ldexp(1.0F, -133));
+  Mxfp8LinearEmulation(x.data(), 1, k, w3.data(), s2.data(), 1, nullptr, out.data());
+  CHECK(out[0] == std::ldexp(1.0F, -132));
+
+  // (d) And the ordinary case still round-trips, so (a) through (c) are reading
+  // a floor and not a broken emitter: 1.875 at 2^-6 survives both paths intact.
+  w[0] = vllm::F32ToF8E4M3(1.875F);  // e4m3 exact: 1.111b
+  const std::vector<uint8_t> s6 = {127U - 6U};
+  Mxfp8LinearEmulation(x.data(), 1, k, w.data(), s6.data(), 1, nullptr, out.data());
+  CHECK(out[0] == 1.875F * std::ldexp(1.0F, -6));
+}
+
+TEST_CASE("V4.1 MXFP8 emulation linear: the BF16 arm is the model-path arm, and it "
+          "matches the f32 reference narrowed at the store") {
+  // emulation.py:59-63 runs `F.linear(x, weight.to(x.dtype), bias).to(x.dtype)`
+  // with `x` the model dtype, which V4.1 resolves to bf16
+  // (test_fp8.py:83 sets `dtype=torch.bfloat16`). So the upstream arm is bf16
+  // in and bf16 out; `Mxfp8LinearEmulationBf16` is that arm, and the f32 entry
+  // point beside it is a REFERENCE, not a model-path buffer.
+  std::mt19937 rng(0xD54105U);
+  std::uniform_real_distribution<float> dx(-1.0F, 1.0F);
+  const int64_t m = 3, k = 64, n = 5;
+  const auto w = DrawWeightBytes(rng, n, k);
+  const auto s = DrawScaleBytes(rng, n, k / kMxfp8BlockSize);
+
+  // Draw the activation and the bias AS BF16, so the two arms get identical
+  // inputs and the only difference between them is the output store.
+  std::vector<uint16_t> xb(static_cast<size_t>(m * k));
+  std::vector<float> xf(static_cast<size_t>(m * k));
+  for (size_t i = 0; i < xb.size(); ++i) {
+    xb[i] = vt::F32ToBF16(dx(rng));
+    xf[i] = vt::BF16ToF32(xb[i]);
+  }
+  std::vector<uint16_t> bb(static_cast<size_t>(n));
+  std::vector<float> bf(static_cast<size_t>(n));
+  for (size_t i = 0; i < bb.size(); ++i) {
+    bb[i] = vt::F32ToBF16(dx(rng));
+    bf[i] = vt::BF16ToF32(bb[i]);
+  }
+
+  std::vector<float> ref(static_cast<size_t>(m * n));
+  Mxfp8LinearEmulation(xf.data(), m, k, w.data(), s.data(), n, bf.data(), ref.data());
+  std::vector<uint16_t> got(static_cast<size_t>(m * n));
+  Mxfp8LinearEmulationBf16(xb.data(), m, k, w.data(), s.data(), n, bb.data(),
+                           got.data());
+  // f32 accumulation in both, narrowed ONCE at the store: this is an equality,
+  // and it reds if the bf16 arm ever stores something wider or rounds twice.
+  for (size_t i = 0; i < got.size(); ++i) CHECK(got[i] == vt::F32ToBF16(ref[i]));
+
+  // The `bias=None` arm (emulation.py:56), and the polarity that says the store
+  // really is bf16: a result bf16 cannot hold comes back rounded.
+  std::vector<uint16_t> nob(static_cast<size_t>(m * n));
+  Mxfp8LinearEmulationBf16(xb.data(), m, k, w.data(), s.data(), n, nullptr,
+                           nob.data());
+  std::vector<float> noref(static_cast<size_t>(m * n));
+  Mxfp8LinearEmulation(xf.data(), m, k, w.data(), s.data(), n, nullptr, noref.data());
+  bool any_rounded = false;
+  for (size_t i = 0; i < nob.size(); ++i) {
+    CHECK(nob[i] == vt::F32ToBF16(noref[i]));
+    if (vt::BF16ToF32(nob[i]) != noref[i]) any_rounded = true;
+  }
+  // Not decoration: without at least one value the bf16 store actually changes,
+  // the equality above would hold for an f32 passthrough too.
+  CHECK(any_rounded);
+}
+
+TEST_CASE("V4.1 MXFP8 emulation linear: a non-positive K is REFUSED before the "
+          "weight buffer is sized") {
+  // The arm sizes `std::vector<uint16_t>(N * K)` before anything validates K.
+  // For K == 0 the refusal already arrived one level down, from the dequant's
+  // own `N > 0 && K > 0`; for K < 0 it did NOT, because `static_cast<size_t>(N *
+  // K)` on a negative product asks for ~2^64 elements and the allocator throws
+  // `std::length_error` — a `std::logic_error`, not the `std::runtime_error`
+  // every VT_CHECK in this family raises. Pinning the EXCEPTION TYPE is what
+  // makes this case able to tell a refusal from an accident.
+  const std::vector<uint8_t> w(32U, 0U), s(1U, 127U);
+  std::vector<float> x(32U, 0.0F), out(1U);
+  CHECK_THROWS_AS(
+      Mxfp8LinearEmulation(x.data(), 1, 0, w.data(), s.data(), 1, nullptr, out.data()),
+      std::runtime_error);
+  CHECK_THROWS_AS(
+      Mxfp8LinearEmulation(x.data(), 1, -32, w.data(), s.data(), 1, nullptr, out.data()),
+      std::runtime_error);
+  CHECK_THROWS_AS(Mxfp8LinearEmulationBf16(nullptr, 1, -32, w.data(), s.data(), 1,
+                                           nullptr, nullptr),
+                  std::runtime_error);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

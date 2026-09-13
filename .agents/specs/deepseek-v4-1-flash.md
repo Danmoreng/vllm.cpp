@@ -673,7 +673,8 @@ that ends in a claim.
   AGENTS.md §"Nothing lands dead" record for it. `deepseek_v4_1_mxfp8.{h,cpp}`
   carries the five pieces of the MXFP8 32x32 UE8M0 linear family — the
   checkpoint-to-runtime scale row expansion, the runtime per-32-column dequant,
-  the dynamic activation quantizer, the emulation linear arm and the
+  the dynamic activation quantizer, the emulation linear arm (bf16 in and bf16
+  out, `Mxfp8LinearEmulationBf16`, with an f32 reference beside it) and the
   `weight_scale` / `weight_scale_inv` name split. Nothing calls any of them,
   because `deepseek_v41` is not registered: that is **W1**. The wiring is owned
   by this row, split across **W8** (the loader arm, which calls the expansion and
@@ -690,7 +691,7 @@ that ends in a claim.
   assumed.** Mirroring upstream's MULTIPLY by `exp2(127 - sb)` rather than a
   divide by `exp2(sb - 127)` survives mutation with the binary proved changed,
   because the two forms are exact powers of two and only CDNA's flush-to-zero
-  separates them (`mxfp8_utils.py:130-135`). The `amax` TINY floor survives for
+  separates them (`mxfp8_utils.py:129-134`). The `amax` TINY floor survives for
   the same kind of reason: the low clamp already maps `log2(0) == -inf` to
   `sb == 0`. **W5's CUDA/ROCm arm owes both measurements**; until then the two
   are source-level fidelity decisions and this spec does not claim a gate holds
