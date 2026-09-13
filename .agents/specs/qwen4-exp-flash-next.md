@@ -10260,6 +10260,73 @@ negligible. Issue
 [#1958](https://github.com/mudler/vllm.cpp/issues/1958) is closed; the fix is
 owned by row `SAMPLE-CORE` (spec: `.agents/specs/sampling-controls-c7.md`).
 
+### The post-W7 profile on dgx, 2026-09-13: what W6 and W7 were worth, and what is next
+
+**W7 on the reference box.** Interleaved same-tree A/B, BASE `3b3ed716f` (W6 only)
+against FIX `ee0644eab` (W6+W7), one boot per arm, two rounds, released UD-IQ1_S
+staged locally, `--max-num-seqs 1 --device cuda`, 16-token decode, median
+inter-token:
+
+| arm | round 1 | round 2 |
+|---|---|---|
+| BASE (W6) | -- | 8.496 tok/s, 0.11769 s |
+| FIX (W6+W7) | 12.892 tok/s, 0.07751 s | 12.817 tok/s, 0.07798 s |
+
+**0.1177 -> 0.0778 s per token, 40 ms removed, 1.51x.** The W7 scope predicted,
+before the work started, "~42 ms per step removed, a step near 77 ms, and ~13
+tok/s". Measured: 40 ms, 77.8 ms, 12.85 tok/s. The prediction is met, not
+adjusted.
+
+**Cumulative, all on `dgx:gpu0` with the same harness:** 0.257 -> 8.50 -> 12.85
+tok/s, i.e. **50x across this campaign**, against the sojufx sparkDash C1
+reference of 66.17 tok/s -- a gap of 264x at the start and **5.2x now**.
+
+**The ranking has changed, and not toward what the pre-W6 trace predicted.**
+`nsys`, 60 s window inside a 3000-token decode (~771 steady-state steps):
+
+| kernel | share | instances | avg |
+|---|---|---|---|
+| `QsaGatherAttentionKernel` | **34.5%** | 6,319 | **2.545 ms** |
+| cuBLAS `gemvx` (bf16, shape A) | 19.6% | 37,914 | 242 us |
+| `QuantDotGemmGrouped32Kernel` | 8.8% | 25,277 | 163 us |
+| cuBLAS `gemvx` (shape B) | 6.8% | 56,872 | 55 us |
+| `QuantDotGemmGroupedKernel` W8 | 5.9% | 35,816 | 77 us |
+
+`HcGroupedNormKernel` does not appear in the top twelve. Before W7 it was 40.7%
+and rank 1; W7's effect is confirmed at the ranking level on the reference box,
+not only end to end.
+
+**TWO THINGS THIS OVERTURNS.** First, the next target was going to be the dense
+GEMV path on the strength of the pre-W6 trace (16 ms/step) and the recorded
+cuBLASLt descriptor lever. It is second, not first. `QsaGatherAttentionKernel` is
+the leader at ten times the next kernel's average, and it was INVISIBLE before:
+2.7% at 231 us in the pre-W6 trace, buried under the allocator. A stale ranking
+would have sent the next row to the wrong kernel.
+
+Second, and larger: **the allocator is still the top HOST cost.**
+
+| API | share | calls | avg |
+|---|---|---|---|
+| `cudaFree` | **63.0%** | 52,130 | 634 us |
+| `cudaMemcpyAsync` | 22.8% | 553,963 | 21.6 us |
+| `cudaLaunchKernel` | 12.4% | 1,349,118 | 4.8 us |
+| `cudaStreamSynchronize` | 0.5% | 198,000 | 1.3 us |
+
+Over ~771 steps that is ~68 `cudaFree` and ~43 ms per step, at 634 us per call.
+W6 removed the per-step ADAPTER rebuild and its 378 allocations; something still
+frees ~68 objects per step. The candidates are the pooled `DBuf` lifetimes in the
+MoE and attention paths and any `ResidentWeight` whose `d_dev` still does not
+memoise. THIS IS NOT A CLAIM ABOUT WHICH -- it is the measurement that says the
+question is open, and it is the first thing the next row should resolve, because
+a 634 us free is itself anomalous.
+
+`cudaLaunchKernel` is 1,349,118 calls over ~771 steps = ~1,750 per step at 4.8 us,
+so ~8.4 ms per step of launch overhead. That is the number W8 exists to attack,
+and it is now ~11% of the step rather than 0.5% of it.
+
+**Owed.** A per-step attribution for the `cudaFree` population, before any row
+scopes a fix for it. Do not scope from this paragraph alone.
+
 ### W8 scope: a device-resident arm for the k-quant MoE block
 
 Owned by `.agents/issues/QUANT-CUDA-GATES/ISSUE-LOCAL-01M2AAACGC0SXYXFN2JQ3GFEAZ.md`.
