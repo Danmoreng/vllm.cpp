@@ -61,6 +61,8 @@
 
 #include "vllm/config/weight_residency.h"
 #include "vllm/model_executor/model_loader/gguf_keep_quant.h"
+#include "vllm/model_executor/models/dense_attn_block.h"
+#include "vllm/model_executor/models/dense_device_glue.h"
 #include "vllm/model_executor/models/qwen3_5.h"
 #include "vllm/model_executor/models/qwen3_5_dense.h"
 #include "vllm/model_executor/models/qwen3_5_internal.h"
@@ -1051,6 +1053,137 @@ TEST_CASE("a host-addressable device that STAGES anyway still releases nothing")
   REQUIRE(t.data == w.d_dev.get());
   CHECK(vllm::BorrowReleaseSnapshot().calls == before.calls);
   // ...and the host bytes the kernels may still follow are intact and unchanged.
+  CHECK(std::memcmp(w.bytes.data(), t.data, nb) == 0);
+}
+#endif  // __linux__
+
+// ═══════════════════════════════════════════════════════════════════════════
+// THE SECOND STAGING ARM — `dense_attn::ResidentWeight`, which is the one
+// QWEN4-EXP TAKES.
+//
+// THE CASES ABOVE PROVE THE WRONG FUNCTION FOR THIS ROW, AND THAT IS MEASURED.
+// `Qwen3_5EmbeddingTable` bridges the `ResidentWeight` defined in the unnamed
+// namespace of `qwen3_5.cpp`, which SHADOWS the header one inside that
+// translation unit. That function serves the Qwen3.5 dense weights and, through
+// `KqResidentSlice` and `KqGrouped`, the shared MoE seam's keep-quant expert
+// towers -- so the MoE half of the target checkpoint does reach it. What never
+// reaches it is Qwen4-Exp's attention, norm, hyper-connection, PLE and lm_head
+// weights: every one of those stages through `dense_attn::ResidentWeight`
+// instead (12 call sites in `qwen4_exp_forward.cpp`, 10 in
+// `qwen4_exp_qsa_block.cpp`, 7 in `qwen4_exp_ple_block.cpp`, 1 in
+// `qwen4_exp_registry.cpp`, and zero references to the `qwen3_5.cpp` function
+// anywhere in that model). With the release in the other function only, host
+// `RssFile` on `strix:gpu0` still climbed to 21.08 GB during the forward and
+// stayed there.
+//
+// WHY THESE CALL THE SEAM DIRECTLY. `dense_attn::ResidentWeight` is production
+// code in a production header, not a test hook, and this file's fake backend
+// implements memory operations only -- it registers no `Embedding`, `MatmulBT`
+// or `RmsNorm` for `kXPU`, so every Qwen4-Exp entry point ABOVE this seam
+// (`RunQwen4ExpPleBlock`, `RunQwen4ExpMoeBlock`, `ModelRegistry::Forward`)
+// refuses on a missing op before residency is even asked about. This is the
+// same shape and the same argument as
+// `tests/vllm/model_executor/test_resident_weight_f32_copy_retires.cpp:263`,
+// which gates `dense_attn::ResidentWeightF32` by a direct call for exactly this
+// reason and carries its reachability separately. The reachability evidence
+// here is the 30 production call sites named above; the mutation that convicts
+// this wiring is deleting the `MaybeReleaseStagedBorrowSource` call from
+// `dense_attn_block.h`, which turns case one below red.
+#if defined(__linux__)
+TEST_CASE("dense_attn: a STAGED borrow's source pages are released too") {
+  const PlatformArm arm(false);  // a device that cannot read host memory
+  MappedFile f(static_cast<size_t>(kBigVocab * kBigHidden) * 2);
+  REQUIRE(f.ok());
+  f.Prefault();
+
+  const size_t rss_resident = RssFileKib();
+  REQUIRE(rss_resident > 0);  // unreadable /proc is "cannot measure", not a pass
+
+  const OwnedTensor w = BorrowWeight(f, kBigVocab, kBigHidden);
+  const vllm::BorrowReleaseStats before = vllm::BorrowReleaseSnapshot();
+
+  Queue q = XpuQueue();
+  vllm::dense_attn::Dev d{Fake(), q};
+  const Tensor t = vllm::dense_attn::ResidentWeight(d, w, {kBigVocab, kBigHidden});
+
+  REQUIRE(w.d_dev != nullptr);  // it really staged
+  REQUIRE(t.data == w.d_dev.get());
+
+  const vllm::BorrowReleaseStats after = vllm::BorrowReleaseSnapshot();
+  CHECK(after.calls == before.calls + 1);
+  CHECK(after.bytes == before.bytes + f.size());
+
+  // THE ASSERTION THE COUNTER CANNOT MAKE, exactly as in the `qwen3_5.cpp` arm:
+  // the file pages this case faulted in are gone from the resident set, against
+  // the background of the same-sized staging allocation that is supposed to
+  // stay. Half the span is the bar for that reason.
+  const size_t rss_after = RssFileKib();
+  CHECK(rss_resident > rss_after);
+  CHECK(rss_resident - rss_after >= (f.size() / 2) / 1024);
+
+  // ...AND THE BORROW IS STILL A VALID VIEW. A private file mapping re-faults
+  // the identical bytes; if this ever differs, something anonymous was touched.
+  CHECK(w.bytes.data() == f.data());
+  CHECK(std::memcmp(w.bytes.data(), t.data, f.size()) == 0);
+}
+
+TEST_CASE("dense_attn: the source release happens ONCE, not on every step") {
+  // #1299's shape on the second arm. `dense_attn::ResidentWeight` is the one
+  // Qwen4-Exp calls about 1,361 times per forward step, so the memo placement
+  // matters MORE here, not less. Move the call outside `if (!w.d_dev)` and the
+  // count below becomes 8.
+  const PlatformArm arm(false);
+  MappedFile f(1u << 20);
+  REQUIRE(f.ok());
+  f.Prefault();
+  const int64_t vocab = 64;
+  const int64_t hidden = (1 << 20) / (64 * 2);
+  const OwnedTensor w = BorrowWeight(f, vocab, hidden);
+
+  const vllm::BorrowReleaseStats before = vllm::BorrowReleaseSnapshot();
+  Queue q = XpuQueue();
+  vllm::dense_attn::Dev d{Fake(), q};
+  for (int i = 0; i < 8; ++i)
+    (void)vllm::dense_attn::ResidentWeight(d, w, {vocab, hidden});
+  const vllm::BorrowReleaseStats after = vllm::BorrowReleaseSnapshot();
+
+  CHECK(after.calls == before.calls + 1);
+  CHECK(after.bytes == before.bytes + f.size());
+}
+
+TEST_CASE("dense_attn: a HOST-ADDRESSABLE device releases nothing here either") {
+  // The platform term, passed in from THIS call site. Delete it -- hand the
+  // helper a literal `false` -- and this case counts a release where the
+  // kernels can still follow the host pointer.
+  const PlatformArm arm(true);
+  MappedFile f(1u << 20);
+  REQUIRE(f.ok());
+  f.Prefault();
+  // MISALIGNED on purpose, so the weight DECLINES the alias and reaches the
+  // staging arm the guard sits on. An aligned borrow returns before it.
+  const size_t skew = 16;
+  REQUIRE(reinterpret_cast<uintptr_t>(f.data() + skew) % vllm::kDeviceAliasAlignment != 0);
+  const int64_t vocab = 64;
+  const int64_t hidden = ((1 << 20) - 4096) / (64 * 2);
+  const size_t nb = static_cast<size_t>(vocab * hidden) * 2;
+  OwnedTensor w;
+  w.dtype = DType::kBF16;
+  w.rank = 2;
+  w.shape[0] = vocab;
+  w.shape[1] = hidden;
+  w.nk = false;
+  std::shared_ptr<const void> keep(static_cast<const void*>(f.data()),
+                                   [](const void*) {});
+  w.bytes = vllm::OwnedBytes::Borrow(f.data() + skew, nb, std::move(keep));
+  w.mmap_fd = f.fd();  // file-backed, so ONLY the platform guard can refuse it
+
+  const vllm::BorrowReleaseStats before = vllm::BorrowReleaseSnapshot();
+  Queue q = XpuQueue();
+  vllm::dense_attn::Dev d{Fake(), q};
+  const Tensor t = vllm::dense_attn::ResidentWeight(d, w, {vocab, hidden});
+  REQUIRE(w.d_dev != nullptr);
+  REQUIRE(t.data == w.d_dev.get());
+  CHECK(vllm::BorrowReleaseSnapshot().calls == before.calls);
   CHECK(std::memcmp(w.bytes.data(), t.data, nb) == 0);
 }
 #endif  // __linux__

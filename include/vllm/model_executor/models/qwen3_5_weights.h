@@ -265,6 +265,13 @@ void AdoptDeviceBytesAsHost(vt::Backend& backend, const OwnedTensor& w);
 //     either. One predicate, computed once, exactly as #2406 made
 //     `QuantRepackForDevice` take its `dev`: a second spelling is how a
 //     refusal and its route predicate come to disagree about one weight.
+//
+//     ONLY THE PLATFORM HALF IS GATED, and that is recorded rather than
+//     implied. Deleting `backend.DeviceMemoryIsHostAddressable()` here leaves
+//     the focused suite green: the fake backend in
+//     `test_resident_weight_host_addressable.cpp` answers false
+//     unconditionally, so no case ever presents the disagreeing pair. Owed in
+//     `ISSUE-LOCAL-01M2CCNA0S74WT5WBV50B3VD0W`.
 //  2. `bytes` is BORROWED. An owned buffer is `ReleaseHost`'s business.
 //  3. `mmap_fd >= 0`. This is the discriminator that makes the call SAFE, and it
 //     is not a convenience. `MADV_DONTNEED` on a file-backed private mapping
@@ -281,13 +288,21 @@ void AdoptDeviceBytesAsHost(vt::Backend& backend, const OwnedTensor& w);
 // kernel would fault them straight back in. Correctness survives that;
 // throughput does not. The one production call site is inside
 // `if (!w.d_dev)` and `BorrowReleaseSnapshot().calls` is what makes that
-// checkable rather than asserted.
+// checkable rather than asserted. THERE ARE TWO SUCH CALL SITES AND BOTH ARE
+// PRODUCTION: the `ResidentWeight` in the unnamed namespace of `qwen3_5.cpp`
+// (Qwen3.5's dense weights, and the shared MoE seam's keep-quant expert towers
+// through `KqResidentSlice` and `KqGrouped`), and `dense_attn::ResidentWeight`
+// in `dense_attn_block.h`, which is the one every `qwen4_exp` attention, norm,
+// hyper-connection, PLE and lm_head weight takes. Wiring only the first left
+// host `RssFile` on `strix:gpu0` at 21.08 GB through the forward.
 //
 // It SYNCHRONIZES `queue` before releasing anything, because the staging copy is
 // `hipMemcpyAsync` on a stream and dropping the source pages under a live DMA is
 // a correctness bug rather than a residency one. The synchronize is skipped
 // entirely when the preconditions do not hold, so a backend this does not apply
-// to pays nothing.
+// to pays nothing. THE SYNCHRONIZE IS ALSO UNGATED, for a harness reason:
+// `HostBackend::Copy` is a synchronous `memcpy` and the class does not override
+// `Synchronize`, so no case in this tree can express a live DMA. Same issue.
 //
 // `host_addressable` is the caller's `host_memory_is_device_addressable()`
 // answer for the queue's device. Returns true when pages were released.
