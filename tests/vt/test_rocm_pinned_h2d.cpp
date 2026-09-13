@@ -307,11 +307,35 @@ TEST_CASE("the ring size and chunk size are llama.cpp's, and bound the residency
 // Production cannot evaluate `ring_available` without allocating 256 MiB of
 // pinned host memory, so it asks StagingTermsExceptRing first and calls
 // EnsureRing only when that passes. That is two expressions where the spec
-// describes one decision, and two expressions drift. This case is what stops
-// them: over the whole input space this file's truth table walks,
-// StagingTermsExceptRing must be exactly ShouldStageH2D with `ring_available`
-// held true -- no more, no less. Deleting a term from either one fails here.
+// describes one decision, and two expressions drift.
+//
+// This case walks 480 inputs against an expectation computed HERE, from the
+// four inputs, as a sequence of refusals -- never by calling either expression
+// under test. An earlier version of this case asserted
+// `StagingTermsExceptRing(in) == ShouldStageH2D(in)` with `ring_available`
+// held true, which is `X == (X && true)`: true for ANY definition of the
+// helper, including a deleted term. It convicted nothing. Measured: deleting
+// `dst == kDevice`, and separately `bytes >= chunk_bytes`, from the helper left
+// that version 1443/1443 SUCCESS. The independent expectation below is what
+// makes a deleted term fail HERE and not only in the truth table above.
 // ---------------------------------------------------------------------------
+namespace {
+
+// The four cheap terms, written out independently of the header. A refusal
+// sequence rather than a conjunction, so this is not a copy of the expression
+// it checks.
+bool ExpectedCheapTerms(PtrKind src, PtrKind dst, size_t bytes,
+                        size_t chunk_bytes, bool capturing) {
+  if (chunk_bytes == 0) return false;
+  if (capturing) return false;
+  if (dst != PtrKind::kDevice) return false;
+  if (src != PtrKind::kUnregisteredHost) return false;
+  if (bytes < chunk_bytes) return false;
+  return true;
+}
+
+}  // namespace
+
 TEST_CASE("the cheap terms are exactly the decision minus the allocating term") {
   const PtrKind kinds[] = {PtrKind::kUnregisteredHost, PtrKind::kPinnedHost,
                            PtrKind::kDevice, PtrKind::kOther};
@@ -332,26 +356,30 @@ TEST_CASE("the cheap terms are exactly the decision minus the allocating term") 
             in.bytes = b;
             in.stream_capturing = cap;
 
-            // The ring is the ONLY term the split holds back.
-            in.ring_available = true;
-            REQUIRE(StagingTermsExceptRing(in) == ShouldStageH2D(in));
-            if (ShouldStageH2D(in)) ++staged;
+            const bool want = ExpectedCheapTerms(s, d, b, c, cap);
 
-            // And with no ring, the decision is always no, while the cheap
-            // terms are unmoved -- which is the whole point: production learns
-            // the answer is no WITHOUT paying for the ring to find out.
+            // The cheap terms are the four, independently of the ring.
+            in.ring_available = true;
+            REQUIRE(StagingTermsExceptRing(in) == want);
+            // And the decision is those four AND the ring, so with a ring it
+            // is the same answer -- proved against `want`, not against the
+            // helper, so a term deleted from EITHER expression fails here.
+            REQUIRE(ShouldStageH2D(in) == want);
+            if (want) ++staged;
+
+            // With no ring, the decision is always no, while the cheap terms
+            // are unmoved -- which is the whole point: production learns the
+            // answer is no WITHOUT paying for the ring to find out.
             in.ring_available = false;
             CHECK_FALSE(ShouldStageH2D(in));
-            in.ring_available = true;
-            CHECK(StagingTermsExceptRing(in) == ShouldStageH2D(in));
+            CHECK(StagingTermsExceptRing(in) == want);
             ++total;
           }
         }
       }
     }
   }
-  // The table is not degenerate: some rows stage and most do not. A helper that
-  // returned a constant would satisfy the equality above and fail here.
+  // The table is not degenerate: some rows stage and most do not.
   CHECK(total == 480);
   CHECK(staged > 0);
   CHECK(staged < total);
