@@ -334,6 +334,11 @@ fix is tracked as #3124 under Owed.
 
 ## Owed
 
+- **`ISSUE-LOCAL-01M2CZX87ZB0WHRW2YZYPW7VRZ`: the harness never restores its
+  cached `vllm-server`.** `job.sh` guards the cache with `[ -x "$CACHED_BIN" ]`,
+  and the CIFS share is mounted `file_mode=0664`, so every boot rebuilds the
+  pin, 26 minutes on `dgx:gpu0`, a box that crashes about hourly under load.
+
 - **[#2993](https://github.com/mudler/vllm.cpp/issues/2993): `gpu_memory_utilization`
   does not account for the DFlash2 draft speculative context.** Found by this
   run, which recorded 1282.5 MiB of it at `max_num_seqs 8`
