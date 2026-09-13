@@ -79,8 +79,12 @@ struct StagedH2DInputs {
 // So the production path asks THIS first and calls the allocator only when it
 // passes. `ShouldStageH2D` stays the single authority on the decision and the
 // thing the truth table gates; this is that expression with `ring_available`
-// held true, and a case in tests/vt/test_rocm_pinned_h2d.cpp asserts the two
-// agree over the whole table so the split cannot drift.
+// held true. A case in tests/vt/test_rocm_pinned_h2d.cpp walks 480 inputs and
+// checks BOTH expressions against an expectation spelled out in that file from
+// the four inputs, so a term deleted from either one fails there. Checking the
+// two against EACH OTHER would not: that is `X == (X && true)`, true for any
+// definition of this helper, and it is what an earlier version of that case
+// did.
 constexpr bool StagingTermsExceptRing(const StagedH2DInputs& in) {
   return in.chunk_bytes != 0 && !in.stream_capturing &&
          in.dst == PtrKind::kDevice && in.src == PtrKind::kUnregisteredHost &&

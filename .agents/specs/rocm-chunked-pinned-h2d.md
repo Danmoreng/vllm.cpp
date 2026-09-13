@@ -321,20 +321,49 @@ selector prints its counts and its board line.
 
 | binary | selector | cases | assertions | result |
 |---|---|---|---|---|
-| `test_rocm_pinned_h2d` | (none — whole binary) | 10 | 1527 | SUCCESS |
+| `test_rocm_pinned_h2d` | (none — whole binary) | 10 | 2007 | SUCCESS |
+| `test_rocm_pinned_h2d` | `-tc=*cheap terms*` | 1 | 1923 | SUCCESS |
 | `test_backend_cross_device` | `-tc=*pinned bounce*` | 1 | 8 | SUCCESS |
 | `test_backend_cross_device` | `-tc=*pinned bounce*`, `VT_ROCM_MANAGED_ALLOC=1` | 1 | 4 | SUCCESS, `ring_bytes=0` |
 | `test_backend_cross_device` | (none — whole binary) | 61 | 84841 | SUCCESS |
 | `test_backend_cross_device` | `-tc=*DSA*` | 2 | 273 | SUCCESS |
 
-The unit binary grew by one case and 1443 assertions. That one case is
-"the cheap terms are exactly the decision minus the allocating term", which
-walks 480 inputs and asserts `StagingTermsExceptRing` equals `ShouldStageH2D`
-with `ring_available` held true, so the split the repair introduces cannot
-drift from the decision the truth table gates. Deleting the `dst == kDevice`
-term from the helper fails it (3 assertions, binaries `0f5b26d660f20f7e` clean
-vs `7e301ff417b3d850` mutated, restored build back to `0f5b26d660f20f7e`), run
-off-board because the header is HIP-free. The cross-device binary is unmoved at
+The unit binary grew by one case, "the cheap terms are exactly the decision
+minus the allocating term", which walks 480 inputs.
+
+**A review measured that case's FIRST version as a tautology, and it is
+replaced.** That version asserted `StagingTermsExceptRing(in) ==
+ShouldStageH2D(in)` with `ring_available` held true. The decision is DEFINED as
+the helper AND that flag, so the assertion is `X == (X && true)` -- true for any
+definition of the helper, deleted terms included. Measured on `strix:gpu0`:
+deleting `dst == kDevice` from the helper, and separately deleting
+`bytes >= chunk_bytes`, each left that case 1443/1443 SUCCESS. Both mutants died
+to the PRE-EXISTING five-term truth table instead (3 and 2 failed assertions
+respectively, elsewhere in the binary), so this spec's earlier sentence -- that
+deleting `dst == kDevice` "fails it (3 assertions)" -- attributed a whole-binary
+count to the case just added. That is the `touched the symbol is not caused the
+failure` error, and the sentence is WITHDRAWN.
+
+The case now computes the expected answer in the test file from the four
+inputs, as a sequence of refusals rather than as a conjunction, and checks BOTH
+expressions against it, so a term deleted from either one fails the case itself.
+It is run off-board because the header is HIP-free.
+
+**RE-MEASURED, and the new case now convicts.** Same box, same clone
+(`/tmp/vllmcpp-chunked-h2d`), `rc` job `ecf7b0b6-6e6f-4123-b6d2-50d5178a32dd`,
+at `8e1f0ac03`. Clean unit binary `32b4cade5a4bba7d2060f6086a681dde`, 10 cases /
+2007 assertions SUCCESS, and the case alone 1 / 1923 SUCCESS.
+
+| mutation in `StagingTermsExceptRing` | binary md5 | `-tc=*cheap terms*` | whole unit binary |
+|---|---|---|---|
+| delete `in.dst == PtrKind::kDevice &&` | `c7f00ede469d373502f961347e5b7361` | **FAILURE**, 1 case failed, first failed assertion at `test_rocm_pinned_h2d.cpp:363` | FAILURE, 2 cases / 4 assertions failed |
+| delete `in.bytes >= in.chunk_bytes` | `c1e2d3d36df481a2cc49c7f091c1210b` | **FAILURE**, 1 case failed, same line | FAILURE, 2 cases / 3 assertions failed |
+
+Both restored builds hash back to `32b4cade5a4bba7d2060f6086a681dde` and the
+restored tree runs 10 / 2007 SUCCESS, which is what proves the restoration
+rather than `git status`. A `REQUIRE` aborts its case, so a mutant run reports
+fewer assertions than the clean one; the verdict is the failure, not the count.
+The cross-device binary is unmoved at
 61 / 84841: the repair adds one assertion to an arm that is SKIPPED in the
 default configuration, which is why the managed selector had to be run
 explicitly and is now a declared gate line.
@@ -424,8 +453,10 @@ The artifact's compiled feature set is asserted before it is timed: `ldd` for
 
 - **The stall survives this too.** Then the trigger is neither the residency of
   the source nor the shape of the transfer, and the next hypothesis is the
-  allocation side — 29.69 GiB of `hipMalloc` on a 33.27 GB board behind a 96 GiB
-  carve, or the CIFS mount, which §6a already named as an unseparated confound.
+  allocation side — 29.69 GiB of `hipMalloc` against this board's
+  `hipMemGetInfo` total of **96.000 GiB** (`.agents/environment.md:89-92`;
+  33,270,497,280 B is the box's HOST RAM, not its VRAM carve), or the CIFS
+  mount, which §6a already named as an unseparated confound.
   A negative result with a `wchan` distribution is the reportable outcome, not a
   failure of the change.
 - **An extra `memcpy` per 64 MiB slows the load.** Load seconds are recorded on
