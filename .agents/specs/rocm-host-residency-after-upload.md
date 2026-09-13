@@ -412,8 +412,20 @@ result is the same failure in both and the axis is not a number.
 **Device memory is no longer UNVERIFIED.** `rocm-smi` is not on `PATH` in the
 leased container, so this is read from
 `/sys/class/drm/card0/device/mem_info_vram_used`: 154,816,512 B at rest, climbing
-to 31.88 GB of the board's 33.27 GB total. The earlier "717 MB of 103 GB" figure
-does not describe this board and is withdrawn rather than carried forward.
+to 31.88 GB. The earlier "717 MB of 103 GB" figure does not describe this board
+and is withdrawn rather than carried forward.
+
+**CORRECTION, 2026-09-13.** This paragraph said "of the board's 33.27 GB total"
+and that was a MISREAD. 33,270,497,280 B is this box's HOST RAM, not its VRAM
+carve: `.agents/environment.md` §"strix" records that since the 2026-09-11
+firmware change `mem_info_vram_total` and `hipMemGetInfo` both report
+**96.000 GiB**, against host RAM total / available of 33,270,497,280 B /
+29,304,037,376 B. So 31.88 GB was never near a device ceiling, and nothing in
+this measurement should be read as the model failing to fit. The header line
+above quotes the same number correctly, as `30 GiB host`. The device figure
+`.agents/specs/rocm-chunked-pinned-h2d.md` §7 reaches with the ring on --
+71.96 GiB -- sits comfortably inside 96.000 GiB and needs no explanation beyond
+this one.
 
 **Where it blocks.** Sampling `/proc/<tid>/{stat,wchan}` every 6 s over both
 runs, the uninterruptible thread is in `svm_range_set_attr` for 153 of 196
