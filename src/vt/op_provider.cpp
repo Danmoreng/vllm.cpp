@@ -480,6 +480,8 @@ const char* OpNameImpl(OpId op) {
       return "IndexSelect";
     case OpId::kIndexCopy:
       return "IndexCopy";
+    case OpId::kVHeadPermute:
+      return "VHeadPermute";
     case OpId::kMoeGroupedGemmBf16:
       return "MoeGroupedGemmBf16";
     case OpId::kLayerNorm:
