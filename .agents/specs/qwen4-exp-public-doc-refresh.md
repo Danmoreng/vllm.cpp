@@ -3,8 +3,9 @@
 ## Now
 
 Documentation audit at base `cef9f8216`, 14 September 2026. No model lifecycle,
-runtime behavior, or benchmark acceptance changes. Implementation and independent
-review are pending. One pull request carries the spec and documentation commits.
+runtime behavior, or benchmark acceptance changes. Implementation is complete.
+Independent review and the fork pull request are pending. One pull request
+carries the spec and documentation commits.
 
 ## Scope
 
@@ -63,3 +64,63 @@ Stop for a claim requiring a new GPU run; describe the gap without filling it.
 
 `ISSUE-LOCAL-01M2EXYPHDZ03EX01VRTB5FECQ` owns this documentation correction.
 The model's existing runtime issues remain with its owning spec.
+
+## Outcome
+
+The feature row now describes the released text-only UD-IQ1_S GGUF and its
+single-sequence limit. README news announces CPU and ROCm generation without
+claiming oracle correctness or competitive performance. CUDA generates tokens,
+but its disagreement with CPU remains unresolved. The original feature row is
+preserved verbatim in `../completed/qwen4exp-features-history-20260914.md`.
+
+Source checks at implementation base `12abed189`:
+
+- `src/vllm/model_executor/models/qwen4_exp_registry.cpp:365` refuses multiple
+  requests. Lines 1322 and 1327 declare the limit and register the model.
+- `src/vt/rocm/rocm_ops.hip:207` registers quantized embedding on ROCm.
+- `docs/bench-evidence/qwen4exp-released-checkpoint-tokens-20260831.md` records
+  prompt-dependent CPU output and explicitly excludes an oracle token gate.
+- `docs/bench-evidence/qwen4exp-rocm-hcnorm-gfx1151-20260913.md` records generation
+  on gfx1151 and the missing correctness gate.
+- `docs/bench-evidence/qwen4exp-cuda-decode-identifiers-20260902.md` records CUDA
+  output and token disagreement. `docs/USAGE.md:1045` retains the unresolved
+  disagreement and the artifact's text-only scope.
+- `.agents/oracles/vllm.md:68` records the blocked model run.
+  `.agents/oracles/llama-cpp-qwen4exp.md:198` records the scoped oracle's run.
+
+## Verification evidence
+
+The captured before row contains both “NO TOKEN HAS COME OUT OF A CUDA DEVICE”
+and “A GPU HAS NOW PRODUCED TOKENS”. Its claim that no usable checkpoint token
+exists contradicts its later CPU result. Source and retained runs falsify those
+claims. A byte comparison against `git show 12abed189:docs/FEATURES.md` confirms
+that the archive preserves the complete original row.
+
+Commands use the temporary Python and Bash tools selected by the operator:
+`PATH=/tmp/vllm-doc-tools/root/usr/bin:/tmp/vllm-doc-tools/root/bin:$PATH` and
+`LD_LIBRARY_PATH=/tmp/vllm-doc-tools/root/usr/lib`.
+
+| Command | Result |
+|---|---|
+| `python3 scripts/check-readme-structure.py` | PASS, exit 0 |
+| `python3 scripts/check-supported-models.py` | PASS, exit 0 |
+| `python3 scripts/check-site.py` | PASS, exit 0 |
+| `python3 scripts/check-agent-record.py` | PASS, exit 0 |
+| `python3 -m unittest discover -s tests/scripts -p 'test_check_readme_structure.py'` | PASS, 19 cases |
+| `python3 -m unittest discover -s tests/scripts -p 'test_check_supported_models.py'` | PASS, 11 cases |
+| `python3 -m unittest discover -s tests/scripts -p 'test_check_site.py'` | PASS, 7 cases after the operator installed Hugo. The initial missing-Hugo error also occurred on the untouched base |
+| `python3 /tmp/verify-qwen4exp-doc-links.py "$PWD"` | PASS, all 7 changed links resolve, including both heading fragments |
+| `git diff --check` | PASS, exit 0 |
+
+The temporary link verifier reads the new README item and feature row. It checks
+each relative path and compares each fragment with the target's Markdown
+headings. In a scratch directory, replacing the README target with
+`docs/MISSING.md#registered-architectures` fails with exit 1. Replacing its
+fragment with `#missing-anchor` also fails with exit 1. Restoring the original
+README passes. The source tree stays unchanged throughout both mutations.
+
+Full `bash scripts/agent-preflight.sh` started before edits. Its log is
+`/tmp/vllm-doc-preflight-impl-base.log`. At handoff, the full sweep is still
+running. The operator owns completion and comparison with the untouched-base
+log `/tmp/vllm-doc-preflight-base.log`. No GPU, runtime, or new benchmark gate
+applies to this documentation-only correction.
