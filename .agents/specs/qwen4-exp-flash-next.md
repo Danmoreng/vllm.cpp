@@ -10286,6 +10286,34 @@ negligible. Issue
 [#1958](https://github.com/mudler/vllm.cpp/issues/1958) is closed; the fix is
 owned by row `SAMPLE-CORE` (spec: `.agents/specs/sampling-controls-c7.md`).
 
+### THE GAP IS A 13x MEMORY-EFFICIENCY DEFICIT, NOT A CEILING (2026-09-13)
+
+Derived from the model's config and this row's measured step, no GPU needed.
+**We sustain ~11.0 GB/s of GB10's ~273 GB/s: 4.0% of peak.** sojufx at 66.17
+tok/s sustains 140.1 GB/s (51.3%), and **this tree already sustains 220.8 GB/s
+(81%) on another model on this same box.**
+
+Active weights are 4.231 G params per token (48 layers x 88.15 M: MoE top-10 of
+512 at `moe_intermediate_size` 640 plus a shared expert, plus q/kv/o), which at
+IQ1_S is **~0.85 GB per step**. At 273 GB/s the floor is **3.1 ms per step,
+~320 tok/s**. The reference's 15.1 ms step is five times slower than the memory
+system permits, and at even 50% of peak we would be at ~161 tok/s -- 2.4x PAST
+the reference.
+
+**So the 5.08x gap is a defect, not a limit, and two of this row's own
+conclusions today are corrected by it.** The withdrawn "no combination of the
+identified kernel leads reaches 66" was wrong in a second and more basic way than
+its first retraction: it treated the distance as a shortfall to scrape together
+when there is ~20x of headroom. And the MTP finding
+(`ISSUE-LOCAL-01M2EG6R3MRCB9ENZB9840KAXX`), though true and unretracted, was
+OVER-WEIGHTED as "the blocker": speculation multiplies throughput at a given step
+cost and cannot explain running at 4% of bandwidth.
+
+Owed, and it is the next row: a per-kernel bandwidth attribution over the 68.9%
+that is GEMM, from shapes rather than from `ncu` (which refuses here). See
+`ISSUE-LOCAL-01M2EK69SESGH6ST1ESMFZC808`, which also records why the q/k/v merge
+is NOT the place to start.
+
 ### THE FULL DECODE KERNEL TABLE, and a retraction: the lead is GEMM, not QSA (2026-09-13)
 
 Read from the SAME self-validated capture as the allocator measurement
