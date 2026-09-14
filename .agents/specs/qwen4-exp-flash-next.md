@@ -10286,6 +10286,41 @@ negligible. Issue
 [#1958](https://github.com/mudler/vllm.cpp/issues/1958) is closed; the fix is
 owned by row `SAMPLE-CORE` (spec: `.agents/specs/sampling-controls-c7.md`).
 
+### THE NEXT ROW, NAMED: keep the GDN projections quantized by permuting a vector (2026-09-14)
+
+The attribution found that **61% of decode weight traffic is a load-time bf16
+expansion**: the V-head reorder the released 16-vs-48 config forces cannot be
+applied to a k-quant block stream, so `attn_qkv`, `attn_gate`, `ssm_beta`,
+`ssm_alpha` and `ssm_out` of all 36 GDN layers are dequantized at load --
+**4.152 GB/step against 1.508 GB in the file**. `qwen4_exp_weights.cpp:292-302`
+states the cost against itself.
+
+**The fix that comment does not consider is to permute a VECTOR instead of the
+weight.** For a GEMV, a ROW permutation satisfies `(P W) x = P (W x)` (permute
+the output) and a COLUMN permutation satisfies `(W P) x = W (P x)` (permute the
+input). Both are exact re-indexings, so both are BIT-IDENTICAL, and both are O(n)
+on a vector of at most 10,240 elements against 115 MB of weight traffic per
+layer. **This covers `ssm_out`'s column reorder**, the case the comment calls
+unavailable -- because it only considered permuting the weight.
+
+| | bytes/step | floor at 273 GB/s | |
+|---|---|---|---|
+| today | 6.792 GB | 24.88 ms | ~40 tok/s |
+| ROW reorders only (73% of the expansion) | ~4.81 GB | 17.6 ms | ~57 tok/s |
+| **all five** | **4.148 GB** | **15.19 ms** | **~66 tok/s** |
+
+**THE ONE WAY THIS DISAPPOINTS, and it must be measured rather than assumed:**
+freeing the bytes moves these operands from cuBLAS bf16 GEMV, which achieves
+162.3 GB/s here, to our own `QuantDotGemm*` family, which achieves 93.4 GB/s. A
+1.7x lower achieved rate against a 2.75x lower byte count is still a win, but the
+margin is smaller than the byte ratio suggests and the trade is the thing to
+measure first.
+
+Scoped in `ISSUE-LOCAL-01M2ENTH6YA5FWEDY6CFHF4NAM`, which also lists the
+correctness risk that is the actual work: the reorder exists so every downstream
+consumer sees HF V-head order, and permuting vectors moves that obligation to the
+conv, the delta rule and the gate.
+
 ### THE GAP IS A 13x MEMORY-EFFICIENCY DEFICIT, NOT A CEILING (2026-09-13)
 
 Derived from the model's config and this row's measured step, no GPU needed.
