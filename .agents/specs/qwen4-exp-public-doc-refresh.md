@@ -4,8 +4,9 @@
 
 Documentation audit at base `cef9f8216`, 14 September 2026. No model lifecycle,
 runtime behavior, or benchmark acceptance changes. Implementation is complete.
-Independent review and the fork pull request are pending. One pull request
-carries the spec and documentation commits.
+Independent scoped review passes at `f450f7626`. The operator reran the focused
+gates. Full preflight is incomplete because of the tool environment, as recorded
+below. One pull request carries the spec and documentation commits.
 
 ## Scope
 
@@ -119,8 +120,18 @@ headings. In a scratch directory, replacing the README target with
 fragment with `#missing-anchor` also fails with exit 1. Restoring the original
 README passes. The source tree stays unchanged throughout both mutations.
 
-Full `bash scripts/agent-preflight.sh` started before edits. Its log is
-`/tmp/vllm-doc-preflight-impl-base.log`. At handoff, the full sweep is still
-running. The operator owns completion and comparison with the untouched-base
-log `/tmp/vllm-doc-preflight-base.log`. No GPU, runtime, or new benchmark gate
-applies to this documentation-only correction.
+Independent review of `f450f7626` found no issues. All seven changed link paths
+and both fragments failed when corrupted in a scratch copy. Each byte-exact
+restoration passed. The operator independently reran the four focused checks,
+all 37 mutation cases, the link verifier, and the archive comparison.
+
+Full `bash scripts/agent-preflight.sh` was attempted on the baseline,
+implementation, and review trees. The logs are
+`/tmp/vllm-doc-preflight-base.log`, `/tmp/vllm-doc-preflight-impl-base.log`, and
+`/tmp/vllm-doc-preflight-review.log`. The baseline and implementation encountered
+the same nine failing checks. The review encountered five of those failures.
+The registration checker cannot find CMake. Release subprocesses also remove
+the library path that the temporary Python installation needs. The operator
+stopped the incomplete sweeps after recording these failures. Full preflight
+is **PENDING**, not green. No GPU, runtime, or new benchmark gate applies to
+this documentation-only correction.
