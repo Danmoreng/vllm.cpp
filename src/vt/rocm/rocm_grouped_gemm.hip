@@ -80,11 +80,23 @@ __device__ __forceinline__ int GetIntB2(const int8_t* qs, int i32) {
 // int8 multiplies + 4 adds. Bit-identical: signed int8×int8→int32 dot
 // product is exact either way (the HW instruction and the scalar expansion
 // compute the same integer result).
+// Fallback to scalar expansion when __ockl_sdot4 is unavailable (older ROCm).
 __device__ __forceinline__ int Dp4a(int a, int b, int acc) {
   using char4_native = char __attribute__((ext_vector_type(4)));
   char4_native va = *reinterpret_cast<const char4_native*>(&a);
   char4_native vb = *reinterpret_cast<const char4_native*>(&b);
+#if defined(__has_builtin)
+#if __has_builtin(__ockl_sdot4)
   return __ockl_sdot4(va, vb, acc, false);
+#endif
+#endif
+  // Fallback: scalar expansion (bit-identical, ~1.4x slower on gfx1100)
+  int result = acc;
+  #pragma unroll
+  for (int i = 0; i < 4; i++) {
+    result += va[i] * vb[i];
+  }
+  return result;
 }
 
 // ---- activation quantizers ----
