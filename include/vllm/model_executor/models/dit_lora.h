@@ -81,6 +81,7 @@
 #include <vector>
 
 #include "vt/dtype.h"
+#include "vt/tensor.h"
 
 namespace vllm {
 
@@ -242,6 +243,12 @@ void DitCheckLorasWereApplied(
 inline constexpr char kDitLoraPathExtra[] = "lora_path";
 inline constexpr char kDitLoraStrengthExtra[] = "lora_strength";
 
+// The model-load extra that tells the engine where to resolve prompt-tag LoRA
+// names to safetensors files. Mirrors sd.cpp's `lora_dir` (gosd.cpp:110-158).
+// Rides in `VideoModelParams.extras` (LTX2) or `MiniMaxH3VideoModelParams.extras`
+// (H3) — a model-load knob, not a per-generation extra.
+inline constexpr char kDitLoraDirExtra[] = "lora_dir";
+
 // Read `lora_path[_<N>]` / `lora_strength[_<N>]` from the extras map and return
 // one `DitLoraSpec` per adapter, in index order. A gap in the sequence refuses
 // by name, as does a `lora_strength_<N>` without its `lora_path_<N>`.
@@ -263,5 +270,107 @@ bool IsDitLoraIndexedExtra(const std::string& key);
 // (N >= 2). Use this to pass through the full LoRA family in a conversion that
 // filters extras, so the first adapter is not silently dropped.
 bool IsDitLoraExtra(const std::string& key);
+
+// ── runtime prompt-activated LoRA (ROAD-V1-LORA-RUNTIME) ─────────────────────
+//
+// Load-time fusion (above) bakes adapter deltas into the base weights at load.
+// Runtime activation applies a per-forward additive delta WITHOUT modifying base
+// weights, so different requests can use different LoRAs without reloading.
+//
+// The prompt carries `<lora:name:strength>` tags; the engine strips them,
+// resolves each name to a safetensors file, and applies the delta at each linear
+// projection during the denoise loop. This mirrors vLLM-Omni's
+// DiffusionLoRAManager (per-layer additive delta, base_linear.py:69-134) and
+// LocalAI stable-diffusion.cpp's parse_loras_from_prompt (gosd.cpp:174-330).
+
+// One resolved runtime LoRA spec: a file path and a strength, from parsing
+// prompt tags. Duplicate adapters (same normalized path) accumulate strengths.
+struct DitRuntimeLoraSpec {
+  std::string path;
+  double strength = 1.0;
+};
+
+// The result of parsing prompt tags: the resolved specs and the cleaned prompt
+// (tags stripped, whitespace collapsed).
+struct DitParseLoraResult {
+  std::vector<DitRuntimeLoraSpec> loras;
+  std::string clean_prompt;
+};
+
+// Parse `<lora:name:strength>` tags from `prompt`, resolve each name to a file
+// path via `lora_dir`, and return the specs plus the cleaned prompt.
+//
+// Name resolution mirrors LocalAI sd.cpp's discover_lora_files + fallback chain
+// (gosd.cpp:110-158, 174-330): exact filename in `lora_dir`, absolute path,
+// case-insensitive match, relative path under `lora_dir`, extension probing
+// (`.safetensors`). Duplicate LoRAs (same normalized path) accumulate strengths.
+// A name that cannot be resolved is refused by name.
+DitParseLoraResult DitParseLoraTags(const std::string& prompt,
+                                     const std::string& lora_dir);
+
+// One layer's runtime LoRA factors, already on the compute device. The tensors
+// are non-owning views (`vt::Tensor`); the backing device memory is owned by the
+// model context that constructed the state. `lora_a` is [rank, in_features],
+// `lora_b` is [out_features, rank].
+//
+// The alpha/rank scaling is folded into `lora_b` at load time (mirrors
+// vLLM-Omni's optimize, manager.py:320), so the per-forward delta is a plain
+// `(x @ A^T) @ B^T` with no scaling. The `strength` is the prompt-tag strength,
+// also folded into `lora_b` at load.
+struct DitRuntimeLoraLayer {
+  vt::Tensor lora_a;
+  vt::Tensor lora_b;
+  float strength = 1.0;
+};
+
+// All loaded runtime LoRA layers for one generation, keyed by contract target
+// name (the same name `DitLoraContractName` produces). The forward path looks
+// up each linear's target name via `Find`; a nullptr return means no runtime LoRA
+// applies to that layer.
+struct DitRuntimeLoraState {
+  bool empty() const { return layers.empty(); }
+  const DitRuntimeLoraLayer* Find(const std::string& target) const {
+    auto it = layers.find(target);
+    return it != layers.end() ? &it->second : nullptr;
+  }
+  std::map<std::string, DitRuntimeLoraLayer> layers;
+  // Backing storage for factor data, populated by DitLoadRuntimeLoras. Map
+  // elements are node-based (never move on insert), so vt::Tensor views into
+  // them stay valid for the state's lifetime. Tests that construct layers by
+  // hand leave these empty.
+  std::map<std::string, std::vector<float>> a_storage;
+  std::map<std::string, std::vector<float>> b_storage;
+};
+
+// Compute the runtime LoRA delta and add it to the output:
+//   out += (a @ lora_a^T) @ lora_b^T
+//
+// `a` is [rows, in_features] (the reshaped input to the base linear),
+// `lora_a` is [rank, in_features], `lora_b` is [out_features, rank].
+// `out` points to [rows * out_features] f32 values that already hold the base
+// linear output; the delta is added in place. A null `lora` is a no-op.
+//
+// This is the CPU path's delta computation (ROAD-V1-LORA-RUNTIME phase 2).
+// The device path inlines the same formula with DBuf scratch, since device
+// buffer allocation is model-specific. Mirrors vLLM-Omni's base_linear apply
+// (base_linear.py:130-131): base weights are never touched.
+void DitApplyRuntimeLoraDelta(vt::Queue& q, const vt::Tensor& a,
+                               float* out, int64_t rows, int64_t out_features,
+                               const DitRuntimeLoraLayer* lora);
+
+// Open the runtime LoRA adapters named by `specs` and build a
+// `DitRuntimeLoraState` whose layers are keyed by contract target name. Each
+// adapter's A/B factors are read as f32; `alpha/rank` is folded into B when the
+// adapter carries `lora_alpha` in its `__metadata__` (mirrors vLLM-Omni's
+// `optimize()`, lora_weights.py:36-41), and `strength` is always folded into B.
+// The result is a per-forward delta of `(x @ A^T) @ B_eff^T` with no scaling.
+//
+// `contract_names` is the set of tensor names the DiT actually binds;
+// `prefixes` is the ComfyUI prefix set to strip (same as `DitLoraAdapter::Open`).
+// Tensors are placed on `device` (CPU for now; device upload is a Phase 7 step).
+DitRuntimeLoraState DitLoadRuntimeLoras(
+    const std::vector<DitRuntimeLoraSpec>& specs,
+    const std::vector<std::string>& contract_names,
+    const std::vector<std::string>& prefixes, vt::Device device);
 
 }  // namespace vllm
