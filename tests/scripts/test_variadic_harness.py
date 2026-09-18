@@ -26,8 +26,10 @@ What each case pins:
   AcceptanceFromMetrics   the /metrics delta becomes an acceptance rate, and an
                           engine with no /metrics reports absent rather than 0
   CorpusIsDeterministic   the corpus is a function of (sources, seed, weights)
-  LongBandIsRequestable   `--weights` reaches the XXL band, and a malformed
-                          spelling is refused rather than silently ignored
+  LongBandIsRequestable   `--weights` reaches the XXL band, the band's target
+                          fits the context the row serves, and a malformed or
+                          non-finite spelling is refused rather than silently
+                          ignored
   BinaryCacheRestores     job.sh restores a cached vllm-server from a share that
                           carries no execute bit, instead of rebuilding it
 """
@@ -711,6 +713,69 @@ class LongBandIsRequestable(unittest.TestCase):
         self.assertGreater(xxl["median"], 0.75 * target)
         self.assertLess(xxl["median"], 1.25 * target)
 
+    # The served configuration this band exists for, from
+    # `.agents/specs/bench-qwen38-exl3-longctx.md` §2. These numbers are the
+    # BUDGET, and none of them is derived from `XXL_TARGET_CHARS`: that is the
+    # whole point of the case below, which pins the generator's constant
+    # against the context rather than against itself.
+    SERVED_CONTEXT_TOKENS = 8192          # `--max-model-len 8192`
+    OUTPUT_TOKENS = 192                   # `max_tokens: 192`
+    # ASSUMED, not measured. No chat template has been counted on either
+    # engine for this row, and the two engines render the same text to
+    # different token counts, so this is an allowance and G-FITS is what
+    # decides. It is here so that the pin is conservative, not so that it is
+    # exact.
+    TEMPLATE_TOKENS = 50
+    # The most ADVERSE characters-per-prompt-token pairing the published `XL`
+    # band realised: 10048 characters at 3233 prompt tokens, the top of the
+    # band, from `corpus-manifest.json` and `corpus-token-histogram.md` in
+    # `docs/bench-evidence/qwen38-27b-exl3-variadic-20260905/` over the same
+    # 144 prompts. The band's mean pairing is 3.21 and its p50 pairing 3.27;
+    # the smallest ratio is the one that buys the most tokens per character,
+    # so it is the one a fit is checked against.
+    CHARS_PER_PROMPT_TOKEN = 3.11
+    # The band's expected ceiling over its target: 4.3% k jitter at
+    # `k_mid = 47` plus 8.3% sampling spread, scaled from XL's measured 22.7%
+    # at `k_mid = 20` by 1/sqrt(k). The derivation is in `build_corpus.py`.
+    CEILING_OVER_TARGET = 1.125
+
+    def _prompt_budget_tokens(self):
+        return (self.SERVED_CONTEXT_TOKENS - self.OUTPUT_TOKENS
+                - self.TEMPLATE_TOKENS)
+
+    def test_the_xxl_target_fits_the_served_context(self):
+        """The constant is pinned against the CONTEXT, not against itself.
+
+        `test_xxl_items_land_in_the_intended_character_range` reads its bound
+        out of the same constant the generator sized the band with, so it
+        asserts `X == X +/- 25%` and stays green at any target. 26000 and 30000
+        characters both passed it, and both overrun the 8192 tokens this row
+        serves. A band that overruns is voided by G-FITS after it has spent the
+        lease, so the refusal has to happen here, with no GPU.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            man = self._build(tmp, Path(tmp) / "a.json", Path(tmp) / "a.man",
+                              count=200,
+                              weights="S=0.2,M=0.2,L=0.2,XL=0.2,XXL=0.2")
+        target = man["rules"]["XXL_target_chars"]
+        budget = self._prompt_budget_tokens()
+        ceiling = target * self.CEILING_OVER_TARGET / self.CHARS_PER_PROMPT_TOKEN
+        self.assertLess(
+            ceiling, budget,
+            f"XXL_TARGET_CHARS = {target} gives an expected ceiling of "
+            f"{ceiling:.0f} prompt tokens, which does not fit the "
+            f"{self.SERVED_CONTEXT_TOKENS} - {self.OUTPUT_TOKENS} - "
+            f"{self.TEMPLATE_TOKENS} = {budget} tokens the served "
+            f"configuration leaves for the prompt body")
+        # And the band as BUILT, not only as configured. A composition rule
+        # that overshoots its target harder than the derivation allows would
+        # pass the line above and still overrun the server.
+        realised_max = man["realised_chars"]["XXL"]["max"]
+        self.assertLess(
+            realised_max / self.CHARS_PER_PROMPT_TOKEN, budget,
+            f"the longest XXL prompt built here is {realised_max} characters, "
+            f"which is over the {budget}-token prompt budget")
+
     def test_xxl_is_xl_with_only_the_length_changed(self):
         """The case above cannot see this, which is why this one exists.
 
@@ -795,6 +860,29 @@ class LongBandIsRequestable(unittest.TestCase):
 
     def test_a_non_numeric_weight_is_refused(self):
         self._refuses("S=half,M=0.5", "half")
+
+    def test_a_nan_weight_is_refused_as_not_finite(self):
+        """NaN passes the sum check, because `abs(nan - 1.0) > 1e-9` is False.
+
+        Without the finiteness guard the run does not stop here. It reaches
+        `band_counts`, where `int(nan)` raises a bare
+        `ValueError: cannot convert float NaN to integer` from inside the
+        split, which names neither the band nor the share. The docstring on
+        `parse_weights` promises a refusal that names the offending text, so
+        the message is the guarantee and `finite` is what pins it.
+        """
+        rc = self._refuses("S=0.5,M=nan", "finite")
+        self.assertIn("M", rc.stderr)
+        self.assertNotIn("cannot convert float NaN", rc.stderr)
+
+    def test_an_infinite_weight_is_refused_as_not_finite(self):
+        """An infinite share is caught by the same guard, not by the sum.
+
+        The sum check would refuse `inf` too, with a message about the total,
+        which sends the reader to the wrong band. This case fails when the
+        guard goes, although the invocation is still refused.
+        """
+        self._refuses("S=0.5,M=inf", "finite")
 
 
 class BinaryCacheRestores(unittest.TestCase):

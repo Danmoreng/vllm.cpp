@@ -40,32 +40,59 @@ XL_TARGET_CHARS = 9000     # about 3000 prompt tokens of Python
 # that overruns the context voids itself under `G-FITS` and costs the lease it
 # was measured on, so the margin is bought here and not argued for later.
 #
-# Derivation. The published XL band
-# (`docs/bench-evidence/qwen38-27b-exl3-variadic-20260905/`) targets 9000
-# characters and realised 2288 to 3290 prompt tokens, so this corpus renders at
-# about 3.4 characters per prompt token. 21000 characters is therefore about
-# 21000 / 3.4 = 6200 prompt tokens, which is still about 2.3 times the XL
-# band's realised median and well clear of the 3.3k ceiling every published
-# band stops at.
+# Where the ratio comes from. `docs/bench-evidence/qwen38-27b-exl3-variadic-20260905/`
+# measured the SAME 144 prompts twice: `corpus-manifest.json` holds their
+# characters, and `corpus-token-histogram.md` holds their prompt tokens under
+# the target checkpoint's own tokenizer. Over the `XL` band, which is the band
+# XXL copies its composition rule from, that is 9011 characters against 2804
+# tokens at the mean, 9572 against 2928 at p50, 7217 against 2237 at the
+# minimum, and 10048 against 3233 at the maximum: 3.21, 3.27, 3.23 and 3.11
+# characters per prompt token.
 #
-# Headroom. The served configuration is `--max-model-len 8192` with
-# `max_tokens: 192`, and the chat template adds about 50 tokens, which leaves
-# 8192 - 192 - 50 = 7950 tokens for the prompt body. The band is a sum of k
-# whole problems with k drawn from [k_mid - 2, k_mid + 2], so it overshoots its
-# target by the k jitter plus the sampling spread of the draws. XL realised
-# 11044 characters at the top, 22.7% over its target, at k_mid = 20: 10 points
-# of that is the jitter, 2/20, and the remaining 12.7 points is the sampling
+# Use the CODE band's ratio, not a blended one. The English bands render at a
+# higher ratio on the same pairing -- `L` is 3361 characters against 878
+# tokens, or 3.83 -- so a figure averaged over the whole corpus reads high and
+# flatters a band that is entirely Python. XXL draws from HumanEval, so 3.21 is
+# the applicable number and the 3.4 an earlier draft of this comment used was a
+# blend.
+#
+# Size. 21000 / 3.21 = about 6540 prompt tokens, which is about 2.2 times the
+# `XL` band's realised median of 2928 tokens and well past the 3.3k every
+# published band stops at.
+#
+# Ceiling. The band is a sum of k whole problems with k drawn from
+# [k_mid - 2, k_mid + 2], so it overshoots its target by the k jitter plus the
+# sampling spread of the draws. XL realised 11044 characters at the top of the
+# 192-prompt corpus, 22.7% over its 9000 target, at k_mid = 20: 10 points of
+# that is the jitter, 2/20, and the remaining 12.7 points is the sampling
 # spread. Both terms shrink with k. The jitter is 2/k_mid, and the spread of a
 # sum of k draws grows as sqrt(k) while the sum grows as k, so it falls as
 # 1/sqrt(k). At the k_mid = 47 that 21000 characters gives on the pinned
 # HumanEval, that is 4.3% + 12.7% * sqrt(20/47) = 4.3% + 8.3% = 12.5% over
-# target, so the expected ceiling is about 23600 characters, or about 6900
-# tokens, and the headroom is about 1000 tokens.
+# target, so the expected ceiling is about 23600 characters. Convert that at
+# 3.11, the ratio the TOP of the XL band realised, because the ceiling is the
+# longest prompt and not the average one: about 7600 prompt tokens. At the mean
+# ratio of 3.21 it is about 7360.
 #
-# That headroom is not a licence to trust the number. `G-FITS` in
+# Headroom. The served configuration is `--max-model-len 8192` with
+# `max_tokens: 192`, and about 50 tokens are allowed for the chat template,
+# which leaves 8192 - 192 - 50 = 7950 tokens for the prompt body. The headroom
+# is therefore about 350 tokens at the adverse 3.11 pairing and about 590 at
+# the mean. Every published pairing leaves the band inside the budget.
+#
+# Two things this arithmetic does NOT know. The 50 tokens of chat template is
+# an ASSUMED allowance, not a measured one: no template has been counted on
+# either engine for this row. And each engine applies its own template and its
+# own tokenizer, so the same corpus is two different token histograms, and the
+# ratio above is one checkpoint's.
+#
+# So this headroom is not a licence to trust the number. `G-FITS` in
 # `.agents/specs/bench-qwen38-exl3-longctx.md` reads every realised
-# `usage.prompt_tokens` back from each server and voids the band rather than
-# publishing a truncation.
+# `usage.prompt_tokens` back from BOTH servers and voids the band rather than
+# publishing a truncation. `tests/scripts/test_variadic_harness.py`
+# `test_the_xxl_target_fits_the_served_context` pins the constant below against
+# that budget with no GPU, so a target that cannot fit is refused before a
+# lease is spent on it.
 XXL_TARGET_CHARS = 21000
 
 BANDS = ("S", "M", "L", "XL", "XXL")
