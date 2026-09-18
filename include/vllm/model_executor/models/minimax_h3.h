@@ -1491,7 +1491,8 @@ std::vector<float> MiniMaxH3SinusoidalTimeEmbed(vt::Device device, const MiniMax
 MiniMaxH3DitOutputs MiniMaxH3DitForward(vt::Device device, const MiniMaxH3DitParams& params,
                                         const MiniMaxH3DitWeights& weights,
                                         const MiniMaxH3DitInputs& inputs,
-                                        vt::DType compute_dtype);
+                                        vt::DType compute_dtype,
+                                        const DitRuntimeLoraState* lora_state = nullptr);
 
 // --- device-resident forward (brick H3-2b, minimax_h3_device.cpp) -----------
 // Owned device copies of every DiT weight, plus the views the device forward
@@ -1726,7 +1727,8 @@ MiniMaxH3DitOutputs MiniMaxH3DitForwardDevice(vt::Queue& queue,
                                               const MiniMaxH3DitParams& params,
                                               const MiniMaxH3DitWeights& weights,
                                               const MiniMaxH3DitInputs& inputs,
-                                              vt::DType compute_dtype);
+                                              vt::DType compute_dtype,
+                                              const DitRuntimeLoraState* lora_state = nullptr);
 
 
 // ---------------------------------------------------------------------------
@@ -1754,7 +1756,8 @@ MiniMaxH3DenoiseResult MiniMaxH3DenoiseLoop(
     const std::vector<float>& initial_audio_rows, const std::vector<float>& keyframe_cond_rows,
     const std::vector<float>& audio_ref_rows, const std::vector<double>& sigmas_video,
     const std::vector<double>& sigmas_audio, vt::DType compute_dtype,
-    const MiniMaxH3DitDeviceWeights* prestaged = nullptr);
+    const MiniMaxH3DitDeviceWeights* prestaged = nullptr,
+    const DitRuntimeLoraState* lora_state = nullptr);
 
 
 // ---------------------------------------------------------------------------
@@ -1875,7 +1878,8 @@ MiniMaxH3T2vaResult MiniMaxH3GenerateT2va(vt::Device device, const MiniMaxH3T2va
                                           // costs tens of seconds, so a driver or server stages
                                           // ONCE and passes it here rather than per generation.
                                           // Null stages internally, as before.
-                                          const MiniMaxH3DitDeviceWeights* prestaged = nullptr);
+                                          const MiniMaxH3DitDeviceWeights* prestaged = nullptr,
+                                          const DitRuntimeLoraState* lora_state = nullptr);
 
 // The DENOISE half of `MiniMaxH3GenerateT2va` on its own: packed layout, the two
 // sigma schedules, and the step loop, stopping before the VAEs.
@@ -1942,6 +1946,7 @@ MiniMaxH3DenoiseResult MiniMaxH3DenoiseT2va(vt::Device device, const MiniMaxH3T2
                                             const std::vector<float>& initial_video_rows,
                                             const std::vector<float>& initial_audio_rows,
                                             vt::DType compute_dtype,
-                                            const MiniMaxH3DitDeviceWeights* prestaged = nullptr);
+                                            const MiniMaxH3DitDeviceWeights* prestaged = nullptr,
+                                            const DitRuntimeLoraState* lora_state = nullptr);
 
 }  // namespace vllm

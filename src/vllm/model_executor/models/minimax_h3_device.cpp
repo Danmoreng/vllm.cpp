@@ -53,6 +53,7 @@
 #include "vt/dtype.h"
 #include "vt/ops.h"
 #include "vt/recipes.h"
+#include "vllm/model_executor/models/dit_lora.h"
 
 namespace vllm {
 namespace {
@@ -156,9 +157,13 @@ void H3DumpFingerprint(std::FILE* f, vt::Backend& backend, vt::Queue& q, const c
 // falls back to a redundant-dequant GEMM, so the arm is correct either way. The
 // dequant lives entirely inside the shared dispatcher — this adds NO quant code.
 void LinearDev(Dev d, const Tensor& in, int64_t rows, int64_t in_features, const Tensor& weight,
-               const Tensor* bias, Tensor& out, const Nvfp4Weight* fp4 = nullptr) {
+               const Tensor* bias, Tensor& out, const Nvfp4Weight* fp4 = nullptr,
+               const DitRuntimeLoraLayer* lora = nullptr) {
   Tensor a = dense_attn::Reshape(in, {rows, in_features});
   if (fp4 != nullptr && !fp4->Empty()) {
+    VT_CHECK(lora == nullptr,
+             "minimax_h3 device linear: runtime LoRA is not supported on the "
+             "nvfp4-resident arm — use the bf16 dequant path (spec §7)");
     VT_CHECK(fp4->k == in_features,
              "minimax_h3 fp4 linear: packed weight K does not match input width");
     Tensor o = dense_attn::Reshape(out, {rows, fp4->n});
@@ -175,6 +180,21 @@ void LinearDev(Dev d, const Tensor& in, int64_t rows, int64_t in_features, const
   vt::MatmulBT(d.q, o, a, weight);
   if (bias != nullptr && bias->data != nullptr) {
     vt::Add(d.q, o, o, *bias);  // rank-1 row-broadcast == a nn.Linear bias term
+  }
+  if (lora != nullptr) {
+    const int64_t rank = lora->lora_a.shape[0];
+    const int64_t out_features = weight.shape[0];
+    // LoRA factors are f32; compute the delta in f32 and cast back, so
+    // MatmulBT always sees (f32,f32)->f32 regardless of the stream dtype.
+    DBuf a_f32(d, DType::kF32, {rows, in_features});
+    CastTo(d, a_f32.t(), a);
+    DBuf tmp(d, DType::kF32, {rows, rank});
+    vt::MatmulBT(d.q, tmp.t(), a_f32.t(), lora->lora_a);
+    DBuf delta_f32(d, DType::kF32, {rows, out_features});
+    vt::MatmulBT(d.q, delta_f32.t(), tmp.t(), lora->lora_b);
+    DBuf delta(d, o.dtype, {rows, out_features});
+    CastTo(d, delta.t(), delta_f32.t());
+    vt::Add(d.q, o, o, delta.t());
   }
 }
 
@@ -224,7 +244,9 @@ void AttentionDev(Dev d, const MiniMaxH3DitParams& params, const AttnWeightsDev&
                   const Tensor& in, int64_t rows, const Tensor* rope_cache,
                   const Tensor* rope_positions, const int32_t* cu_seqlens, int num_reqs,
                   const DeviceStreamDtype& dt, Tensor& out, std::FILE* dbg = nullptr,
-                  const char* dbg_pfx = nullptr) {
+                  const char* dbg_pfx = nullptr,
+                  const DitRuntimeLoraLayer* qkv_lora = nullptr,
+                  const DitRuntimeLoraLayer* out_lora = nullptr) {
   const int64_t heads = params.num_attention_heads;
   const int64_t head_dim = params.attention_head_dim;
   const int64_t inner = heads * head_dim;
@@ -236,7 +258,8 @@ void AttentionDev(Dev d, const MiniMaxH3DitParams& params, const AttnWeightsDev&
   };
 
   DBuf qkv(d, dt.S(), {rows, 3 * inner});
-  LinearDev(d, in, rows, params.hidden_size, *w.qkv, nullptr, qkv.t(), w.qkv_fp4);
+  LinearDev(d, in, rows, params.hidden_size, *w.qkv, nullptr, qkv.t(), w.qkv_fp4,
+            qkv_lora);
   dbgd("qkv_out", qkv.t());
 
   DBuf qb(d, dt.S(), {rows, inner});
@@ -279,7 +302,8 @@ void AttentionDev(Dev d, const MiniMaxH3DitParams& params, const AttnWeightsDev&
   dbgd("core_out", attn.t());
 
   Tensor flat = dense_attn::Reshape(attn.t(), {rows, inner});
-  LinearDev(d, flat, rows, inner, *w.out_proj, nullptr, out, w.out_fp4);
+  LinearDev(d, flat, rows, inner, *w.out_proj, nullptr, out, w.out_fp4,
+            out_lora);
   dbgd("out_proj", out);
 }
 
@@ -287,15 +311,17 @@ void AttentionDev(Dev d, const MiniMaxH3DitParams& params, const AttnWeightsDev&
 // fc1 emits [gate; up] per row, which is exactly vt::SiluAndMul's input layout.
 void MlpDev(Dev d, const MiniMaxH3DitParams& params, const Tensor& fc1, const Tensor& fc2,
             const Tensor& in, int64_t rows, const DeviceStreamDtype& dt, Tensor& out,
-            const Nvfp4Weight* fc1_fp4 = nullptr, const Nvfp4Weight* fc2_fp4 = nullptr) {
+            const Nvfp4Weight* fc1_fp4 = nullptr, const Nvfp4Weight* fc2_fp4 = nullptr,
+            const DitRuntimeLoraLayer* fc1_lora = nullptr,
+            const DitRuntimeLoraLayer* fc2_lora = nullptr) {
   const int64_t ffn = params.ffn_hidden_size;
   DBuf hidden(d, dt.S(), {rows, 2 * ffn});
   // fc1 is already the merged [gate; up] (SwiGLU) — one W4A16 GEMM to [rows, 2*ffn]
   // then SiluAndMul, so the fused gate_up pair (GateUpFusedMarlinD) does not apply.
-  LinearDev(d, in, rows, params.hidden_size, fc1, nullptr, hidden.t(), fc1_fp4);
+  LinearDev(d, in, rows, params.hidden_size, fc1, nullptr, hidden.t(), fc1_fp4, fc1_lora);
   DBuf act(d, dt.S(), {rows, ffn});
   vt::SiluAndMul(d.q, act.t(), hidden.t());
-  LinearDev(d, act.t(), rows, ffn, fc2, nullptr, out, fc2_fp4);
+  LinearDev(d, act.t(), rows, ffn, fc2, nullptr, out, fc2_fp4, fc2_lora);
 }
 
 // MiniMaxH3AdalnProj.forward (minimax_h3_transformer.py:555-561):
@@ -304,8 +330,9 @@ void MlpDev(Dev d, const MiniMaxH3DitParams& params, const Tensor& fc1, const Te
 // reference's per-block silu is redundant work the device path simply does once.
 void AdalnProjectDev(Dev d, const Tensor& activated, int64_t m, int64_t time_embed_dim,
                      const Tensor& weight, const Tensor& bias, Tensor& out,
-                     const Nvfp4Weight* fp4 = nullptr) {
-  LinearDev(d, activated, m, time_embed_dim, weight, &bias, out, fp4);
+                     const Nvfp4Weight* fp4 = nullptr,
+                     const DitRuntimeLoraLayer* lora = nullptr) {
+  LinearDev(d, activated, m, time_embed_dim, weight, &bias, out, fp4, lora);
 }
 
 }  // namespace
@@ -559,7 +586,8 @@ MiniMaxH3DitOutputs MiniMaxH3DitForwardDevice(vt::Queue& queue,
                                               const MiniMaxH3DitParams& params,
                                               const MiniMaxH3DitWeights& weights,
                                               const MiniMaxH3DitInputs& inputs,
-                                              DType compute_dtype) {
+                                              DType compute_dtype,
+                                              const DitRuntimeLoraState* lora_state) {
   VT_CHECK(compute_dtype == DType::kF32 || compute_dtype == DType::kBF16,
            "minimax_h3: the device forward computes in f32 (parity) or bf16 (the "
            "production stream policy)");
@@ -568,6 +596,11 @@ MiniMaxH3DitOutputs MiniMaxH3DitForwardDevice(vt::Queue& queue,
   VT_CHECK(static_cast<int64_t>(weights.refiner.size()) == params.token_refiner_num_layers,
            "minimax_h3: refiner weight count does not match token_refiner_num_layers");
   VT_CHECK(inputs.num_cu_seqlens >= 2, "minimax_h3: packed_seq_params.cu_seqlens is required");
+
+  const bool has_lora = lora_state != nullptr && !lora_state->empty();
+  auto lora_find = [&](const std::string& target) -> const DitRuntimeLoraLayer* {
+    return has_lora ? lora_state->Find(target) : nullptr;
+  };
 
   vt::Backend& backend = vt::GetBackend(queue.device.type);
   Dev d{backend, queue};
@@ -681,7 +714,8 @@ MiniMaxH3DitOutputs MiniMaxH3DitForwardDevice(vt::Queue& queue,
   vt::IndexSelect(d.q, video_rows.t(), d_x.t(), d_img_pos.t());
   DBuf video_embed(d, DType::kF32, {inputs.num_img_pos, hidden});
   LinearDev(d, video_rows.t(), inputs.num_img_pos, video_width, weights.video_patch_proj_w,
-            &weights.video_patch_proj_b, video_embed.t());
+            &weights.video_patch_proj_b, video_embed.t(), nullptr,
+            lora_find("video_patch_proj.weight"));
   dump_act("embed.video_rows_in", video_rows.t());
   dump_act("embed.video_patch_out", video_embed.t());
 
@@ -690,7 +724,8 @@ MiniMaxH3DitOutputs MiniMaxH3DitForwardDevice(vt::Queue& queue,
   vt::IndexSelect(d.q, audio_rows.t(), d_audio_x.t(), d_audio_pos.t());
   DBuf audio_embed(d, DType::kF32, {inputs.num_audio_pos, hidden});
   LinearDev(d, audio_rows.t(), inputs.num_audio_pos, audio_width, weights.audio_patch_proj_w,
-            &weights.audio_patch_proj_b, audio_embed.t());
+            &weights.audio_patch_proj_b, audio_embed.t(), nullptr,
+            lora_find("audio_patch_proj.weight"));
   dump_act("embed.audio_patch_out", audio_embed.t());
 
   // text rows enter as the stream dtype before the BF16 condition projection.
@@ -700,7 +735,8 @@ MiniMaxH3DitOutputs MiniMaxH3DitForwardDevice(vt::Queue& queue,
   CastTo(d, text_rows.t(), text_rows_f32.t());
   DBuf text_embed(d, dt.S(), {inputs.num_text_pos, hidden});
   LinearDev(d, text_rows.t(), inputs.num_text_pos, params.text_dim, weights.condition_proj_w,
-            &weights.condition_proj_b, text_embed.t(), &weights.condition_fp4);
+            &weights.condition_proj_b, text_embed.t(), &weights.condition_fp4,
+            lora_find("condition_proj.weight"));
   dump_act("embed.text_condition_out", text_embed.t());
 
   // Token refiner: a plain pre-norm stack, no AdaLN and no RoPE (:564-623), on the
@@ -714,6 +750,7 @@ MiniMaxH3DitOutputs MiniMaxH3DitForwardDevice(vt::Queue& queue,
     int64_t ref_idx = -1;
     for (const MiniMaxH3DitBlockWeights& block : weights.refiner) {
       ++ref_idx;
+      const std::string rp = "token_refiner.blocks." + std::to_string(ref_idx);
       if (ref_idx == 0) {
         dump_act("W.ref0.norm1", block.norm1);
         if (block.qkv_proj.data != nullptr) dump_act("W.ref0.qkv_proj", block.qkv_proj);
@@ -729,7 +766,10 @@ MiniMaxH3DitOutputs MiniMaxH3DitForwardDevice(vt::Queue& queue,
                    AttnWeightsDev{&block.qkv_proj, &block.q_norm, &block.k_norm, &block.out_proj,
                                   &block.qkv_fp4, &block.out_fp4},
                    normed.t(), rows, nullptr, nullptr, inputs.refiner_cu_seqlens,
-                   static_cast<int>(inputs.num_refiner_cu_seqlens - 1), dt, tmp.t());
+                   static_cast<int>(inputs.num_refiner_cu_seqlens - 1), dt, tmp.t(),
+                   nullptr, nullptr,
+                   lora_find(rp + ".attn.qkv_proj.weight"),
+                   lora_find(rp + ".attn.out_proj.weight"));
       // FOLD onto the catalog recipe. This was DECLINED one milestone ago because
       // the recipe casts nothing between its `residual = x + residual` and its
       // `rms_norm(residual)`, which would have dropped a bf16 rounding. TRUE bf16
@@ -740,7 +780,9 @@ MiniMaxH3DitOutputs MiniMaxH3DitForwardDevice(vt::Queue& queue,
       vt::FusedChain(d.q, normed.t(), tmp.t(), block.norm2, &text_embed.t(),
                      vt::kFusedAddRmsNormStd, args.eps);
       MlpDev(d, params, block.fc1, block.fc2, normed.t(), rows, dt, tmp.t(), &block.fc1_fp4,
-             &block.fc2_fp4);
+             &block.fc2_fp4,
+             lora_find(rp + ".mlp.fc1.weight"),
+             lora_find(rp + ".mlp.fc2.weight"));
       vt::Add(d.q, text_embed.t(), text_embed.t(), tmp.t());
     }
     vt::RmsNormArgs final_args;
@@ -859,6 +901,7 @@ MiniMaxH3DitOutputs MiniMaxH3DitForwardDevice(vt::Queue& queue,
   int64_t blk_idx = -1;
   for (const MiniMaxH3DitBlockWeights& block : weights.blocks) {
     ++blk_idx;
+    const std::string bp = "blocks." + std::to_string(blk_idx);
     // Direct WEIGHT fingerprints for block 0 -- comparing these between the two arms
     // isolates a loader/materialization bug (a weight class that differs) from a
     // compute divergence. The bf16 arm has real bf16 tensors here (fp4-resident leaves
@@ -876,7 +919,8 @@ MiniMaxH3DitOutputs MiniMaxH3DitForwardDevice(vt::Queue& queue,
       if (block.adaln_b.data != nullptr) dump_act("W.blk0.adaln_b", block.adaln_b);
     }
     AdalnProjectDev(d, t_emb_s.t(), m, params.time_embed_dim, block.adaln_w, block.adaln_b,
-                    projected.t(), &block.adaln_fp4);
+                    projected.t(), &block.adaln_fp4,
+                    lora_find(bp + ".adaln_proj.linear.weight"));
     if (act_f != nullptr) dump_act(("block." + std::to_string(blk_idx) + ".adaln_proj").c_str(),
                                    projected.t());
     const Tensor shift_msa = chunk_view(projected, adaln_rows, 6, 0);
@@ -895,7 +939,9 @@ MiniMaxH3DitOutputs MiniMaxH3DitForwardDevice(vt::Queue& queue,
                  AttnWeightsDev{&block.qkv_proj, &block.q_norm, &block.k_norm, &block.out_proj,
                                 &block.qkv_fp4, &block.out_fp4},
                  normed.t(), seq_len, &d_rope_cache.t(), &d_rope_pos.t(), inputs.cu_seqlens,
-                 num_reqs, dt, tmp.t(), blk_idx == 0 ? act_f : nullptr, "block.0.attn");
+                 num_reqs, dt, tmp.t(), blk_idx == 0 ? act_f : nullptr, "block.0.attn",
+                 lora_find(bp + ".attn.qkv_proj.weight"),
+                 lora_find(bp + ".attn.out_proj.weight"));
     if (blk_idx == 0) dump_act("block.0.attn_contrib", tmp.t());
     glue->modulate_gate(d.q, stream.t().data, gate_msa.data, tmp.t().data,
                         d_combined.t().Ptr<int32_t>(), seq_len, hidden, 6 * hidden, dt.S());
@@ -907,7 +953,9 @@ MiniMaxH3DitOutputs MiniMaxH3DitForwardDevice(vt::Queue& queue,
                                d_combined.t().Ptr<int32_t>(), seq_len, hidden, 6 * hidden,
                                dt.S());
     MlpDev(d, params, block.fc1, block.fc2, normed.t(), seq_len, dt, tmp.t(), &block.fc1_fp4,
-           &block.fc2_fp4);
+           &block.fc2_fp4,
+           lora_find(bp + ".mlp.fc1.weight"),
+           lora_find(bp + ".mlp.fc2.weight"));
     glue->modulate_gate(d.q, stream.t().data, gate_mlp.data, tmp.t().data,
                         d_combined.t().Ptr<int32_t>(), seq_len, hidden, 6 * hidden, dt.S());
     if (act_f != nullptr)
@@ -917,7 +965,8 @@ MiniMaxH3DitOutputs MiniMaxH3DitForwardDevice(vt::Queue& queue,
   // --- final layer (minimax_h3_transformer.py:724-743) ---
   DBuf final_projected(d, dt.S(), {m, 2 * hidden});
   AdalnProjectDev(d, t_emb_s.t(), m, params.time_embed_dim, weights.final_adaln_w,
-                  weights.final_adaln_b, final_projected.t(), &weights.final_adaln_fp4);
+                  weights.final_adaln_b, final_projected.t(), &weights.final_adaln_fp4,
+                  lora_find("final_layer.adaln_proj.linear.weight"));
   const Tensor final_shift = chunk_view(final_projected, m, 2, 0);
   const Tensor final_scale = chunk_view(final_projected, m, 2, 1);
   vt::RmsNormArgs final_args;
@@ -934,10 +983,12 @@ MiniMaxH3DitOutputs MiniMaxH3DitForwardDevice(vt::Queue& queue,
 
   DBuf video_all(d, DType::kF32, {seq_len, video_width});
   LinearDev(d, head_in.t(), seq_len, hidden, weights.video_out_w, &weights.video_out_b,
-            video_all.t());
+            video_all.t(), nullptr,
+            lora_find("final_layer.video_out.weight"));
   DBuf audio_all(d, DType::kF32, {seq_len, audio_width});
   LinearDev(d, head_in.t(), seq_len, hidden, weights.audio_out_w, &weights.audio_out_b,
-            audio_all.t());
+            audio_all.t(), nullptr,
+            lora_find("final_layer.audio_out.weight"));
   dump_act("final.video_all", video_all.t());
   dump_act("final.audio_all", audio_all.t());
   if (act_f != nullptr) std::fclose(act_f);
