@@ -49,9 +49,14 @@ Both effects are ours; neither has been measured against their engine.
 
 ## 2. Scope
 
-- One new corpus band, `XXL`, targeting about 7000 prompt tokens, so that a
-  prompt plus its 192 output tokens fits inside `--max-model-len 8192` with the
-  chat template's own overhead.
+- One new corpus band, `XXL`, sized to FIT rather than to hit a round number:
+  21000 characters, about 6200 prompt tokens at the 3.4 characters per token this
+  corpus realises, with an expected ceiling near 6900 and about 1000 tokens of
+  headroom under `8192 - 192 output - about 50 template`. A first draft targeted
+  7000 tokens (23800 characters) and left about 150 tokens of headroom; that was
+  rejected, because a band that overshoots is voided by G-FITS and costs a lease.
+  6200 tokens is 2.3x the `XL` band's realised median and well past the 3.3k where
+  every published band stops.
 - The band is built from the same HumanEval source as `XL`, by the same
   concatenation rule, so length is the only variable that changes.
 - The band weights become a command-line knob, because a run that wants long
