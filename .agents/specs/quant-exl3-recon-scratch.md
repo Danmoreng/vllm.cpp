@@ -187,14 +187,31 @@ Unwatched, the #3150 binary exhausted host memory and took the machine down.
 
 ## 8. Gates (operator, on `dgx:gpu0` through `rc`)
 
-- **G-MEM:** the c = 32 watchdog leg from the issue record. The fixed binary
-  completes the leg, and its MemAvailable floor is at least the parent's 19.2 GiB
-  minus 1.5 GiB of run-to-run noise.
+- **G-MEM:** the c = 32 leg from the issue record. The fixed binary completes it,
+  and its MemAvailable is within 1.5 GiB of #3150's PARENT **on the same
+  statistic**, measured in the same job.
+
+  **The floor was first written as "at least the parent's 19.2 GiB minus 1.5".
+  That compared two different statistics** and is corrected here rather than
+  restated: 19.2 GiB was the parent's sustained plateau read off an earlier run,
+  while the gate computed the fixed binary's transient MINIMUM. Measured
+  like for like on 2026-09-18, lease `3a419fc7`, boot `aa8685cb`, two rounds each,
+  interleaved, one c = 32 leg of 128 requests per arm:
+
+  | arm | min GiB | p05 | median | output tok/s |
+  |---|---|---|---|---|
+  | parent `3cafbcaf` | 15.93 / 16.59 | 17.81 / 18.30 | 19.06 / 18.43 | 50.57 / 50.72 |
+  | fixed `75984bbf` | 15.10 / 14.96 | 16.13 / 16.59 | 17.59 / 18.16 | 94.26 / 94.37 |
+
+  The parent's own transient minimum is 15.93 GiB, so the 1.5 GiB band admits
+  14.43; the fixed binary reads 14.96. No watchdog fired on any of the four legs.
+  The fixed binary holds about 1 GiB less at the minimum and 0.6 to 0.9 GiB less
+  at the median while serving 1.86x the tokens per second.
+
 - **G-TOKENS:** greedy (T = 0) outputs of the fixed binary and `39d3af455` are
   token-identical on the variadic corpus's first 32 prompts at c = 1.
-- **G-SPEED:** c = 1 and c = 16 output tok/s and the XL-band median TTFT of the
-  fixed binary are within the two binaries' round-to-round spread of
-  `39d3af455`, measured interleaved on one boot.
+- **G-SPEED:** c = 1 and c = 16 output tok/s and median TTFT of the fixed binary
+  are not below `39d3af455`, measured interleaved on one boot.
 
 ## 9. Evidence
 
@@ -206,5 +223,46 @@ this spec's `## Outcome`.
 - A production path runs reconstruct on one queue from two threads (return
   `NEEDS_DECISION`).
 - G-TOKENS fails.
-- G-MEM does not reach the parent plateau: the increment is not the scratch
-  pinning alone. Re-open the mechanism rather than widen the change.
+- G-MEM does not reach the parent ON THE SAME STATISTIC: the increment is not
+  the scratch pinning alone. Re-open the mechanism rather than widen the change.
+
+## Outcome
+
+`DONE` on 2026-09-18. What the change is, and what it is not.
+
+**Measured.** All three gates ran on `dgx:gpu0`, on a binary built from
+`origin/main` plus this branch and verified by tree hash `75984bbf` before it
+ran. G-TOKENS: 32 of 32 greedy outputs identical to `39d3af455`. G-SPEED, two
+rounds each interleaved on one boot: c = 1 44.09 / 43.98 tok/s against
+42.70 / 42.44, and median TTFT 672 / 671 ms against 802 / 803; c = 16
+81.18 / 80.67 against 79.41 / 79.33. G-MEM as corrected above. The c = 32 leg,
+which `39d3af455` could not finish without a watchdog kill, completes at
+94.3 to 95.0 tok/s.
+
+**The TTFT figure is NOT this row's.** 131 ms of it is the chat-template parse
+cache (`SERVE-CHAT-TEMPLATE`, landed separately), which this binary also carries
+because it was built from main. This row's own contribution to c = 1 is the
+throughput, and to c = 32 it is that the leg runs at all.
+
+**Rejected: widening the change.** The issue record attributes about 27 GiB of
+the c = 32 growth to lazy CUDA-graph capture and the pool's free list, which this
+row does not touch. That was left alone deliberately: the parent's plateau is the
+bar, and reaching it does not require them. They stay owed in
+`ISSUE-LOCAL-01M2DW8CXYEWWMJSZZ6GRH48SZ`.
+
+**Rejected: the spec's own §5.2 seam.** The scratch is owned by the CUDA kernel,
+not borrowed as a view by `Exl3MatmulD`, because `cudaStreamIsCapturing` is only
+visible there and the tree already spells that pattern twice. The reviewer
+accepted it; the spec's design text is the draft, this is what shipped.
+
+**Why the retire rule is not simply "always free".** A block handed out while a
+stream was capturing is baked into that graph, so freeing it on growth leaves a
+replayed graph reading freed memory. A block that no capture saw is freed, which
+keeps the first eager step's intermediate classes from staying resident. Two
+fresh reviews ran; the first FAILED for leaving that rule, the stream key and the
+queue teardown untested, and the repair added a device test for each.
+
+**Open, and visible.** `M7` (the release path frees a capture-exposed block
+instead of retiring it) still survives its mutation: no test covers a graph
+captured on one queue and replayed after that queue is destroyed. No production
+path does that today. Recorded here rather than closed silently.
