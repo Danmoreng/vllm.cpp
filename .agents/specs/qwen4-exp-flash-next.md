@@ -10865,6 +10865,38 @@ section above says.
    and which this attribution now quantifies: at batch 1 the activation is under
    0.1% of the bytes a GEMV moves.
 
+### THE SLOWEST KERNEL IS ONE WARP PER OUTPUT WITH A 2.5-ITERATION LOOP (2026-09-18)
+
+The bandwidth attribution ranked the decode kernels ascending and the floor is
+the IQ1_S expert gate/up grouped kernel at **41.6 GB/s, 15.2% of peak**, against
+cuBLAS `gemvx` at 162.3 GB/s in the same capture.
+
+Read off the source: `cuda_quant_dot.cu:1986` `QuantDotGemmGrouped32Kernel`
+assigns **one warp per output element**, and `LaunchGrouped32` (`:2092`) uses
+`kWarpsPerBlock = 4`. At `hidden_size` 2560 the weight row is `nb = 80` blocks,
+so `for (b = lane; b < 80; b += 32)` is **2.50 iterations per lane** -- two or
+three loads, then a five-step `__shfl_down_sync`, then 31 of 32 lanes idle while
+lane 0 writes one float. Five reduction steps to amortise two and a half loads.
+That is latency-bound by construction.
+
+**The fix has a precedent 120 lines below it.**
+`QuantDotGemmGroupedFusedSwiGLU32Kernel` (`:2019`) already amortises at width 2 --
+one warp computes gate AND up for the same `(p, j)` against one broadcast
+activation. Generalising that to N output columns per warp makes the loop
+`2.5 x N` useful iterations per reduction and reads the broadcast activation once
+per warp instead of once per output.
+
+**Bound, not promise:** at cuBLAS's measured 162.3 GB/s the family's 26.22 ms/step
+becomes ~15.1 ms, about 11 ms off a 76.9 ms step; at full peak, ~17 ms. Neither is
+predicted -- 15.2% of peak has one measurement behind it, and register pressure
+turns the N sweep over somewhere. Scoped in
+`ISSUE-LOCAL-01M2TZ9AE416FW4GH23V09783Q`, which owes the sweep before any width
+is chosen.
+
+**And the bit-identity bar here IS achievable**, unlike the two this row has
+already written and had to retract: each output keeps its own accumulator and its
+own ascending block order, so only the assignment of work to warps changes.
+
 ### THE FULL DECODE KERNEL TABLE, and a retraction: the lead is GEMM, not QSA (2026-09-13)
 
 Read from the SAME self-validated capture as the allocator measurement
