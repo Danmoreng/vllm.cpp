@@ -82,9 +82,16 @@ Detection, in order:
 
 1. Strip `//` and `/* */` comments from the extracted body, so an intrinsic
    named only in prose cannot satisfy the gate.
-2. Delete every `__has_builtin( __ockl_sdot4 )` probe, whitespace-tolerant.
-   The probe asks whether the compiler knows the name; it is not a use of it.
-3. Require `__ockl_sdot4\s*\(` to match what is left.
+2. Require `__ockl_sdot4\s*\(` to match what is left.
+
+A third step was written and then removed: an explicit pass deleting every
+`__has_builtin( __ockl_sdot4 )` probe. It was **unreachable**, and the
+mutation matrix is what proved it — deleting the pass changed no verdict and
+the test file stayed green, the only surviving arm of the run. The reason is
+that inside the probe the intrinsic is followed by `)`, so step 2 already
+rejects it. Shipping the pass would have added exactly the shape this row
+exists to remove, so it is gone and
+`test_has_builtin_probe_alone_fails` pins the behaviour instead.
 
 The `has_conditional_fallback` disjunct is removed. It is not an assertion
 being deleted: it is the widening, and after step 2 it cannot be satisfied by
@@ -145,6 +152,53 @@ A restored `.py` can still run mutant `__pycache__` bytecode, so
 - Stop if repairing detection would require editing
   `src/vt/rocm/rocm_grouped_gemm.hip`; that is a different change with a
   different reviewer.
+
+## Outcome
+
+**Which half was stale: the checker.** `2bde17f6c` widened it and left the
+test behind. The repaired checker detects its own mutation; the A/B on one
+byte-identical mutated source is `rc=1` new against `rc=0` old.
+
+**Every one of the ten cases has teeth, and nothing is vacuous.** Nine
+checker mutations were run against the test file, with `__pycache__` purged
+between arms and each restore verified by sha256. Each arm was asserted to
+have changed the file before the arm ran, and the selected count was asserted
+at 10 on every arm, so no arm is a green over zero cases.
+
+| Arm | Checker mutation | Result |
+|---|---|---|
+| B | drop the comment stripping | detected |
+| C | call regex to bare substring (the pre-repair polarity) | detected |
+| D | restore both old disjuncts verbatim | detected |
+| E | `_has_call` always True | detected |
+| F | `_has_call` always False | detected |
+| G | delete the `if not _has_call` guard | detected |
+| H | `_extract_dp4a` never finds the function | detected |
+| I | drop the missing-source-file early return | detected |
+| J | drop the `Dp4a function not found` error | detected |
+
+Zero survivors after the probe pass was removed, and every line of the
+checker is load-bearing under some arm.
+
+`test_missing_source_file_fails` and `test_missing_dp4a_function_fails` fired
+on no arm until `I` and `J` were written for them. They are not vacuous, but
+neither was covered by a mutation until this row, and each is now pinned by
+exactly one arm.
+
+**One pre-existing case was misnamed, not vacuous.** The old
+`test_missing_dp4a_function_fails` passed an empty *body*, which still has a
+`Dp4a` signature, so it never reached the `Dp4a function not found` branch it
+is named for; that branch had no test at all. It is split into
+`test_empty_dp4a_body_fails` (what it measured) and a new
+`test_missing_dp4a_function_fails` (what it claimed), and arm `J` shows the
+new one reaches the branch.
+
+**`_SCALAR_MARKERS` was dead and is removed.** It was defined, never read,
+and described an `a * b` rule the checker never enforced.
+
+**No source, kernel, build or ROCm behaviour changed**, and no GPU was used.
+`src/vt/rocm/rocm_grouped_gemm.hip` is byte-identical to `origin/main` after
+every mutation arm, verified with `sha256sum -c`.
 
 ## Now
 
