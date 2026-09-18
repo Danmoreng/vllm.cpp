@@ -5837,9 +5837,14 @@ void Exl3Gemm(Queue& q, Tensor& c, const Tensor& a, const Tensor& trellis, const
 // QUANT-EXL3 W6. The reconstruct+cuBLAS dispatch, parallel to Exl3Gemm above.
 // Same validation, plus w_scratch: fp16 [k, min(n, 32768)] holding the
 // reconstructed weight (MAX_RECONSTRUCT_SLICE_N, exl3.py:11).
-void Exl3ReconstructGemm(Queue& q, Tensor& c, const Tensor& a, const Tensor& trellis,
-                          const Tensor& suh, const Tensor& svh, Tensor& a_had,
-                          Tensor& w_scratch, const Exl3GemmArgs& args) {
+//
+// QUANT-EXL3 W7: `w_scratch == nullptr` is the persistent-scratch spelling, whose
+// scratch the backend owns, so there is nothing of the caller's to validate.
+namespace {
+void CheckExl3ReconstructGemm(const Queue& q, const Tensor& c, const Tensor& a,
+                              const Tensor& trellis, const Tensor& suh, const Tensor& svh,
+                              const Tensor& a_had, const Tensor* w_scratch,
+                              const Exl3GemmArgs& args) {
   VT_CHECK(args.bits >= 1 && args.bits <= 8,
            "exl3_reconstruct_gemm: bits must be in [1, 8]; got " + std::to_string(args.bits));
   VT_CHECK(args.codebook >= 0 && args.codebook <= 2,
@@ -5850,9 +5855,6 @@ void Exl3ReconstructGemm(Queue& q, Tensor& c, const Tensor& a, const Tensor& tre
            "exl3_reconstruct_gemm: A must be f16; got " + std::string(Name(a.dtype)));
   VT_CHECK(a_had.dtype == DType::kF16,
            "exl3_reconstruct_gemm: A_had must be f16; got " + std::string(Name(a_had.dtype)));
-  VT_CHECK(w_scratch.dtype == DType::kF16,
-           "exl3_reconstruct_gemm: w_scratch must be f16; got " +
-               std::string(Name(w_scratch.dtype)));
   VT_CHECK(c.dtype == DType::kF16 || c.dtype == DType::kF32,
            "exl3_reconstruct_gemm: C must be f16 or f32; got " + std::string(Name(c.dtype)));
   VT_CHECK(trellis.dtype == DType::kI8,
@@ -5864,9 +5866,16 @@ void Exl3ReconstructGemm(Queue& q, Tensor& c, const Tensor& a, const Tensor& tre
   VT_CHECK(c.shape[0] == m, "exl3_reconstruct_gemm: C rows must equal A rows");
   VT_CHECK(a_had.shape[0] == m && a_had.shape[1] == k,
            "exl3_reconstruct_gemm: A_had must be shaped like A");
-  const int64_t w_cols = n <= 32768 ? n : 32768;
-  VT_CHECK(w_scratch.shape[0] == k && w_scratch.shape[1] == w_cols,
-           "exl3_reconstruct_gemm: w_scratch must be [k, min(n, 32768)]");
+  if (w_scratch != nullptr) {
+    const int64_t w_cols = n <= 32768 ? n : 32768;
+    VT_CHECK(w_scratch->dtype == DType::kF16,
+             "exl3_reconstruct_gemm: w_scratch must be f16; got " +
+                 std::string(Name(w_scratch->dtype)));
+    VT_CHECK(w_scratch->rank == 2 && w_scratch->shape[0] == k && w_scratch->shape[1] == w_cols,
+             "exl3_reconstruct_gemm: w_scratch must be [k, min(n, 32768)]");
+    VT_CHECK(w_scratch->IsContiguous() && w_scratch->device == q.device,
+             "exl3_reconstruct_gemm: w_scratch must be contiguous and on the queue's device");
+  }
   // Upstream requires this on EVERY reconstruct path, not only the fused one.
   // The unfused path calls `reconstruct` -> `reconstruct_slice`, which checks
   // N % 128 (exllamav3_ext/quant/reconstruct.cu:121), and `had_r_128` on the
@@ -5885,15 +5894,37 @@ void Exl3ReconstructGemm(Queue& q, Tensor& c, const Tensor& a, const Tensor& tre
   VT_CHECK(suh.Numel() == k, "exl3_reconstruct_gemm: suh must have k entries");
   VT_CHECK(svh.Numel() == n, "exl3_reconstruct_gemm: svh must have n entries");
   VT_CHECK(a.IsContiguous() && c.IsContiguous() && a_had.IsContiguous() &&
-               w_scratch.IsContiguous() && trellis.IsContiguous() &&
+               trellis.IsContiguous() &&
                suh.IsContiguous() && svh.IsContiguous(),
            "exl3_reconstruct_gemm: contiguous required");
   VT_CHECK(a.device == q.device && c.device == q.device && a_had.device == q.device &&
-               w_scratch.device == q.device && trellis.device == q.device &&
+               trellis.device == q.device &&
                suh.device == q.device && svh.device == q.device,
            "exl3_reconstruct_gemm: device mismatch");
+}
+}  // namespace
+
+void Exl3ReconstructGemm(Queue& q, Tensor& c, const Tensor& a, const Tensor& trellis,
+                          const Tensor& suh, const Tensor& svh, Tensor& a_had,
+                          Tensor& w_scratch, const Exl3GemmArgs& args) {
+  // A caller-owned scratch must be a real buffer: an empty one would silently
+  // select the backend's persistent scratch through the spelling that says the
+  // caller supplies it.
+  VT_CHECK(w_scratch.data != nullptr,
+           "exl3_reconstruct_gemm: w_scratch is empty; call the overload without w_scratch "
+           "for the backend's persistent reconstruct scratch");
+  CheckExl3ReconstructGemm(q, c, a, trellis, suh, svh, a_had, &w_scratch, args);
   reinterpret_cast<Exl3ReconstructGemmFn>(GetOp(OpId::kExl3ReconstructGemm, q.device.type))(
       q, c, a, trellis, suh, svh, a_had, w_scratch, args);
+}
+
+void Exl3ReconstructGemm(Queue& q, Tensor& c, const Tensor& a, const Tensor& trellis,
+                          const Tensor& suh, const Tensor& svh, Tensor& a_had,
+                          const Exl3GemmArgs& args) {
+  CheckExl3ReconstructGemm(q, c, a, trellis, suh, svh, a_had, nullptr, args);
+  Tensor persistent;  // data == nullptr: the backend's persistent scratch
+  reinterpret_cast<Exl3ReconstructGemmFn>(GetOp(OpId::kExl3ReconstructGemm, q.device.type))(
+      q, c, a, trellis, suh, svh, a_had, persistent, args);
 }
 
 // ─── The fused MoE MLP — MODEL-DSV4-EXL3 W2d ─────────────────────────────────
