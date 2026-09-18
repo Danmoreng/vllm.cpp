@@ -5,13 +5,18 @@ The corpus is a pure function of (source bytes, seed, weights, count). Run this
 twice with the same arguments on two machines and you get the same file, which
 is what lets a published length histogram be reproduced rather than believed.
 
-Four bands, one composition rule each. `docs/benchmarks/variadic-load-methodology.md`
+Five bands, one composition rule each. `docs/benchmarks/variadic-load-methodology.md`
 carries the reasoning; this file carries the rules.
 
-  S   short question      GSM8K `question`, verbatim
-  M   code completion     HumanEval `prompt`, verbatim
-  L   prose summary       a contiguous block of sonnet lines, under an instruction
-  XL  long code review    k HumanEval prompts concatenated, under an instruction
+  S    short question     GSM8K `question`, verbatim
+  M    code completion    HumanEval `prompt`, verbatim
+  L    prose summary      a contiguous block of sonnet lines, under an instruction
+  XL   long code review   k HumanEval prompts concatenated, under an instruction
+  XXL  as XL, longer      the same rule, sized at the served context
+
+`XXL` carries no weight by default, so an invocation that does not name it
+produces the same corpus bytes as the four-band predecessor did. Ask for it with
+`--weights S=0.2,M=0.2,L=0.2,XL=0.2,XXL=0.2`.
 
 Output is the ShareGPT shape the head-to-head client already reads, with a
 `band` key added. A manifest beside it records every source sha256, the seed,
@@ -30,13 +35,96 @@ import sys
 L_TARGET_CHARS = 3200      # about 800 prompt tokens of English verse
 XL_TARGET_CHARS = 9000     # about 3000 prompt tokens of Python
 
+# XXL is sized against the context the server actually serves, not against a
+# round number, and it is sized to FIT rather than to hit 7000 exactly. A band
+# that overruns the context voids itself under `G-FITS` and costs the lease it
+# was measured on, so the margin is bought here and not argued for later.
+#
+# Derivation. The published XL band
+# (`docs/bench-evidence/qwen38-27b-exl3-variadic-20260905/`) targets 9000
+# characters and realised 2288 to 3290 prompt tokens, so this corpus renders at
+# about 3.4 characters per prompt token. 21000 characters is therefore about
+# 21000 / 3.4 = 6200 prompt tokens, which is still about 2.3 times the XL
+# band's realised median and well clear of the 3.3k ceiling every published
+# band stops at.
+#
+# Headroom. The served configuration is `--max-model-len 8192` with
+# `max_tokens: 192`, and the chat template adds about 50 tokens, which leaves
+# 8192 - 192 - 50 = 7950 tokens for the prompt body. The band is a sum of k
+# whole problems with k drawn from [k_mid - 2, k_mid + 2], so it overshoots its
+# target by the k jitter plus the sampling spread of the draws. XL realised
+# 11044 characters at the top, 22.7% over its target, at k_mid = 20: 10 points
+# of that is the jitter, 2/20, and the remaining 12.7 points is the sampling
+# spread. Both terms shrink with k. The jitter is 2/k_mid, and the spread of a
+# sum of k draws grows as sqrt(k) while the sum grows as k, so it falls as
+# 1/sqrt(k). At the k_mid = 47 that 21000 characters gives on the pinned
+# HumanEval, that is 4.3% + 12.7% * sqrt(20/47) = 4.3% + 8.3% = 12.5% over
+# target, so the expected ceiling is about 23600 characters, or about 6900
+# tokens, and the headroom is about 1000 tokens.
+#
+# That headroom is not a licence to trust the number. `G-FITS` in
+# `.agents/specs/bench-qwen38-exl3-longctx.md` reads every realised
+# `usage.prompt_tokens` back from each server and voids the band rather than
+# publishing a truncation.
+XXL_TARGET_CHARS = 21000
+
+BANDS = ("S", "M", "L", "XL", "XXL")
+DEFAULT_WEIGHTS = "S=0.35,M=0.40,L=0.15,XL=0.10"
+
 L_INSTRUCTION = (
     "Read the following passage and write a short prose summary of it. "
     "Say what it is about, in your own words.\n\n")
+# XXL reuses XL_INSTRUCTION deliberately: the composition rule is XL's,
+# unchanged, so that length is the only variable that differs between them.
 XL_INSTRUCTION = (
     "Below are several Python function signatures with their docstrings. "
     "For each one, say in a single sentence what the function is supposed to "
     "do, and name the edge case its docstring leaves undefined.\n\n")
+
+
+def parse_weights(text):
+    """`S=0.35,M=0.40,...` -> {band: share}. Refuses, never rounds.
+
+    Every defect here is silent if it is tolerated: an unknown band name would
+    drop its mass, a share that does not sum to 1.0 would change the realised
+    count, and both would publish a histogram that the manifest describes
+    wrongly. So each one is an error that names the offending text.
+    """
+    weights = {}
+    for pair in text.split(","):
+        pair = pair.strip()
+        if not pair:
+            continue
+        if "=" not in pair:
+            raise argparse.ArgumentTypeError(
+                f"{pair!r} is not BAND=SHARE")
+        band, _, share = pair.partition("=")
+        band = band.strip()
+        if band not in BANDS:
+            raise argparse.ArgumentTypeError(
+                f"unknown band {band!r}; known bands are "
+                + ", ".join(BANDS))
+        if band in weights:
+            raise argparse.ArgumentTypeError(f"band {band!r} given twice")
+        try:
+            value = float(share)
+        except ValueError:
+            raise argparse.ArgumentTypeError(
+                f"share {share!r} for band {band!r} is not a number") from None
+        if value != value or value in (float("inf"), float("-inf")):
+            raise argparse.ArgumentTypeError(
+                f"share {share!r} for band {band!r} is not finite")
+        if value < 0.0:
+            raise argparse.ArgumentTypeError(
+                f"share {value} for band {band!r} is negative")
+        weights[band] = value
+    if not weights:
+        raise argparse.ArgumentTypeError("no bands given")
+    total = sum(weights.values())
+    if abs(total - 1.0) > 1e-9:
+        raise argparse.ArgumentTypeError(
+            f"weights sum to {total}, not 1.0")
+    return weights
 
 
 def sha256_of(path):
@@ -75,23 +163,18 @@ def build(args):
     with open(args.sonnet, encoding="utf-8") as f:
         sonnet = [ln.rstrip("\n") for ln in f if ln.strip()]
 
-    weights = {"S": args.weight_s, "M": args.weight_m,
-               "L": args.weight_l, "XL": args.weight_xl}
-    total_w = sum(weights.values())
-    if abs(total_w - 1.0) > 1e-9:
-        print(f"ERROR: weights sum to {total_w}, not 1.0", file=sys.stderr)
-        return 2
+    weights = args.weights
     counts = band_counts(args.count, weights)
 
     items = []
 
     # S: one real short question, verbatim.
-    for q in rng.sample(gsm, counts["S"]):
+    for q in rng.sample(gsm, counts.get("S", 0)):
         items.append(("S", q))
 
     # M: one real HumanEval prompt, verbatim. This is the predecessor's whole
     # workload, kept so the two runs share a band.
-    for p in rng.sample(he, counts["M"]):
+    for p in rng.sample(he, counts.get("M", 0)):
         items.append(("M", p))
 
     # L: a CONTIGUOUS block of lines, so two L prompts overlap only where the
@@ -102,7 +185,7 @@ def build(args):
     # length, which is the opposite of what this corpus is for.
     lo_b = max(1, round(block_mid * 0.75))
     hi_b = min(len(sonnet), round(block_mid * 1.25))
-    for _ in range(counts["L"]):
+    for _ in range(counts.get("L", 0)):
         block = rng.randint(lo_b, hi_b)
         start = rng.randrange(0, max(1, len(sonnet) - block + 1))
         body = "\n".join(sonnet[start:start + block])
@@ -112,10 +195,18 @@ def build(args):
     # internal spread rather than one length repeated.
     mean_he = sum(len(p) for p in he) / len(he)
     k_mid = max(2, round(XL_TARGET_CHARS / mean_he))
-    for _ in range(counts["XL"]):
+    for _ in range(counts.get("XL", 0)):
         k = rng.randint(max(2, k_mid - 2), k_mid + 2)
         body = "\n\n".join(rng.sample(he, min(k, len(he))))
         items.append(("XL", XL_INSTRUCTION + body))
+
+    # XXL: the same rule at the served context. It draws from `rng` only when
+    # it was asked for, which is what keeps the four-band default byte-exact.
+    k_mid_xxl = max(2, round(XXL_TARGET_CHARS / mean_he))
+    for _ in range(counts.get("XXL", 0)):
+        k = rng.randint(max(2, k_mid_xxl - 2), k_mid_xxl + 2)
+        body = "\n\n".join(rng.sample(he, min(k, len(he))))
+        items.append(("XXL", XL_INSTRUCTION + body))
 
     # One shuffle, so the band order is fixed and identical for every arm and
     # every rung. Two arms that see different orders are not one workload.
@@ -151,6 +242,8 @@ def build(args):
             "L_target_chars": L_TARGET_CHARS,
             "XL_k_mid": k_mid,
             "XL_target_chars": XL_TARGET_CHARS,
+            "XXL_k_mid": k_mid_xxl,
+            "XXL_target_chars": XXL_TARGET_CHARS,
         },
         "realised_chars": {
             b: {"n": len(v), "min": min(v), "median": sorted(v)[len(v) // 2],
@@ -173,10 +266,13 @@ def main():
     ap.add_argument("--sonnet", required=True, help="vLLM benchmarks/sonnet.txt")
     ap.add_argument("--count", type=int, default=136)
     ap.add_argument("--seed", type=int, default=0)
-    ap.add_argument("--weight-s", type=float, default=0.35)
-    ap.add_argument("--weight-m", type=float, default=0.40)
-    ap.add_argument("--weight-l", type=float, default=0.15)
-    ap.add_argument("--weight-xl", type=float, default=0.10)
+    ap.add_argument(
+        "--weights", type=parse_weights, default=DEFAULT_WEIGHTS,
+        metavar="S=0.35,M=0.40,L=0.15,XL=0.10",
+        help="band shares, comma separated, summing to 1.0. Bands: "
+             + ", ".join(BANDS) + ". A band that is not named gets no items. "
+             "The default is the four-band distribution the predecessor run "
+             "published.")
     ap.add_argument("--out", required=True)
     ap.add_argument("--manifest", required=True)
     return build(ap.parse_args())

@@ -26,6 +26,8 @@ What each case pins:
   AcceptanceFromMetrics   the /metrics delta becomes an acceptance rate, and an
                           engine with no /metrics reports absent rather than 0
   CorpusIsDeterministic   the corpus is a function of (sources, seed, weights)
+  LongBandIsRequestable   `--weights` reaches the XXL band, and a malformed
+                          spelling is refused rather than silently ignored
   BinaryCacheRestores     job.sh restores a cached vllm-server from a share that
                           carries no execute bit, instead of rebuilding it
 """
@@ -606,14 +608,19 @@ class CorpusIsDeterministic(unittest.TestCase):
         son.write_text("".join(f"line {i} of the verse here\n" for i in range(517)))
         return gsm, he, son
 
-    def _build(self, tmp, out, man, seed=0, count=40):
+    def _run(self, tmp, out, man, seed=0, count=40, weights=None):
         gsm, he, son = self._sources(tmp)
-        rc = subprocess.run(
-            [sys.executable, str(HARNESS / "build_corpus.py"),
-             "--gsm8k", str(gsm), "--humaneval", str(he), "--sonnet", str(son),
-             "--count", str(count), "--seed", str(seed),
-             "--out", str(out), "--manifest", str(man)],
-            capture_output=True, text=True, timeout=120)
+        argv = [sys.executable, str(HARNESS / "build_corpus.py"),
+                "--gsm8k", str(gsm), "--humaneval", str(he),
+                "--sonnet", str(son),
+                "--count", str(count), "--seed", str(seed),
+                "--out", str(out), "--manifest", str(man)]
+        if weights is not None:
+            argv += ["--weights", weights]
+        return subprocess.run(argv, capture_output=True, text=True, timeout=120)
+
+    def _build(self, tmp, out, man, seed=0, count=40, weights=None):
+        rc = self._run(tmp, out, man, seed=seed, count=count, weights=weights)
         self.assertEqual(rc.returncode, 0, rc.stderr)
         return json.loads(Path(man).read_text())
 
@@ -642,6 +649,32 @@ class CorpusIsDeterministic(unittest.TestCase):
         for name, src in man["sources"].items():
             self.assertEqual(len(src["sha256"]), 64, name)
 
+    # The corpus that `docs/bench-evidence/qwen38-27b-exl3-variadic-20260905/`
+    # published is a pure function of (sources, seed, weights, count), so any
+    # change to the default weights, to the band order, or to the number of
+    # values each band draws from the shared `random.Random` moves these bytes.
+    # This golden is over the fixture sources above, not the pinned corpora,
+    # because a test may not download 3 corpora; it pins the same property.
+    DEFAULT_GOLDEN_192 = \
+        "689e73227fdf07018260d1f8603b3d1d0d281f0762eb4b075cfacad8b4dfc953"
+
+    def test_the_default_corpus_bytes_are_unchanged(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            man = self._build(tmp, Path(tmp) / "a.json", Path(tmp) / "a.man",
+                              count=192)
+            blob = (Path(tmp) / "a.json").read_bytes()
+        self.assertEqual(hashlib.sha256(blob).hexdigest(),
+                         self.DEFAULT_GOLDEN_192)
+        self.assertEqual(man["corpus_sha256"], self.DEFAULT_GOLDEN_192)
+
+    def test_the_default_weights_spelled_out_give_the_same_bytes(self):
+        """`--weights` with today's distribution is not a different corpus."""
+        with tempfile.TemporaryDirectory() as tmp:
+            man = self._build(tmp, Path(tmp) / "a.json", Path(tmp) / "a.man",
+                              count=192,
+                              weights="S=0.35,M=0.40,L=0.15,XL=0.10")
+        self.assertEqual(man["corpus_sha256"], self.DEFAULT_GOLDEN_192)
+
     def test_the_bands_are_ordered_by_length(self):
         with tempfile.TemporaryDirectory() as tmp:
             man = self._build(tmp, Path(tmp) / "a.json", Path(tmp) / "a.man",
@@ -649,6 +682,119 @@ class CorpusIsDeterministic(unittest.TestCase):
         med = {b: v["median"] for b, v in man["realised_chars"].items()}
         self.assertLess(med["S"], med["L"])
         self.assertLess(med["L"], med["XL"])
+
+
+class LongBandIsRequestable(unittest.TestCase):
+    """ISSUE-LOCAL-01M2TNH3A9DKGWCRADM4Q8J30C.
+
+    Every published band stops at about 3.3k prompt tokens, which is 40% of the
+    `--max-model-len 8192` both engines serve, so the corpus could not express
+    the question `BENCH-QWEN38-EXL3-LONGCTX` asks. `XXL` is that band, and
+    `--weights` is how a run asks for it without editing the generator.
+    """
+
+    _sources = CorpusIsDeterministic._sources
+    _run = CorpusIsDeterministic._run
+    _build = CorpusIsDeterministic._build
+
+    def test_xxl_items_land_in_the_intended_character_range(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            man = self._build(tmp, Path(tmp) / "a.json", Path(tmp) / "a.man",
+                              count=200,
+                              weights="S=0.2,M=0.2,L=0.2,XL=0.2,XXL=0.2")
+        target = man["rules"]["XXL_target_chars"]
+        xxl = man["realised_chars"]["XXL"]
+        self.assertEqual(xxl["n"], 40)
+        # The band draws k around `XXL_k_mid`, so it has a spread by design.
+        # What it may not do is overlap XL or miss its target by a factor.
+        self.assertGreater(xxl["min"], man["realised_chars"]["XL"]["max"])
+        self.assertGreater(xxl["median"], 0.75 * target)
+        self.assertLess(xxl["median"], 1.25 * target)
+
+    def test_xxl_is_xl_with_only_the_length_changed(self):
+        """The case above cannot see this, which is why this one exists.
+
+        The spec's claim is that length is the ONLY variable between the two
+        long bands, which is what makes the pair readable as one axis. Give XXL
+        its own instruction and the lengths still sit where they should, so
+        `test_xxl_items_land_in_the_intended_character_range` stays green while
+        the comparison has quietly become two workloads.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "a.json"
+            self._build(tmp, out, Path(tmp) / "a.man", count=200,
+                        weights="S=0.2,M=0.2,L=0.2,XL=0.2,XXL=0.2")
+            corpus = json.loads(out.read_text())
+        by_band = {}
+        for item in corpus:
+            body = item["conversations"][0]["value"]
+            by_band.setdefault(item["band"], set()).add(body.split("\n\n")[0])
+        self.assertEqual(len(by_band["XL"]), 1, "XL lost its single instruction")
+        self.assertEqual(by_band["XXL"], by_band["XL"])
+
+    def test_band_counts_match_the_requested_weights(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            man = self._build(tmp, Path(tmp) / "a.json", Path(tmp) / "a.man",
+                              count=100,
+                              weights="S=0.1,M=0.2,L=0.2,XL=0.2,XXL=0.3")
+        self.assertEqual(man["band_counts"],
+                         {"S": 10, "M": 20, "L": 20, "XL": 20, "XXL": 30})
+        self.assertEqual(sum(man["band_counts"].values()), 100)
+
+    def test_largest_remainder_still_holds_with_five_bands(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            man = self._build(tmp, Path(tmp) / "a.json", Path(tmp) / "a.man",
+                              count=137,
+                              weights="S=0.2,M=0.2,L=0.2,XL=0.2,XXL=0.2")
+        self.assertEqual(sum(man["band_counts"].values()), 137)
+        self.assertEqual(sorted(man["band_counts"].values()), [27, 27, 27, 28, 28])
+
+    def test_the_manifest_records_the_weights_it_used(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            man = self._build(tmp, Path(tmp) / "a.json", Path(tmp) / "a.man",
+                              count=100,
+                              weights="S=0.1,M=0.2,L=0.2,XL=0.2,XXL=0.3")
+        self.assertEqual(man["weights"],
+                         {"S": 0.1, "M": 0.2, "L": 0.2, "XL": 0.2, "XXL": 0.3})
+        self.assertIn("XXL_target_chars", man["rules"])
+        self.assertIn("XXL_k_mid", man["rules"])
+
+    def test_weights_are_deterministic(self):
+        w = "S=0.2,M=0.2,L=0.2,XL=0.2,XXL=0.2"
+        with tempfile.TemporaryDirectory() as tmp:
+            a = self._build(tmp, Path(tmp) / "a.json", Path(tmp) / "a.man",
+                            count=60, weights=w)
+            b = self._build(tmp, Path(tmp) / "b.json", Path(tmp) / "b.man",
+                            count=60, weights=w)
+        self.assertEqual(a["corpus_sha256"], b["corpus_sha256"])
+
+    def _refuses(self, weights, needle):
+        with tempfile.TemporaryDirectory() as tmp:
+            rc = self._run(tmp, Path(tmp) / "a.json", Path(tmp) / "a.man",
+                           weights=weights)
+        self.assertNotEqual(rc.returncode, 0, rc.stdout)
+        # Not `unrecognized arguments`: that is argparse refusing the FLAG, and
+        # it would pass this case on a tree that never grew `--weights`.
+        self.assertNotIn("unrecognized arguments", rc.stderr)
+        self.assertIn(needle, rc.stderr,
+                      f"refusal for {weights!r} did not name the defect: "
+                      f"{rc.stderr!r}")
+        return rc
+
+    def test_an_unknown_band_is_refused_by_name(self):
+        self._refuses("S=0.5,XXXL=0.5", "XXXL")
+
+    def test_a_negative_weight_is_refused(self):
+        self._refuses("S=1.2,M=-0.2", "negative")
+
+    def test_weights_that_do_not_sum_to_one_are_refused(self):
+        self._refuses("S=0.5,M=0.4", "sum")
+
+    def test_a_malformed_pair_is_refused(self):
+        self._refuses("S:0.5,M=0.5", "S:0.5")
+
+    def test_a_non_numeric_weight_is_refused(self):
+        self._refuses("S=half,M=0.5", "half")
 
 
 class BinaryCacheRestores(unittest.TestCase):

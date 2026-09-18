@@ -13,6 +13,28 @@ Comparator: `MiaAI-Lab/exllamav3` @ `63b32f001d7b2cfed3b3e3aaf25f534ba53cc7ed`
 
 `ACTIVE`. Spec committed before the harness change.
 
+2026-09-18: the harness part landed on `row/BENCH-QWEN38-EXL3-LONGCTX`.
+`build_corpus.py` carries the `XXL` band at `XXL_TARGET_CHARS = 21000`, and
+`--weights` replaces the four `--weight-*` flags.
+
+The band is sized to FIT, not to hit the 7000 tokens §2 asks for. At the 3.4
+characters per prompt token this corpus realised on the published `XL` band,
+21000 characters is about 6200 prompt tokens. The band's own overshoot at
+`k_mid = 47` is about 12.5% (4.3% k jitter plus 8.3% sampling spread, scaled
+from XL's measured 22.7% at `k_mid = 20`), so the expected ceiling is about
+6900 tokens against the 8192 - 192 - 50 = 7950 the served configuration leaves,
+which is about 1000 tokens of headroom. The first draft targeted 7000 tokens at
+23800 characters and left about 150. That margin was rejected: a band that
+overruns the context is voided by `G-FITS` and costs the dgx lease it was
+measured on, and 6200 tokens is still about 2.3 times the `XL` median and well
+past the 3.3k every published band stops at. `G-FITS` still decides.
+
+`XXL` carries no default weight, so the four-band default is byte-identical to
+the predecessor: the pre-change and post-change generators produced the same
+corpus sha256 on five `(count, seed)` pairs over the same fixture sources, and
+`tests/scripts/test_variadic_harness.py` pins that sha256 as a golden. The run
+itself, `job.sh`, and the publication are not in this change.
+
 ## 1. The question
 
 Does our prefill lead over exllamav3 hold at the context this server actually
