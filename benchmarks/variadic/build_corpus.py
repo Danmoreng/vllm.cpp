@@ -68,23 +68,36 @@ XL_TARGET_CHARS = 9000     # about 3000 prompt tokens of Python
 # spread. Both terms shrink with k. The jitter is 2/k_mid, and the spread of a
 # sum of k draws grows as sqrt(k) while the sum grows as k, so it falls as
 # 1/sqrt(k). At the k_mid = 47 that 21000 characters gives on the pinned
-# HumanEval, that is 4.3% + 12.7% * sqrt(20/47) = 4.3% + 8.3% = 12.5% over
-# target, so the expected ceiling is about 23600 characters. Convert that at
+# HumanEval, that is 2/47 + 12.7% * sqrt(20/47) = 4.26% + 8.28% = 12.54% over
+# target, which is the 1.125 the test below pins. (An earlier draft of this
+# comment displayed the two terms rounded, as 4.3% + 8.3% = 12.5%; those
+# rounded terms add to 12.6%, not to 12.5%. The constant was always computed
+# from the unrounded terms and does not move.) The expected ceiling is
+# therefore about 23600 characters. Convert that at
 # 3.11, the ratio the TOP of the XL band realised, because the ceiling is the
 # longest prompt and not the average one: about 7600 prompt tokens. At the mean
 # ratio of 3.21 it is about 7360.
 #
 # Headroom. The served configuration is `--max-model-len 8192` with
-# `max_tokens: 192`, and about 50 tokens are allowed for the chat template,
-# which leaves 8192 - 192 - 50 = 7950 tokens for the prompt body. The headroom
-# is therefore about 350 tokens at the adverse 3.11 pairing and about 590 at
-# the mean. Every published pairing leaves the band inside the budget.
+# `max_tokens: 192`, and 57 tokens are allowed for the chat template, which
+# leaves 8192 - 192 - 57 = 7943 tokens for the prompt body. The headroom is
+# therefore about 346 tokens at the adverse 3.11 pairing and about 583 at the
+# mean. Every published pairing leaves the band inside the budget.
 #
-# Two things this arithmetic does NOT know. The 50 tokens of chat template is
-# an ASSUMED allowance, not a measured one: no template has been counted on
-# either engine for this row. And each engine applies its own template and its
-# own tokenizer, so the same corpus is two different token histograms, and the
-# ratio above is one checkpoint's.
+# The template allowance is MEASURED, not assumed.
+# `docs/benchmarks/qwen38-27b-exl3-variadic-gb10.md` ran this corpus through
+# both engines, each rendering its own chat template, and read the realised
+# counts back from every server's own `usage.prompt_tokens`. The corpus
+# measures 26 to 3233 tokens with the target's own tokenizer, and the served
+# histogram runs 78 to 3290: +52 at the corpus minimum and +57 at the `XL`
+# top. 57 is the larger of the two measured deltas, so the pin is conservative
+# at its own boundary; 50 was not, because it admits a target of 21977
+# characters whose ceiling is 7950 served tokens.
+#
+# What that page does NOT settle is the second tokenizer. Each engine applies
+# its own template and its own tokenizer, and the published run found the two
+# rendered the SAME counts, but one agreeing run is not a guarantee for a band
+# no published run has built.
 #
 # So this headroom is not a licence to trust the number. `G-FITS` in
 # `.agents/specs/bench-qwen38-exl3-longctx.md` reads every realised

@@ -720,12 +720,18 @@ class LongBandIsRequestable(unittest.TestCase):
     # against the context rather than against itself.
     SERVED_CONTEXT_TOKENS = 8192          # `--max-model-len 8192`
     OUTPUT_TOKENS = 192                   # `max_tokens: 192`
-    # ASSUMED, not measured. No chat template has been counted on either
-    # engine for this row, and the two engines render the same text to
-    # different token counts, so this is an allowance and G-FITS is what
-    # decides. It is here so that the pin is conservative, not so that it is
-    # exact.
-    TEMPLATE_TOKENS = 50
+    # MEASURED, from `docs/benchmarks/qwen38-27b-exl3-variadic-gb10.md`: that
+    # page ran this corpus through both engines, each rendering its own chat
+    # template, and read the counts back from every server's own
+    # `usage.prompt_tokens`. The corpus measures 26 to 3233 tokens with the
+    # target's own tokenizer and the served histogram runs 78 to 3290, so the
+    # template adds +52 at the corpus minimum and +57 at the `XL` top. The
+    # LARGER measured delta is the one pinned here, so that the refusal below
+    # is conservative at its own boundary: at 50 this case admits a target of
+    # 21977 characters, whose ceiling is 7950 served tokens and overruns.
+    # G-FITS still decides on the realised counts, because no published run
+    # has built the `XXL` band.
+    TEMPLATE_TOKENS = 57
     # The most ADVERSE characters-per-prompt-token pairing the published `XL`
     # band realised: 10048 characters at 3233 prompt tokens, the top of the
     # band, from `corpus-manifest.json` and `corpus-token-histogram.md` in
@@ -734,9 +740,11 @@ class LongBandIsRequestable(unittest.TestCase):
     # the smallest ratio is the one that buys the most tokens per character,
     # so it is the one a fit is checked against.
     CHARS_PER_PROMPT_TOKEN = 3.11
-    # The band's expected ceiling over its target: 4.3% k jitter at
-    # `k_mid = 47` plus 8.3% sampling spread, scaled from XL's measured 22.7%
-    # at `k_mid = 20` by 1/sqrt(k). The derivation is in `build_corpus.py`.
+    # The band's expected ceiling over its target: 4.26% k jitter at
+    # `k_mid = 47` plus 8.28% sampling spread, scaled from XL's measured 22.7%
+    # at `k_mid = 20` by 1/sqrt(k), which is 12.54%. The derivation is in
+    # `build_corpus.py`. The terms are carried unrounded because the rounded
+    # 4.3% and 8.3% an earlier draft displayed add to 12.6%, not to 12.5%.
     CEILING_OVER_TARGET = 1.125
 
     def _prompt_budget_tokens(self):

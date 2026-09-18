@@ -28,19 +28,29 @@ render higher (`L` is 3.83 on the same pairing) and `XXL` is entirely Python.
 
 At 3.21, 21000 characters is about **6540 prompt tokens**, about **2.2 times**
 the `XL` band's realised median of 2928 tokens. The band's own overshoot at
-`k_mid = 47` is about 12.5% (4.3% k jitter plus 8.3% sampling spread, scaled
+`k_mid = 47` is 12.54% (4.26% k jitter plus 8.28% sampling spread, scaled
 from XL's measured 22.7% at `k_mid = 20`), so the expected ceiling is about
 23600 characters, or about **7600 tokens** at the adverse 3.11 pairing and about
-7360 at the mean. The served configuration leaves 8192 - 192 - 50 = 7950 tokens
-for the prompt body, so the headroom is about **350 tokens** at the adverse
-pairing and about 590 at the mean, not the 1000 an earlier draft claimed. Every
-published pairing leaves the band inside the budget.
+7360 at the mean. The served configuration leaves 8192 - 192 - 57 = 7943 tokens
+for the prompt body, so the headroom is about **346 tokens** at the adverse
+pairing and about 583 at the mean, not the 1000 an earlier draft claimed. Every
+published pairing leaves the band inside the budget. (An earlier draft displayed
+the overshoot terms rounded, as 4.3% + 8.3% = 12.5%; those rounded terms add to
+12.6%. The 1.125 constant comes from the unrounded terms and does not move.)
 
-The 50 tokens of chat template is an ASSUMED allowance and not a measurement:
-no template has been counted on either engine for this row. Each engine applies
-its own template and tokenizer, so the same corpus is two different token
-histograms and the ratio above is one checkpoint's. `G-FITS` reads both back
-and decides.
+The 57 tokens of chat template is a MEASURED allowance.
+[`qwen38-27b-exl3-variadic-gb10`](../../docs/benchmarks/qwen38-27b-exl3-variadic-gb10.md)
+ran this corpus through both engines, each rendering its own chat template, and
+read the counts back from every server's own `usage.prompt_tokens`: the corpus
+measures 26 to 3233 tokens with the target's own tokenizer and the served
+histogram runs 78 to 3290, so the template adds +52 at the corpus minimum and
++57 at the `XL` top. The larger delta is the one pinned, so that the refusal is
+conservative at its own boundary; at 50 it admits a target of 21977 characters
+whose ceiling is 7950 served tokens and overruns. That page also found the two
+engines rendered the same corpus to the SAME counts, so the two-tokenizer
+caution earlier drafts asserted is not something this tree has measured. One
+agreeing run is not a guarantee for a band no published run has built, so
+`G-FITS` reads both histograms back and decides anyway.
 
 The first draft targeted 7000 tokens at 23800 characters, which is about 7900
 tokens at the ceiling and leaves nothing. That margin was rejected: a band that
@@ -87,10 +97,13 @@ Both effects are ours; neither has been measured against their engine.
   21000 characters, about 6540 prompt tokens at the 3.21 characters per token the
   published `XL` band realised (`## Now` carries the derivation and its
   provenance), with an expected ceiling near 7600 at the adverse 3.11 pairing and
-  about 350 tokens of headroom under `8192 - 192 output - about 50 template`,
-  where the template allowance is ASSUMED and not measured. A first draft targeted
-  7000 tokens (23800 characters), which leaves no headroom at all once the band's
-  own 12.5% overshoot is applied; that was rejected, because a band that
+  about 346 tokens of headroom under `8192 - 192 output - 57 template`, where the
+  57-token allowance is the larger of the two template deltas
+  `docs/benchmarks/qwen38-27b-exl3-variadic-gb10.md` measured on this corpus
+  (+52 at the corpus minimum, 26 to 78 tokens; +57 at the `XL` top, 3233 to
+  3290). A first draft targeted 7000 tokens (23800 characters), which leaves no
+  headroom at all once the band's own 12.5% overshoot is applied; that was
+  rejected, because a band that
   overshoots is voided by G-FITS and costs a lease. 6540 tokens is about 2.2x the
   `XL` band's realised median and well past the 3.3k where every published band
   stops.
@@ -135,8 +148,11 @@ served configuration.
 
 - **The band does not fit.** `XXL_TARGET_CHARS = 21000` is a target in
   CHARACTERS, and the about 6540 prompt tokens it converts to rests on one
-  checkpoint's tokenizer and on an assumed 50-token chat template. The two
-  engines render the same text to different token counts.
+  checkpoint's tokenizer and on the 57-token chat-template allowance
+  `docs/benchmarks/qwen38-27b-exl3-variadic-gb10.md` measured on this corpus.
+  That page found both engines rendered the corpus to the same counts, but it
+  never built this band, and neither delta it measured was taken on a prompt of
+  this length.
   `tests/scripts/test_variadic_harness.py`
   `test_the_xxl_target_fits_the_served_context` refuses a target whose expected
   ceiling does not fit, with no GPU; G-FITS then reads the realised counts back
