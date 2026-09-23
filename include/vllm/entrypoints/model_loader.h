@@ -490,10 +490,16 @@ class LoadedEngine {
   // at model_executed=0 with an idle GPU (issue #83 M4; external PR #227).
   // Exposed, like ResolveMaxNumBatchedTokens above, for testing the policy
   // without a disk load.
+  //
+  // FIX-KV-POOL-MIN-FIT: the need of that one request is the SUM over every KV
+  // cache group (each group's block table draws from this one pool), and the
+  // null block is not usable (kv_cache_utils.py:2029-2058, :2304-2327 @
+  // e126687a9a). `is_dense_arch` selects the `ResolveMaxNumBatchedTokens`
+  // budget the scheduler receives, which sliding-window counts depend on.
   static int ResolveMaxModelLen(const EngineParams& params,
                                 const HfConfig& config,
                                 const vllm::v1::KVCacheConfig& kv_cfg,
-                                int block_size);
+                                int block_size, bool is_dense_arch);
   // The serving `max_num_seqs`, resolved AGAINST the recurrent-state budget the
   // KV pool affords (issue #1983). `max_num_seqs` sizes no allocation anywhere
   // in vLLM; here it multiplied the GDN state pool

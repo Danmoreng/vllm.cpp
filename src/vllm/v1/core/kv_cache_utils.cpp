@@ -930,17 +930,6 @@ constexpr const char* kConservingMemoryDoc =
 
 }  // namespace
 
-int64_t kv_memory_needed_bytes(int64_t max_model_len, int block_size,
-                               int64_t bytes_per_block) {
-  if (max_model_len <= 0 || block_size <= 0 || bytes_per_block <= 0) {
-    return 0;
-  }
-  // Whole blocks only: ceil(max_model_len / block_size).
-  const int64_t blocks =
-      (max_model_len + block_size - 1) / static_cast<int64_t>(block_size);
-  return blocks * bytes_per_block;
-}
-
 int64_t host_available_memory_bytes() {
   // The pool the allocation actually draws from. On a unified-memory device
   // (GB10, Jetson Thor) device allocations come out of exactly this, which is why
@@ -1009,20 +998,6 @@ void check_enough_state_memory(int64_t available_memory, int64_t needed_memory,
   throw std::invalid_argument(msg);
 }
 
-int64_t estimate_max_model_len(int64_t available_memory,
-                               int64_t bytes_per_block, int block_size) {
-  // Upstream binary-searches `max_memory_usage_bytes(len) <= available_memory`.
-  // That predicate is `ceil(len / block_size) * bytes_per_block <= available`,
-  // whose largest solution is `(available / bytes_per_block) * block_size` —
-  // written closed-form because our per-block geometry does not vary with the
-  // block count (see KVBytesPerBlock).
-  if (available_memory <= 0 || bytes_per_block <= 0 || block_size <= 0) {
-    return 0;
-  }
-  const int64_t blocks = available_memory / bytes_per_block;
-  return blocks * static_cast<int64_t>(block_size);
-}
-
 void check_enough_kv_cache_memory(int64_t available_memory,
                                   int64_t needed_memory, int64_t max_model_len,
                                   int64_t estimated_max_model_len) {
@@ -1058,25 +1033,135 @@ void check_enough_kv_cache_memory(int64_t available_memory,
   }
 }
 
-int64_t auto_fit_max_model_len(int64_t derived_max_model_len,
+int64_t max_blocks_per_request(const KVCacheSpec& spec, int64_t max_model_len,
+                               int max_num_batched_tokens) {
+  // See kv_cache_utils.h for the anchors and the Mamba `none` deviation.
+  const int64_t bs = spec.block_size;
+  if (max_model_len <= 0 || bs <= 0) return 0;
+  const int64_t full_blocks = (max_model_len + bs - 1) / bs;
+  switch (spec.kind()) {
+    case KVCacheSpecKind::kFullAttention:
+    case KVCacheSpecKind::kMlaAttention:
+      // kv_cache_interface.py:464-469 (DCP is 1 in this tree).
+      return full_blocks;
+    case KVCacheSpecKind::kSlidingWindow:
+    case KVCacheSpecKind::kSlidingWindowMla:
+      // kv_cache_interface.py:704-738, through the function the manager's
+      // admission cap calls.
+      return static_cast<const SlidingWindowSpec&>(spec)
+          .max_admission_blocks_per_request(max_num_batched_tokens,
+                                            static_cast<int>(max_model_len));
+    case KVCacheSpecKind::kChunkedLocalAttention:
+      // kv_cache_interface.py:658-681.
+      return static_cast<const ChunkedLocalAttentionSpec&>(spec)
+          .max_admission_blocks_per_request(max_num_batched_tokens,
+                                            static_cast<int>(max_model_len));
+    case KVCacheSpecKind::kMamba: {
+      // kv_cache_interface.py:883-894.
+      const auto& mamba = static_cast<const MambaSpec&>(spec);
+      const int64_t k = mamba.num_speculative_blocks;
+      if (mamba.mamba_cache_mode == "align") return 2 + k;
+      // "all", and "none" at this tree's block size (see the header).
+      return full_blocks + k;
+    }
+    case KVCacheSpecKind::kEncoderOnlyAttention:
+      // kv_cache_interface.py:923-925: encoder-only layers keep no KV.
+      return 0;
+    case KVCacheSpecKind::kSinkFullAttention:
+    case KVCacheSpecKind::kCrossAttention:
+    case KVCacheSpecKind::kUnknown:
+      break;
+  }
+  throw std::invalid_argument(
+      "max_blocks_per_request: the per-request KV usage of this spec kind is not "
+      "ported, so the startup check cannot count it (FIX-KV-POOL-MIN-FIT)");
+}
+
+int64_t max_memory_usage_bytes_from_groups(const KVCacheConfig& kv_cfg,
+                                           int64_t max_model_len,
+                                           int max_num_batched_tokens) {
+  // kv_cache_utils.py:2029-2058: each group claims its own blocks from the one
+  // shared pool, so a request consumes the SUM of the per-group counts.
+  const int64_t bytes_per_block = KVBytesPerBlock(kv_cfg);
+  if (bytes_per_block <= 0 || max_model_len <= 0) return 0;
+  int64_t total_blocks = 0;
+  for (const KVCacheGroupSpec& group : kv_cfg.kv_cache_groups) {
+    if (group.kv_cache_spec == nullptr) continue;
+    total_blocks += max_blocks_per_request(*group.kv_cache_spec, max_model_len,
+                                           max_num_batched_tokens);
+  }
+  return bytes_per_block * total_blocks;
+}
+
+int64_t estimate_max_model_len_from_groups(const KVCacheConfig& kv_cfg,
+                                           int64_t available_memory,
+                                           int64_t original_max_model_len,
+                                           int max_num_batched_tokens) {
+  // kv_cache_utils.py:2061-2093.
+  const auto fits = [&](int64_t len) {
+    return max_memory_usage_bytes_from_groups(kv_cfg, len,
+                                              max_num_batched_tokens) <=
+           available_memory;
+  };
+  int64_t left = 1;
+  int64_t right = original_max_model_len;
+  if (right < left || !fits(left)) return 0;
+  int64_t result = 1;
+  while (left <= right) {
+    const int64_t mid = left + (right - left) / 2;
+    if (fits(mid)) {
+      result = mid;
+      left = mid + 1;
+    } else {
+      right = mid - 1;
+    }
+  }
+  return result;
+}
+
+void check_enough_kv_cache_memory(const KVCacheConfig& kv_cfg,
+                                  int64_t available_memory,
+                                  int64_t max_model_len,
+                                  int max_num_batched_tokens) {
+  // kv_cache_utils.py:933-967. `if kv_cache_spec:` -- a config with no paged KV
+  // (attention-free, or pure Mamba/GDN, where KVBytesPerBlock is 0) has nothing
+  // to size here.
+  const int64_t bytes_per_block = KVBytesPerBlock(kv_cfg);
+  if (bytes_per_block <= 0) return;
+  // :953-961: plan against the blocks BlockPool does not hold back as the null
+  // block (block_pool.cpp: block 0 is popped at construction).
+  const int64_t check_memory = available_memory - bytes_per_block;
+  check_enough_kv_cache_memory(
+      check_memory,
+      max_memory_usage_bytes_from_groups(kv_cfg, max_model_len,
+                                         max_num_batched_tokens),
+      max_model_len,
+      estimate_max_model_len_from_groups(kv_cfg, check_memory, max_model_len,
+                                         max_num_batched_tokens));
+}
+
+int64_t auto_fit_max_model_len(const KVCacheConfig& kv_cfg,
                                int64_t available_memory,
-                               int64_t bytes_per_block, int block_size) {
-  // kv_cache_utils.py:1986-1992: an attention-free model has no KV to fit, so
+                               int64_t derived_max_model_len,
+                               int max_num_batched_tokens) {
+  // kv_cache_utils.py:2113-2120: an attention-free model has no KV to fit, so
   // the derived length stands.
+  const int64_t bytes_per_block = KVBytesPerBlock(kv_cfg);
   if (bytes_per_block <= 0) {
     return derived_max_model_len;
   }
-  const int64_t auto_fit_max =
-      estimate_max_model_len(available_memory, bytes_per_block, block_size);
-  // kv_cache_utils.py:2005-2010.
+  // :2304-2311: the null block is reserved before auto-fit, as before the check.
+  const int64_t check_memory = available_memory - bytes_per_block;
+  const int64_t auto_fit_max = estimate_max_model_len_from_groups(
+      kv_cfg, check_memory, derived_max_model_len, max_num_batched_tokens);
+  // :2133-2137.
   if (auto_fit_max <= 0) {
     throw std::invalid_argument(
         "Cannot auto-fit max_model_len: not enough GPU memory available to "
         "serve even a single token. Try increasing `gpu_memory_utilization`." +
         std::string(kLocalRemediation));
   }
-  // kv_cache_utils.py:2012-2027: keep the full context when it fits, else
-  // reduce to what does.
+  // :2139-2157: keep the full context when it fits, else reduce to what does.
   if (auto_fit_max >= derived_max_model_len) {
     return derived_max_model_len;
   }

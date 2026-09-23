@@ -172,7 +172,12 @@ TwoRequestRun RunTwoRequests(int max_model_len, const std::vector<int32_t>& firs
     LoadedEngine eng(target, MakeDenseWeights(target), BuildFixture(),
                      DflashSpecParams(dir, max_model_len, /*max_num_seqs=*/1,
                                       /*max_num_batched_tokens=*/8192,
-                                      /*num_blocks=*/512),
+                                      // 6144 tokens claim 192 blocks in each
+                                      // of fa and fa_draft and 192 + k in gdn,
+                                      // plus the null block: 580. 512 held
+                                      // under the one-table startup check
+                                      // (FIX-KV-POOL-MIN-FIT).
+                                      /*num_blocks=*/640),
                      MakeDflash2Draft(target, /*muse_glimmer_scalars=*/false));
     r.first = DrainWithDeadline(eng.async_engine(), first, first_max_tokens, "req-first");
     r.second =
