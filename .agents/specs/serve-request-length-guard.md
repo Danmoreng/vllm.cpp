@@ -18,9 +18,13 @@ repository default applies.
 
 ## Now
 
-**`GATING`.** The guard is implemented, reachable from three registered routes,
-and green on the CPU tier. The operator reruns `## Gates` and owns the promotion
-to `DONE`. Nothing in this row needs a GPU, a lease, or a checkpoint mount.
+`DONE`. The guard bounds every chat request's RENDERED prompt, template and
+tools included, by `Tokenizer::MaxPromptBytes(max_model_len)` before any encode,
+on HTTP, the C ABI chat entry points and run_batch, and answers a 400. The fixed
+200,000-character default this amendment removed no longer refuses prompts the
+context can hold. The operator reran `## Gates` on the tree merged with main
+(`ec8de4e73`): all twelve suites passed with non-zero case counts. Deleting the
+rendered-prompt check fails two api-server cases and one C ABI case.
 
 ## Scope
 
@@ -979,3 +983,23 @@ and has nothing to tune.
    one that has a direct vLLM mirror to port named.
 3. **The chat arm measures the summed message text, not the rendered prompt.**
    Also under `## Owed`.
+
+### Amendment 2026-09-23: what was decided, and why
+
+Three fresh reviews ran before this landed. Review 1 found that removing the
+fixed default left `tools`, `tool_calls` arguments and template framing unbounded
+before the encode, because the #1541 guard summed only message content. A 4 MiB
+tool description was fully tokenized, and 64 MB of tools costs about 63 s of
+encode on one worker. The repair moved the bound onto the rendered prompt, where
+vLLM's `_text_len_check` runs. Review 2 found the ordering before the beam and
+multimodal encodes untested, and gates now cover both. Review 3 passed.
+
+Rejected: keeping any fixed character default. vLLM has none, and the derived
+bound already refuses a pathological body before tokenization. Also rejected:
+making `VT_SERVER_MAX_NEW_TOKENS` part of this change. It clamps output tokens
+rather than refusing input, so it is a different mechanism with its own issue.
+
+The one stated exception to "a prompt that fits is never refused" is a
+SentencePiece tokenizer with `fuse_unk` and no byte fallback. vLLM's bound shares
+it. The multimodal seam re-renders with up to 43 more bytes per image part than
+the checked string. Both are recorded under the amendment's design notes.
