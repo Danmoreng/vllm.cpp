@@ -242,6 +242,10 @@ void InputProcessor::UpdateFromTokenizer(SamplingParams& params) const {
   params.bad_words_token_ids = std::move(bad_ids);
 }
 
+size_t InputProcessor::max_prompt_bytes() const {
+  return tokenizer_.MaxPromptBytes(max_model_len_);
+}
+
 EngineCoreRequest InputProcessor::process_inputs(
     const std::string& request_id, const std::string& prompt,
     SamplingParams params, std::optional<double> arrival_time,
@@ -256,6 +260,7 @@ EngineCoreRequest InputProcessor::process_inputs(
   // post_processor template is APPLIED here. This is a no-op for every Qwen
   // tokenizer (their ByteLevel post_processor declares no bos/eos) and supplies
   // the prepended `</s>` that OPT's TemplateProcessing declares.
+  num_prompt_encodes_.fetch_add(1, std::memory_order_relaxed);
   std::vector<int32_t> prompt_token_ids =
       tokenizer_.EncodeWithSpecialTokens(prompt);
 

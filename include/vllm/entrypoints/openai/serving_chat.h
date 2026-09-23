@@ -23,6 +23,7 @@
 #define VLLM_ENTRYPOINTS_OPENAI_SERVING_CHAT_H_
 
 #include <atomic>
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -195,6 +196,13 @@ std::optional<nlohmann::json> ToolChoiceStructuralTagSpec(
 void ApplyToolChoiceStructuredOutput(const ChatCompletionRequest& request,
                                      SamplingParams& sampling_params);
 
+// VT_SERVER_MAX_PROMPT_CHARS: the OPTIONAL operator ceiling, in bytes, on the
+// rendered chat prompt. Unset, empty or 0 returns 0, which means NO fixed
+// ceiling: the only default bound is the derived one, max_model_len *
+// Tokenizer::MaxTokenBytes() (ISSUE-LOCAL-01M37A34NTK8A98KYWA5SA5GNN). vLLM has
+// no such variable. Read on every call, so one process can exercise both arms.
+std::size_t OperatorMaxPromptChars();
+
 class OpenAIServingChat {
  public:
   // `prompt_fn` defaults to DefaultChatPromptFallback (the M3.2 seam).
@@ -229,6 +237,15 @@ class OpenAIServingChat {
                                  std::optional<int32_t> eos_token_id) {
     beam_tokenizer_ = tokenizer;
     beam_eos_token_id_ = eos_token_id;
+  }
+
+  // How many rendered chat prompts the beam-search path has handed to
+  // beam_tokenizer_->Encode. The beam path encodes the prompt itself and never
+  // calls InputProcessor's text process_inputs, so num_prompt_encodes() cannot
+  // see it. A test asserts this stays unchanged when a prompt is refused before
+  // the encode (SERVE-REQUEST-LENGTH-GUARD). Relaxed, because it orders nothing.
+  uint64_t num_beam_prompt_encodes() const {
+    return num_beam_prompt_encodes_.load(std::memory_order_relaxed);
   }
 
   // Attach the multimodal chat seam (see MultiModalChatFn). Unset (default)
@@ -295,6 +312,8 @@ class OpenAIServingChat {
   MultiModalChatFn mm_chat_fn_;
   // request_id is "chatcmpl-<counter>" (upstream f"chatcmpl-{random_uuid()}").
   std::atomic<int64_t> request_counter_{0};
+  // See num_beam_prompt_encodes().
+  std::atomic<uint64_t> num_beam_prompt_encodes_{0};
 };
 
 }  // namespace vllm::entrypoints::openai

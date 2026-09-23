@@ -18,9 +18,13 @@ repository default applies.
 
 ## Now
 
-**`GATING`.** The guard is implemented, reachable from three registered routes,
-and green on the CPU tier. The operator reruns `## Gates` and owns the promotion
-to `DONE`. Nothing in this row needs a GPU, a lease, or a checkpoint mount.
+`DONE`. The guard bounds every chat request's RENDERED prompt, template and
+tools included, by `Tokenizer::MaxPromptBytes(max_model_len)` before any encode,
+on HTTP, the C ABI chat entry points and run_batch, and answers a 400. The fixed
+200,000-character default this amendment removed no longer refuses prompts the
+context can hold. The operator reran `## Gates` on the tree merged with main
+(`ec8de4e73`): all twelve suites passed with non-zero case counts. Deleting the
+rendered-prompt check fails two api-server cases and one C ABI case.
 
 ## Scope
 
@@ -135,6 +139,13 @@ longer than `max_model_len * MaxTokenBytes()` therefore exceeds `max_model_len`
 tokens, and `ValidatePromptLen` would refuse it after the encode. The guard
 refuses it before. **It rejects nothing the server would have served**; it only
 moves an already-certain refusal ahead of the work that pays for it.
+**One exception, recorded 2026-09-23:** a SentencePiece tokenizer with
+`fuse_unk: true` and no byte fallback encodes a run of unknown characters of
+any length as ONE `<unk>` (`src/vllm/tokenizer/tokenizer.cpp`, the `fuse_unk_`
+branches of the SentencePiece encode). Its token texts do not concatenate back
+to the input, so such a prompt can fit in `max_model_len` tokens and still be
+longer than the bound. vLLM's `max_chars_per_token` bound has the same
+exception. See `#### Second review repair 2026-09-23`.
 
 `MaxTokenBytes()` is the longest STORED token text, which is an OVER-estimate of
 the decoded bytes one token can carry, and the over-estimate is the direction
@@ -342,10 +353,454 @@ Named gaps, none of them a defect this row leaves behind:
 - **The chat guard measures the summed message text, not the rendered prompt.**
   A template's per-message framing is not counted, so a request with very many
   tiny messages is bounded only by the 100 MB body limit. Owned by this row.
+  **Closed 2026-09-23** by `### Review repair 2026-09-23` in the amendment
+  below: the same derived bound now also applies to the rendered chat prompt,
+  before the encode.
 - **No prompt-LIST form exists to bound.** If `CompletionRequest::prompt` ever
   becomes a list, `VLLM_MAX_COMPLETION_PROMPTS`
   (`completion/protocol.py:536-553`) is the mirror to port at the same time.
   Owned by this row.
+
+## Amendment 2026-09-23: the fixed prompt-character cap
+
+**Issue:** `ISSUE-LOCAL-01M37A34NTK8A98KYWA5SA5GNN`, owned by this row.
+**Base:** `0132c65e7`. Every local line number in this section is read there.
+**Pull request shape:** one pull request, spec commit first, for the same
+reason as the row: no split case applies.
+
+### The defect
+
+A second prompt-size refusal exists beside this row's derived bound, and this
+row did not add it. `OpenAIServingChat::create_chat_completion`
+(`src/vllm/entrypoints/openai/serving_chat.cpp:663-685`) refuses a RENDERED chat
+prompt above `VT_SERVER_MAX_PROMPT_CHARS`, which defaults to 200,000 when the
+variable is unset. `git log -S VT_SERVER_MAX_PROMPT_CHARS` names its origin:
+`0c2827c18` (#154), a Gemma-4 performance pull request that added it as a "lab
+guardrail" against one client sending a very large system prompt. It has three
+faults:
+
+1. **The number is not derived from the context.** A 64k-token prompt of English
+   prose is about 268,000 characters, so a server started with
+   `--max-model-len 262144` refuses every such prompt above about 48k tokens.
+   Observed on `dgx:gpu0` on 2026-09-23: `prompt too large for this server
+   (268439 chars > VT_SERVER_MAX_PROMPT_CHARS=200000)`. This violates this
+   row's own guarantee, stated under `## Design`: a pre-tokenization bound
+   "rejects nothing the server would have served".
+2. **The status is 500.** The refusal is a `std::runtime_error`, which
+   `ApiServer::handle_chat_completions` maps to `InternalServerError`
+   (`api_server.cpp:377-382`). The request is at fault, so the status is 400.
+3. **The message blames an unrelated client** ("Hermes is likely injecting a
+   full system SOUL").
+
+### Upstream, at the current pin `e126687a9a`
+
+`## Upstream chain` above was read at `5559679229` and says vLLM has no prompt
+byte bound. **At `e126687a9a` that is no longer true**, and this is the anchor
+the fix mirrors:
+
+| What | Anchor | Behaviour |
+|---|---|---|
+| the pre-tokenization text bound | `vllm/renderers/params.py:342-365` `TokenizeParams._text_len_check` | refuses `len(text) > max_input_tokens * tokenizer.max_chars_per_token` with `VLLMValidationError`. There is no fixed number and no environment variable |
+| the per-token factor | `vllm/tokenizers/hf.py:131` | `max_chars_per_token = max(len(tok) for tok in tokenizer_vocab)`, the longest vocabulary entry. It is the same quantity as our `Tokenizer::MaxTokenBytes()`, counted in characters instead of bytes |
+| `max_input_tokens` | `vllm/renderers/params.py:204-210`; `chat_completion/protocol.py:608-626` | `max_model_len - (max_completion_tokens or max_tokens or 0)` |
+| where it runs | `vllm/renderers/base.py:527,563` | on the rendered prompt string, immediately before the encode |
+| the error text | `vllm/renderers/params.py:352-362` | `This model's maximum context length is {max_total_tokens} tokens. However, you requested {max_output_tokens} output tokens and your prompt contains {len(text)} characters (more than {max_input_chars} characters, which is the upper bound for {max_input_tokens} input tokens). Please reduce the length of the input prompt or the number of requested output tokens.` |
+| the status | `vllm/entrypoints/serve/exception_handling/error_response.py:39-41` | `VLLMValidationError` is `BadRequestError`, HTTP 400 |
+| the token refusal after the encode | `vllm/renderers/params.py:436-461` `_token_len_check`; `vllm/v1/engine/input_processor.py:436-476` `_validate_prompt_len` | 400, token count against `max_model_len` |
+
+So vLLM's only pre-tokenization bound is derived from the context and the
+vocabulary, and it cannot refuse a prompt that could fit, except for the
+`fuse_unk` case that `## Design` records, which both bounds share. This row's
+`max_model_len * MaxTokenBytes()` is the same kind of bound. It uses
+`max_model_len` instead of `max_input_tokens`, so it is looser by the requested
+output tokens. It counts bytes where vLLM counts characters, so on multi-byte
+text it can be tighter than vLLM's, but it still refuses no prompt that fits in
+`max_model_len` tokens, with the same `fuse_unk` exception (`## Design`). vLLM applies its bound to the RENDERED
+prompt, template and tools included. This row's HTTP guard measures the summed
+message content before the template renders, which is not the same string;
+`### Review repair 2026-09-23` below closes that difference.
+
+### How the derived bound compares with vLLM's
+
+| Factor | vLLM at `e126687a9a` | Ours | Difference |
+|---|---|---|---|
+| per-token length | `max_chars_per_token`, the longest vocabulary entry in CHARACTERS, computed once at tokenizer load (`vllm/tokenizers/hf.py:131`) | `vllm::tok::Tokenizer::MaxTokenBytes()`, the longest stored token text in UTF-8 BYTES, computed once in `FinalizeTables` (`src/vllm/tokenizer/tokenizer.cpp`, `include/vllm/tokenizer/tokenizer.h`) | the prompt is measured in bytes too, and this row's `## Design` argues the stored text over-estimates the decoded bytes per token on both tokenizer families |
+| token budget | `max_input_tokens = max_model_len - requested output tokens` (`params.py:204-210`) | `max_model_len` | larger by the requested output tokens |
+| status | `VLLMValidationError`, a `VLLMClientError` (`vllm/exceptions.py:19-27`), mapped to 400 (`error_response.py:39-41`) | 400 `BadRequestError` | equal |
+| measured string | the rendered prompt, after `render_messages(tokenize=False)` (`params.py:386-399`) | the rendered chat prompt, in `create_chat_completion` (`### Review repair 2026-09-23`); the HTTP guard also measures the summed message content earlier | equal on the rendered prompt |
+| message | the `_text_len_check` text above | the rendered-prompt check uses that text, in bytes and without the output-token clause; the HTTP guard keeps this row's own byte message (`### The error shape`) | the HTTP guard's message difference is recorded in `ISSUE-LOCAL-01M37A43C0XFW3PAYV1399HFAE` with the token-refusal one, so the two text mirrors land together |
+
+**No fixed absolute ceiling is added.** The only absolute one is httplib's
+100 MB `CPPHTTPLIB_PAYLOAD_MAX_LENGTH` on the whole body, which this change
+does not touch. It can bind below the derived bound only when
+`max_model_len * MaxTokenBytes()` exceeds 100 MB, for example a
+1,048,576-token context with 256-byte tokens, and then only for a prompt that
+averages more than about 100 bytes per token. Ordinary text averages about
+four. It is a transport limit that predates this row, not a prompt policy, and
+it is named here so that nobody reads it as one.
+
+### Design
+
+- **The default is unset, and unset means no fixed cap.** The
+  pre-tokenization bound on the default configuration is the derived one this
+  row landed, `max_model_len * MaxTokenBytes()`. **Correction, from the fresh
+  review:** the first version of this bullet said that
+  `ApiServer::refuse_oversized_prompt` alone keeps the #1541 guarantee. It does
+  not. That guard sums `messages[].content` before the template renders, so
+  bytes in `tools`, in assistant `tool_calls` arguments and in template framing
+  reached the encode unbounded once the fixed 200,000 default was gone. The
+  reviewer's 4 MiB tool description was tokenized in full and refused only
+  after the encode ("length 514"). `### Review repair 2026-09-23` applies the
+  same derived bound to the rendered prompt, and the #1541 guarantee holds only
+  with that check in place.
+- **An explicitly set positive value is kept as an operator ceiling.** vLLM has
+  no such variable, so this is a divergence, and it is kept for one reason:
+  the variable is documented, and removing it would silently drop a ceiling an
+  operator set on purpose. Only an operator who sets it can make it bind below
+  the context, and `docs/ENVIRONMENT.md` says so. `0` still means off.
+- **The refusal is a 400.** It throws `vllm::v1::InputValidationError`, which
+  `handle_chat_completions` already maps to `BadRequestError`
+  (`error_response.py:39-41`). The message names the length received, the
+  limit and the variable, and blames no client.
+- **The variable is read on each request, not once into a function-local
+  static.** A static fixes the first value the process saw, so no test can
+  exercise both the unset and the set arms in one process, and the gate would
+  be blind to one of them. vLLM also reads its environment lazily
+  (`vllm/envs.py`, module `__getattr__`). One `getenv` beside a template render
+  costs nothing measurable.
+- **Rejected: deriving a new default for this variable.** The derived bound
+  already exists one layer up. A second copy of the same derivation in
+  `serving_chat.cpp` would be a duplicated fact, and the next edit to one copy
+  would make them disagree.
+- **Rejected: changing the token refusal's text to the renderer's text.**
+  vLLM's server reaches `_token_len_check` before `_validate_prompt_len`, so
+  its over-long-prompt message differs from ours. That changes
+  `ValidatePromptLen`, which this row's `## Stop conditions` forbid, and it
+  adds a `prompt + max_tokens` check the server does not make today. Filed as
+  `ISSUE-LOCAL-01M37A43C0XFW3PAYV1399HFAE`.
+
+### `VT_SERVER_MAX_NEW_TOKENS`
+
+The sibling variable has a different defect by a different mechanism. It
+silently CLAMPS a positive `max_tokens` to 4096 by default. It does not refuse
+input. vLLM has no default output ceiling: `get_max_tokens`
+(`vllm/entrypoints/serve/utils/api_utils.py:169-206`) takes the minimum of the
+remaining context, the request value, an operator `override_max_tokens` that
+is unset by default (`chat_completion/serving.py:172-176`) and the platform
+limit. It is filed as `ISSUE-LOCAL-01M37A3S7N7GSZC37JH515QXFE` and is not
+changed here.
+
+### Tests
+
+All cases run over a real socket through `ConfigureUtilityEndpoints`, the seam
+`server_main.cpp` uses, on a fixture tokenizer whose longest token is 8,192
+bytes. That makes a prompt above 200,000 bytes fit in the 32-token test
+context, so the red needs no large engine.
+
+1. **RED today, GREEN after:** a 204,800-byte chat prompt of 25 tokens, with
+   `VT_SERVER_MAX_PROMPT_CHARS` unset, answers 200 with an assistant choice.
+   Today it answers 500 naming `VT_SERVER_MAX_PROMPT_CHARS=200000`.
+2. **A prompt over `max_model_len` in tokens is still refused:** 33 tokens in
+   253,954 bytes, under the derived byte bound, answers 400 `BadRequestError`
+   with the `_validate_prompt_len` text, `maximum model length of 32`.
+3. **The pre-tokenization bound still refuses a pathological body:** a 4 MiB
+   message answers 400 with the byte-bound message, not the token message, and
+   the engine holds no request.
+4. **An explicit operator ceiling refuses with 400:** with
+   `VT_SERVER_MAX_PROMPT_CHARS=1000`, a 204,800-byte prompt answers 400
+   `BadRequestError` naming the variable and not naming any client. RED today:
+   500.
+
+### Reachability
+
+`POST /v1/chat/completions` -> `ApiServer::handle_chat_completions` ->
+`OpenAIServingChat::create_chat_completion`. The deletion mutation restores the
+fixed default in a scratch worktree and must turn case 1 red.
+
+### Gates
+
+The row's `## Gates`, plus `python3 tests/scripts/test_check_env_doc.py`
+because `docs/ENVIRONMENT.md` changes. No GPU and no lease.
+
+### Stop conditions
+
+- Stop with `NEEDS_DECISION` if removing the default would leave any text
+  route without a pre-tokenization bound.
+- Stop if the fix needs a change to `ValidatePromptLen`.
+
+### Evidence, recorded on the branch
+
+CPU build, `cmake -S . -B build -G Ninja -DVLLM_CPP_BUILD_TESTS=ON
+-DVLLM_CPP_BUILD_EXAMPLES=OFF`, `ninja -C build -j 4`. The focused command is
+`test_openai_api_server -tc="api_server: the chat prompt cap never refuses what
+the context holds"`, run with `VT_SERVER_MAX_PROMPT_CHARS` removed from the
+environment.
+
+| stage | commit | cases | assertions | `Status:` | exit |
+|---|---|---:|---:|---|---:|
+| RED, production code unchanged | `efe6ed9b6` | 1 | 53, **11 failed** | `FAILURE!` | **1** |
+| GREEN | `1cb56af24` | 1 | 55, 0 failed | `SUCCESS!` | 0 |
+| deletion mutation: `serving_chat.cpp` replaced by its `origin/main` bytes, in a scratch worktree | `1cb56af24` + mutation | 1 | 53, **11 failed** | `FAILURE!` | **1** |
+
+The red is the defect: the 204,800-byte, 25-token prompt answered
+`CHECK( 500 == 200 )` with the old `VT_SERVER_MAX_PROMPT_CHARS=200000` message;
+the 33-token prompt answered 500 from the same cap instead of the token
+refusal; the explicit 1000 ceiling answered 500. The 4 MiB subcase passed in
+the red, because the derived byte bound already refuses it first, and it still
+passes. The mutated file hashed `1701e40f...` against `866b2bb7...` for the
+committed file, and the restored file hashed `866b2bb7...` again.
+
+At `1cb56af24` the serving and tokenizer suites are green, each run as its own
+executable: `test_openai_api_server` 99 cases / 1397 assertions,
+`test_openai_conformance` 23 / 252, `test_openai_serving` 48 / 1365,
+`test_openai_serving_chat_stream` 2 / 210, `test_openai_protocol` 37 / 269,
+`test_bpe` 29 / 1009, `test_bpe_equivalence` 2 / 334, all `SUCCESS!`, exit 0.
+`scripts/check-env-doc.py` reports the same three undocumented variables it
+reports on `origin/main` (`VT_CUDA_ALLOC_STATS`, `VT_V4_W32_COLS`,
+`VT_V4_W32_WARPS`) and no new one.
+
+### Review repair 2026-09-23
+
+A fresh review of `b83feab14` failed the amendment on one blocking finding and
+one test gap. Both are repaired on the same branch.
+
+**F1, blocking: the rendered prompt had no pre-tokenization bound.** The #1541
+HTTP guard sums `messages[].content` before the template renders. Bytes in
+`tools` (descriptions and parameter schemas), in assistant `tool_calls`
+arguments and in template framing were not counted, and after the fixed 200,000
+default was removed nothing else measured them. The reviewer's 4 MiB tool
+description was tokenized in full and refused only after the encode ("length
+514"). This case is the one `### Stop conditions` names, and the first version
+of `### Design` wrongly said the #1541 guarantee held.
+
+The repair mirrors vLLM, which runs `_text_len_check` on the rendered prompt
+(`vllm/renderers/params.py:342-370`, reached through `apply_pre_tokenization`
+at `:386-399`, after `render_messages(tokenize=False)`):
+
+- `OpenAIServingChat::create_chat_completion` refuses a rendered prompt longer
+  than `max_model_len * MaxTokenBytes()`. The check is at the point where the
+  old fixed cap measured the prompt: after the template renders, before the
+  engine encode, the beam-search encode and the multimodal seam. The first
+  version of this repair gated only the engine encode; `#### Second review
+  repair 2026-09-23` adds the gates for the other two. It throws
+  `InputValidationError`, which is HTTP 400 `BadRequestError`. The message is
+  `_text_len_check`'s, counted in bytes and without the output-token clause,
+  because this bound does not subtract the requested output tokens:
+  `This model's maximum context length is {max_model_len} tokens. However, your
+  prompt contains {N} bytes (more than {bound} bytes, which is the upper bound
+  for {max_model_len} input tokens). Please reduce the length of the input
+  prompt.`
+- **One copy of the derivation.** `Tokenizer::MaxPromptBytes(max_model_len)`
+  holds it, with the 0-when-unknown and overflow-clamp rules that
+  `ApiServer::set_tokenizer` had. `set_tokenizer` now calls it, and so does
+  `InputProcessor::max_prompt_bytes()`. The chat handler reads the bound from
+  its own engine's `InputProcessor` (new `input_processor()` accessors on
+  `LLMEngine` and `AsyncLLM`), which holds the tokenizer and the resolved
+  `max_model_len` that `ValidatePromptLen` refuses against. In
+  `server_main.cpp` both come from the same `LoadedEngine`
+  (`model_loader.cpp:2288`, `server_main.cpp:1984`).
+- **Reach.** Every caller of `create_chat_completion` gets the check, because
+  every `OpenAIServingChat` holds an engine:
+  - `POST /v1/chat/completions` through `ApiServer::handle_chat_completions`;
+  - the C ABI `vllm_chat` and `vllm_chat_stream` (`src/capi/vllm_c.cpp`,
+    through `EnsureChatServing`, which builds the handler over
+    `engine->loaded->async_engine()`). The C ABI has no HTTP guard in front of
+    it, so before this repair an ABI chat prompt had no pre-tokenization bound
+    at all. The new `test_capi` case proves the refusal on both entry points
+    with zero encodes;
+  - `RunBatch` (`run_batch.cpp:118`). It has no production caller in this tree
+    (`grep -rn RunBatch src tools examples` finds only its own file), so it is
+    reached structurally through the same handler and no separate case is
+    added.
+- **Completions and `/tokenize` have no equivalent gap.** `/tokenize` already
+  measures the final prompt after the chat form's template render
+  (`api_server.cpp`, `handle_tokenize`). `/v1/completions` renders nothing:
+  `request.prompt` is the string the engine encodes, and the HTTP guard
+  measures exactly it. The C ABI's completion entry points (`vllm_complete`,
+  `vllm_complete_stream`, `vllm_request_submit`) have no pre-tokenization
+  bound. That is the existing C ABI gap under the row's `## Owed`, not a
+  counted-before-rendering gap, so it is not changed here.
+- The HTTP content-sum guard stays. It is cheaper, it runs before the template
+  renders, and it keeps its own message.
+
+**F2, non-blocking: the operator ceiling's comparison survived off-by-one
+mutations.** A boundary pair now pins it: with
+`VT_SERVER_MAX_PROMPT_CHARS=204800`, a rendered prompt of exactly 204,800 bytes
+is served (one encode), and 204,801 bytes are refused with the variable named
+(zero encodes). The derived bound has the same pair: 262,144 rendered bytes
+reach the encode and the token refusal, and 262,145 are refused before it.
+
+**The default resolution is pinned directly.** The resolution moved into
+`OperatorMaxPromptChars()` (declared in `serving_chat.h`). End to end, a fixed
+default above the fixture's 262,144-byte derived bound is indistinguishable
+from no default, because the derived bound refuses first. A real server's
+derived bound is tens of megabytes, so such a default would still refuse
+prompts the context holds. The new case asserts that unset, empty and `0`
+resolve to 0, which is no ceiling, and that `1000` resolves to 1000.
+
+**The encode spy.** `InputProcessor::num_prompt_encodes()` is a relaxed counter,
+incremented where the text `process_inputs` overload hands a prompt to the
+tokenizer. The cases assert it stays 0 for every pre-encode refusal and is 1
+where the prompt must reach the encode, so a message-only pass cannot satisfy
+them.
+
+#### Evidence
+
+Same CPU build and command form as above, with `VT_SERVER_MAX_PROMPT_CHARS`
+removed from the environment.
+
+| stage | commit | selection | cases | assertions | exit |
+|---|---|---|---:|---:|---:|
+| RED: tools and tool_calls reach the encode | `6278e226d` | `the derived bound applies to the RENDERED chat prompt` | 1, 1 failed | 45, **12 failed** | **1** |
+| GREEN | `19b2bb3fc` | the three prompt-cap cases in `test_openai_api_server` | 3 | 129, 0 failed | 0 |
+| GREEN | `19b2bb3fc` | `capi: vllm_chat refuses a prompt over the derived byte bound before the encode` | 1 | 10, 0 failed | 0 |
+
+The red is the defect: the 4 MiB tool description and the 4 MiB of
+`tool_calls` arguments each answered the post-encode `The decoder prompt
+(length 513)` refusal with `num_prompt_encodes() == 1`, and the rendered prompt
+one byte over the derived bound answered `(length 33)`, also with one encode.
+The exact-bound half passed.
+
+Mutations of `src/vllm/entrypoints/openai/serving_chat.cpp` at `19b2bb3fc`, in
+a separate scratch worktree, each rebuilt and run on the three api-server cases
+and the C ABI case. The committed file hashed
+`0ddc717e2315453462fca8032f6815b6be015f9c85a76d30c081fec777205a8f` before every
+mutation and again after every restore.
+
+| mutation | mutated sha256 | api-server cases | C ABI case | killed by |
+|---|---|---|---|---|
+| delete the rendered-prompt check | `64730cfd...` | 12 of 129 failed | 4 of 10 failed | the tools, tool_calls and one-byte-over cases (encode count 1, token message); both ABI entry points |
+| derived `>` to `>=` | `4706ed2d...` | 3 failed | green | the exact-bound case (byte refusal, encode count 0) |
+| derived `> bound + 1` | `c3a799fd...` | 4 failed | green | the one-byte-over case (encode count 1) |
+| operator `>` to `>=` | `d6859200...` | 4 failed | green | the exact-ceiling case (refused, encode count 0) |
+| operator `> ceiling + 1` | `18baf44c...` | 6 failed | green | the one-byte-over-ceiling case (served) |
+| default 300000 when unset | `b657fda8...` | 2 failed | green | the resolution case, unset and empty |
+| measure message content only | `396b8bcb...` | 12 failed | green | the tools, tool_calls and one-byte-over cases. The ABI case stays green by construction: its content is the whole prompt |
+
+After the last restore the tree was rebuilt and all four cases passed again.
+
+At `19b2bb3fc`, each run as its own executable, all `SUCCESS!` and exit 0:
+`test_openai_api_server` 101 cases / 1471 assertions, `test_openai_serving`
+48 / 1365, `test_openai_conformance` 23 / 252,
+`test_openai_serving_chat_stream` 2 / 210, `test_openai_protocol` 37 / 269,
+`test_openai_run_batch` 7 / 80, `test_capi` 73 / 730, `test_chat_prompt`
+5 / 15, `test_bpe` 29 / 1009, `test_bpe_equivalence` 2 / 334.
+`scripts/agent-preflight.sh --staged` reports the same 15 failed gates as on
+`b83feab14`, all inherited from `origin/main`, and `scripts/check-env-doc.py`
+still lists only `VT_CUDA_ALLOC_STATS`, `VT_V4_W32_COLS` and
+`VT_V4_W32_WARPS`.
+
+#### Second review repair 2026-09-23
+
+A second fresh review of `07ae2a052` confirmed that the text path is closed and
+gated. It failed the branch on two blocking findings and raised two notes.
+
+**B1, blocking: three record anchors went stale.** Lines this branch inserted
+moved three symbols that `.agents/engine-matrix.md` cites. Each cell is
+re-pointed and no other row changed:
+
+| row | before | after |
+|---|---|---|
+| SERVE-UTILITY-ENDPOINTS | `include/vllm/entrypoints/openai/serving_chat.h:246` (`prompt_fn()`) | `:263` |
+| LOAD-SENTENCEPIECE | `include/vllm/tokenizer/tokenizer.h:129` (`GetFamily`) | `:147` |
+| SPEC-BPE-QUADRATIC-MERGE | `src/vllm/v1/engine/input_processor.cpp:245` (`process_inputs`), encode at 260, length check at 265 | `:249`, encode at 265, length check at 270 |
+
+`scripts/check-agent-record.py` then reports the five stale anchors inherited
+from `origin/main` (SERVE-METRICS, SERVE-UTILITY-ENDPOINTS and SERVE-ADMIN in
+`api_server.cpp` and `api_server.h`) and the `roadmap_v1.md:105-106` table
+errors, and nothing else. Those belong to another change.
+
+**B2, blocking: the claim "before the beam-search encode and the multimodal
+seam" had no gate.** `InputProcessor::num_prompt_encodes()` counts only the
+text `process_inputs` overload. Beam search encodes with
+`beam_tokenizer_->Encode(prompt)` in `create_chat_completion`, and the
+multimodal seam encodes inside `MakeQwen3VLImageChatFn` (`chat_mm.cpp`). The
+reviewer moved the check below the beam-search block and every suite stayed
+green.
+
+- **Beam search.** `OpenAIServingChat::num_beam_prompt_encodes()` is a relaxed
+  counter, incremented on the line before `beam_tokenizer_->Encode(prompt)`.
+  It is the same mechanism as the text-path spy, at the one call site the beam
+  path has. The alternatives were weaker: a counter inside `Tokenizer` would
+  add state to a copyable core type for one test, and asserting only the
+  response message would not show that the encode was skipped. The case sends
+  a `use_beam_search` request whose rendered prompt is one byte over the
+  derived bound, with `VT_SERVER_MAX_PROMPT_CHARS` unset. It asserts HTTP 400
+  `BadRequestError` with the byte-bound message, no `choices`, zero beam
+  encodes, zero engine encodes and no unfinished request. An in-bound beam
+  request is the control: it answers 200 with choices and exactly one beam
+  encode, so a counter that never moves cannot pass.
+- **Multimodal seam: gated.** The fixtures can drive the REAL production seam,
+  `MakeQwen3VLImageChatFn`, as the existing over-limit multimodal case already
+  does. The case wraps that seam in a counter. An image request one byte over
+  the bound answers the byte-bound 400 with zero seam entries, zero codec calls
+  and zero engine encodes. The in-bound control enters the seam once, and the
+  seam's own encode is observable because it fails: the 22-entry fixture
+  vocabulary cannot encode the seam's Qwen placeholder marker, so the request
+  answers 500 with the tokenizer's message. What this gate does NOT prove is a
+  real Qwen3-VL tokenizer's encode; it proves the order of the check and the
+  seam call, which is the claim.
+
+**N1, a known small difference on the multimodal path.** The multimodal seam
+re-renders the messages itself (`chat_mm.cpp`, `MakeQwen3VLImageChatFn` step 1)
+with no tools, no `chat_template_kwargs`, and content built by
+`BuildMarkerInjectedContent`: text parts joined without the `"\n"` separator
+the text path uses, and one placeholder marker per media part. So the string
+the seam encodes is not the string the check measured. Per image part it adds
+the Qwen3-VL marker `<|vision_start|><|image_pad|><|vision_end|>` (43 bytes,
+`chat_mm.cpp:191`); the dropped separators and the dropped tools only make it
+shorter. The review estimated about 45 bytes per media part, and 43 is the
+exact upper bound for an image part. `ValidateChatMmLimits` caps Qwen3-VL at
+one image, so the seam's encode can exceed the derived bound by at most 43
+bytes. The token refusal after the encode still catches such a prompt. The
+difference is accepted and recorded, not repaired. The missing
+`chat_template_kwargs` on this seam are already owed under
+`specs/chat-template-jinja-undefined.md` (#1681).
+
+**N2, wording.** The claim "never refuses a prompt that fits in
+`max_model_len` tokens" has one exception, now named under `## Design`, in the
+`serving_chat.cpp` comment and in `docs/ENVIRONMENT.md`
+(`VT_SERVER_MAX_PROMPT_CHARS`): a SentencePiece tokenizer with `fuse_unk: true`
+and no byte fallback collapses a run of unknown characters of any length into
+one `<unk>`, so such a prompt can fit in tokens and exceed the byte bound.
+vLLM's `max_chars_per_token` bound has the same exception.
+
+##### Evidence
+
+CPU build as above, `VT_SERVER_MAX_PROMPT_CHARS` removed from the environment.
+The new case is `api_server: the rendered-prompt bound runs before the beam and
+multimodal encodes`, committed at `7b1553024`.
+
+The mutations ran in one scratch worktree at `7b1553024`, each rebuilt and run
+on the four prompt-cap cases of `test_openai_api_server` (172 assertions) and
+the C ABI case (10 assertions). The committed `serving_chat.cpp` hashed
+`bb6f29d6b824dc33965c03068cf31f28e41e6fbd7598a58ee7b9bb77cfd0015d` before every
+mutation and again after every restore. The unmutated baseline was 4 of 4 cases
+and 1 of 1 case, 0 failed.
+
+| mutation | mutated sha256 | api-server | C ABI | killed by |
+|---|---|---|---|---|
+| (a) delete the check | `8be41ce3...` | 2 of 4 cases, 19 assertions failed | 4 of 10 failed | the tools, tool_calls and one-byte-over cases; the beam and image cases |
+| (b) measure content only | `d6542d9a...` | 2 of 4, 19 failed | green (content is the whole prompt) | the same cases as (a) |
+| (c) derived `>` to `>=` | `c5b2dc8c...` | 1 of 4, 3 failed | green | the exact-bound case (byte refusal, encode count 0) |
+| (d) operator `>` to `>=` | `dad57298...` | 1 of 4, 4 failed | green | the exact-ceiling case |
+| (e) default 300000 when unset | `271fe068...` | 1 of 4, 2 failed | green | the resolution case, unset and empty |
+| (g) check moved below the beam-search block | `8d6e27ea...` | 1 of 4, 7 failed | green | the beam case: `The decoder prompt (length 33)` in place of the byte message, `num_beam_prompt_encodes() == 1`; and the image case: status 500, seam entered once |
+| (h) check moved below the multimodal seam, above beam search | `71b9dfc1...` | 1 of 4, 4 failed | green | the image case: status 500 from the seam's encode, `seam_calls == 1` |
+
+Red before, under (g), in the beam subcase:
+`CHECK( msg.find("The decoder prompt") == std::string::npos )` failed with the
+body `The decoder prompt (length 33) is longer than the maximum model length of
+32`, and `CHECK( h.chat.num_beam_prompt_encodes() == 0 )` failed with
+`1 == 0`. Green after, at `7b1553024`: the case passes, 1 case, 43 assertions,
+0 failed.
+
+At `7b1553024`, each run as its own executable, all `SUCCESS!` and exit 0:
+`test_openai_api_server` 102 cases / 1508 assertions (one case more than
+`19b2bb3fc`), `test_capi` 73 / 730, `test_openai_serving` 48 / 1365,
+`test_openai_run_batch` 7 / 80, `test_chat_prompt` 5 / 15, `test_bpe`
+29 / 1009. `test_model_registry` is excluded because it does not compile on
+`origin/main` for an unrelated reason.
 
 ## Outcome
 
@@ -528,3 +983,23 @@ and has nothing to tune.
    one that has a direct vLLM mirror to port named.
 3. **The chat arm measures the summed message text, not the rendered prompt.**
    Also under `## Owed`.
+
+### Amendment 2026-09-23: what was decided, and why
+
+Three fresh reviews ran before this landed. Review 1 found that removing the
+fixed default left `tools`, `tool_calls` arguments and template framing unbounded
+before the encode, because the #1541 guard summed only message content. A 4 MiB
+tool description was fully tokenized, and 64 MB of tools costs about 63 s of
+encode on one worker. The repair moved the bound onto the rendered prompt, where
+vLLM's `_text_len_check` runs. Review 2 found the ordering before the beam and
+multimodal encodes untested, and gates now cover both. Review 3 passed.
+
+Rejected: keeping any fixed character default. vLLM has none, and the derived
+bound already refuses a pathological body before tokenization. Also rejected:
+making `VT_SERVER_MAX_NEW_TOKENS` part of this change. It clamps output tokens
+rather than refusing input, so it is a different mechanism with its own issue.
+
+The one stated exception to "a prompt that fits is never refused" is a
+SentencePiece tokenizer with `fuse_unk` and no byte fallback. vLLM's bound shares
+it. The multimodal seam re-renders with up to 43 more bytes per image part than
+the checked string. Both are recorded under the amendment's design notes.
