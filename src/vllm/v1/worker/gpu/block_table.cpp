@@ -6,8 +6,12 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <numeric>
 #include <stdexcept>
+#include <string>
 #include <utility>
+
+#include "vllm/v1/kv_cache_interface.h"
 
 namespace vllm::v1 {
 
@@ -20,6 +24,44 @@ constexpr int64_t kPadSlotId = -1;
 int cdiv(int a, int b) { return (a + b - 1) / b; }
 
 }  // namespace
+
+int get_block_table_width(int max_num_blocks, int block_size,
+                          std::optional<int> kernel_block_size,
+                          std::optional<int> token_alignment) {
+  // block_table.py:29-49.
+  const int kbs = kernel_block_size.has_value() ? *kernel_block_size : block_size;
+  if (kbs <= 0 || block_size % kbs != 0) {
+    throw std::invalid_argument("kernel_block_size " + std::to_string(kbs) +
+                                " must divide block_size " +
+                                std::to_string(block_size) + " evenly");
+  }
+  if (token_alignment.has_value()) {
+    if (*token_alignment <= 0) {
+      throw std::invalid_argument("token_alignment must be positive");
+    }
+    const int block_alignment =
+        *token_alignment / std::gcd(*token_alignment, block_size);
+    max_num_blocks = cdiv(max_num_blocks, block_alignment) * block_alignment;
+  }
+  return max_num_blocks * block_size / kbs;
+}
+
+BlockTableGeometry block_table_geometry(const KVCacheConfig& kv_cache_config,
+                                        int max_model_len) {
+  // gpu_model_runner.py:7340-7360. The runner has no encoder-decoder path, so
+  // upstream's max(max_model_len, max_encoder_len) is max_model_len, and it
+  // keeps every group (no ENCODER_ONLY_ATTENTION group reaches this runner).
+  BlockTableGeometry g;
+  for (const KVCacheGroupSpec& group : kv_cache_config.kv_cache_groups) {
+    const KVCacheSpec& spec = *group.kv_cache_spec;
+    g.block_sizes.push_back(spec.block_size);
+    g.slot_mapping_modes.push_back(spec.kind() == KVCacheSpecKind::kMamba
+                                       ? SlotMappingMode::kNone
+                                       : SlotMappingMode::kTokenToKvSlot);
+    g.max_num_blocks.push_back(spec.max_num_blocks_per_req(max_model_len));
+  }
+  return g;
+}
 
 BlockTable::BlockTable(int block_size, int max_num_reqs,
                        int max_num_blocks_per_req, int max_num_batched_tokens,
@@ -81,7 +123,16 @@ void BlockTable::append_row(const std::vector<int>& block_ids, int row_idx) {
                         : block_ids;
   const int num_blocks = static_cast<int>(ids.size());
   const int start = num_blocks_per_row[static_cast<size_t>(row_idx)];
-  num_blocks_per_row[static_cast<size_t>(row_idx)] += num_blocks;
+  // gpu/block_table.py:125-131: refuse the write before any state changes.
+  const int end = start + num_blocks;
+  if (end > max_num_blocks_per_req) {
+    throw std::runtime_error(
+        "Block table write for request " + std::to_string(row_idx) +
+        ", group " + std::to_string(group_index) +
+        " exceeds row capacity (" + std::to_string(end) + " > " +
+        std::to_string(max_num_blocks_per_req) + ")");
+  }
+  num_blocks_per_row[static_cast<size_t>(row_idx)] = end;
   const size_t base = static_cast<size_t>(row_idx) * max_num_blocks_per_req;
   for (int i = 0; i < num_blocks; ++i) {
     block_table_cpu_[base + start + i] = static_cast<int32_t>(ids[i]);
@@ -187,10 +238,21 @@ MultiGroupBlockTable::MultiGroupBlockTable(
     int max_num_reqs, int max_model_len, int max_num_batched_tokens,
     std::vector<int> block_sizes, std::vector<int> kernel_block_sizes,
     std::optional<std::vector<int>> max_num_blocks,
-    int cp_kv_cache_interleave_size) {
+    int cp_kv_cache_interleave_size,
+    std::optional<std::vector<SlotMappingMode>> slot_mapping_modes) {
   if (kernel_block_sizes.size() != block_sizes.size()) {
     throw std::invalid_argument(
         "kernel_block_sizes length must match block_sizes length");
+  }
+  // block_table.py:308-315.
+  std::vector<SlotMappingMode> modes =
+      slot_mapping_modes.has_value()
+          ? std::move(*slot_mapping_modes)
+          : std::vector<SlotMappingMode>(block_sizes.size(),
+                                         SlotMappingMode::kTokenToKvSlot);
+  if (modes.size() != block_sizes.size()) {
+    throw std::invalid_argument(
+        "slot_mapping_modes length must match block_sizes length");
   }
 
   std::vector<int> num_blocks;
@@ -207,13 +269,14 @@ MultiGroupBlockTable::MultiGroupBlockTable(
         "max_num_blocks length must match block_sizes length");
   }
 
-  // Align to a multiple of (128 / block_size) for block_size <= 128 (#39324).
+  // block_table.py:322-331: a kTokenToKvSlot row is rounded to 128 tokens, a
+  // kNone (Mamba/GDN) row keeps the width its spec asked for.
   for (size_t i = 0; i < num_blocks.size(); ++i) {
-    const int bs = block_sizes[i];
-    if (bs <= 128) {
-      const int mult = 128 / bs;
-      num_blocks[i] = cdiv(num_blocks[i], mult) * mult;
-    }
+    num_blocks[i] =
+        modes[i] == SlotMappingMode::kNone
+            ? get_block_table_width(num_blocks[i], block_sizes[i], std::nullopt,
+                                    /*token_alignment=*/std::nullopt)
+            : get_block_table_width(num_blocks[i], block_sizes[i]);
   }
 
   block_tables.reserve(block_sizes.size());
@@ -221,6 +284,7 @@ MultiGroupBlockTable::MultiGroupBlockTable(
     block_tables.emplace_back(block_sizes[i], max_num_reqs, num_blocks[i],
                               max_num_batched_tokens, kernel_block_sizes[i],
                               cp_kv_cache_interleave_size);
+    block_tables.back().group_index = static_cast<int>(i);
   }
 }
 

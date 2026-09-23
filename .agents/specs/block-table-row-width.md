@@ -27,7 +27,9 @@ These are the Qwen3.5/3.6 hybrids (`qwen3_5_common.cpp`), Kimi Linear, GLM-5
 Next, Qwen4-Exp and Nemotron-H. The change is in the host-side block table of
 the shared worker seam, so it applies to all backends (CPU, CUDA, ROCm, Vulkan,
 Metal) in the same way. Attention groups (full, MLA, sliding window, chunked
-local, the DFlash2 draft group) keep their current width byte for byte.
+local, the DFlash2 draft group) keep their current width for every block size
+that divides 128 or is a multiple of it. See "Attention rounding" for the other
+block sizes.
 
 Out of scope:
 
@@ -84,6 +86,18 @@ result to `InputBatch`, which forwards it to `MultiGroupBlockTable`.
 write when `end > max_num_blocks_per_req`. The message is upstream's, with the
 group index that `MultiGroupBlockTable` records on each table.
 
+### Attention rounding
+
+The previous port rounded a row to a multiple of `128 / block_size` blocks,
+and only when `block_size <= 128`. The pinned `get_block_table_width` rounds to
+a multiple of `128 / gcd(128, block_size)` blocks for every block size. The two
+agree when the block size divides 128 or is a multiple of it. For other sizes
+the pinned rule gives a wider row: block size 48 at `max_model_len 256` goes
+from 6 to 8 blocks, and block size 528 now rounds to 8 blocks. A wider row
+cannot overflow, so this change only adds unused capacity. The existing case in
+`test_block_table.cpp` that encoded the old value for block size 48 now asserts
+the pinned value.
+
 ### Recorded deviation: the Mamba `none` width
 
 Upstream's `none` width is `1 + k`. That value is correct upstream because
@@ -136,8 +150,9 @@ engine (`LoadedEngine(config, weights, tokenizer, params, dflash_draft)` and its
 (`fa`, `gdn`, `fa_draft`; `k = 3`), `max_model_len 128`, block size 32,
 512 blocks and one sequence:
 
-1. A 93-token prompt with `max_tokens 1` finishes. On the current tree the
-   process aborts with `free(): invalid pointer`. This is the red.
+1. A 93-token prompt with `max_tokens 1` finishes. On the current tree glibc
+   aborts the process on the corrupted heap (`free(): invalid pointer` in the
+   issue's run). This is the red.
 2. The boundary. The longest prompt that the engine accepts finishes, and the
    GDN claim of that request equals the GDN row width exactly. One token more
    gets the engine's named length refusal and no crash.
@@ -153,7 +168,8 @@ Unit tests in `tests/vllm/v1/worker/test_block_table.cpp`:
 5. `MultiGroupBlockTable` rounds a `kTokenToKvSlot` group to 128 tokens and
    leaves a `kNone` group at its given width. `get_block_table_width` values
    from `block_table.py:29-49`.
-6. `MambaSpec::max_num_blocks_per_req` for `none`, `align` and `all`, with and
+6. In `tests/vllm/v1/test_kv_cache_interface.cpp`,
+   `MambaSpec::max_num_blocks_per_req` for `none`, `align` and `all`, with and
    without speculative blocks, at this tree's geometry and at upstream's
    geometry (`block_size = max_model_len`, which gives `1 + k`).
 
@@ -175,6 +191,21 @@ from the runner's `InputBatch` construction, rebuild, and show that tests 1 and
 - vLLM at the pin writes past the row silently: mirror vLLM and report it. (It
   does not. Both tables raise.)
 
+## Owed
+
+- `ISSUE-LOCAL-01M36XJNF0TRNZBH7GYCW756AQ`: the GDN group in `none` mode is
+  built at the attention block size instead of `max_model_len`
+  (`config.py:657`). This row's `none` width, `cdiv(max_len, block_size) + k`,
+  holds the claim at that block size and becomes upstream's `1 + k` when the
+  block size moves. `FIX-KV-POOL-MIN-FIT` filed the issue and lists it under its
+  own `## Owed` on its branch. This branch carries the same file so that the
+  reference resolves. When both rows land, one `## Owed` bullet must go.
+
 ## Now
 
-`ACTIVE` on `row/FIX-BLOCK-TABLE-ROW-WIDTH`.
+`ACTIVE` on `row/FIX-BLOCK-TABLE-ROW-WIDTH`. The implementation and its CPU
+gates are on the branch and wait for a fresh review. Two existing
+`test_runner.cpp` cases encoded the old widths: one fed two block ids to a
+group whose row holds one (an overflow the bounds check now refuses), and one
+asserted the 128-token rounding on the recurrent group. Both now assert the
+pinned behaviour.

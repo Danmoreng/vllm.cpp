@@ -161,10 +161,18 @@ class InputBatch {
   // `RequestStates.__init__(..., num_speculative_steps)`, states.py:34,71-77).
   // 0 — the default and every non-speculative runner — makes the buffer
   // zero-width, which is upstream's `torch.zeros(max_num_reqs, 0)` exactly.
+  // max_num_blocks_per_req / slot_mapping_modes are upstream's InputBatch
+  // arguments of the same names (gpu_model_runner.py:7375-7394 @ e126687a9a),
+  // forwarded to MultiGroupBlockTable. nullopt keeps its derivation
+  // (cdiv(max_model_len, block_size), every group kTokenToKvSlot). The runner
+  // passes block_table_geometry's values (FIX-BLOCK-TABLE-ROW-WIDTH).
   InputBatch(int max_num_reqs, int max_model_len, int max_num_batched_tokens,
              int vocab_size, std::vector<int> block_sizes,
              std::vector<int> kernel_block_sizes,
-             int num_speculative_steps = 0);
+             int num_speculative_steps = 0,
+             std::optional<std::vector<int>> max_num_blocks_per_req = std::nullopt,
+             std::optional<std::vector<SlotMappingMode>> slot_mapping_modes =
+                 std::nullopt);
 
   // add_request: place `request` into a slot (a freed hole if one exists, else
   // append at num_reqs), fill the per-slot arrays from it, add the block-table

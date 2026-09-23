@@ -444,10 +444,16 @@ GPUModelRunner::GPUModelRunner(
       // which is declared (and so initialized) above `input_batch_`. 0 without a
       // speculator, which leaves the buffer empty and every non-speculative
       // runner byte-identical.
+      // FIX-BLOCK-TABLE-ROW-WIDTH: each group's row width comes from its spec
+      // (gpu_model_runner.py:7340-7360 @ e126687a9a), so a speculative GDN
+      // group gets its `+ k` blocks.
       input_batch_(max_num_reqs, max_model_len, max_num_batched_tokens,
                    static_cast<int>(config.vocab_size),
                    group_block_sizes(kv_cache_config),
-                   group_block_sizes(kv_cache_config), num_spec()) {
+                   group_block_sizes(kv_cache_config), num_spec(),
+                   block_table_geometry(kv_cache_config, max_model_len).max_num_blocks,
+                   block_table_geometry(kv_cache_config, max_model_len)
+                       .slot_mapping_modes) {
   max_num_reqs_ = max_num_reqs;
   max_num_batched_tokens_ = max_num_batched_tokens;
   // SPEC-MTP I5e: the async input-combine splices the device-resident
@@ -554,10 +560,16 @@ GPUModelRunner::GPUModelRunner(
       // which is declared (and so initialized) above `input_batch_`. 0 without a
       // speculator, which leaves the buffer empty and every non-speculative
       // runner byte-identical.
+      // FIX-BLOCK-TABLE-ROW-WIDTH: each group's row width comes from its spec
+      // (gpu_model_runner.py:7340-7360 @ e126687a9a), so a speculative GDN
+      // group gets its `+ k` blocks.
       input_batch_(max_num_reqs, max_model_len, max_num_batched_tokens,
                    static_cast<int>(config.vocab_size),
                    group_block_sizes(kv_cache_config),
-                   group_block_sizes(kv_cache_config), num_spec()) {
+                   group_block_sizes(kv_cache_config), num_spec(),
+                   block_table_geometry(kv_cache_config, max_model_len).max_num_blocks,
+                   block_table_geometry(kv_cache_config, max_model_len)
+                       .slot_mapping_modes) {
   max_num_reqs_ = max_num_reqs;
   max_num_batched_tokens_ = max_num_batched_tokens;
   // SPEC-MTP I5e: the async input-combine splices the device-resident
