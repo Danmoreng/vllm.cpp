@@ -613,6 +613,12 @@ OpenAIServingChat::OpenAIServingChat(v1::AsyncLLM& engine,
       reasoning_parser_name_(std::move(reasoning_parser_name)),
       enable_force_include_usage_(enable_force_include_usage) {}
 
+std::size_t OperatorMaxPromptChars() {
+  const char* e = std::getenv("VT_SERVER_MAX_PROMPT_CHARS");
+  if (e && e[0]) return static_cast<std::size_t>(std::strtoull(e, nullptr, 10));
+  return 0;
+}
+
 ChatCompletionResult OpenAIServingChat::create_chat_completion(
     const ChatCompletionRequest& request) {
   // request_id = f"chatcmpl-{...}" (chat_completion/serving.py:268); created =
@@ -674,11 +680,7 @@ ChatCompletionResult OpenAIServingChat::create_chat_completion(
   // is HTTP 400 BadRequestError (error_response.py:39-41).
   // VT_SERVER_MAX_NEW_TOKENS keeps its 4096 default; its divergence from vLLM is
   // ISSUE-LOCAL-01M37A3S7N7GSZC37JH515QXFE.
-  const size_t max_prompt_chars = [] {
-    const char* e = std::getenv("VT_SERVER_MAX_PROMPT_CHARS");
-    if (e && e[0]) return static_cast<size_t>(std::strtoull(e, nullptr, 10));
-    return static_cast<size_t>(0);
-  }();
+  const size_t max_prompt_chars = OperatorMaxPromptChars();
   static const int kMaxNewTokensCap = [] {
     const char* e = std::getenv("VT_SERVER_MAX_NEW_TOKENS");
     if (e && e[0]) return std::atoi(e);

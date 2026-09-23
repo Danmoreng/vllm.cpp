@@ -23,6 +23,7 @@
 #define VLLM_ENTRYPOINTS_OPENAI_SERVING_CHAT_H_
 
 #include <atomic>
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -194,6 +195,13 @@ std::optional<nlohmann::json> ToolChoiceStructuralTagSpec(
 // tool_parser_name. Kept for source compatibility.
 void ApplyToolChoiceStructuredOutput(const ChatCompletionRequest& request,
                                      SamplingParams& sampling_params);
+
+// VT_SERVER_MAX_PROMPT_CHARS: the OPTIONAL operator ceiling, in bytes, on the
+// rendered chat prompt. Unset, empty or 0 returns 0, which means NO fixed
+// ceiling: the only default bound is the derived one, max_model_len *
+// Tokenizer::MaxTokenBytes() (ISSUE-LOCAL-01M37A34NTK8A98KYWA5SA5GNN). vLLM has
+// no such variable. Read on every call, so one process can exercise both arms.
+std::size_t OperatorMaxPromptChars();
 
 class OpenAIServingChat {
  public:

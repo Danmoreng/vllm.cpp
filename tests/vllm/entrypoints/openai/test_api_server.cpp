@@ -2650,6 +2650,32 @@ class ScopedPromptCharsEnv {
   std::string prev_;
 };
 
+// Binds the harness's server to a loopback port, runs `body` with a client,
+// then stops and joins the server.
+template <class Body>
+void WithPromptCapServer(ServerHarness& h, Body&& body) {
+  const int port = h.server.bind_to_any_port("127.0.0.1");
+  REQUIRE(port > 0);
+  ScopedServerThread server_thread(h.server);
+  for (int i = 0; i < 500 && !h.server.is_running(); ++i)
+    std::this_thread::sleep_for(std::chrono::milliseconds(2));
+  REQUIRE(h.server.is_running());
+  httplib::Client client("127.0.0.1", port);
+  client.set_read_timeout(120, 0);
+  body(client);
+  server_thread.join();  // stops the server, then joins
+}
+
+// One user message, greedy, one output token.
+std::string PromptCapChatBody(const std::string& content) {
+  json req;
+  req["model"] = "test-model";
+  req["messages"] = json::array({{{"role", "user"}, {"content", content}}});
+  req["max_tokens"] = 1;
+  req["temperature"] = 0.0;
+  return req.dump();
+}
+
 TEST_CASE("api_server: the chat prompt cap never refuses what the context holds") {
   const HfConfig c = MakeConfig();
   const Qwen3_5MoeWeights w = MakeWeights(c);
@@ -2658,26 +2684,6 @@ TEST_CASE("api_server: the chat prompt cap never refuses what the context holds"
   REQUIRE(tok.MaxTokenBytes() == kLongToken);
   const size_t derived_bound = static_cast<size_t>(kMaxModelLen) * kLongToken;
 
-  auto with_server = [](ServerHarness& h, auto&& body) {
-    const int port = h.server.bind_to_any_port("127.0.0.1");
-    REQUIRE(port > 0);
-    ScopedServerThread server_thread(h.server);
-    for (int i = 0; i < 500 && !h.server.is_running(); ++i)
-      std::this_thread::sleep_for(std::chrono::milliseconds(2));
-    REQUIRE(h.server.is_running());
-    httplib::Client client("127.0.0.1", port);
-    client.set_read_timeout(120, 0);
-    body(client);
-    server_thread.join();  // stops the server, then joins
-  };
-  auto chat = [](const std::string& content) {
-    json req;
-    req["model"] = "test-model";
-    req["messages"] = json::array({{{"role", "user"}, {"content", content}}});
-    req["max_tokens"] = 1;
-    req["temperature"] = 0.0;
-    return req.dump();
-  };
 
   // 25 tokens, 204,800 bytes: above the old fixed 200,000, inside a 32-token
   // context, and below the derived 262,144-byte bound.
@@ -2692,8 +2698,8 @@ TEST_CASE("api_server: the chat prompt cap never refuses what the context holds"
     ConfigureUtilityEndpoints(h.server, tok, kMaxModelLen, h.async_engine,
                               UtilityEndpointOptions{});
     REQUIRE(h.server.max_prompt_bytes() == derived_bound);
-    with_server(h, [&](httplib::Client& client) {
-      auto r = client.Post("/v1/chat/completions", chat(fits),
+    WithPromptCapServer(h, [&](httplib::Client& client) {
+      auto r = client.Post("/v1/chat/completions", PromptCapChatBody(fits),
                            "application/json");
       REQUIRE(r);
       INFO("body: " << r->body.substr(0, 400));
@@ -2724,8 +2730,8 @@ TEST_CASE("api_server: the chat prompt cap never refuses what the context holds"
     ServerHarness h(c, w, tok);
     ConfigureUtilityEndpoints(h.server, tok, kMaxModelLen, h.async_engine,
                               UtilityEndpointOptions{});
-    with_server(h, [&](httplib::Client& client) {
-      auto r = client.Post("/v1/chat/completions", chat(over),
+    WithPromptCapServer(h, [&](httplib::Client& client) {
+      auto r = client.Post("/v1/chat/completions", PromptCapChatBody(over),
                            "application/json");
       REQUIRE(r);
       CHECK(r->status == 400);
@@ -2747,8 +2753,8 @@ TEST_CASE("api_server: the chat prompt cap never refuses what the context holds"
     ServerHarness h(c, w, tok);
     ConfigureUtilityEndpoints(h.server, tok, kMaxModelLen, h.async_engine,
                               UtilityEndpointOptions{});
-    with_server(h, [&](httplib::Client& client) {
-      auto r = client.Post("/v1/chat/completions", chat(huge),
+    WithPromptCapServer(h, [&](httplib::Client& client) {
+      auto r = client.Post("/v1/chat/completions", PromptCapChatBody(huge),
                            "application/json");
       REQUIRE(r);
       CHECK(r->status == 400);
@@ -2771,8 +2777,8 @@ TEST_CASE("api_server: the chat prompt cap never refuses what the context holds"
     ServerHarness h(c, w, tok);
     ConfigureUtilityEndpoints(h.server, tok, kMaxModelLen, h.async_engine,
                               UtilityEndpointOptions{});
-    with_server(h, [&](httplib::Client& client) {
-      auto r = client.Post("/v1/chat/completions", chat(fits),
+    WithPromptCapServer(h, [&](httplib::Client& client) {
+      auto r = client.Post("/v1/chat/completions", PromptCapChatBody(fits),
                            "application/json");
       REQUIRE(r);
       CHECK(r->status == 400);
@@ -2785,6 +2791,218 @@ TEST_CASE("api_server: the chat prompt cap never refuses what the context holds"
       CHECK_FALSE(j.contains("choices"));
     });
     CHECK_FALSE(h.async_engine.has_unfinished_requests());
+  }
+
+  // The ceiling's comparison is `>`: a rendered prompt of EXACTLY the ceiling is
+  // served, and one byte over is refused. Either off-by-one (`>=`, or
+  // `> ceiling + 1`) turns one half of this pair red.
+  SUBCASE("set: a prompt exactly at the operator ceiling is served") {
+    ScopedPromptCharsEnv env("204800");
+    ServerHarness h(c, w, tok);
+    ConfigureUtilityEndpoints(h.server, tok, kMaxModelLen, h.async_engine,
+                              UtilityEndpointOptions{});
+    WithPromptCapServer(h, [&](httplib::Client& client) {
+      auto r = client.Post("/v1/chat/completions", PromptCapChatBody(fits),
+                           "application/json");
+      REQUIRE(r);
+      INFO("body: " << r->body.substr(0, 400));
+      CHECK(r->status == 200);
+      json j = json::parse(r->body, nullptr, /*allow_exceptions=*/false);
+      CHECK(ErrMsg(j).find("VT_SERVER_MAX_PROMPT_CHARS") == std::string::npos);
+      CHECK((j.is_object() && j.contains("choices")));
+    });
+    CHECK(h.input_processor.num_prompt_encodes() == 1);
+  }
+  SUBCASE("set: a prompt one byte over the operator ceiling is refused") {
+    ScopedPromptCharsEnv env("204800");
+    const std::string over = fits + "h";  // 204,801 bytes, 26 tokens
+    REQUIRE(tok.EncodeWithSpecialTokens(over).size() == 26);
+    ServerHarness h(c, w, tok);
+    ConfigureUtilityEndpoints(h.server, tok, kMaxModelLen, h.async_engine,
+                              UtilityEndpointOptions{});
+    WithPromptCapServer(h, [&](httplib::Client& client) {
+      auto r = client.Post("/v1/chat/completions", PromptCapChatBody(over),
+                           "application/json");
+      REQUIRE(r);
+      CHECK(r->status == 400);
+      json j = json::parse(r->body, nullptr, /*allow_exceptions=*/false);
+      CHECK(ErrType(j) == "BadRequestError");
+      const std::string msg = ErrMsg(j);
+      CHECK(msg.find("204801") != std::string::npos);
+      CHECK(msg.find("VT_SERVER_MAX_PROMPT_CHARS=204800") != std::string::npos);
+      CHECK_FALSE(j.contains("choices"));
+    });
+    CHECK(h.input_processor.num_prompt_encodes() == 0);
+  }
+}
+
+// The default resolution itself. The end-to-end cases above cannot tell "no
+// fixed ceiling" from "a fixed ceiling above the fixture's 262,144-byte derived
+// bound", because the derived bound refuses such a prompt first. A real
+// server's derived bound is tens of megabytes, so a finite default anywhere
+// below it would refuse prompts the context holds, as the old 200,000 did.
+// This case therefore pins the resolution: unset, empty and 0 are NO ceiling.
+TEST_CASE("api_server: VT_SERVER_MAX_PROMPT_CHARS unset sets no fixed ceiling") {
+  using vllm::entrypoints::openai::OperatorMaxPromptChars;
+  {
+    ScopedPromptCharsEnv env(nullptr);
+    CHECK(OperatorMaxPromptChars() == 0);
+  }
+  {
+    ScopedPromptCharsEnv env("");
+    CHECK(OperatorMaxPromptChars() == 0);
+  }
+  {
+    ScopedPromptCharsEnv env("0");
+    CHECK(OperatorMaxPromptChars() == 0);
+  }
+  {
+    ScopedPromptCharsEnv env("1000");
+    CHECK(OperatorMaxPromptChars() == 1000);
+  }
+}
+
+// F1 of the SERVE-REQUEST-LENGTH-GUARD amendment review. ApiServer's #1541
+// guard sums `messages[].content` only, before the template renders, so bytes
+// the template adds -- tool descriptions and schemas, assistant tool_calls
+// arguments, per-message framing -- were never bounded before the encode. vLLM
+// runs `_text_len_check` on the RENDERED prompt, template and tools included
+// (vllm/renderers/params.py:342-370, reached through apply_pre_tokenization at
+// params.py:386-399 @ e126687a9a). This fixture template renders the tool
+// descriptions and the tool_calls arguments verbatim and adds nothing else, so
+// the rendered length and token count are exact. The spy is
+// InputProcessor::num_prompt_encodes(): a refusal before the encode leaves it 0.
+std::string ToolsRenderingChatPrompt(
+    const std::vector<ChatMessage>& messages, bool,
+    const std::vector<vllm::entrypoints::openai::ChatCompletionToolsParam>& tools,
+    const nlohmann::ordered_json&) {
+  std::string p;
+  for (const ChatMessage& m : messages) {
+    if (m.content.has_value()) p += *m.content;
+    if (m.tool_calls.has_value())
+      for (const auto& call : *m.tool_calls) p += call.function.arguments;
+  }
+  for (const auto& t : tools)
+    if (t.function.description.has_value()) p += *t.function.description;
+  return p;
+}
+
+TEST_CASE("api_server: the derived bound applies to the RENDERED chat prompt") {
+  const HfConfig c = MakeConfig();
+  const Qwen3_5MoeWeights w = MakeWeights(c);
+  const Tokenizer& tok = LongTokenFixture();
+  constexpr size_t kLongToken = 8192;
+  REQUIRE(tok.MaxTokenBytes() == kLongToken);
+  const size_t derived_bound = static_cast<size_t>(kMaxModelLen) * kLongToken;
+  ScopedPromptCharsEnv env(nullptr);
+
+  // A small message, so the content-only #1541 guard passes, and `tool_bytes`
+  // of 'h' in one tool description.
+  auto tools_body = [](size_t tool_bytes) {
+    json req = json::parse(PromptCapChatBody("h"));
+    req["tools"] = json::array(
+        {{{"type", "function"},
+          {"function",
+           {{"name", "f"}, {"description", std::string(tool_bytes, 'h')}}}}});
+    return req.dump();
+  };
+  // A prior assistant turn whose tool_calls arguments carry `arg_bytes`.
+  auto tool_calls_body = [](size_t arg_bytes) {
+    json req = json::parse(PromptCapChatBody("h"));
+    req["messages"] = json::array(
+        {{{"role", "user"}, {"content", "h"}},
+         {{"role", "assistant"},
+          {"content", nullptr},
+          {"tool_calls",
+           json::array({{{"id", "call_0"},
+                         {"type", "function"},
+                         {"function",
+                          {{"name", "f"},
+                           {"arguments", std::string(arg_bytes, 'h')}}}}})}},
+         {{"role", "tool"}, {"tool_call_id", "call_0"}, {"content", "h"}}});
+    return req.dump();
+  };
+  auto check_byte_refusal = [&](const httplib::Result& r, size_t rendered) {
+    REQUIRE(r);
+    INFO("body: " << r->body.substr(0, 600));
+    CHECK(r->status == 400);
+    json j = json::parse(r->body, nullptr, /*allow_exceptions=*/false);
+    CHECK(ErrType(j) == "BadRequestError");
+    CHECK(ErrCode(j) == 400);
+    const std::string msg = ErrMsg(j);
+    // vLLM's _text_len_check wording, in bytes (params.py:352-362).
+    CHECK(msg.find("This model's maximum context length is 32 tokens.") !=
+          std::string::npos);
+    CHECK(msg.find("your prompt contains " + std::to_string(rendered) +
+                   " bytes (more than " + std::to_string(derived_bound) +
+                   " bytes, which is the upper bound for 32 input tokens)") !=
+          std::string::npos);
+    // Not the post-encode token refusal.
+    CHECK(msg.find("The decoder prompt") == std::string::npos);
+    CHECK_FALSE(j.contains("choices"));
+  };
+
+  SUBCASE("4 MiB in a tool description is refused BEFORE the encode") {
+    ServerHarness h(c, w, tok, false, ApiServer::kDefaultMaxConcurrentStreams,
+                    ToolsRenderingChatPrompt);
+    ConfigureUtilityEndpoints(h.server, tok, kMaxModelLen, h.async_engine,
+                              UtilityEndpointOptions{});
+    WithPromptCapServer(h, [&](httplib::Client& client) {
+      auto r = client.Post("/v1/chat/completions", tools_body(4u << 20),
+                           "application/json");
+      check_byte_refusal(r, (4u << 20) + 1);
+    });
+    CHECK(h.input_processor.num_prompt_encodes() == 0);
+    CHECK_FALSE(h.async_engine.has_unfinished_requests());
+  }
+
+  SUBCASE("4 MiB in assistant tool_calls arguments is refused BEFORE the encode") {
+    ServerHarness h(c, w, tok, false, ApiServer::kDefaultMaxConcurrentStreams,
+                    ToolsRenderingChatPrompt);
+    ConfigureUtilityEndpoints(h.server, tok, kMaxModelLen, h.async_engine,
+                              UtilityEndpointOptions{});
+    WithPromptCapServer(h, [&](httplib::Client& client) {
+      auto r = client.Post("/v1/chat/completions", tool_calls_body(4u << 20),
+                           "application/json");
+      check_byte_refusal(r, (4u << 20) + 2);
+    });
+    CHECK(h.input_processor.num_prompt_encodes() == 0);
+    CHECK_FALSE(h.async_engine.has_unfinished_requests());
+  }
+
+  // The boundary pair on the derived bound. Exactly 262,144 rendered bytes are
+  // 32 tokens: not refused by the byte bound, so they reach the encode and the
+  // token refusal decides them. One byte more is refused before the encode.
+  SUBCASE("a rendered prompt exactly at the derived bound reaches the encode") {
+    const size_t tool_bytes = derived_bound - 1;  // + the 1-byte message
+    ServerHarness h(c, w, tok, false, ApiServer::kDefaultMaxConcurrentStreams,
+                    ToolsRenderingChatPrompt);
+    ConfigureUtilityEndpoints(h.server, tok, kMaxModelLen, h.async_engine,
+                              UtilityEndpointOptions{});
+    WithPromptCapServer(h, [&](httplib::Client& client) {
+      auto r = client.Post("/v1/chat/completions", tools_body(tool_bytes),
+                           "application/json");
+      REQUIRE(r);
+      INFO("body: " << r->body.substr(0, 600));
+      json j = json::parse(r->body, nullptr, /*allow_exceptions=*/false);
+      CHECK(ErrMsg(j).find("The decoder prompt (length 32)") !=
+            std::string::npos);
+      CHECK(ErrMsg(j).find("bytes (more than") == std::string::npos);
+    });
+    CHECK(h.input_processor.num_prompt_encodes() == 1);
+  }
+  SUBCASE("a rendered prompt one byte over the derived bound is refused") {
+    const size_t tool_bytes = derived_bound;  // + the 1-byte message
+    ServerHarness h(c, w, tok, false, ApiServer::kDefaultMaxConcurrentStreams,
+                    ToolsRenderingChatPrompt);
+    ConfigureUtilityEndpoints(h.server, tok, kMaxModelLen, h.async_engine,
+                              UtilityEndpointOptions{});
+    WithPromptCapServer(h, [&](httplib::Client& client) {
+      auto r = client.Post("/v1/chat/completions", tools_body(tool_bytes),
+                           "application/json");
+      check_byte_refusal(r, derived_bound + 1);
+    });
+    CHECK(h.input_processor.num_prompt_encodes() == 0);
   }
 }
 
