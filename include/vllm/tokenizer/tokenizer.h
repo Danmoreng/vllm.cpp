@@ -6,6 +6,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -110,6 +111,23 @@ class Tokenizer {
   // max_model_len tokens: a prompt of B bytes costs at least
   // B / MaxTokenBytes() tokens.
   size_t MaxTokenBytes() const { return max_token_bytes_; }
+
+  // SERVE-REQUEST-LENGTH-GUARD (#1541): the largest prompt, in BYTES, that can
+  // still fit in `max_model_len` tokens, `max_model_len * MaxTokenBytes()`.
+  // Anything longer is unservable, so a request boundary may refuse it without
+  // tokenizing. 0 means unbounded: `max_model_len <= 0` or no token length is
+  // known. Clamped rather than wrapped on overflow. This is the ONE copy of the
+  // derivation; the HTTP guard (ApiServer::set_tokenizer) and the rendered chat
+  // prompt check (InputProcessor::max_prompt_bytes) both call it. vLLM's
+  // counterpart is `max_input_tokens * tokenizer.max_chars_per_token`
+  // (vllm/renderers/params.py:342-370 @ e126687a9a).
+  size_t MaxPromptBytes(int64_t max_model_len) const {
+    if (max_model_len <= 0 || max_token_bytes_ == 0) return 0;
+    const size_t len = static_cast<size_t>(max_model_len);
+    return len > std::numeric_limits<size_t>::max() / max_token_bytes_
+               ? std::numeric_limits<size_t>::max()
+               : len * max_token_bytes_;
+  }
 
   // Number of id slots (max id + 1); ids in [0, VocabSize) may still be
   // unassigned for vocabs with holes.

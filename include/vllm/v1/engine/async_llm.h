@@ -204,6 +204,9 @@ class AsyncLLM {
     return get_num_unfinished_requests() != 0;
   }
 
+  // The processor that validates and tokenizes this engine's prompts.
+  const InputProcessor& input_processor() const { return input_processor_; }
+
   // The stat-logger attach point (async_llm.py:648-652 `logger_ref`, the
   // mutable one-element list holding self.logger_manager). Mirrors
   // LLMEngine::set_stat_logger: NON-OWNING. A non-null logger must remain alive

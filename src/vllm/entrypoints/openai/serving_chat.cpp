@@ -21,6 +21,7 @@
 #include "vllm/entrypoints/openai/serving_utils.h"
 #include "vllm/entrypoints/openai/tool_parsers/structural_tags.h"
 #include "vllm/tokenizer/tokenizer.h"
+#include "vllm/v1/engine/validation_error.h"
 
 namespace vllm::entrypoints::openai {
 
@@ -612,6 +613,12 @@ OpenAIServingChat::OpenAIServingChat(v1::AsyncLLM& engine,
       reasoning_parser_name_(std::move(reasoning_parser_name)),
       enable_force_include_usage_(enable_force_include_usage) {}
 
+std::size_t OperatorMaxPromptChars() {
+  const char* e = std::getenv("VT_SERVER_MAX_PROMPT_CHARS");
+  if (e && e[0]) return static_cast<std::size_t>(std::strtoull(e, nullptr, 10));
+  return 0;
+}
+
 ChatCompletionResult OpenAIServingChat::create_chat_completion(
     const ChatCompletionRequest& request) {
   // request_id = f"chatcmpl-{...}" (chat_completion/serving.py:268); created =
@@ -660,28 +667,70 @@ ChatCompletionResult OpenAIServingChat::create_chat_completion(
                            " stream=" + std::string(request.stream ? "1" : "0"));
   const auto req_t0 = std::chrono::steady_clock::now();
 
-  // Lab guardrails: Hermes accidentally sending full SOUL (~140k chars) + max_tokens=65536
-  // wedges single-batch async prefill for many minutes with no client tokens.
-  // Override with VT_SERVER_MAX_PROMPT_CHARS / VT_SERVER_MAX_NEW_TOKENS (0 = disable).
-  static const size_t kMaxPromptChars = [] {
-    const char* e = std::getenv("VT_SERVER_MAX_PROMPT_CHARS");
-    if (e && e[0]) return static_cast<size_t>(std::strtoull(e, nullptr, 10));
-    // Default raised for Hermes full SOUL+tools (~140k). Set lower for safety.
-    return static_cast<size_t>(200000);
-  }();
+  // SERVE-REQUEST-LENGTH-GUARD. The pre-tokenization bound on the RENDERED
+  // prompt, template and tools included, which is where vLLM's _text_len_check
+  // runs: render_messages(tokenize=False), then apply_pre_tokenization
+  // (vllm/renderers/params.py:342-370,386-399 @ e126687a9a). The bound is
+  // max_model_len * MaxTokenBytes(), vLLM's max_input_tokens *
+  // max_chars_per_token, from Tokenizer::MaxPromptBytes, the same derivation
+  // ApiServer's #1541 guard uses. That guard sums only messages[].content before
+  // the template renders, so tool descriptions and schemas, tool_calls
+  // arguments and template framing reach this point unmeasured. The bound reads
+  // this handler's own engine, so the C ABI (vllm_chat / vllm_chat_stream) and
+  // RunBatch get it as well as HTTP. Differences from vLLM: it counts bytes, not
+  // characters, and uses max_model_len, not max_model_len minus the requested
+  // output tokens. A prompt of B bytes costs at least B / MaxTokenBytes()
+  // tokens, so the bound refuses no prompt that fits in max_model_len, with one
+  // exception: a SentencePiece tokenizer with fuse_unk and no byte fallback
+  // encodes a run of unknown characters of any length as ONE <unk>
+  // (tokenizer.cpp, the fuse_unk_ branches of the SentencePiece encode), so such
+  // a prompt can fit in tokens and still exceed the byte bound. vLLM's
+  // max_chars_per_token bound has the same exception. The check runs before
+  // every encode this handler can reach: the engine encode, the beam-search
+  // encode and the multimodal seam below.
+  {
+    const v1::InputProcessor& processor =
+        async_engine_ != nullptr ? async_engine_->input_processor()
+                                 : sync_engine_->input_processor();
+    const size_t max_prompt_bytes = processor.max_prompt_bytes();
+    if (max_prompt_bytes > 0 && prompt.size() > max_prompt_bytes) {
+      const int64_t max_model_len = processor.max_model_len();
+      std::ostringstream err;
+      err << "This model's maximum context length is " << max_model_len
+          << " tokens. However, your prompt contains " << prompt.size()
+          << " bytes (more than " << max_prompt_bytes
+          << " bytes, which is the upper bound for " << max_model_len
+          << " input tokens). Please reduce the length of the input prompt.";
+      LogRequestError(request_id, "/v1/chat/completions", err.str());
+      throw vllm::v1::InputValidationError(err.str());
+    }
+  }
+
+  // VT_SERVER_MAX_PROMPT_CHARS is an OPTIONAL operator ceiling on the rendered
+  // prompt, in bytes; unset or 0 sets none (ISSUE-LOCAL-01M37A34NTK8A98KYWA5SA5GNN).
+  // It used to default to a fixed 200,000, which is not derived from the
+  // context and refused a 262,144-token server's prompts above ~48k tokens.
+  // The default bound is the derived one above; vLLM has no such variable.
+  // The refusal is the request's fault: InputValidationError is HTTP 400
+  // BadRequestError (error_response.py:39-41).
+  // VT_SERVER_MAX_NEW_TOKENS keeps its 4096 default; its divergence from vLLM is
+  // ISSUE-LOCAL-01M37A3S7N7GSZC37JH515QXFE.
+  const size_t max_prompt_chars = OperatorMaxPromptChars();
   static const int kMaxNewTokensCap = [] {
     const char* e = std::getenv("VT_SERVER_MAX_NEW_TOKENS");
     if (e && e[0]) return std::atoi(e);
     return 4096;  // 0 disables
   }();
-  if (kMaxPromptChars > 0 && prompt.size() > kMaxPromptChars) {
+  if (max_prompt_chars > 0 && prompt.size() > max_prompt_chars) {
     std::ostringstream err;
-    err << "prompt too large for this server (" << prompt.size()
-        << " chars > VT_SERVER_MAX_PROMPT_CHARS=" << kMaxPromptChars
-        << "). Hermes is likely injecting a full system SOUL; shrink the system "
-           "prompt / tools payload. Set VT_SERVER_MAX_PROMPT_CHARS=0 to disable.";
+    err << "prompt length " << prompt.size()
+        << " bytes exceeds the operator-set limit VT_SERVER_MAX_PROMPT_CHARS="
+        << max_prompt_chars
+        << " on the rendered chat prompt. Shorten the messages or tools, or "
+           "ask the operator to raise or unset the limit. The request is "
+           "refused, not truncated.";
     LogRequestError(request_id, "/v1/chat/completions", err.str());
-    throw std::runtime_error(err.str());
+    throw vllm::v1::InputValidationError(err.str());
   }
   if (prompt.size() > 32000) {
     ChatDbg(request_id,
@@ -736,6 +785,7 @@ ChatCompletionResult OpenAIServingChat::create_chat_completion(
             : request.max_tokens.value_or(16);
     const BeamSearchParams params =
         request.to_beam_search_params(max_tok, &default_sampling_params_);
+    num_beam_prompt_encodes_.fetch_add(1, std::memory_order_relaxed);
     const std::vector<int32_t> prompt_ids = beam_tokenizer_->Encode(prompt);
     const BeamSearchOutput beams =
         async_engine_ != nullptr

@@ -216,18 +216,12 @@ void ApiServer::set_tokenizer(const vllm::tok::Tokenizer* tokenizer,
   tokenizer_ = tokenizer;
   max_model_len_ = max_model_len;
   // The bound is exactly `max_model_len * MaxTokenBytes()` -- see
-  // max_prompt_bytes(). Unset (0 == unbounded) whenever either factor is
-  // unknown, and clamped rather than wrapped on the overflow a hostile
-  // max_model_len could otherwise produce.
+  // max_prompt_bytes(). Tokenizer::MaxPromptBytes holds the one copy of the
+  // derivation: 0 (unbounded) whenever either factor is unknown, and clamped
+  // rather than wrapped on the overflow a hostile max_model_len could produce.
   max_token_bytes_ = tokenizer != nullptr ? tokenizer->MaxTokenBytes() : 0;
-  if (tokenizer == nullptr || max_model_len <= 0 || max_token_bytes_ == 0) {
-    max_prompt_bytes_ = 0;
-    return;
-  }
-  const size_t len = static_cast<size_t>(max_model_len);
-  max_prompt_bytes_ = len > std::numeric_limits<size_t>::max() / max_token_bytes_
-                          ? std::numeric_limits<size_t>::max()
-                          : len * max_token_bytes_;
+  max_prompt_bytes_ =
+      tokenizer != nullptr ? tokenizer->MaxPromptBytes(max_model_len) : 0;
 }
 
 ApiServer::DispatchResult ApiServer::handle_completions(
