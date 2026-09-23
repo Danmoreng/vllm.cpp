@@ -609,10 +609,12 @@ TEST_CASE("loaded_engine: FromModelDir resolves an explicit absent device BEFORE
 TEST_CASE(
     "loaded_engine: refuses a pinned --max-model-len the KV pool cannot hold") {
   // _check_enough_kv_cache_memory (kv_cache_utils.py:751-788): the caller asked
-  // for 4096 tokens of context out of a 1 x 32-token pool.
+  // for 4096 tokens of context out of a 32-token pool.
   const HfConfig c = MakeDenseConfig();
   EngineParams params;
-  params.num_blocks = 1;  // 1 x 32 = 32 tokens of KV
+  // 3 blocks: the null block, plus one 32-token block for each of the two
+  // groups (fa, gdn), so 32 tokens of context (FIX-KV-POOL-MIN-FIT).
+  params.num_blocks = 3;
   params.max_model_len = 4096;
 
   CHECK_THROWS_WITH_AS(
@@ -648,11 +650,13 @@ TEST_CASE(
   EngineParams pinned;
   pinned.max_model_len = 4096;
   CHECK(LoadedEngine::ResolveMaxModelLen(pinned, c, no_paged_kv,
-                                         /*block_size=*/32) == 4096);
+                                         /*block_size=*/32,
+                                         /*is_dense_arch=*/true) == 4096);
 
   EngineParams unpinned;
   CHECK(LoadedEngine::ResolveMaxModelLen(unpinned, c, no_paged_kv,
-                                         /*block_size=*/32) == kMaxModelLen);
+                                         /*block_size=*/32,
+                                         /*is_dense_arch=*/true) == kMaxModelLen);
 }
 
 TEST_CASE(
@@ -660,7 +664,10 @@ TEST_CASE(
     "unchanged") {
   const HfConfig c = MakeDenseConfig();
   EngineParams params;
-  params.num_blocks = 1;                // 32 tokens of KV
+  // The null block plus one block per group (fa, gdn): 32 tokens. One block
+  // was a pool with ZERO usable blocks, which the pre-FIX-KV-POOL-MIN-FIT
+  // check accepted and on which no request could ever run.
+  params.num_blocks = 3;
   params.max_model_len = kMaxModelLen;  // exactly one pool
   LoadedEngine eng(c, MakeDenseWeights(c), FreshFixture(), params);
   CHECK(eng.max_model_len() == kMaxModelLen);
@@ -675,7 +682,7 @@ TEST_CASE(
   HfConfig c = MakeDenseConfig();
   c.max_position_embeddings = 4096;
   EngineParams params;
-  params.num_blocks = 1;  // 32 tokens
+  params.num_blocks = 3;  // 32 tokens: null block + one block per group
   LoadedEngine eng(c, MakeDenseWeights(c), FreshFixture(), params);
   CHECK(eng.max_model_len() == kMaxModelLen);
 }
@@ -696,7 +703,9 @@ TEST_CASE("loaded_engine: an over-long prompt is REFUSED, not left waiting") {
   HfConfig c = MakeDenseConfig();
   c.max_position_embeddings = 4096;
   EngineParams params;
-  params.num_blocks = 1;  // 32 tokens of KV -> max_model_len auto-fits to 32
+  // 32 tokens of KV (null block + one block per group) -> max_model_len
+  // auto-fits to 32.
+  params.num_blocks = 3;
   LoadedEngine eng(c, MakeDenseWeights(c), FreshFixture(), params);
   REQUIRE(eng.max_model_len() == kMaxModelLen);
 
