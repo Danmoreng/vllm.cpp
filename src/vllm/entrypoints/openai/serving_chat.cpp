@@ -680,7 +680,14 @@ ChatCompletionResult OpenAIServingChat::create_chat_completion(
   // RunBatch get it as well as HTTP. Differences from vLLM: it counts bytes, not
   // characters, and uses max_model_len, not max_model_len minus the requested
   // output tokens. A prompt of B bytes costs at least B / MaxTokenBytes()
-  // tokens, so the bound never refuses a prompt that fits in max_model_len.
+  // tokens, so the bound refuses no prompt that fits in max_model_len, with one
+  // exception: a SentencePiece tokenizer with fuse_unk and no byte fallback
+  // encodes a run of unknown characters of any length as ONE <unk>
+  // (tokenizer.cpp, the fuse_unk_ branches of the SentencePiece encode), so such
+  // a prompt can fit in tokens and still exceed the byte bound. vLLM's
+  // max_chars_per_token bound has the same exception. The check runs before
+  // every encode this handler can reach: the engine encode, the beam-search
+  // encode and the multimodal seam below.
   {
     const v1::InputProcessor& processor =
         async_engine_ != nullptr ? async_engine_->input_processor()
@@ -778,6 +785,7 @@ ChatCompletionResult OpenAIServingChat::create_chat_completion(
             : request.max_tokens.value_or(16);
     const BeamSearchParams params =
         request.to_beam_search_params(max_tok, &default_sampling_params_);
+    num_beam_prompt_encodes_.fetch_add(1, std::memory_order_relaxed);
     const std::vector<int32_t> prompt_ids = beam_tokenizer_->Encode(prompt);
     const BeamSearchOutput beams =
         async_engine_ != nullptr
