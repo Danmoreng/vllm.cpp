@@ -256,6 +256,7 @@ EngineCoreRequest InputProcessor::process_inputs(
   // post_processor template is APPLIED here. This is a no-op for every Qwen
   // tokenizer (their ByteLevel post_processor declares no bos/eos) and supplies
   // the prepended `</s>` that OPT's TemplateProcessing declares.
+  num_prompt_encodes_.fetch_add(1, std::memory_order_relaxed);
   std::vector<int32_t> prompt_token_ids =
       tokenizer_.EncodeWithSpecialTokens(prompt);
 

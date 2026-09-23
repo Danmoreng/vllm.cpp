@@ -52,6 +52,7 @@
 // priority, resumable.
 #pragma once
 
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -136,6 +137,18 @@ class InputProcessor {
       std::optional<double> arrival_time = std::nullopt,
       int priority = 0) const;
 
+  // The resolved max_model_len that ValidatePromptLen refuses against.
+  int64_t max_model_len() const { return max_model_len_; }
+
+  // The number of prompts the text `process_inputs` overload has handed to the
+  // tokenizer since construction. It is an observation point, not a policy: a
+  // request boundary that must refuse a prompt BEFORE the encode is proved by
+  // this count staying unchanged (SERVE-REQUEST-LENGTH-GUARD). Relaxed, because
+  // it orders nothing.
+  uint64_t num_prompt_encodes() const {
+    return num_prompt_encodes_.load(std::memory_order_relaxed);
+  }
+
  private:
   // _validate_params: runs SamplingParams::PostInit() (normalize + Verify) —
   // this closes the M1.1 deferred-__post_init__ carry.
@@ -164,6 +177,8 @@ class InputProcessor {
   std::optional<int32_t> eos_token_id_;
   // generation_config["eos_token_id"] as a list (int is a 1-element list).
   std::vector<int32_t> generation_config_eos_ids_;
+  // See num_prompt_encodes().
+  mutable std::atomic<uint64_t> num_prompt_encodes_{0};
 };
 
 }  // namespace vllm::v1
