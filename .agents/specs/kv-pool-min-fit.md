@@ -227,10 +227,50 @@ before and after.
 
 ## Now
 
-`ACTIVE` on `row/FIX-KV-POOL-MIN-FIT`. The implementation and its gates are on
-the branch and wait for a fresh review. Three existing tests configured pools
-the new check refuses, because each held one block table:
-`test_loaded_engine_dense` (1 block), `test_engine_scratch_steady_state` (64
-blocks for 4096 tokens at block size 128) and `test_dflash2_ctx_capacity` (512
-blocks for 6144 tokens with three groups). Each now uses the pool its
-configuration needs.
+`DONE`. The startup check counts one `max_model_len` request across every KV
+cache group and reserves the null block, so a pool that cannot hold that request
+is refused at load with vLLM's message instead of admitting the request and never
+scheduling it. The two defects under `## Owed` stay open: the block-table row
+overflow is being fixed on its own row, and the GDN block size waits on a
+developer decision.
+
+## Outcome
+
+What was measured. On the CPU build, the pre-fix engine accepted a 15-block pool
+for a 128-token three-group speculative configuration, and the max-length request
+produced no output in 60 s: the long-context benchmark's hang, reproduced without
+a GPU. After the fix the same pool is refused, and the scheduler's own allocator
+places that request at exactly 16 blocks, which is the count the check accepts.
+The same boundary holds for a two-group engine at 9 blocks.
+
+What a fresh review found. PASS. Every cited upstream anchor was read at pin
+`e126687a9a` and holds, with minor line offsets recorded in the review. Nine
+mutations (the production call site, first-group-only, both null-block
+reservations, three off-by-one counts, dropping only `fa_draft`, and an auto-fit
+that returns its input) each built and each failed an assertion; none survived
+and none was killed by a crash. 109 of 110 affected binaries pass; the 110th,
+`test_qwen35_paged_engine`, is skipped for a missing model artifact.
+
+What was rejected, and why.
+- A scheduler-side error for a request that can never fit. vLLM adds none: its
+  waiting loop breaks without an error (`scheduler.py:1091-1098`), and the
+  startup refusal makes the state unreachable. Mirrored as upstream has it.
+- A literal port of upstream's `1 + k` count for the GDN group in `none` mode.
+  Here that group is built at block size 32, where `MambaManager` really claims
+  `cdiv(len, 32) + k`. The literal count would still have admitted the 2,114-block
+  pool the benchmark stalled on.
+- Keeping `kv_memory_needed_bytes` and the closed-form `estimate_max_model_len`.
+  They counted one table and had no caller outside their own tests.
+
+Why the defaults are what they are. Three existing tests configured pools that
+counted one table and are resized to the pool their configuration needs:
+`test_loaded_engine_dense` 1 to 3 blocks, `test_engine_scratch_steady_state`
+64 to 65, `test_dflash2_ctx_capacity` 512 to 640. None of them is about pool
+sizing, and each keeps its original meaning.
+
+Known departures from upstream, recorded rather than fixed here: the check uses
+`max_num_batched_tokens` where upstream uses `max_in_flight_tokens`, which is
+twice as large under async scheduling. This matches the runtime admission cap
+this tree already had, so startup and runtime agree, but it undercounts
+sliding-window and chunked-local groups relative to upstream when async
+scheduling is on.
