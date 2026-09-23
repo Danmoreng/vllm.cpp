@@ -135,6 +135,13 @@ longer than `max_model_len * MaxTokenBytes()` therefore exceeds `max_model_len`
 tokens, and `ValidatePromptLen` would refuse it after the encode. The guard
 refuses it before. **It rejects nothing the server would have served**; it only
 moves an already-certain refusal ahead of the work that pays for it.
+**One exception, recorded 2026-09-23:** a SentencePiece tokenizer with
+`fuse_unk: true` and no byte fallback encodes a run of unknown characters of
+any length as ONE `<unk>` (`src/vllm/tokenizer/tokenizer.cpp`, the `fuse_unk_`
+branches of the SentencePiece encode). Its token texts do not concatenate back
+to the input, so such a prompt can fit in `max_model_len` tokens and still be
+longer than the bound. vLLM's `max_chars_per_token` bound has the same
+exception. See `#### Second review repair 2026-09-23`.
 
 `MaxTokenBytes()` is the longest STORED token text, which is an OVER-estimate of
 the decoded bytes one token can carry, and the over-estimate is the direction
@@ -398,12 +405,13 @@ the fix mirrors:
 | the token refusal after the encode | `vllm/renderers/params.py:436-461` `_token_len_check`; `vllm/v1/engine/input_processor.py:436-476` `_validate_prompt_len` | 400, token count against `max_model_len` |
 
 So vLLM's only pre-tokenization bound is derived from the context and the
-vocabulary, and it cannot refuse a prompt that could fit. This row's
+vocabulary, and it cannot refuse a prompt that could fit, except for the
+`fuse_unk` case that `## Design` records, which both bounds share. This row's
 `max_model_len * MaxTokenBytes()` is the same kind of bound. It uses
 `max_model_len` instead of `max_input_tokens`, so it is looser by the requested
 output tokens. It counts bytes where vLLM counts characters, so on multi-byte
 text it can be tighter than vLLM's, but it still refuses no prompt that fits in
-`max_model_len` tokens (`## Design`). vLLM applies its bound to the RENDERED
+`max_model_len` tokens, with the same `fuse_unk` exception (`## Design`). vLLM applies its bound to the RENDERED
 prompt, template and tools included. This row's HTTP guard measures the summed
 message content before the template renders, which is not the same string;
 `### Review repair 2026-09-23` below closes that difference.
@@ -568,7 +576,9 @@ at `:386-399`, after `render_messages(tokenize=False)`):
 - `OpenAIServingChat::create_chat_completion` refuses a rendered prompt longer
   than `max_model_len * MaxTokenBytes()`. The check is at the point where the
   old fixed cap measured the prompt: after the template renders, before the
-  engine encode, the beam-search encode and the multimodal seam. It throws
+  engine encode, the beam-search encode and the multimodal seam. The first
+  version of this repair gated only the engine encode; `#### Second review
+  repair 2026-09-23` adds the gates for the other two. It throws
   `InputValidationError`, which is HTTP 400 `BadRequestError`. The message is
   `_text_len_check`'s, counted in bytes and without the output-token clause,
   because this bound does not subtract the requested output tokens:
@@ -675,6 +685,118 @@ At `19b2bb3fc`, each run as its own executable, all `SUCCESS!` and exit 0:
 `b83feab14`, all inherited from `origin/main`, and `scripts/check-env-doc.py`
 still lists only `VT_CUDA_ALLOC_STATS`, `VT_V4_W32_COLS` and
 `VT_V4_W32_WARPS`.
+
+#### Second review repair 2026-09-23
+
+A second fresh review of `07ae2a052` confirmed that the text path is closed and
+gated. It failed the branch on two blocking findings and raised two notes.
+
+**B1, blocking: three record anchors went stale.** Lines this branch inserted
+moved three symbols that `.agents/engine-matrix.md` cites. Each cell is
+re-pointed and no other row changed:
+
+| row | before | after |
+|---|---|---|
+| SERVE-UTILITY-ENDPOINTS | `include/vllm/entrypoints/openai/serving_chat.h:246` (`prompt_fn()`) | `:263` |
+| LOAD-SENTENCEPIECE | `include/vllm/tokenizer/tokenizer.h:129` (`GetFamily`) | `:147` |
+| SPEC-BPE-QUADRATIC-MERGE | `src/vllm/v1/engine/input_processor.cpp:245` (`process_inputs`), encode at 260, length check at 265 | `:249`, encode at 265, length check at 270 |
+
+`scripts/check-agent-record.py` then reports the five stale anchors inherited
+from `origin/main` (SERVE-METRICS, SERVE-UTILITY-ENDPOINTS and SERVE-ADMIN in
+`api_server.cpp` and `api_server.h`) and the `roadmap_v1.md:105-106` table
+errors, and nothing else. Those belong to another change.
+
+**B2, blocking: the claim "before the beam-search encode and the multimodal
+seam" had no gate.** `InputProcessor::num_prompt_encodes()` counts only the
+text `process_inputs` overload. Beam search encodes with
+`beam_tokenizer_->Encode(prompt)` in `create_chat_completion`, and the
+multimodal seam encodes inside `MakeQwen3VLImageChatFn` (`chat_mm.cpp`). The
+reviewer moved the check below the beam-search block and every suite stayed
+green.
+
+- **Beam search.** `OpenAIServingChat::num_beam_prompt_encodes()` is a relaxed
+  counter, incremented on the line before `beam_tokenizer_->Encode(prompt)`.
+  It is the same mechanism as the text-path spy, at the one call site the beam
+  path has. The alternatives were weaker: a counter inside `Tokenizer` would
+  add state to a copyable core type for one test, and asserting only the
+  response message would not show that the encode was skipped. The case sends
+  a `use_beam_search` request whose rendered prompt is one byte over the
+  derived bound, with `VT_SERVER_MAX_PROMPT_CHARS` unset. It asserts HTTP 400
+  `BadRequestError` with the byte-bound message, no `choices`, zero beam
+  encodes, zero engine encodes and no unfinished request. An in-bound beam
+  request is the control: it answers 200 with choices and exactly one beam
+  encode, so a counter that never moves cannot pass.
+- **Multimodal seam: gated.** The fixtures can drive the REAL production seam,
+  `MakeQwen3VLImageChatFn`, as the existing over-limit multimodal case already
+  does. The case wraps that seam in a counter. An image request one byte over
+  the bound answers the byte-bound 400 with zero seam entries, zero codec calls
+  and zero engine encodes. The in-bound control enters the seam once, and the
+  seam's own encode is observable because it fails: the 22-entry fixture
+  vocabulary cannot encode the seam's Qwen placeholder marker, so the request
+  answers 500 with the tokenizer's message. What this gate does NOT prove is a
+  real Qwen3-VL tokenizer's encode; it proves the order of the check and the
+  seam call, which is the claim.
+
+**N1, a known small difference on the multimodal path.** The multimodal seam
+re-renders the messages itself (`chat_mm.cpp`, `MakeQwen3VLImageChatFn` step 1)
+with no tools, no `chat_template_kwargs`, and content built by
+`BuildMarkerInjectedContent`: text parts joined without the `"\n"` separator
+the text path uses, and one placeholder marker per media part. So the string
+the seam encodes is not the string the check measured. Per image part it adds
+the Qwen3-VL marker `<|vision_start|><|image_pad|><|vision_end|>` (43 bytes,
+`chat_mm.cpp:191`); the dropped separators and the dropped tools only make it
+shorter. The review estimated about 45 bytes per media part, and 43 is the
+exact upper bound for an image part. `ValidateChatMmLimits` caps Qwen3-VL at
+one image, so the seam's encode can exceed the derived bound by at most 43
+bytes. The token refusal after the encode still catches such a prompt. The
+difference is accepted and recorded, not repaired. The missing
+`chat_template_kwargs` on this seam are already owed under
+`specs/chat-template-jinja-undefined.md` (#1681).
+
+**N2, wording.** The claim "never refuses a prompt that fits in
+`max_model_len` tokens" has one exception, now named under `## Design`, in the
+`serving_chat.cpp` comment and in `docs/ENVIRONMENT.md`
+(`VT_SERVER_MAX_PROMPT_CHARS`): a SentencePiece tokenizer with `fuse_unk: true`
+and no byte fallback collapses a run of unknown characters of any length into
+one `<unk>`, so such a prompt can fit in tokens and exceed the byte bound.
+vLLM's `max_chars_per_token` bound has the same exception.
+
+##### Evidence
+
+CPU build as above, `VT_SERVER_MAX_PROMPT_CHARS` removed from the environment.
+The new case is `api_server: the rendered-prompt bound runs before the beam and
+multimodal encodes`, committed at `7b1553024`.
+
+The mutations ran in one scratch worktree at `7b1553024`, each rebuilt and run
+on the four prompt-cap cases of `test_openai_api_server` (172 assertions) and
+the C ABI case (10 assertions). The committed `serving_chat.cpp` hashed
+`bb6f29d6b824dc33965c03068cf31f28e41e6fbd7598a58ee7b9bb77cfd0015d` before every
+mutation and again after every restore. The unmutated baseline was 4 of 4 cases
+and 1 of 1 case, 0 failed.
+
+| mutation | mutated sha256 | api-server | C ABI | killed by |
+|---|---|---|---|---|
+| (a) delete the check | `8be41ce3...` | 2 of 4 cases, 19 assertions failed | 4 of 10 failed | the tools, tool_calls and one-byte-over cases; the beam and image cases |
+| (b) measure content only | `d6542d9a...` | 2 of 4, 19 failed | green (content is the whole prompt) | the same cases as (a) |
+| (c) derived `>` to `>=` | `c5b2dc8c...` | 1 of 4, 3 failed | green | the exact-bound case (byte refusal, encode count 0) |
+| (d) operator `>` to `>=` | `dad57298...` | 1 of 4, 4 failed | green | the exact-ceiling case |
+| (e) default 300000 when unset | `271fe068...` | 1 of 4, 2 failed | green | the resolution case, unset and empty |
+| (g) check moved below the beam-search block | `8d6e27ea...` | 1 of 4, 7 failed | green | the beam case: `The decoder prompt (length 33)` in place of the byte message, `num_beam_prompt_encodes() == 1`; and the image case: status 500, seam entered once |
+| (h) check moved below the multimodal seam, above beam search | `71b9dfc1...` | 1 of 4, 4 failed | green | the image case: status 500 from the seam's encode, `seam_calls == 1` |
+
+Red before, under (g), in the beam subcase:
+`CHECK( msg.find("The decoder prompt") == std::string::npos )` failed with the
+body `The decoder prompt (length 33) is longer than the maximum model length of
+32`, and `CHECK( h.chat.num_beam_prompt_encodes() == 0 )` failed with
+`1 == 0`. Green after, at `7b1553024`: the case passes, 1 case, 43 assertions,
+0 failed.
+
+At `7b1553024`, each run as its own executable, all `SUCCESS!` and exit 0:
+`test_openai_api_server` 102 cases / 1508 assertions (one case more than
+`19b2bb3fc`), `test_capi` 73 / 730, `test_openai_serving` 48 / 1365,
+`test_openai_run_batch` 7 / 80, `test_chat_prompt` 5 / 15, `test_bpe`
+29 / 1009. `test_model_registry` is excluded because it does not compile on
+`origin/main` for an unrelated reason.
 
 ## Outcome
 
