@@ -14,6 +14,7 @@
 #include "vllm/entrypoints/openai/video_api.h"
 #include "vllm/multimodal/parakeet_transcription.h"
 #include "vllm/multimodal/speech_engine.h"
+#include "support/test_env.h"
 
 #include <doctest/doctest.h>
 
@@ -2554,6 +2555,236 @@ TEST_CASE("api_server: the prompt bound IS max_model_len x MaxTokenBytes") {
     CHECK(h.server.max_prompt_bytes() == 0);
     h.server.set_tokenizer(&Fixture(), kMaxModelLen);
     CHECK(h.server.max_prompt_bytes() == kMaxPromptBytes);
+  }
+}
+
+// ISSUE-LOCAL-01M37A34NTK8A98KYWA5SA5GNN. The chat handler carried a FIXED
+// 200,000-character cap (VT_SERVER_MAX_PROMPT_CHARS) that was not derived from
+// max_model_len, so a 262,144-token server refused prose above about 48k tokens
+// with an HTTP 500. vLLM's only pre-tokenization bound is
+// `max_input_tokens * tokenizer.max_chars_per_token`
+// (vllm/renderers/params.py:342-365 at e126687a9a), refused as a 400; ours is
+// this row's `max_model_len * MaxTokenBytes()`.
+//
+// Reproducing "over 200,000 characters but inside the context" needs a
+// vocabulary whose tokens are LONG, or an engine with a 22k-token context. This
+// fixture takes the first route: "h" repeated 2^k for k = 0..13, joined by
+// power-of-two merges, so a run of 8,192 'h' is ONE token and 25 such tokens
+// are 204,800 bytes. The derived bound is then 32 x 8192 = 262,144 bytes.
+Tokenizer BuildLongTokenFixture() {
+  static int counter = 0;
+  const std::string path =
+      (std::filesystem::temp_directory_path() /
+       ("vllm_apisrv_longtok_" + std::to_string(counter++) + ".json"))
+          .string();
+  json doc;
+  doc["version"] = "1.0";
+  doc["added_tokens"] = json::array();
+  doc["normalizer"] = nullptr;
+  // The same Split + ByteLevel pre-tokenizer as Fixture(): a run of letters is
+  // one pretoken, so the merges below decide the token count alone.
+  doc["pre_tokenizer"] = {
+      {"type", "Sequence"},
+      {"pretokenizers",
+       json::array(
+           {{{"type", "Split"},
+             {"pattern",
+              {{"Regex",
+                R"((?i:'s|'t|'re|'ve|'m|'ll|'d)|[^\r\n\p{L}\p{N}]?[\p{L}\p{M}]+|\p{N}| ?[^\s\p{L}\p{M}\p{N}]+[\r\n]*|\s*[\r\n]+|\s+(?!\S)|\s+)"}}},
+             {"behavior", "Isolated"},
+             {"invert", false}},
+            {{"type", "ByteLevel"},
+             {"add_prefix_space", false},
+             {"trim_offsets", false},
+             {"use_regex", false}}})}};
+  json vocab = json::object();
+  json merges = json::array();
+  std::string run = "h";
+  for (int k = 0; k <= 13; ++k) {
+    vocab[run] = k;
+    if (k < 13) merges.push_back(json::array({run, run}));
+    run += run;
+  }
+  // Fill the model's 22-id vocabulary, so every id the synthetic model can
+  // sample detokenizes.
+  const char* fill[] = {"e", "l", "o", "w", "r", "d", "Ġ", "1"};
+  for (int i = 0; i < 8; ++i) vocab[fill[i]] = 14 + i;
+  doc["model"] = {{"type", "BPE"},
+                  {"ignore_merges", false},
+                  {"vocab", vocab},
+                  {"merges", merges}};
+  std::ofstream(path, std::ios::binary) << doc.dump();
+  Tokenizer tok = Tokenizer::FromHfJson(path);
+  std::remove(path.c_str());
+  return tok;
+}
+
+const Tokenizer& LongTokenFixture() {
+  static const Tokenizer tok = BuildLongTokenFixture();
+  return tok;
+}
+
+// Holds VT_SERVER_MAX_PROMPT_CHARS at one value for a scope and restores what
+// the process had, so a developer shell that exports it cannot pick the arm.
+class ScopedPromptCharsEnv {
+ public:
+  explicit ScopedPromptCharsEnv(const char* value) {
+    const char* prev = std::getenv(kName);
+    had_ = prev != nullptr;
+    if (had_) prev_ = prev;
+    vllm_test::SetEnv(kName, value);
+  }
+  ~ScopedPromptCharsEnv() {
+    if (had_) {
+      vllm_test::SetEnv(kName, prev_);
+    } else {
+      vllm_test::UnsetEnv(kName);
+    }
+  }
+  ScopedPromptCharsEnv(const ScopedPromptCharsEnv&) = delete;
+  ScopedPromptCharsEnv& operator=(const ScopedPromptCharsEnv&) = delete;
+
+ private:
+  static constexpr const char* kName = "VT_SERVER_MAX_PROMPT_CHARS";
+  bool had_ = false;
+  std::string prev_;
+};
+
+TEST_CASE("api_server: the chat prompt cap never refuses what the context holds") {
+  const HfConfig c = MakeConfig();
+  const Qwen3_5MoeWeights w = MakeWeights(c);
+  const Tokenizer& tok = LongTokenFixture();
+  constexpr size_t kLongToken = 8192;
+  REQUIRE(tok.MaxTokenBytes() == kLongToken);
+  const size_t derived_bound = static_cast<size_t>(kMaxModelLen) * kLongToken;
+
+  auto with_server = [](ServerHarness& h, auto&& body) {
+    const int port = h.server.bind_to_any_port("127.0.0.1");
+    REQUIRE(port > 0);
+    ScopedServerThread server_thread(h.server);
+    for (int i = 0; i < 500 && !h.server.is_running(); ++i)
+      std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    REQUIRE(h.server.is_running());
+    httplib::Client client("127.0.0.1", port);
+    client.set_read_timeout(120, 0);
+    body(client);
+    server_thread.join();  // stops the server, then joins
+  };
+  auto chat = [](const std::string& content) {
+    json req;
+    req["model"] = "test-model";
+    req["messages"] = json::array({{{"role", "user"}, {"content", content}}});
+    req["max_tokens"] = 1;
+    req["temperature"] = 0.0;
+    return req.dump();
+  };
+
+  // 25 tokens, 204,800 bytes: above the old fixed 200,000, inside a 32-token
+  // context, and below the derived 262,144-byte bound.
+  const std::string fits(25 * kLongToken, 'h');
+  REQUIRE(fits.size() > 200000);
+  REQUIRE(fits.size() <= derived_bound);
+  REQUIRE(tok.EncodeWithSpecialTokens(fits).size() == 25);
+
+  SUBCASE("unset: a prompt over 200,000 bytes that fits the context is SERVED") {
+    ScopedPromptCharsEnv env(nullptr);
+    ServerHarness h(c, w, tok);
+    ConfigureUtilityEndpoints(h.server, tok, kMaxModelLen, h.async_engine,
+                              UtilityEndpointOptions{});
+    REQUIRE(h.server.max_prompt_bytes() == derived_bound);
+    with_server(h, [&](httplib::Client& client) {
+      auto r = client.Post("/v1/chat/completions", chat(fits),
+                           "application/json");
+      REQUIRE(r);
+      INFO("body: " << r->body.substr(0, 400));
+      CHECK(r->status == 200);
+      json j = json::parse(r->body, nullptr, /*allow_exceptions=*/false);
+      CHECK(ErrMsg(j).find("VT_SERVER_MAX_PROMPT_CHARS") == std::string::npos);
+      // CHECK, not REQUIRE: a refusal here must not abort the TEST_CASE and
+      // hide the later subcases' own verdicts.
+      const bool served = j.is_object() && j.contains("choices") &&
+                          j.at("choices").size() == 1 && j.contains("usage");
+      CHECK(served);
+      if (served) {
+        CHECK(j.at("choices").at(0).at("message").at("role") == "assistant");
+        CHECK(j.at("usage").at("prompt_tokens") == 25);
+      }
+    });
+  }
+
+  // The token refusal is untouched: 31 long tokens plus "e" and "l" are 33
+  // tokens in 253,954 bytes, under the byte bound, so ValidatePromptLen decides
+  // it with vLLM's _validate_prompt_len text
+  // (vllm/v1/engine/input_processor.py:436-476).
+  SUBCASE("unset: a prompt over max_model_len in TOKENS is still refused, 400") {
+    ScopedPromptCharsEnv env(nullptr);
+    const std::string over = std::string(31 * kLongToken, 'h') + "el";
+    REQUIRE(over.size() <= derived_bound);
+    REQUIRE(tok.EncodeWithSpecialTokens(over).size() == 33);
+    ServerHarness h(c, w, tok);
+    ConfigureUtilityEndpoints(h.server, tok, kMaxModelLen, h.async_engine,
+                              UtilityEndpointOptions{});
+    with_server(h, [&](httplib::Client& client) {
+      auto r = client.Post("/v1/chat/completions", chat(over),
+                           "application/json");
+      REQUIRE(r);
+      CHECK(r->status == 400);
+      json j = json::parse(r->body, nullptr, /*allow_exceptions=*/false);
+      CHECK(ErrType(j) == "BadRequestError");
+      CHECK(ErrCode(j) == 400);
+      CHECK(ErrMsg(j).find("The decoder prompt (length 33) is longer than the "
+                           "maximum model length of 32.") != std::string::npos);
+      CHECK_FALSE(j.contains("choices"));
+    });
+    CHECK_FALSE(h.async_engine.has_unfinished_requests());
+  }
+
+  // #1541's guarantee survives: a pathological body is refused by the derived
+  // byte bound, before the template renders and before any encode.
+  SUBCASE("unset: a 4 MiB prompt is refused by the byte bound, not tokenized") {
+    ScopedPromptCharsEnv env(nullptr);
+    const std::string huge(4u << 20, 'h');
+    ServerHarness h(c, w, tok);
+    ConfigureUtilityEndpoints(h.server, tok, kMaxModelLen, h.async_engine,
+                              UtilityEndpointOptions{});
+    with_server(h, [&](httplib::Client& client) {
+      auto r = client.Post("/v1/chat/completions", chat(huge),
+                           "application/json");
+      REQUIRE(r);
+      CHECK(r->status == 400);
+      json j = json::parse(r->body, nullptr, /*allow_exceptions=*/false);
+      CHECK(ErrType(j) == "BadRequestError");
+      const std::string msg = ErrMsg(j);
+      CHECK(msg.find("prompt length 4194304 bytes exceeds the maximum allowed "
+                     "prompt length of 262144 bytes") != std::string::npos);
+      // The byte refusal, not the post-encode token one.
+      CHECK(msg.find("maximum model length") == std::string::npos);
+      CHECK_FALSE(j.contains("choices"));
+    });
+    CHECK_FALSE(h.async_engine.has_unfinished_requests());
+  }
+
+  // An operator who SETS the variable keeps a ceiling, and a request over it is
+  // the request's fault: 400, naming the variable, blaming no client.
+  SUBCASE("set: an explicit operator ceiling refuses with 400, not 500") {
+    ScopedPromptCharsEnv env("1000");
+    ServerHarness h(c, w, tok);
+    ConfigureUtilityEndpoints(h.server, tok, kMaxModelLen, h.async_engine,
+                              UtilityEndpointOptions{});
+    with_server(h, [&](httplib::Client& client) {
+      auto r = client.Post("/v1/chat/completions", chat(fits),
+                           "application/json");
+      REQUIRE(r);
+      CHECK(r->status == 400);
+      json j = json::parse(r->body, nullptr, /*allow_exceptions=*/false);
+      CHECK(ErrType(j) == "BadRequestError");
+      const std::string msg = ErrMsg(j);
+      CHECK(msg.find("204800") != std::string::npos);
+      CHECK(msg.find("VT_SERVER_MAX_PROMPT_CHARS=1000") != std::string::npos);
+      CHECK(msg.find("Hermes") == std::string::npos);
+      CHECK_FALSE(j.contains("choices"));
+    });
+    CHECK_FALSE(h.async_engine.has_unfinished_requests());
   }
 }
 
