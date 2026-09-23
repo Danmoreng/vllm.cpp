@@ -151,6 +151,9 @@ class LLMEngine {
     return output_processor_.get_num_unfinished_requests();
   }
 
+  // The processor that validates and tokenizes this engine's prompts.
+  const InputProcessor& input_processor() const { return input_processor_; }
+
   // generate (the LLM.generate / _run_engine driver for one request): add the
   // request, then loop step() until it finishes, returning its finished
   // RequestOutput (the last one carrying finished == true). For DELTA output_kind

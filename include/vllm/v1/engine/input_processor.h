@@ -140,6 +140,13 @@ class InputProcessor {
   // The resolved max_model_len that ValidatePromptLen refuses against.
   int64_t max_model_len() const { return max_model_len_; }
 
+  // The pre-tokenization byte bound for a prompt this processor will encode:
+  // Tokenizer::MaxPromptBytes(max_model_len()), 0 when unbounded. The chat
+  // handler applies it to the RENDERED prompt before the encode, which is where
+  // vLLM's _text_len_check runs (vllm/renderers/params.py:342-370,386-399 @
+  // e126687a9a). Out of line: this header only forward-declares Tokenizer.
+  size_t max_prompt_bytes() const;
+
   // The number of prompts the text `process_inputs` overload has handed to the
   // tokenizer since construction. It is an observation point, not a policy: a
   // request boundary that must refuse a prompt BEFORE the encode is proved by
