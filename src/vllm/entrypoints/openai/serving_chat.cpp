@@ -667,17 +667,45 @@ ChatCompletionResult OpenAIServingChat::create_chat_completion(
                            " stream=" + std::string(request.stream ? "1" : "0"));
   const auto req_t0 = std::chrono::steady_clock::now();
 
+  // SERVE-REQUEST-LENGTH-GUARD. The pre-tokenization bound on the RENDERED
+  // prompt, template and tools included, which is where vLLM's _text_len_check
+  // runs: render_messages(tokenize=False), then apply_pre_tokenization
+  // (vllm/renderers/params.py:342-370,386-399 @ e126687a9a). The bound is
+  // max_model_len * MaxTokenBytes(), vLLM's max_input_tokens *
+  // max_chars_per_token, from Tokenizer::MaxPromptBytes, the same derivation
+  // ApiServer's #1541 guard uses. That guard sums only messages[].content before
+  // the template renders, so tool descriptions and schemas, tool_calls
+  // arguments and template framing reach this point unmeasured. The bound reads
+  // this handler's own engine, so the C ABI (vllm_chat / vllm_chat_stream) and
+  // RunBatch get it as well as HTTP. Differences from vLLM: it counts bytes, not
+  // characters, and uses max_model_len, not max_model_len minus the requested
+  // output tokens. A prompt of B bytes costs at least B / MaxTokenBytes()
+  // tokens, so the bound never refuses a prompt that fits in max_model_len.
+  {
+    const v1::InputProcessor& processor =
+        async_engine_ != nullptr ? async_engine_->input_processor()
+                                 : sync_engine_->input_processor();
+    const size_t max_prompt_bytes = processor.max_prompt_bytes();
+    if (max_prompt_bytes > 0 && prompt.size() > max_prompt_bytes) {
+      const int64_t max_model_len = processor.max_model_len();
+      std::ostringstream err;
+      err << "This model's maximum context length is " << max_model_len
+          << " tokens. However, your prompt contains " << prompt.size()
+          << " bytes (more than " << max_prompt_bytes
+          << " bytes, which is the upper bound for " << max_model_len
+          << " input tokens). Please reduce the length of the input prompt.";
+      LogRequestError(request_id, "/v1/chat/completions", err.str());
+      throw vllm::v1::InputValidationError(err.str());
+    }
+  }
+
   // VT_SERVER_MAX_PROMPT_CHARS is an OPTIONAL operator ceiling on the rendered
   // prompt, in bytes; unset or 0 sets none (ISSUE-LOCAL-01M37A34NTK8A98KYWA5SA5GNN).
   // It used to default to a fixed 200,000, which is not derived from the
   // context and refused a 262,144-token server's prompts above ~48k tokens.
-  // vLLM's only pre-tokenization bound is max_input_tokens * max_chars_per_token
-  // (vllm/renderers/params.py:342-365 @ e126687a9a); ours is the derived
-  // max_model_len * MaxTokenBytes() that ApiServer::refuse_oversized_prompt
-  // applies before this function runs, so the default path needs no second
-  // number here. Read per request, like vLLM's lazy envs.py, so one process can
-  // exercise both arms. The refusal is the request's fault: InputValidationError
-  // is HTTP 400 BadRequestError (error_response.py:39-41).
+  // The default bound is the derived one above; vLLM has no such variable.
+  // The refusal is the request's fault: InputValidationError is HTTP 400
+  // BadRequestError (error_response.py:39-41).
   // VT_SERVER_MAX_NEW_TOKENS keeps its 4096 default; its divergence from vLLM is
   // ISSUE-LOCAL-01M37A3S7N7GSZC37JH515QXFE.
   const size_t max_prompt_chars = OperatorMaxPromptChars();

@@ -1168,6 +1168,67 @@ TEST_CASE("capi: vllm_chat rejects malformed request JSON cleanly") {
   vllm_engine_free(eng);
 }
 
+// SERVE-REQUEST-LENGTH-GUARD review repair. vllm_chat and vllm_chat_stream call
+// the same OpenAIServingChat::create_chat_completion as the HTTP server, and
+// the derived pre-tokenization bound (max_model_len * MaxTokenBytes()) is read
+// from that handler's own engine, so an ABI chat whose rendered prompt cannot
+// fit is refused before the encode. There is no HTTP guard in front of this
+// path, so without the handler check the prompt is tokenized in full and only
+// the post-encode "The decoder prompt (length N)" refusal answers it. The spy
+// is the engine's InputProcessor::num_prompt_encodes().
+TEST_CASE("capi: vllm_chat refuses a prompt over the derived byte bound before the encode") {
+  const HfConfig c = MakeConfig();
+  auto loaded =
+      std::make_unique<LoadedEngine>(c, MakeWeights(c), BuildFixture(),
+                                     SyntheticParams());
+  LoadedEngine* raw = loaded.get();
+  const size_t bound = static_cast<size_t>(kMaxModelLen) *
+                       raw->tokenizer().MaxTokenBytes();
+  REQUIRE(bound > 0);
+  REQUIRE(raw->async_engine().input_processor().max_prompt_bytes() == bound);
+  vllm_engine* eng = vllm::capi::MakeEngineHandle(
+      std::move(loaded),
+      [](const std::vector<vllm::entrypoints::openai::ChatMessage>& messages,
+         bool,
+         const std::vector<vllm::entrypoints::openai::ChatCompletionToolsParam>&,
+         const nlohmann::ordered_json&) {
+        std::string p;
+        for (const auto& m : messages)
+          if (m.content.has_value()) p += *m.content;
+        return p;
+      });
+  REQUIRE(eng != nullptr);
+
+  std::string content;
+  while (content.size() <= bound) content += "hello";
+  json req;
+  req["messages"] = json::array({{{"role", "user"}, {"content", content}}});
+  req["temperature"] = 0;
+  req["max_tokens"] = 1;
+  const std::string expect =
+      "your prompt contains " + std::to_string(content.size()) +
+      " bytes (more than " + std::to_string(bound) + " bytes";
+
+  char* response = nullptr;
+  CHECK(vllm_chat(eng, req.dump().c_str(), &response) ==
+        VLLM_ERR_INVALID_ARGUMENT);
+  CHECK(response == nullptr);
+  std::string err = vllm_last_error();
+  CAPTURE(err);
+  CHECK(err.find(expect) != std::string::npos);
+  CHECK(err.find("The decoder prompt") == std::string::npos);
+
+  auto cb = [](const char*, bool, void*) -> bool { return true; };
+  CHECK(vllm_chat_stream(eng, req.dump().c_str(), cb, nullptr) !=
+        VLLM_OK);
+  err = vllm_last_error();
+  CAPTURE(err);
+  CHECK(err.find(expect) != std::string::npos);
+
+  CHECK(raw->async_engine().input_processor().num_prompt_encodes() == 0);
+  vllm_engine_free(eng);
+}
+
 // ─── tool-parser selection (ABI v4) ──────────────────────────────────────────
 // An UNKNOWN explicit tool-parser name must fail the FIRST chat call with
 // VLLM_ERR_INVALID_ARGUMENT (not crash, not silently disable parsing) and set
