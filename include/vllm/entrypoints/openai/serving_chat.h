@@ -239,6 +239,15 @@ class OpenAIServingChat {
     beam_eos_token_id_ = eos_token_id;
   }
 
+  // How many rendered chat prompts the beam-search path has handed to
+  // beam_tokenizer_->Encode. The beam path encodes the prompt itself and never
+  // calls InputProcessor's text process_inputs, so num_prompt_encodes() cannot
+  // see it. A test asserts this stays unchanged when a prompt is refused before
+  // the encode (SERVE-REQUEST-LENGTH-GUARD). Relaxed, because it orders nothing.
+  uint64_t num_beam_prompt_encodes() const {
+    return num_beam_prompt_encodes_.load(std::memory_order_relaxed);
+  }
+
   // Attach the multimodal chat seam (see MultiModalChatFn). Unset (default)
   // keeps the text-only path byte-identical. When set AND a request carries a mm
   // content part, create_chat_completion routes the request through the engine
@@ -303,6 +312,8 @@ class OpenAIServingChat {
   MultiModalChatFn mm_chat_fn_;
   // request_id is "chatcmpl-<counter>" (upstream f"chatcmpl-{random_uuid()}").
   std::atomic<int64_t> request_counter_{0};
+  // See num_beam_prompt_encodes().
+  std::atomic<uint64_t> num_beam_prompt_encodes_{0};
 };
 
 }  // namespace vllm::entrypoints::openai

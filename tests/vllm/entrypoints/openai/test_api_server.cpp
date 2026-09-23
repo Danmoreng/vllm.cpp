@@ -3006,6 +3006,168 @@ TEST_CASE("api_server: the derived bound applies to the RENDERED chat prompt") {
   }
 }
 
+// Review B2 of the SERVE-REQUEST-LENGTH-GUARD amendment. The rendered-prompt
+// check claims to run before EVERY encode create_chat_completion can reach, and
+// the text path's spy (InputProcessor::num_prompt_encodes) sees only one of
+// them. The other two encode outside InputProcessor's text overload:
+//   * use_beam_search encodes with beam_tokenizer_->Encode(prompt), counted by
+//     OpenAIServingChat::num_beam_prompt_encodes();
+//   * the multimodal seam (MakeQwen3VLImageChatFn) re-renders the messages and
+//     encodes inside chat_mm.cpp. The case wraps the REAL seam in a counter, so
+//     a check moved below the seam's call site is seen as a seam entry.
+// A reviewer moved the check below the beam-search block and every suite
+// stayed green; these cases are the gate that mutation lacked. vLLM runs
+// _text_len_check on the rendered prompt before any encode on either path
+// (vllm/renderers/params.py:342-370,386-399 @ e126687a9a; beam search renders
+// through the same renderer, chat_completion/serving.py:319-343).
+TEST_CASE("api_server: the rendered-prompt bound runs before the beam and "
+          "multimodal encodes") {
+  namespace oai = vllm::entrypoints::openai;
+  const HfConfig c = MakeConfig();
+  const Qwen3_5MoeWeights w = MakeWeights(c);
+  const Tokenizer& tok = LongTokenFixture();
+  constexpr size_t kLongToken = 8192;
+  REQUIRE(tok.MaxTokenBytes() == kLongToken);
+  const size_t derived_bound = static_cast<size_t>(kMaxModelLen) * kLongToken;
+  ScopedPromptCharsEnv env(nullptr);
+
+  // `tool_bytes` of 'h' in one tool description, so the content-only #1541
+  // guard passes and only the rendered-prompt check can refuse.
+  auto with_tools = [](json req, size_t tool_bytes) {
+    req["tools"] = json::array(
+        {{{"type", "function"},
+          {"function",
+           {{"name", "f"}, {"description", std::string(tool_bytes, 'h')}}}}});
+    return req;
+  };
+  auto beam_body = [&](size_t tool_bytes) {
+    json req = json::parse(PromptCapChatBody("h"));
+    req["use_beam_search"] = true;
+    req["n"] = 1;
+    return with_tools(std::move(req), tool_bytes).dump();
+  };
+  auto check_byte_refusal = [&](const httplib::Result& r, size_t rendered) {
+    REQUIRE(r);
+    INFO("body: " << r->body.substr(0, 600));
+    CHECK(r->status == 400);
+    json j = json::parse(r->body, nullptr, /*allow_exceptions=*/false);
+    CHECK(ErrType(j) == "BadRequestError");
+    const std::string msg = ErrMsg(j);
+    CHECK(msg.find("your prompt contains " + std::to_string(rendered) +
+                   " bytes (more than " + std::to_string(derived_bound) +
+                   " bytes, which is the upper bound for 32 input tokens)") !=
+          std::string::npos);
+    CHECK(msg.find("The decoder prompt") == std::string::npos);
+    CHECK_FALSE(j.contains("choices"));
+  };
+
+  // The control: an in-bound beam request reaches the beam encode once and is
+  // served, so a counter that never moves cannot pass the refusal below.
+  SUBCASE("an in-bound use_beam_search request reaches the beam encode") {
+    ServerHarness h(c, w, tok, false, ApiServer::kDefaultMaxConcurrentStreams,
+                    ToolsRenderingChatPrompt);
+    h.chat.set_beam_search_tokenizer(&tok, std::nullopt);
+    ConfigureUtilityEndpoints(h.server, tok, kMaxModelLen, h.async_engine,
+                              UtilityEndpointOptions{});
+    WithPromptCapServer(h, [&](httplib::Client& client) {
+      auto r = client.Post("/v1/chat/completions", beam_body(1),
+                           "application/json");
+      REQUIRE(r);
+      INFO("body: " << r->body.substr(0, 600));
+      CHECK(r->status == 200);
+      json j = json::parse(r->body, nullptr, /*allow_exceptions=*/false);
+      CHECK(j.contains("choices"));
+    });
+    CHECK(h.chat.num_beam_prompt_encodes() == 1);
+    CHECK(h.input_processor.num_prompt_encodes() == 0);
+  }
+
+  // One byte over the derived bound, on the default configuration.
+  SUBCASE("use_beam_search over the bound is refused before the beam encode") {
+    ServerHarness h(c, w, tok, false, ApiServer::kDefaultMaxConcurrentStreams,
+                    ToolsRenderingChatPrompt);
+    h.chat.set_beam_search_tokenizer(&tok, std::nullopt);
+    ConfigureUtilityEndpoints(h.server, tok, kMaxModelLen, h.async_engine,
+                              UtilityEndpointOptions{});
+    WithPromptCapServer(h, [&](httplib::Client& client) {
+      auto r = client.Post("/v1/chat/completions", beam_body(derived_bound),
+                           "application/json");
+      check_byte_refusal(r, derived_bound + 1);
+    });
+    CHECK(h.chat.num_beam_prompt_encodes() == 0);
+    CHECK(h.input_processor.num_prompt_encodes() == 0);
+    CHECK_FALSE(h.async_engine.has_unfinished_requests());
+  }
+
+  // The same request with one image part, through the REAL production seam.
+  // In bound, the seam is entered once and runs its own encode. The fixture
+  // vocabulary cannot encode the seam's Qwen placeholder marker ("<" is not in
+  // it), so that encode throws and the control answers 500 with the
+  // tokenizer's own message: the observable proof that the seam's encode ran.
+  // The codec runs only after that encode, so it stays at 0 in both arms.
+  // Over the bound, the seam is never entered.
+  size_t image_tool_bytes = 0;
+  bool image_in_bound = false;
+  SUBCASE("an in-bound image request enters the multimodal seam") {
+    image_tool_bytes = 1;
+    image_in_bound = true;
+  }
+  SUBCASE("an image request over the bound is refused before the multimodal seam") {
+    image_tool_bytes = derived_bound;
+  }
+  if (image_tool_bytes != 0) {
+    ServerHarness h(c, w, tok, false, ApiServer::kDefaultMaxConcurrentStreams,
+                    ToolsRenderingChatPrompt);
+    const vllm::MultiModalConfig default_cfg;
+    const vllm::multimodal::BaseProcessingInfo info(
+        default_cfg, oai::Qwen3VLChatSupportedMmLimits());
+    vllm::multimodal::Qwen3VLProcessorConfig pcfg;
+    pcfg.image_token_id = 3;
+    const vllm::multimodal::Qwen3VLImageProcessor proc(pcfg);
+    std::atomic<int> seam_calls{0};
+    std::atomic<int> codec_calls{0};
+    auto real_seam = oai::MakeQwen3VLImageChatFn(
+        proc, tok, ToolsRenderingChatPrompt,
+        [&codec_calls](const oai::DecodedMedia&) -> oai::DecodedImageRgb {
+          codec_calls.fetch_add(1);
+          throw std::runtime_error("codec reached");
+        },
+        info);
+    h.chat.set_multimodal_chat_fn(
+        [&seam_calls, real_seam](const std::vector<ChatMessage>& messages) {
+          seam_calls.fetch_add(1);
+          return real_seam(messages);
+        });
+    ConfigureUtilityEndpoints(h.server, tok, kMaxModelLen, h.async_engine,
+                              UtilityEndpointOptions{});
+    json req = json::parse(PromptCapChatBody("h"));
+    req["messages"] = json::array(
+        {{{"role", "user"},
+          {"content",
+           json::array({{{"type", "image_url"},
+                         {"image_url",
+                          {{"url", "data:image/x-raw-rgb;base64,AAAA"}}}},
+                        {{"type", "text"}, {"text", "h"}}})}}});
+    req = with_tools(std::move(req), image_tool_bytes);
+    WithPromptCapServer(h, [&](httplib::Client& client) {
+      auto r = client.Post("/v1/chat/completions", req.dump(),
+                           "application/json");
+      if (image_in_bound) {
+        REQUIRE(r);
+        INFO("body: " << r->body.substr(0, 600));
+        CHECK(r->status == 500);
+        CHECK(r->body.find("tokenizer: symbol") != std::string::npos);
+      } else {
+        check_byte_refusal(r, derived_bound + 1);
+      }
+    });
+    CHECK(seam_calls.load() == (image_in_bound ? 1 : 0));
+    CHECK(codec_calls.load() == 0);
+    CHECK(h.input_processor.num_prompt_encodes() == 0);
+    CHECK_FALSE(h.async_engine.has_unfinished_requests());
+  }
+}
+
 // W2 port of test_async_llm.test_load at the HTTP boundary: concurrent workers
 // submit into one AsyncLLM queue and complete as one scheduler batch; there is
 // no server-wide engine mutex.
