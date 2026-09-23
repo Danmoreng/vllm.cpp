@@ -9,6 +9,31 @@ endif()
 # CPU-only benchmark-harness contract. The tools deliberately use only the
 # Python standard library; image/model/GPU preflights remain dgx-only.
 find_package(Python3 COMPONENTS Interpreter REQUIRED)
+add_test(NAME test_b70_inventory COMMAND ${Python3_EXECUTABLE}
+  "${CMAKE_SOURCE_DIR}/tests/scripts/test_b70_inventory.py")
+add_executable(b70_provider_trace_probe
+  vt/b70_provider_trace_probe.cpp
+  ${CMAKE_SOURCE_DIR}/src/vt/op_provider.cpp
+  ${CMAKE_SOURCE_DIR}/src/vt/backend.cpp
+  ${CMAKE_SOURCE_DIR}/src/vt/dtype.cpp
+  ${CMAKE_SOURCE_DIR}/src/vt/cpu/cpu_backend.cpp)
+target_include_directories(b70_provider_trace_probe PRIVATE ${CMAKE_SOURCE_DIR}/include)
+target_include_directories(b70_provider_trace_probe SYSTEM PRIVATE ${CMAKE_SOURCE_DIR}/third_party)
+vllm_cpp_set_warnings(b70_provider_trace_probe)
+add_test(NAME test_b70_provider_trace COMMAND ${Python3_EXECUTABLE}
+  "${CMAKE_SOURCE_DIR}/tests/scripts/test_b70_provider_trace.py" $<TARGET_FILE:b70_provider_trace_probe>)
+if(VLLM_CPP_XPU)
+  add_executable(test_xpu_backend vt/test_xpu_backend.cpp
+    ${CMAKE_SOURCE_DIR}/src/vt/backend.cpp $<TARGET_OBJECTS:vllm_xpu_backend>)
+  target_include_directories(test_xpu_backend PRIVATE ${CMAKE_SOURCE_DIR}/include ${CMAKE_SOURCE_DIR}/src)
+  target_compile_options(test_xpu_backend PRIVATE -fsycl)
+  target_link_options(test_xpu_backend PRIVATE -fsycl)
+  vllm_cpp_set_warnings(test_xpu_backend)
+  add_test(NAME test_xpu_backend COMMAND test_xpu_backend)
+  set_tests_properties(test_xpu_backend PROPERTIES ENVIRONMENT "VT_XPU_MEMORY_BUDGET_BYTES=8388608")
+  add_test(NAME test_xpu_no_gpu COMMAND test_xpu_backend --expect-no-gpu)
+  set_tests_properties(test_xpu_no_gpu PROPERTIES ENVIRONMENT "ONEAPI_DEVICE_SELECTOR=opencl:cpu")
+endif()
 add_test(NAME test_serve_low_tools
   COMMAND ${Python3_EXECUTABLE} -m unittest discover
     -s "${CMAKE_SOURCE_DIR}/tests/tools" -p "test_*.py")
@@ -37,6 +62,9 @@ function(vllm_cpp_add_test name)
   # returns 77, which today is all but test_voxtral_e2e.
   set_tests_properties(${name} PROPERTIES SKIP_RETURN_CODE 77)
 endfunction()
+if(VLLM_CPP_XPU)
+  vllm_cpp_add_test(test_xpu_ops vt/test_xpu_ops.cpp)
+endif()
 
 # The gate on the golden-comparison helper itself (issue #449): a NaN operand
 # must be a FAILURE, never the 0.0 that both historical spellings returned.
@@ -2919,6 +2947,14 @@ vllm_cpp_add_test(test_tensor vt/test_tensor.cpp)
 # — deterministic selection, capability predicates, decline-and-fall-back and the
 # selection stats. Device-independent (registers onto the unused kXPU slots).
 vllm_cpp_add_test(test_op_provider vt/test_op_provider.cpp)
+add_executable(test_copy vt/test_copy.cpp
+  ${CMAKE_SOURCE_DIR}/src/vt/copy.cpp ${CMAKE_SOURCE_DIR}/src/vt/tensor.cpp
+  ${CMAKE_SOURCE_DIR}/src/vt/op_provider.cpp ${CMAKE_SOURCE_DIR}/src/vt/backend.cpp
+  ${CMAKE_SOURCE_DIR}/src/vt/dtype.cpp)
+target_include_directories(test_copy PRIVATE ${CMAKE_SOURCE_DIR}/include)
+target_link_libraries(test_copy PRIVATE vllm_test_main)
+vllm_cpp_set_warnings(test_copy)
+add_test(NAME test_copy COMMAND test_copy)
 # S5 portable reference tier (accelerator-seam-audit.md): the unified-memory
 # safety gate, correctness-with-zero-native-kernels via the CPU fallback, and the
 # native-wins / observability contract. Hardware-free — a fake backend on the

@@ -920,6 +920,7 @@ enum class OpId : uint8_t {
   kScaledRmsNorm,
   kSandwichRmsNorm,
   kCompiledGeluErfMul,
+  kCopy,
   kCount
 };
 
@@ -2408,6 +2409,12 @@ using MoeRelu2Fn = void (*)(Queue&, Tensor&, const Tensor&);
 using CastBf16Fn = void (*)(Queue&, Tensor&, const Tensor&);
 using CastF32Fn = void (*)(Queue&, Tensor&, const Tensor&);
 using CastF16Fn = void (*)(Queue&, Tensor&, const Tensor&);
+using CopyFn = void (*)(Queue&, Tensor&, const Tensor&);
+// Shape-preserving strided copy, with optional F16/BF16/F32 conversion.
+// Same-dtype copies preserve bits for every elementwise dtype. Overlapping
+// source/destination storage has snapshot semantics. Negative strides and
+// overlapping output elements are refused.
+void Copy(Queue& q, Tensor& out, const Tensor& in);
 using MulColVecF32Fn = void (*)(Queue&, Tensor&, const Tensor&);
 using AttnGateSplitFn = void (*)(Queue&, Tensor&, Tensor&, const Tensor&);
 using SigmoidGateBf16Fn = void (*)(Queue&, Tensor&, const Tensor&, const Tensor&);
