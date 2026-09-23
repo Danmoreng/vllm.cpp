@@ -21,6 +21,7 @@
 #include "vllm/entrypoints/openai/serving_utils.h"
 #include "vllm/entrypoints/openai/tool_parsers/structural_tags.h"
 #include "vllm/tokenizer/tokenizer.h"
+#include "vllm/v1/engine/validation_error.h"
 
 namespace vllm::entrypoints::openai {
 
@@ -660,28 +661,39 @@ ChatCompletionResult OpenAIServingChat::create_chat_completion(
                            " stream=" + std::string(request.stream ? "1" : "0"));
   const auto req_t0 = std::chrono::steady_clock::now();
 
-  // Lab guardrails: Hermes accidentally sending full SOUL (~140k chars) + max_tokens=65536
-  // wedges single-batch async prefill for many minutes with no client tokens.
-  // Override with VT_SERVER_MAX_PROMPT_CHARS / VT_SERVER_MAX_NEW_TOKENS (0 = disable).
-  static const size_t kMaxPromptChars = [] {
+  // VT_SERVER_MAX_PROMPT_CHARS is an OPTIONAL operator ceiling on the rendered
+  // prompt, in bytes; unset or 0 sets none (ISSUE-LOCAL-01M37A34NTK8A98KYWA5SA5GNN).
+  // It used to default to a fixed 200,000, which is not derived from the
+  // context and refused a 262,144-token server's prompts above ~48k tokens.
+  // vLLM's only pre-tokenization bound is max_input_tokens * max_chars_per_token
+  // (vllm/renderers/params.py:342-365 @ e126687a9a); ours is the derived
+  // max_model_len * MaxTokenBytes() that ApiServer::refuse_oversized_prompt
+  // applies before this function runs, so the default path needs no second
+  // number here. Read per request, like vLLM's lazy envs.py, so one process can
+  // exercise both arms. The refusal is the request's fault: InputValidationError
+  // is HTTP 400 BadRequestError (error_response.py:39-41).
+  // VT_SERVER_MAX_NEW_TOKENS keeps its 4096 default; its divergence from vLLM is
+  // ISSUE-LOCAL-01M37A3S7N7GSZC37JH515QXFE.
+  const size_t max_prompt_chars = [] {
     const char* e = std::getenv("VT_SERVER_MAX_PROMPT_CHARS");
     if (e && e[0]) return static_cast<size_t>(std::strtoull(e, nullptr, 10));
-    // Default raised for Hermes full SOUL+tools (~140k). Set lower for safety.
-    return static_cast<size_t>(200000);
+    return static_cast<size_t>(0);
   }();
   static const int kMaxNewTokensCap = [] {
     const char* e = std::getenv("VT_SERVER_MAX_NEW_TOKENS");
     if (e && e[0]) return std::atoi(e);
     return 4096;  // 0 disables
   }();
-  if (kMaxPromptChars > 0 && prompt.size() > kMaxPromptChars) {
+  if (max_prompt_chars > 0 && prompt.size() > max_prompt_chars) {
     std::ostringstream err;
-    err << "prompt too large for this server (" << prompt.size()
-        << " chars > VT_SERVER_MAX_PROMPT_CHARS=" << kMaxPromptChars
-        << "). Hermes is likely injecting a full system SOUL; shrink the system "
-           "prompt / tools payload. Set VT_SERVER_MAX_PROMPT_CHARS=0 to disable.";
+    err << "prompt length " << prompt.size()
+        << " bytes exceeds the operator-set limit VT_SERVER_MAX_PROMPT_CHARS="
+        << max_prompt_chars
+        << " on the rendered chat prompt. Shorten the messages or tools, or "
+           "ask the operator to raise or unset the limit. The request is "
+           "refused, not truncated.";
     LogRequestError(request_id, "/v1/chat/completions", err.str());
-    throw std::runtime_error(err.str());
+    throw vllm::v1::InputValidationError(err.str());
   }
   if (prompt.size() > 32000) {
     ChatDbg(request_id,
