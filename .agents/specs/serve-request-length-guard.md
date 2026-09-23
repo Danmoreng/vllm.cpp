@@ -347,6 +347,142 @@ Named gaps, none of them a defect this row leaves behind:
   (`completion/protocol.py:536-553`) is the mirror to port at the same time.
   Owned by this row.
 
+## Amendment 2026-09-23: the fixed prompt-character cap
+
+**Issue:** `ISSUE-LOCAL-01M37A34NTK8A98KYWA5SA5GNN`, owned by this row.
+**Base:** `0132c65e7`. Every local line number in this section is read there.
+**Pull request shape:** one pull request, spec commit first, for the same
+reason as the row: no split case applies.
+
+### The defect
+
+A second prompt-size refusal exists beside this row's derived bound, and this
+row did not add it. `OpenAIServingChat::create_chat_completion`
+(`src/vllm/entrypoints/openai/serving_chat.cpp:663-685`) refuses a RENDERED chat
+prompt above `VT_SERVER_MAX_PROMPT_CHARS`, which defaults to 200,000 when the
+variable is unset. `git log -S VT_SERVER_MAX_PROMPT_CHARS` names its origin:
+`0c2827c18` (#154), a Gemma-4 performance pull request that added it as a "lab
+guardrail" against one client sending a very large system prompt. It has three
+faults:
+
+1. **The number is not derived from the context.** A 64k-token prompt of English
+   prose is about 268,000 characters, so a server started with
+   `--max-model-len 262144` refuses every such prompt above about 48k tokens.
+   Observed on `dgx:gpu0` on 2026-09-23: `prompt too large for this server
+   (268439 chars > VT_SERVER_MAX_PROMPT_CHARS=200000)`. This violates this
+   row's own guarantee, stated under `## Design`: a pre-tokenization bound
+   "rejects nothing the server would have served".
+2. **The status is 500.** The refusal is a `std::runtime_error`, which
+   `ApiServer::handle_chat_completions` maps to `InternalServerError`
+   (`api_server.cpp:377-382`). The request is at fault, so the status is 400.
+3. **The message blames an unrelated client** ("Hermes is likely injecting a
+   full system SOUL").
+
+### Upstream, at the current pin `e126687a9a`
+
+`## Upstream chain` above was read at `5559679229` and says vLLM has no prompt
+byte bound. **At `e126687a9a` that is no longer true**, and this is the anchor
+the fix mirrors:
+
+| What | Anchor | Behaviour |
+|---|---|---|
+| the pre-tokenization text bound | `vllm/renderers/params.py:342-365` `TokenizeParams._text_len_check` | refuses `len(text) > max_input_tokens * tokenizer.max_chars_per_token` with `VLLMValidationError`. There is no fixed number and no environment variable |
+| the per-token factor | `vllm/tokenizers/hf.py:131` | `max_chars_per_token = max(len(tok) for tok in tokenizer_vocab)`, the longest vocabulary entry. It is the same quantity as our `Tokenizer::MaxTokenBytes()`, counted in characters instead of bytes |
+| `max_input_tokens` | `vllm/renderers/params.py:204-210`; `chat_completion/protocol.py:608-626` | `max_model_len - (max_completion_tokens or max_tokens or 0)` |
+| where it runs | `vllm/renderers/base.py:527,563` | on the rendered prompt string, immediately before the encode |
+| the error text | `vllm/renderers/params.py:352-362` | `This model's maximum context length is {max_total_tokens} tokens. However, you requested {max_output_tokens} output tokens and your prompt contains {len(text)} characters (more than {max_input_chars} characters, which is the upper bound for {max_input_tokens} input tokens). Please reduce the length of the input prompt or the number of requested output tokens.` |
+| the status | `vllm/entrypoints/serve/exception_handling/error_response.py:39-41` | `VLLMValidationError` is `BadRequestError`, HTTP 400 |
+| the token refusal after the encode | `vllm/renderers/params.py:436-461` `_token_len_check`; `vllm/v1/engine/input_processor.py:436-476` `_validate_prompt_len` | 400, token count against `max_model_len` |
+
+So vLLM's only pre-tokenization bound is derived from the context and the
+vocabulary, and it cannot refuse a prompt that could fit. This row's
+`max_model_len * MaxTokenBytes()` is that bound. It uses `max_model_len`
+instead of `max_input_tokens`, so it is looser by the requested output tokens
+and can never bind below vLLM's.
+
+### Design
+
+- **The default is unset, and unset means no fixed cap.** The pre-tokenization
+  bound on the default configuration is the derived one this row landed, in
+  `ApiServer::refuse_oversized_prompt`, which runs before the chat template
+  renders and before any encode. It is unchanged. The #1541 guarantee, a
+  refusing bound on request size before tokenization, therefore holds, and the
+  new pathological-body case below pins it.
+- **An explicitly set positive value is kept as an operator ceiling.** vLLM has
+  no such variable, so this is a divergence, and it is kept for one reason:
+  the variable is documented, and removing it would silently drop a ceiling an
+  operator set on purpose. Only an operator who sets it can make it bind below
+  the context, and `docs/ENVIRONMENT.md` says so. `0` still means off.
+- **The refusal is a 400.** It throws `vllm::v1::InputValidationError`, which
+  `handle_chat_completions` already maps to `BadRequestError`
+  (`error_response.py:39-41`). The message names the length received, the
+  limit and the variable, and blames no client.
+- **The variable is read on each request, not once into a function-local
+  static.** A static fixes the first value the process saw, so no test can
+  exercise both the unset and the set arms in one process, and the gate would
+  be blind to one of them. vLLM also reads its environment lazily
+  (`vllm/envs.py`, module `__getattr__`). One `getenv` beside a template render
+  costs nothing measurable.
+- **Rejected: deriving a new default for this variable.** The derived bound
+  already exists one layer up. A second copy of the same derivation in
+  `serving_chat.cpp` would be a duplicated fact, and the next edit to one copy
+  would make them disagree.
+- **Rejected: changing the token refusal's text to the renderer's text.**
+  vLLM's server reaches `_token_len_check` before `_validate_prompt_len`, so
+  its over-long-prompt message differs from ours. That changes
+  `ValidatePromptLen`, which this row's `## Stop conditions` forbid, and it
+  adds a `prompt + max_tokens` check the server does not make today. Filed as
+  `ISSUE-LOCAL-01M37A43C0XFW3PAYV1399HFAE`.
+
+### `VT_SERVER_MAX_NEW_TOKENS`
+
+The sibling variable has a different defect by a different mechanism. It
+silently CLAMPS a positive `max_tokens` to 4096 by default. It does not refuse
+input. vLLM has no default output ceiling: `get_max_tokens`
+(`vllm/entrypoints/serve/utils/api_utils.py:169-206`) takes the minimum of the
+remaining context, the request value, an operator `override_max_tokens` that
+is unset by default (`chat_completion/serving.py:172-176`) and the platform
+limit. It is filed as `ISSUE-LOCAL-01M37A3S7N7GSZC37JH515QXFE` and is not
+changed here.
+
+### Tests
+
+All cases run over a real socket through `ConfigureUtilityEndpoints`, the seam
+`server_main.cpp` uses, on a fixture tokenizer whose longest token is 8,192
+bytes. That makes a prompt above 200,000 bytes fit in the 32-token test
+context, so the red needs no large engine.
+
+1. **RED today, GREEN after:** a 204,800-byte chat prompt of 25 tokens, with
+   `VT_SERVER_MAX_PROMPT_CHARS` unset, answers 200 with an assistant choice.
+   Today it answers 500 naming `VT_SERVER_MAX_PROMPT_CHARS=200000`.
+2. **A prompt over `max_model_len` in tokens is still refused:** 33 tokens in
+   253,954 bytes, under the derived byte bound, answers 400 `BadRequestError`
+   with the `_validate_prompt_len` text, `maximum model length of 32`.
+3. **The pre-tokenization bound still refuses a pathological body:** a 4 MiB
+   message answers 400 with the byte-bound message, not the token message, and
+   the engine holds no request.
+4. **An explicit operator ceiling refuses with 400:** with
+   `VT_SERVER_MAX_PROMPT_CHARS=1000`, a 204,800-byte prompt answers 400
+   `BadRequestError` naming the variable and not naming any client. RED today:
+   500.
+
+### Reachability
+
+`POST /v1/chat/completions` -> `ApiServer::handle_chat_completions` ->
+`OpenAIServingChat::create_chat_completion`. The deletion mutation restores the
+fixed default in a scratch worktree and must turn case 1 red.
+
+### Gates
+
+The row's `## Gates`, plus `python3 tests/scripts/test_check_env_doc.py`
+because `docs/ENVIRONMENT.md` changes. No GPU and no lease.
+
+### Stop conditions
+
+- Stop with `NEEDS_DECISION` if removing the default would leave any text
+  route without a pre-tokenization bound.
+- Stop if the fix needs a change to `ValidatePromptLen`.
+
 ## Outcome
 
 Recorded on the branch, before the merge. Base `db648fb88`, branch
