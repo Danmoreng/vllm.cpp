@@ -2293,6 +2293,11 @@ target_include_directories(test_dflash2_embed_dedup_reach PRIVATE ${CMAKE_SOURCE
 # above 4096, which no other binary drives.
 vllm_cpp_add_test(test_dflash2_ctx_capacity
   vllm/v1/spec_decode/test_dflash2_ctx_capacity.cpp)
+# FIX-BLOCK-TABLE-ROW-WIDTH (ISSUE-LOCAL-01M36YFXAHPXMCFAGWQABT6KCE): each KV
+# cache group's block-table row is sized from its spec, through the production
+# DFlash2 engine. Its own binary because the fixture header is per-binary.
+vllm_cpp_add_test(test_block_table_row_width
+  vllm/v1/worker/test_block_table_row_width.cpp)
 # SPEC-DFLASH2 (#2008): the draft context must follow the REQUEST, not the batch
 # ROW. Its OWN binary for the reason every fixture binary here has one --
 # `VT_SPEC_TRACE` is latched once per process by a function-local static on the

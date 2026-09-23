@@ -206,6 +206,28 @@ int ChunkedLocalAttentionSpec::max_admission_blocks_per_request(
   return (num_tokens + block_size - 1) / block_size;
 }
 
+int KVCacheSpec::max_num_blocks_per_req(int max_len) const {
+  // kv_cache_interface.py:197-207 @ e126687a9a.
+  return (max_len + block_size - 1) / block_size;
+}
+
+int MambaSpec::max_num_blocks_per_req(int max_len) const {
+  // kv_cache_interface.py:896-905 @ e126687a9a. The runner passes
+  // max_len == max_model_len (no encoder-decoder), so the `all` arm's
+  // cdiv(max_memory_usage_bytes, page_size_bytes) =
+  // cdiv(max_model_len, block_size) + k (:884-887) is the `align` arm's value.
+  //
+  // `none` (:893-894, :905) is upstream's 1 + k. That is correct upstream only
+  // because upstream builds a `none` group at block_size = max_model_len
+  // (model_executor/models/config.py:657), where MambaManager claims at most
+  // cdiv(num_tokens + block_size * k, block_size) = 1 + k blocks. This tree
+  // builds it at the attention block size (ISSUE-LOCAL-01M36XJNF0TRNZBH7GYCW756AQ),
+  // where the same claim reaches cdiv(max_model_len, block_size) + k. The row
+  // must hold the claim, so every mode returns cdiv(max_len, block_size) + k,
+  // which is exactly upstream's 1 + k whenever block_size >= max_len.
+  return (max_len + block_size - 1) / block_size + num_speculative_blocks;
+}
+
 int64_t MambaSpec::page_size_bytes() const {
   if (shapes.size() != dtypes.size()) {
     throw std::runtime_error(

@@ -2790,8 +2790,12 @@ TEST_CASE("runner: a multi-cache forward is REFUSED, naming the channel") {
   nr.prompt_token_ids = {1, 2, 3};
   nr.sampling_params = sp;
   // One block-table group per PUBLISHED group, which is what the block table
-  // this runner built expects.
-  nr.block_ids.assign(7, std::vector<int>{0, 1});
+  // this runner built expects. One block each: a 3-token prompt claims one
+  // block in every group, and group 0's row (block size 256 at max_model_len
+  // 32) holds exactly one. The two ids this used to feed overran that row,
+  // which `BlockTable::append_row` now refuses by name
+  // (FIX-BLOCK-TABLE-ROW-WIDTH, gpu/block_table.py:125-131 @ e126687a9a).
+  nr.block_ids.assign(7, std::vector<int>{1});
   nr.num_computed_tokens = 0;
   nr.prefill_token_ids = {1, 2, 3};
   so.scheduled_new_reqs.push_back(std::move(nr));
@@ -2949,8 +2953,11 @@ TEST_CASE("runner: EVERY published KV group's block table is gathered (#2249)") 
     int cols = 0;
     const std::vector<int32_t>* bt = mk.BlockTableForGroup(g, &cols);
     REQUIRE(bt != nullptr);
-    // cdiv(32, 16) == 2, rounded up to a multiple of 128/16 == 8.
-    CHECK(cols == 8);
+    // cdiv(32, 16) == 2. An attention row is rounded up to a multiple of
+    // 128/16 == 8; the recurrent group 1 is a kNone row and keeps its spec's
+    // width, cdiv(32, 16) + 0 speculative blocks == 2
+    // (FIX-BLOCK-TABLE-ROW-WIDTH, block_table.py:322-331 @ e126687a9a).
+    CHECK(cols == (g == 1 ? 2 : 8));
     REQUIRE(bt->size() == static_cast<size_t>(cols));
     CHECK((*bt)[0] == want[static_cast<size_t>(g)][0]);
     CHECK((*bt)[1] == want[static_cast<size_t>(g)][1]);
