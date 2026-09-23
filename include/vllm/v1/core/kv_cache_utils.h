@@ -444,8 +444,9 @@ std::pair<int, int> resolve_kv_cache_block_sizes(
 // Startup KV sizing: can the pool hold ONE max_model_len sequence?
 //
 // Ported from vllm/v1/core/kv_cache_utils.py @ 555967922:
-//   max_memory_usage_bytes          :791-798  -> kv_memory_needed_bytes
-//   estimate_max_model_len          :800-851  -> estimate_max_model_len
+//   max_memory_usage_bytes          :791-798  -> max_memory_usage_bytes_from_groups
+//   estimate_max_model_len          :800-851  -> estimate_max_model_len_from_groups
+//   (both re-ported at e126687a9a as the per-GROUP forms; FIX-KV-POOL-MIN-FIT)
 //   _check_enough_kv_cache_memory   :751-788  -> check_enough_kv_cache_memory
 //   _auto_fit_max_model_len         :1967-2027 -> auto_fit_max_model_len
 //
@@ -459,25 +460,13 @@ std::pair<int, int> resolve_kv_cache_block_sizes(
 //   - Upstream takes `Callable`s (get_needed_memory / estimate_max_model_len) so
 //     the expensive device-profiling variants stay lazy. Both are pure
 //     arithmetic for us, so they are passed as values.
-//   - estimate_max_model_len upstream binary-searches `max_memory_usage_bytes`.
-//     Our per-block geometry is exactly linear in the block count
-//     (KVBytesPerBlock is block-count independent), so the search has the closed
-//     form `num_blocks * block_size` and is written as such.
+//   - The closed-form one-table estimate this block once carried is gone: a
+//     sliding-window group's count is not linear in the length, so the estimate
+//     is upstream's binary search again (estimate_max_model_len_from_groups).
 //   - The remediation sentence keeps upstream's wording and appends the knobs a
 //     vllm.cpp user can actually act on: `gpu_memory_utilization` profiling is
 //     un-ported (model_loader.cpp ResolveNumBlocks step 3, TODO ROAD-V1-MEM M3),
 //     so `--num-blocks` / `--kv-cache-memory` / `--max-model-len` are the levers.
-
-// max_memory_usage_bytes: the KV bytes ONE sequence of `max_model_len` tokens
-// occupies, at this block geometry. Blocks are whole, so the token count is
-// rounded up to a block boundary.
-int64_t kv_memory_needed_bytes(int64_t max_model_len, int block_size,
-                               int64_t bytes_per_block);
-
-// estimate_max_model_len: the longest sequence `available_memory` can hold.
-// Returns 0 when not even a single block fits.
-int64_t estimate_max_model_len(int64_t available_memory,
-                               int64_t bytes_per_block, int block_size);
 
 // _check_enough_kv_cache_memory: throws std::invalid_argument (upstream
 // ValueError) when the pool cannot hold one `max_model_len` sequence.
@@ -518,13 +507,86 @@ int64_t recurrent_state_bytes(const KVCacheConfig& kv_cfg, int max_num_seqs);
 void check_enough_state_memory(int64_t available_memory, int64_t needed_memory,
                                int max_num_seqs, int num_spec);
 
-// _auto_fit_max_model_len: the length to serve when the caller did NOT pin one.
-// Upstream reduces max_model_len to what the pool holds and logs the reduction;
-// it raises when not even one token fits. `derived_max_model_len` is the
-// checkpoint's own context length (upstream's `original_max`).
-int64_t auto_fit_max_model_len(int64_t derived_max_model_len,
+// ---------------------------------------------------------------------------
+// FIX-KV-POOL-MIN-FIT (ISSUE-LOCAL-01M36QVG0KGKEP4MSMKT18MMZ4): the need of ONE
+// max-length request, counted per KV cache GROUP.
+//
+// Ported from vllm @ e126687a9a:
+//   KVCacheSpec.max_memory_usage_bytes / page_size_bytes
+//     vllm/v1/kv_cache_interface.py:464-469 (full), :658-681 (chunked local),
+//     :704-738 (sliding window), :883-894 (Mamba), :923-925 (encoder-only)
+//                                        -> max_blocks_per_request
+//   _max_memory_usage_bytes_from_groups  vllm/v1/core/kv_cache_utils.py:2029-2058
+//                                        -> max_memory_usage_bytes_from_groups
+//   _estimate_max_model_len_from_groups  vllm/v1/core/kv_cache_utils.py:2061-2093
+//                                        -> estimate_max_model_len_from_groups
+//
+// WHY THIS EXISTS: every group owns its own block table, and every table draws
+// its block ids from ONE pool (`kv_cache_coordinator.cpp`, one BlockPool of
+// `num_blocks`). A request of `max_model_len` tokens therefore needs the SUM of
+// the per-group block counts, not one table's worth. The one-table count this
+// replaces let a Qwen3.5 pool with a speculative config (`fa`,
+// `gdn`, `fa_draft`) passed the check at about a third of its real need, and a
+// max-length request was admitted, could never allocate, and waited forever:
+// upstream's waiting loop breaks without an error (scheduler.py:1091-1098).
+//
+// RECORDED DEVIATION, Mamba `none` mode. Upstream charges `1 + k` blocks, which
+// is its allocator's claim `cdiv(len + bs*k, bs)` at the block size upstream
+// resolves for `none` mode, `bs = max_model_len` (config.py:645-657). This tree
+// builds the `none` GDN spec at the ATTENTION block size, where the same
+// allocator arithmetic (`MambaManager::get_num_blocks_to_allocate`) claims
+// `cdiv(len, bs) + k`. The count here is `cdiv(max_model_len, bs) + k`, which is
+// upstream's `1 + k` at upstream's block size and the real claim at ours. The
+// block-size divergence itself is owed: ISSUE-LOCAL-01M36XJNF0TRNZBH7GYCW756AQ.
+//
+// `max_num_batched_tokens` is upstream's `max_in_flight_tokens`: the sliding
+// window and chunked-local counts come from the SAME
+// `max_admission_blocks_per_request` the managers' admission cap calls
+// (`get_manager_for_kv_cache_spec`), so the startup count and the runtime cap
+// cannot disagree.
+//
+// Throws std::invalid_argument for a spec kind whose usage is not ported (sink
+// and cross attention: no registry in this tree builds either).
+int64_t max_blocks_per_request(const KVCacheSpec& spec, int64_t max_model_len,
+                               int max_num_batched_tokens);
+
+// `KVBytesPerBlock(kv_cfg) * sum over groups of max_blocks_per_request`: the
+// bytes one max-length request occupies in the shared pool. 0 when the config
+// has no paged KV (KVBytesPerBlock == 0) or `max_model_len <= 0`.
+int64_t max_memory_usage_bytes_from_groups(const KVCacheConfig& kv_cfg,
+                                           int64_t max_model_len,
+                                           int max_num_batched_tokens);
+
+// Upstream's binary search: the longest length in [1, original_max_model_len]
+// whose `max_memory_usage_bytes_from_groups` fits `available_memory`. 0 when
+// not even one token fits.
+int64_t estimate_max_model_len_from_groups(const KVCacheConfig& kv_cfg,
+                                           int64_t available_memory,
+                                           int64_t original_max_model_len,
+                                           int max_num_batched_tokens);
+
+// Public check_enough_kv_cache_memory (kv_cache_utils.py:933-967) over one
+// KVCacheConfig: reserve the null block BlockPool holds back, then refuse via
+// the message overload above when the pool cannot hold ONE request of
+// `max_model_len` tokens counted over EVERY group. `available_memory` is the
+// whole pool, `num_blocks * KVBytesPerBlock(kv_cfg)`. A config with no paged
+// KV (KVBytesPerBlock == 0) is never refused, which is upstream's
+// `if kv_cache_spec:`.
+void check_enough_kv_cache_memory(const KVCacheConfig& kv_cfg,
+                                  int64_t available_memory,
+                                  int64_t max_model_len,
+                                  int max_num_batched_tokens);
+
+// _auto_fit_max_model_len (kv_cache_utils.py:2096-2157), with the null-block
+// reservation `get_kv_cache_configs` applies first (:2304-2311): the length to
+// serve when the caller did NOT pin one. Returns the derived length when it
+// fits, else the longest length the pool holds counted over every group.
+// Throws std::invalid_argument when not even one token fits. A config with no
+// paged KV returns the derived length unchanged.
+int64_t auto_fit_max_model_len(const KVCacheConfig& kv_cfg,
                                int64_t available_memory,
-                               int64_t bytes_per_block, int block_size);
+                               int64_t derived_max_model_len,
+                               int max_num_batched_tokens);
 
 }  // namespace vllm::v1
 
