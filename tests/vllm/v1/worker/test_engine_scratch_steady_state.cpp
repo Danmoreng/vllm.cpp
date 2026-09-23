@@ -128,7 +128,10 @@ OwnedTensor MakeOwned(DType dt, std::vector<int64_t> shape, uint64_t seed) {
 constexpr int kVocab = 24;        // == the tiny BPE fixture's ids 0..23, no holes.
 constexpr int kMaxModelLen = 4096;
 constexpr int kBlockSize = 128;   // < max_model_len: many paged blocks per request.
-constexpr int kNumBlocks = 64;
+// One max-length request claims 32 blocks for EACH of the two KV cache groups
+// (fa, gdn) plus the null block BlockPool holds back: 65. 64 held one table and
+// passed the pre-FIX-KV-POOL-MIN-FIT startup check, which counted one table.
+constexpr int kNumBlocks = 65;
 
 HfConfig MakeConfig() {
   HfConfig c;
