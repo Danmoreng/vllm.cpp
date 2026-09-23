@@ -674,9 +674,22 @@ std::string GetInstructions(const nlohmann::json& qj) {
 // r2(x) — round to 2 decimal places (kev/api.py:r2).
 double R2(double x) { return std::round(x * 100.0) / 100.0; }
 
-// r4(x) — round to 4 decimal places. Used by the cua-s1 score path.
+// r4(x) — round to 4 decimal places. Used by the cua-s1 score path
+// (rl_agent_api.py:round(float(v), 4)).
 double R4(double x) { return std::round(x * 10000.0) / 10000.0; }
 
+// confidence_from_probs(p, k) — 1 - normalized Shannon entropy
+// (rl_common.py:confidence_from_probs). Used by the Laya decision path.
+double ConfidenceFromProbs(const std::vector<float>& p) {
+  size_t k = p.size();
+  if (k < 2) return 1.0;
+  double ent = 0.0;
+  for (float v : p) {
+    double pv = std::max(static_cast<double>(v), 1e-12);
+    ent -= pv * std::log(pv);
+  }
+  return 1.0 - ent / std::log(static_cast<double>(k));
+}
 // choice_confidence(p) — normalized margin (kev/api.py:choice_confidence).
 double ChoiceConfidence(const std::vector<float>& p) {
   size_t k = p.size();
@@ -726,8 +739,9 @@ std::vector<float> Softmax(const std::vector<float>& scores) {
 struct SystemOneQuestion {
   std::string id;
   std::string type;  // "noul", "choice", "score"
+  std::string instructions;  // question instructions (GetInstructions)
   std::vector<std::string> keys;   // option names (choice) / level text (score)
-  std::vector<std::string> labels;  // NER labels for this question
+  std::vector<std::string> labels;  // NER labels / option text (decision)
 };
 
 // Parsed SystemOneRequest body.
@@ -788,6 +802,7 @@ ParsedSystemOne ParseSystemOneBody(const nlohmann::json& body) {
     }
     q.type = qj["type"].get<std::string>();
     std::string instr = GetInstructions(qj);
+    q.instructions = instr;
     if (q.type == "noul") {
       // kev/api.py: noul -> instruction is the NER label; criteria is
       // optional {"false": ..., "true": ...} for option text.
@@ -888,6 +903,81 @@ nlohmann::json BuildSystemOneAnswer(
                         {"legend", std::move(legend)},
                         {"probabilities", std::move(dist)},
                         {"confidence", R2(ScoreConfidence(probs))}};
+}
+
+// Build one kev answer from decision scores (MODEL-LAYA). Mirrors
+// BuildSystemOneAnswer but takes per-option logits directly from the decision
+// head instead of extracting NER confidences.
+//
+// Temperature scaling is already applied inside LayaInference (matching
+// reference rl_agent_api.py: z = logits / temp_bucket(qt, k)). Here we just
+// softmax the scaled logits and format the answer.
+nlohmann::json BuildSystemOneAnswerDecision(
+    const SystemOneQuestion& q, const ApiServer::DecisionResult& result) {
+  // Softmax the temperature-scaled logits for all question types.
+  std::vector<float> probs = Softmax(result.scores);
+
+  // act_probability: softmax(act_logits)[0] (rl_agent_api.py:ext).
+  std::vector<float> act_probs = Softmax(result.act_logits);
+  float act_prob = act_probs.empty() ? 0.0F : act_probs[0];
+  nlohmann::json rl_agent = {{"act_probability", R4(act_prob)}};
+
+  if (q.type == "noul") {
+    // Reference: {"type": "noul", "noul": round(p[1], 4), "rl_agent": ext}
+    return nlohmann::json{{"type", "noul"}, {"noul", R4(probs[1])},
+                          {"rl_agent", std::move(rl_agent)}};
+  }
+  if (q.type == "choice") {
+    size_t argmax = 0;
+    for (size_t i = 1; i < probs.size(); ++i) {
+      if (probs[i] > probs[argmax]) argmax = i;
+    }
+    nlohmann::json dist = nlohmann::json::object();
+    for (size_t i = 0; i < q.keys.size(); ++i) {
+      dist[q.keys[i]] = R4(probs[i]);
+    }
+    return nlohmann::json{{"type", "choice"}, {"choice", q.keys[argmax]},
+                          {"probabilities", std::move(dist)},
+                          {"confidence", R4(ConfidenceFromProbs(probs))},
+                          {"rl_agent", std::move(rl_agent)}};
+  }
+  // score
+  double score = 0.0;
+  for (size_t i = 0; i < probs.size(); ++i) {
+    score += static_cast<double>(i) * probs[i];
+  }
+  nlohmann::json legend = nlohmann::json::object();
+  nlohmann::json dist = nlohmann::json::object();
+  for (size_t i = 0; i < q.keys.size(); ++i) {
+    legend[std::to_string(i)] = q.keys[i];
+    dist[std::to_string(i)] = R4(probs[i]);
+  }
+  return nlohmann::json{{"type", "score"}, {"score", R4(score)},
+                        {"legend", std::move(legend)},
+                        {"probabilities", std::move(dist)},
+                        {"confidence", R4(ConfidenceFromProbs(probs))},
+                        {"rl_agent", std::move(rl_agent)}};
+}
+
+// Render option texts for the Laya decision path, matching
+// rl_common.py:render_options. The GLiNER NER path uses q.labels directly
+// (kev format); the Laya decision path needs the reference option format.
+std::vector<std::string> RenderDecisionOptions(const SystemOneQuestion& q) {
+  if (q.type == "noul") {
+    // Reference: always 2 options — false / true.
+    return {"false: no, the statement does not hold",
+            "true: yes, the statement holds"};
+  }
+  if (q.type == "score") {
+    // Reference: "level %d: %s" % (i, c)
+    std::vector<std::string> opts;
+    for (size_t i = 0; i < q.keys.size(); ++i) {
+      opts.push_back("level " + std::to_string(i) + ": " + q.keys[i]);
+    }
+    return opts;
+  }
+  // choice: q.labels already has the right format (key or "key: desc").
+  return q.labels;
 }
 
 }  // namespace
@@ -1054,9 +1144,9 @@ ApiServer::DispatchResult ApiServer::handle_score(
 
 ApiServer::DispatchResult ApiServer::handle_systemone(
     const std::string& request_body) const {
-  if (!ner_) {
+  if (!ner_ && !decision_) {
     return MakeError(500, "InternalServerError",
-                    "The model does not support NER");
+                    "The model does not support SystemOne");
   }
   nlohmann::json body;
   try {
@@ -1069,6 +1159,35 @@ ApiServer::DispatchResult ApiServer::handle_systemone(
   if (!parsed.ok) {
     return MakeError(parsed.error_status, parsed.error_type, parsed.error_msg);
   }
+  // Decision path (MODEL-LAYA): one forward per question.
+  if (decision_) {
+    auto start = std::chrono::steady_clock::now();
+    try {
+      nlohmann::json answers = nlohmann::json::object();
+      int64_t total_tokens = 0;
+      for (const auto& q : parsed.questions) {
+        auto result = decision_(parsed.text, q.type, q.instructions,
+                                  RenderDecisionOptions(q));
+        total_tokens += result.prompt_tokens;
+        answers[q.id] = BuildSystemOneAnswerDecision(q, result);
+      }
+      auto end = std::chrono::steady_clock::now();
+      double latency_ms =
+         std::chrono::duration<double, std::milli>(end - start).count();
+      DispatchResult r;
+      r.body = nlohmann::json{
+         {"model", parsed.model.empty() ? models_.model_name() : parsed.model},
+         {"answers", std::move(answers)},
+         {"usage", nlohmann::json{{"input_tokens", total_tokens},
+                                  {"output_tokens", 0}}},
+         {"latency_ms", R2(latency_ms)},
+      }.dump();
+      return r;
+    } catch (const std::exception& e) {
+      return MakeError(500, "InternalServerError", e.what());
+    }
+  }
+  // NER path (MODEL-GLINER25): one NER call, answers from shared result.
   auto start = std::chrono::steady_clock::now();
   try {
     const NerResult result = ner_(parsed.text, parsed.all_labels,
@@ -1099,9 +1218,9 @@ ApiServer::DispatchResult ApiServer::handle_systemone(
 // so probabilities are stable across permutations; the API shape matches kev.
 ApiServer::DispatchResult ApiServer::handle_systemone_permute(
     const std::string& request_body) const {
-  if (!ner_) {
+  if (!ner_ && !decision_) {
     return MakeError(500, "InternalServerError",
-                    "The model does not support NER");
+                    "The model does not support SystemOne");
   }
   nlohmann::json body;
   try {
@@ -1158,19 +1277,25 @@ ApiServer::DispatchResult ApiServer::handle_systemone_permute(
      order_labels.push_back(target->labels[j]);
     }
     auto start = std::chrono::steady_clock::now();
-    NerResult result = ner_(parsed.text, order_labels, parsed.threshold,
-                            parsed.max_width);
+    std::vector<float> scores;
+    if (decision_) {
+     auto dr = decision_(parsed.text, "choice", target->instructions,
+                         order_labels);
+     scores = dr.scores;
+    } else {
+     NerResult result = ner_(parsed.text, order_labels, parsed.threshold,
+                              parsed.max_width);
+     for (const auto& label : order_labels) {
+       float max_conf = 0.0F;
+       for (const auto& e : result.entities) {
+         if (e.label == label) max_conf = std::max(max_conf, e.confidence);
+       }
+       scores.push_back(max_conf);
+     }
+    }
     auto end = std::chrono::steady_clock::now();
     double latency_ms =
        std::chrono::duration<double, std::milli>(end - start).count();
-    std::vector<float> scores;
-    for (const auto& label : order_labels) {
-     float max_conf = 0.0F;
-     for (const auto& e : result.entities) {
-       if (e.label == label) max_conf = std::max(max_conf, e.confidence);
-     }
-     scores.push_back(max_conf);
-    }
     std::vector<float> probs = Softmax(scores);
     size_t argmax = 0;
     for (size_t j = 1; j < probs.size(); ++j) {
@@ -1214,9 +1339,9 @@ ApiServer::DispatchResult ApiServer::handle_systemone_permute(
 // question in its own NER call (N passes). Response shape matches /v1/systemone.
 ApiServer::DispatchResult ApiServer::handle_systemone_separate(
     const std::string& request_body) const {
-  if (!ner_) {
+  if (!ner_ && !decision_) {
     return MakeError(500, "InternalServerError",
-                    "The model does not support NER");
+                    "The model does not support SystemOne");
   }
   nlohmann::json body;
   try {
@@ -1234,10 +1359,17 @@ ApiServer::DispatchResult ApiServer::handle_systemone_separate(
     nlohmann::json answers = nlohmann::json::object();
     int64_t total_tokens = 0;
     for (const auto& q : parsed.questions) {
-     const NerResult result = ner_(parsed.text, q.labels, parsed.threshold,
-                                   parsed.max_width);
-     total_tokens += result.prompt_tokens;
-     answers[q.id] = BuildSystemOneAnswer(q, result);
+     if (decision_) {
+       auto dr = decision_(parsed.text, q.type, q.instructions,
+                           RenderDecisionOptions(q));
+       total_tokens += dr.prompt_tokens;
+       answers[q.id] = BuildSystemOneAnswerDecision(q, dr);
+     } else {
+       const NerResult result = ner_(parsed.text, q.labels, parsed.threshold,
+                                     parsed.max_width);
+       total_tokens += result.prompt_tokens;
+       answers[q.id] = BuildSystemOneAnswer(q, result);
+     }
     }
     auto end = std::chrono::steady_clock::now();
     double latency_ms =
@@ -1875,7 +2007,10 @@ void ApiServer::register_routes() {
                               httplib::Response& res) {
                   write(handle_ner(req.body), res);
                 });
-    // kev / System One-compatible endpoints (same NER callback).
+  }
+  if (ner_ || decision_) {
+    // kev / System One-compatible endpoints. Backed by NER (GLiNER2.5) or
+    // decision (Laya) -- the handlers route to the correct callback.
     server.Post("/v1/systemone",
                 [this, write](const httplib::Request& req,
                               httplib::Response& res) {
