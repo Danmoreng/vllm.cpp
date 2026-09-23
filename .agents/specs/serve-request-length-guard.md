@@ -400,6 +400,24 @@ vocabulary, and it cannot refuse a prompt that could fit. This row's
 instead of `max_input_tokens`, so it is looser by the requested output tokens
 and can never bind below vLLM's.
 
+### How the derived bound compares with vLLM's
+
+| Factor | vLLM at `e126687a9a` | Ours | Why ours cannot bind below vLLM's |
+|---|---|---|---|
+| per-token length | `max_chars_per_token`, the longest vocabulary entry in CHARACTERS, computed once at tokenizer load (`vllm/tokenizers/hf.py:131`) | `vllm::tok::Tokenizer::MaxTokenBytes()`, the longest stored token text in UTF-8 BYTES, computed once in `FinalizeTables` (`src/vllm/tokenizer/tokenizer.cpp`, `include/vllm/tokenizer/tokenizer.h`) | the prompt is measured in bytes too, and this row's `## Design` argues the stored text over-estimates the decoded bytes per token on both tokenizer families |
+| token budget | `max_input_tokens = max_model_len - requested output tokens` (`params.py:204-210`) | `max_model_len` | larger by the requested output tokens |
+| status | `VLLMValidationError`, a `VLLMClientError` (`vllm/exceptions.py:19-27`), mapped to 400 (`error_response.py:39-41`) | 400 `BadRequestError` | equal |
+| message | the `_text_len_check` text above | this row's own byte message (`### The error shape`) | not a bound question. The message difference is recorded in `ISSUE-LOCAL-01M37A43C0XFW3PAYV1399HFAE` with the token-refusal one, so the two text mirrors land together |
+
+**No fixed absolute ceiling is added.** The only absolute one is httplib's
+100 MB `CPPHTTPLIB_PAYLOAD_MAX_LENGTH` on the whole body, which this change
+does not touch. It can bind below the derived bound only when
+`max_model_len * MaxTokenBytes()` exceeds 100 MB, for example a
+1,048,576-token context with 256-byte tokens, and then only for a prompt that
+averages more than about 100 bytes per token. Ordinary text averages about
+four. It is a transport limit that predates this row, not a prompt policy, and
+it is named here so that nobody reads it as one.
+
 ### Design
 
 - **The default is unset, and unset means no fixed cap.** The pre-tokenization
@@ -482,6 +500,37 @@ because `docs/ENVIRONMENT.md` changes. No GPU and no lease.
 - Stop with `NEEDS_DECISION` if removing the default would leave any text
   route without a pre-tokenization bound.
 - Stop if the fix needs a change to `ValidatePromptLen`.
+
+### Evidence, recorded on the branch
+
+CPU build, `cmake -S . -B build -G Ninja -DVLLM_CPP_BUILD_TESTS=ON
+-DVLLM_CPP_BUILD_EXAMPLES=OFF`, `ninja -C build -j 4`. The focused command is
+`test_openai_api_server -tc="api_server: the chat prompt cap never refuses what
+the context holds"`, run with `VT_SERVER_MAX_PROMPT_CHARS` removed from the
+environment.
+
+| stage | commit | cases | assertions | `Status:` | exit |
+|---|---|---:|---:|---|---:|
+| RED, production code unchanged | `efe6ed9b6` | 1 | 53, **11 failed** | `FAILURE!` | **1** |
+| GREEN | `1cb56af24` | 1 | 55, 0 failed | `SUCCESS!` | 0 |
+| deletion mutation: `serving_chat.cpp` replaced by its `origin/main` bytes, in a scratch worktree | `1cb56af24` + mutation | 1 | 53, **11 failed** | `FAILURE!` | **1** |
+
+The red is the defect: the 204,800-byte, 25-token prompt answered
+`CHECK( 500 == 200 )` with the old `VT_SERVER_MAX_PROMPT_CHARS=200000` message;
+the 33-token prompt answered 500 from the same cap instead of the token
+refusal; the explicit 1000 ceiling answered 500. The 4 MiB subcase passed in
+the red, because the derived byte bound already refuses it first, and it still
+passes. The mutated file hashed `1701e40f...` against `866b2bb7...` for the
+committed file, and the restored file hashed `866b2bb7...` again.
+
+At `1cb56af24` the serving and tokenizer suites are green, each run as its own
+executable: `test_openai_api_server` 99 cases / 1397 assertions,
+`test_openai_conformance` 23 / 252, `test_openai_serving` 48 / 1365,
+`test_openai_serving_chat_stream` 2 / 210, `test_openai_protocol` 37 / 269,
+`test_bpe` 29 / 1009, `test_bpe_equivalence` 2 / 334, all `SUCCESS!`, exit 0.
+`scripts/check-env-doc.py` reports the same three undocumented variables it
+reports on `origin/main` (`VT_CUDA_ALLOC_STATS`, `VT_V4_W32_COLS`,
+`VT_V4_W32_WARPS`) and no new one.
 
 ## Outcome
 
