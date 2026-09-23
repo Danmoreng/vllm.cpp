@@ -171,7 +171,8 @@ Red first, through the production constructor
    it cannot. The refusal and the allocator agree at the boundary. This case
    calls the allocator directly instead of running the request through the
    runner, because a max-length speculative request trips a separate
-   block-table overflow (`ISSUE-LOCAL-01M36YFXAHPXMCFAGWQABT6KCE`, `## Owed`).
+   block-table overflow (`ISSUE-LOCAL-01M36YFXAHPXMCFAGWQABT6KCE`, since fixed
+   by `FIX-BLOCK-TABLE-ROW-WIDTH`).
 3. The same boundary for a two-group model (no speculative config), with the
    max-length request served to completion through the engine within a
    deadline.
@@ -215,13 +216,6 @@ before and after.
   at upstream geometry. This row counts the claim correctly and does not
   change it. Moving the block size is a shared-seam change across every hybrid
   registry and needs a developer decision.
-- `ISSUE-LOCAL-01M36YFXAHPXMCFAGWQABT6KCE`: the runner sizes every group's
-  block-table row at `cdiv(max_model_len, block_size)`, while vLLM sizes a
-  Mamba group's row from `MambaSpec.max_num_blocks_per_req`, which includes
-  `+ k`. A speculative request whose GDN claim exceeds the row writes past it
-  on the host. This row found it on the CPU tier (the DFlash2 fixture aborts
-  with `free(): invalid pointer` from 93 prompt tokens at `max_model_len 128`)
-  and does not fix it, because the fix is in the shared worker seam.
 - A pure recurrent model has `KVBytesPerBlock == 0`, and the check is skipped for
   it as before. Its Mamba group still claims pool blocks.
 
@@ -230,9 +224,9 @@ before and after.
 `DONE`. The startup check counts one `max_model_len` request across every KV
 cache group and reserves the null block, so a pool that cannot hold that request
 is refused at load with vLLM's message instead of admitting the request and never
-scheduling it. The two defects under `## Owed` stay open: the block-table row
-overflow is being fixed on its own row, and the GDN block size waits on a
-developer decision.
+scheduling it. The block-table row overflow this row found
+(`ISSUE-LOCAL-01M36YFXAHPXMCFAGWQABT6KCE`) is fixed by `FIX-BLOCK-TABLE-ROW-WIDTH`.
+The GDN block size under `## Owed` stays open and waits on a developer decision.
 
 ## Outcome
 
