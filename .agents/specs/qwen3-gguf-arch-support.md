@@ -241,8 +241,10 @@ Add one entry:
 
 ## Gates
 
-1. **Token-exact** — vllm.cpp Q4_K_M output matches llama.cpp Q4_K_M
-   output on all 6 prompts. This is the primary gate.
+1. **Token-exact** — vllm.cpp Q4_K_M output matches the PRIMARY oracle
+   (vLLM eager-mode) on all 6 prompts. The gate denominator is vLLM, not
+   llama.cpp. See Evidence below for why llama.cpp cannot serve as the
+   denominator.
 2. **Build** — clean CPU build with `-Werror`, 0 warnings.
 3. **Existing tests** — full CPU `ctest` green (no regressions in
    existing qwen3 safetensors tests).
@@ -251,10 +253,93 @@ Add one entry:
 
 - llama.cpp Q4_K_M output: captured on Strix, all 6 prompts, `b10451`
   pin, sha256-verified model file.
-- vllm.cpp BF16 output: captured on Strix, all 6 prompts (partial gate,
-   not token-exact due to quantization difference).
-- The qwen3 GGUF arm closes the quantization gap: same Q4_K_M file on
-  both sides.
+- vllm.cpp Q4_K_M GGUF output: captured on devbox (CPU-only), all 6
+  prompts, same Q4_K_M file. Fed the same `ORACLE_PROMPT_IDS` as
+  `gen_rocm.py` via `vllm_complete_tokens` (ABI v13). All 6 prompts
+  generated 48 tokens.
+- CPU-only diagnostic (devbox, g++ 13.3): 3/6 exact token matches vs
+  llama.cpp. Identical match/mismatch pattern to Strix HIP — the HIP
+  backend introduces no additional error.
+- vllm.cpp token IDs for all 6 oracle prompts recorded and ready for
+  comparison once vLLM is rebuilt on Strix.
+
+### Root cause of 3/6 mismatches
+
+The Qwen3-4B Q4_K_M GGUF file carries heterogeneous quantization per tensor:
+
+| Tensor | ggml type |
+|---|---|
+| `attn_q.weight` | Q4_K |
+| `attn_k.weight` | Q4_K |
+| `attn_v.weight` | Q6_K |
+| `ffn_gate.weight` | Q4_K |
+| `ffn_up.weight` | Q4_K |
+| `ffn_down.weight` | Q6_K |
+
+The loader (`qwen3_gguf_weights.cpp:471`) forces ALL merged weights through
+`NoKeepQuant(pol)` — bf16 expansion — because merged qkv_proj has
+heterogeneous types (Q4_K q/k + Q6_K v) that cannot share one block dtype.
+This also forces the homogeneous gate_up_proj (Q4_K + Q4_K) through bf16
+expansion unnecessarily.
+
+llama.cpp runs each tensor separately with native Q4_K/Q6_K dot products
+(dequantize to fp32 on the fly, accumulate in fp32). The bf16 expansion path
+(dequantize to bf16, then bf16 GEMM) loses precision in the dequantization
+step, causing greedy argmax to diverge on near-tied logits.
+
+Q4_K_S (homogeneous Q4_K) is not available on HuggingFace for Qwen3-4B, so a
+homogeneous-quant control test is not possible with published artifacts.
+
+### vLLM is the primary oracle and it diverges from llama.cpp too
+
+The Qwen3.8-27B three-way comparison
+(`docs/bench-evidence/oracle-vllm-gfx1151-20260903.md`) measured:
+
+| Comparison | Divergences |
+|---|---|
+| vLLM eager vs llama.cpp | 4/6 |
+| vLLM compiled vs llama.cpp | 3/6 |
+| vllm.cpp vs llama.cpp | 3/6 |
+| vllm.cpp vs vLLM (compiled) | 5/6 |
+
+vLLM (the PRIMARY oracle) diverges from llama.cpp (the SECONDARY oracle) at
+the same rate as vllm.cpp does. A gate whose denominator the reference
+implementation does not satisfy is measuring the denominator, not the arm
+under gate.
+
+The root cause is the same on all three engines: Q4_K_M's heterogeneous
+quantization (Q4_K + Q6_K) forces bf16 expansion for merged weights in both
+vLLM and vllm.cpp, while llama.cpp uses native quantized dot products. The
+bf16 path loses precision, causing greedy argmax to diverge on near-tied
+logits.
+
+### LoadMerged port: implemented, tested, abandoned
+
+The `LoadMerged` pattern from `muse_glimmer_gguf_weights.cpp:255-345` was
+ported to the Qwen3 GGUF loader on branch
+`row/BACKEND-GATE-ROCM-SGLANG-q4-keepquant`. `LoadMerged` keeps homogeneous
+shards (gate_up_proj Q4_K+Q4_K) on the keep-quant path and only expands
+heterogeneous shards (qkv_proj Q4_K+Q6_K) to bf16.
+
+Result: 3/6 matches — same count as without `LoadMerged`. The mismatch
+pattern shifted (prompt 2 MISMATCH to MATCH, prompts 1 and 3 MATCH to
+MISMATCH), proving the keep-quant path activated, but the overall count did
+not improve.
+
+More importantly, vLLM ALWAYS expands merged weights to bf16 for Q4_K_M —
+even homogeneous shards. `LoadMerged` makes vllm.cpp take a different
+dequantization path from the primary oracle. The port is abandoned.
+
+### Next step
+
+The correct gate is vLLM eager-mode vs vllm.cpp on Qwen3-4B-Q4_K_M, same
+6 prompts, same `ORACLE_PROMPT_IDS`. The vLLM installation on Strix was
+lost (the `/workspace` venv was cleaned between sessions). Rebuilding vLLM
+on Strix is a multi-hour effort. The vllm.cpp token IDs for all 6 oracle
+prompts are captured and ready for comparison.
+
+The gate gap stays open. The next traceable step is rebuilding vLLM on
+Strix and running `gen_rocm.py` with Qwen3-4B-Q4_K_M.
 
 ## Stop conditions
 
