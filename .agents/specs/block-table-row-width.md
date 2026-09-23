@@ -193,13 +193,8 @@ from the runner's `InputBatch` construction, rebuild, and show that tests 1 and
 
 ## Owed
 
-- `ISSUE-LOCAL-01M36XJNF0TRNZBH7GYCW756AQ`: the GDN group in `none` mode is
-  built at the attention block size instead of `max_model_len`
-  (`config.py:657`). This row's `none` width, `cdiv(max_len, block_size) + k`,
-  holds the claim at that block size and becomes upstream's `1 + k` when the
-  block size moves. `FIX-KV-POOL-MIN-FIT` filed the issue and lists it under its
-  own `## Owed` on its branch. This branch carries the same file so that the
-  reference resolves. When both rows land, one `## Owed` bullet must go.
+Nothing owed by this row. The GDN block size that this row's `none` width
+accommodates is owned under `## Owed` in `.agents/specs/kv-pool-min-fit.md`.
 
 ## Now
 
