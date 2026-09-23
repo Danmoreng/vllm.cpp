@@ -1,0 +1,98 @@
+#pragma once
+#include <sycl/sycl.hpp>
+#include "vt/backend.h"
+#include "vt/tensor.h"
+#include "vt/ops.h"
+#include <algorithm>
+#include <initializer_list>
+
+namespace vt::xpu {
+// All kernels use the queue's owning context. No ambient/default SYCL queue.
+sycl::queue& NativeQueue(Queue& q);
+
+// Trivially copyable kernel argument; never capture Tensor's optional metadata.
+struct View {
+  void* data;
+  DType dtype;
+  int rank;
+  int64_t shape[kMaxRank], stride[kMaxRank];
+  explicit View(const Tensor& t) : data(t.data), dtype(t.dtype), rank(t.rank) {
+    for (int i = 0; i < kMaxRank; ++i) { shape[i] = t.shape[i]; stride[i] = t.stride[i]; }
+  }
+  int64_t offset(int64_t linear) const {
+    int64_t result = 0;
+    for (int d = rank - 1; d >= 0; --d) { result += (linear % shape[d]) * stride[d]; linear /= shape[d]; }
+    return result;
+  }
+};
+inline uint16_t Bf16(float f) {
+  uint32_t u = sycl::bit_cast<uint32_t>(f);
+  if ((u & 0x7f800000) == 0x7f800000 && (u & 0x7fffff)) return (u >> 16) | 0x40;
+  return (u + 0x7fff + ((u >> 16) & 1)) >> 16;
+}
+inline float Load(View t, int64_t offset) {
+  if (t.dtype == DType::kF32) return static_cast<const float*>(t.data)[offset];
+  if (t.dtype == DType::kF16) return static_cast<float>(static_cast<const sycl::half*>(t.data)[offset]);
+  return sycl::bit_cast<float>(uint32_t(static_cast<const uint16_t*>(t.data)[offset]) << 16);
+}
+inline void Store(View t, int64_t offset, float f) {
+  if (t.dtype == DType::kF32) static_cast<float*>(t.data)[offset] = f;
+  else if (t.dtype == DType::kF16) static_cast<sycl::half*>(t.data)[offset] = sycl::half(f);
+  else static_cast<uint16_t*>(t.data)[offset] = Bf16(f);
+}
+inline float Round(DType d, float f) {
+  if (d == DType::kF16) return static_cast<float>(sycl::half(f));
+  if (d == DType::kBF16) return sycl::bit_cast<float>(uint32_t(Bf16(f)) << 16);
+  return f;
+}
+inline void FloatTensor(const Tensor& t) {
+  VT_CHECK(t.dtype == DType::kF32 || t.dtype == DType::kF16 || t.dtype == DType::kBF16,
+           "XPU operator requires F16/BF16/F32 storage");
+}
+inline size_t Span(const Tensor& t) {
+  if (t.Numel() == 0) return 0;
+  size_t elements = 1;
+  for (int i = 0; i < t.rank; ++i) {
+    VT_CHECK(t.shape[i] >= 0 && t.stride[i] >= 0, "XPU requires nonnegative shape/stride");
+    VT_CHECK(t.shape[i] <= 1 || static_cast<uint64_t>(t.stride[i]) <=
+                 (SIZE_MAX - elements) / static_cast<uint64_t>(t.shape[i] - 1), "XPU span overflow");
+    elements += (t.shape[i] - 1) * t.stride[i];
+  }
+  VT_CHECK(elements <= SIZE_MAX / SizeOf(t.dtype), "XPU byte span overflow");
+  return elements * SizeOf(t.dtype);
+}
+inline bool Overlap(const Tensor& a, const Tensor& b) {
+  const auto ap = reinterpret_cast<uintptr_t>(a.data), bp = reinterpret_cast<uintptr_t>(b.data);
+  const auto as = Span(a), bs = Span(b);
+  return as && bs && (ap <= bp ? bp - ap < as : ap - bp < bs);
+}
+class Scratch {
+  Device device_;
+ public:
+  void* data;
+  Scratch(Device d, size_t bytes) : device_(d), data(vt::Alloc(d, std::max(bytes, size_t{1}))) {}
+  Scratch(const Scratch&) = delete;
+  Scratch& operator=(const Scratch&) = delete;
+  ~Scratch() { try { vt::Free(device_, data); } catch (...) { /* backend retains failed-wait allocations */ } }
+};
+// The correctness path snapshots only when the output could clobber an input.
+// Temporary releases drain their final kernel/copy use through Backend::Free.
+template<class Launch>
+void WithOutput(Queue& q, Tensor& out, std::initializer_list<const Tensor*> inputs, Launch launch,
+                bool preserve = false) {
+  bool alias = false;
+  for (const auto* in : inputs) if (in && Overlap(out, *in)) alias = true;
+  if (!alias) { launch(out); return; }
+  VT_CHECK(static_cast<uint64_t>(out.Numel()) <= SIZE_MAX / SizeOf(out.dtype), "XPU scratch size overflow");
+  Scratch scratch(q.device, static_cast<size_t>(out.Numel()) * SizeOf(out.dtype));
+  Tensor temp = out;
+  temp.data = scratch.data;
+  int64_t stride = 1;
+  for (int d = temp.rank - 1; d >= 0; --d) { temp.stride[d] = stride; stride *= temp.shape[d]; }
+  if (preserve) vt::Copy(q, temp, out);
+  launch(temp);
+  vt::Copy(q, out, temp);
+  // Surface asynchronous failures before the nonthrowing cleanup.
+  GetBackend(q.device).Synchronize(q);
+}
+}  // namespace vt::xpu

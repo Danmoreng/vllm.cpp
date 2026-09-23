@@ -56,6 +56,7 @@ else()
 endif()
 
 option(VLLM_CPP_BUILD_TESTS "Build tests" ON)
+option(VLLM_CPP_XPU "Build the native SYCL/Level Zero XPU backend (requires icpx)" OFF)
 option(VLLM_CPP_BUILD_EXAMPLES "Build examples" ON)
 # The OpenAI HTTP server (M3.1 Task 4) is gated so the core build stays lean when
 # the vendored cpp-httplib transport header is absent. cpp-httplib is a
@@ -1372,6 +1373,7 @@ add_library(vllm STATIC
   src/vt/breakable_graph.cpp
   src/vt/persistent_step_input.cpp
   src/vt/tensor.cpp
+  src/vt/copy.cpp
   src/vt/arena.cpp
   src/vt/op_provider.cpp
   src/vt/communicator.cpp
@@ -1690,6 +1692,31 @@ if(VLLM_CPP_VULKAN)
     # ONE TU's compile time instead of every TU that includes the table.
     src/vt/vulkan/vulkan_spirv.cpp)
   target_link_libraries(vllm PUBLIC ${CMAKE_DL_LIBS})
+endif()
+if(VLLM_CPP_XPU)
+  include(CheckCXXSourceCompiles)
+  set(CMAKE_REQUIRED_FLAGS "-fsycl")
+  check_cxx_source_compiles("#include <sycl/sycl.hpp>\nint main() { sycl::queue q; q.wait(); }"
+    VLLM_CPP_SYCL_COMPILER_WORKS)
+  unset(CMAKE_REQUIRED_FLAGS)
+  if(NOT VLLM_CPP_SYCL_COMPILER_WORKS)
+    message(FATAL_ERROR "VLLM_CPP_XPU=ON requires a SYCL compiler/runtime. Configure with -DCMAKE_CXX_COMPILER=icpx.")
+  endif()
+  add_library(vllm_xpu_backend OBJECT src/vt/xpu/xpu_backend.cpp)
+  add_library(vllm_xpu OBJECT
+    src/vt/xpu/xpu_elementwise.cpp src/vt/xpu/xpu_norm.cpp
+    src/vt/xpu/xpu_sampling.cpp src/vt/xpu/xpu_ops.cpp)
+  foreach(xpu_target vllm_xpu vllm_xpu_backend)
+    set_target_properties(${xpu_target} PROPERTIES POSITION_INDEPENDENT_CODE ON)
+    target_include_directories(${xpu_target} PRIVATE include src)
+    target_include_directories(${xpu_target} SYSTEM PRIVATE third_party)
+    target_compile_options(${xpu_target} PRIVATE -fsycl)
+    vllm_cpp_set_warnings(${xpu_target})
+  endforeach()
+  target_sources(vllm PRIVATE $<TARGET_OBJECTS:vllm_xpu> $<TARGET_OBJECTS:vllm_xpu_backend>
+    src/vllm/platforms/xpu.cpp)
+  target_compile_definitions(vllm PUBLIC VLLM_CPP_XPU)
+  target_link_options(vllm PUBLIC -fsycl)
 endif()
 if(NOT WIN32)
   # The persistent cache is also exercised by CPU-only NVFP4 emulation. Its
