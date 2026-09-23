@@ -1,14 +1,14 @@
 ID: ISSUE-LOCAL-01M36QVG0KGKEP4MSMKT18MMZ4
 Title: engine: a request the hybrid KV pool can never hold waits forever instead of being refused
 Row: FIX-KV-POOL-MIN-FIT
-State: OPEN
+State: CLOSED
 Kind: bug
 GitHub: -
 Mirror: PENDING
 Availability: FULL
 Created: 2026-09-23
 Updated: 2026-09-23
-Closed: -
+Closed: 2026-09-23
 
 ## Problem
 
@@ -16,4 +16,4 @@ On Qwen3.8-27B EXL3 with a DFlash2 draft (tree d4738d241, dgx:gpu0, leases 55f02
 
 ## Resolution
 
--
+2026-09-23, row/FIX-KV-POOL-MIN-FIT. LoadedEngine::ResolveMaxModelLen now refuses at startup, with vLLM's message, a pool that cannot hold one max_model_len request counted over EVERY KV cache group plus the null block (vllm/v1/core/kv_cache_utils.py:2029-2058, :2304-2327, :830-867 @ e126687a9a); the unpinned auto-fit counts the same way. vLLM's scheduler raises nothing for an unplaceable request (scheduler.py:1091-1098), so the startup check is the whole guard, as upstream. Red on the pre-fix tree (test_kv_pool_min_fit): the DFlash2 three-group engine at 15 blocks for max_model_len 128 constructed and its 127-token request gave NO OUTPUT within 60s; auto-fit chose 128 where 96 fits. Green after: 4/4 cases, 16 assertions; test_kv_cache_utils 40/40; the 107 affected CPU test targets pass (test_qwen35_paged_engine skipped for weights). Deleting the production check call reds the case. Two related defects are filed, not fixed: ISSUE-LOCAL-01M36XJNF0TRNZBH7GYCW756AQ (GDN none-mode block size) and ISSUE-LOCAL-01M36YFXAHPXMCFAGWQABT6KCE (GDN block-table row overflow).

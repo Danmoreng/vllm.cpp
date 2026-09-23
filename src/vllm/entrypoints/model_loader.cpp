@@ -1954,28 +1954,32 @@ int LoadedEngine::ResolveMaxNumSeqs(const EngineParams& params,
 int LoadedEngine::ResolveMaxModelLen(const EngineParams& params,
                                      const HfConfig& config,
                                      const vllm::v1::KVCacheConfig& kv_cfg,
-                                     int block_size) {
-  // kv_cache_utils.py:2160-2174 @ 555967922. See model_loader.h for the two
+                                     int block_size, bool is_dense_arch) {
+  // kv_cache_utils.py:2304-2327 @ e126687a9a. See model_loader.h for the two
   // arms and why this post-condition matters.
+  //
+  // FIX-KV-POOL-MIN-FIT (ISSUE-LOCAL-01M36QVG0KGKEP4MSMKT18MMZ4): both arms
+  // count ONE max-length request over EVERY KV cache group and reserve the null
+  // block, because that is what the scheduler's allocator claims: one block
+  // table per group, all drawn from this one pool. The one-table count this
+  // replaced accepted a Qwen3.5 speculative pool (`fa`, `gdn`, `fa_draft`) at a
+  // third of its need, and the admitted max-length request then waited forever.
+  (void)block_size;  // each group's spec carries its own block size
   const int64_t bytes_per_block = vllm::v1::KVBytesPerBlock(kv_cfg);
   const int64_t available =
       static_cast<int64_t>(kv_cfg.num_blocks) * bytes_per_block;
 
   if (params.max_model_len > 0) {
-    // The caller pinned a length. Refuse if the pool cannot serve it — UNLESS
-    // there is no paged KV to size at all. kv_cache_utils.py:872-878 guards the
-    // whole check with `if kv_cache_spec:` for exactly this: an attention-free
-    // model (and, here, a pure Mamba/GDN one, whose state is sized per sequence
-    // slot rather than per block, so KVBytesPerBlock is 0) has nothing to run
-    // out of, and checking it would refuse a configuration that works.
-    if (bytes_per_block > 0) {
-      const int64_t needed = vllm::v1::kv_memory_needed_bytes(
-          params.max_model_len, block_size, bytes_per_block);
-      vllm::v1::check_enough_kv_cache_memory(
-          available, needed, params.max_model_len,
-          vllm::v1::estimate_max_model_len(available, bytes_per_block,
-                                           block_size));
-    }
+    // The caller pinned a length. Refuse if the pool cannot serve it. A config
+    // with no paged KV (attention-free, or pure Mamba/GDN, where
+    // KVBytesPerBlock is 0) has nothing to run out of and is never refused,
+    // which is upstream's `if kv_cache_spec:` (kv_cache_utils.py:950).
+    // `max_num_batched_tokens` is the value the scheduler's managers get, so
+    // a sliding-window count here is the count their admission cap uses.
+    vllm::v1::check_enough_kv_cache_memory(
+        kv_cfg, available, params.max_model_len,
+        ResolveMaxNumBatchedTokens(params, params.max_model_len,
+                                   is_dense_arch));
     return params.max_model_len;
   }
 
@@ -1986,16 +1990,22 @@ int LoadedEngine::ResolveMaxModelLen(const EngineParams& params,
     // and it is not this function's job to invent one.
     return static_cast<int>(derived);
   }
+  // The batched-token budget at the DERIVED length. The budget can only shrink
+  // at a shorter length, so a fitted length is never one the scheduler's
+  // admission cap would refuse.
   const int64_t fitted = vllm::v1::auto_fit_max_model_len(
-      derived, available, bytes_per_block, block_size);
+      kv_cfg, available, derived,
+      ResolveMaxNumBatchedTokens(params, static_cast<int>(derived),
+                                 is_dense_arch));
   if (fitted < derived) {
-    // kv_cache_utils.py:2021-2027 logs the reduction. Silence here would make a
+    // kv_cache_utils.py:2150-2157 logs the reduction. Silence here would make a
     // shortened context look like a model-config surprise later.
     std::cerr << "INFO auto-fit max_model_len: reduced from " << derived
               << " to " << fitted << " to fit the KV cache ("
-              << kv_cfg.num_blocks << " blocks x " << block_size
-              << " tokens). Raise --num-blocks / --kv-cache-memory for a longer"
-                 " context.\n";
+              << kv_cfg.num_blocks << " blocks, one of them the null block, "
+              << "shared by " << kv_cfg.kv_cache_groups.size()
+              << " KV cache groups). Raise --num-blocks / --kv-cache-memory for "
+                 "a longer context.\n";
     std::cerr.flush();
   }
   return static_cast<int>(fitted);
@@ -2183,7 +2193,8 @@ LoadedEngine::LoadedEngine(HfConfig config,
                                   resolved_spec_config_)),
       // The serving length, checked (pinned) or auto-fitted (unpinned) against
       // kv_cfg_. See ResolveMaxModelLen.
-      max_model_len_(ResolveMaxModelLen(params, config_, kv_cfg_, block_size_)),
+      max_model_len_(ResolveMaxModelLen(params, config_, kv_cfg_, block_size_,
+                                        ModelRegistry::IsDenseModel(*model_))),
       // The serving concurrency, clamped to the recurrent-state budget the KV
       // pool affords. See ResolveMaxNumSeqs (issue #1983).
       max_num_seqs_(ResolveMaxNumSeqs(

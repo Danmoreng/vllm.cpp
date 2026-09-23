@@ -930,44 +930,124 @@ TEST_CASE("unify_hybrid_kv_cache_specs rejects an unconvertible mixed policy") {
 }
 
 // ---------------------------------------------------------------------------
-// Startup KV sizing: kv_memory_needed_bytes / estimate_max_model_len /
-// check_enough_kv_cache_memory / auto_fit_max_model_len.
-// Ported from vllm/v1/core/kv_cache_utils.py @ 555967922 (:751-788, :791-798,
-// :800-851, :1967-2027). Issue #83 M4; the guard external PR #227 needed.
+// Startup KV sizing: max_blocks_per_request / max_memory_usage_bytes_from_groups
+// / estimate_max_model_len_from_groups / check_enough_kv_cache_memory /
+// auto_fit_max_model_len.
+// Ported from vllm/v1/core/kv_cache_utils.py @ 555967922 (:751-788) and, per
+// GROUP, @ e126687a9a (:933-967, :2029-2157, :2304-2327). Issue #83 M4; the
+// guard external PR #227 needed; FIX-KV-POOL-MIN-FIT
+// (ISSUE-LOCAL-01M36QVG0KGKEP4MSMKT18MMZ4) for the per-group sum and the null
+// block.
 // ---------------------------------------------------------------------------
-TEST_CASE("kv_memory_needed_bytes rounds up to whole blocks") {
-  // max_memory_usage_bytes (:791-798): blocks are allocated whole.
-  CHECK(vllm::v1::kv_memory_needed_bytes(/*max_model_len=*/32, /*block_size=*/32,
-                                         /*bytes_per_block=*/100) == 100);
-  CHECK(vllm::v1::kv_memory_needed_bytes(33, 32, 100) == 200);
-  CHECK(vllm::v1::kv_memory_needed_bytes(64, 32, 100) == 200);
-  CHECK(vllm::v1::kv_memory_needed_bytes(1, 32, 100) == 100);
-  // Degenerate inputs need no KV rather than dividing by zero.
-  CHECK(vllm::v1::kv_memory_needed_bytes(0, 32, 100) == 0);
-  CHECK(vllm::v1::kv_memory_needed_bytes(64, 32, 0) == 0);
+namespace {
+
+// Upstream `new_kv_cache_spec()` (tests/v1/core/test_kv_cache_utils.py):
+// block_size 16, 2 KV heads, head_size 64, float32 -> a 16384-byte page.
+std::shared_ptr<FullAttentionSpec> NewKvCacheSpec(int block_size = 16) {
+  return std::make_shared<FullAttentionSpec>(block_size, /*num_kv_heads=*/2,
+                                             /*head_size=*/64, vt::DType::kF32);
 }
 
-TEST_CASE("estimate_max_model_len is the longest sequence the pool holds") {
-  // estimate_max_model_len (:800-851). Upstream binary-searches the same
-  // predicate; ours is the closed form, so the two must agree at the boundary:
-  // the answer is a whole number of blocks and never overshoots.
-  CHECK(vllm::v1::estimate_max_model_len(/*available_memory=*/1000,
-                                         /*bytes_per_block=*/100,
-                                         /*block_size=*/32) == 320);
-  // A partial block buys nothing.
-  CHECK(vllm::v1::estimate_max_model_len(1099, 100, 32) == 320);
-  CHECK(vllm::v1::estimate_max_model_len(1100, 100, 32) == 352);
-  // Not even one block: 0, which suppresses the "estimated maximum" clause.
-  CHECK(vllm::v1::estimate_max_model_len(99, 100, 32) == 0);
-  CHECK(vllm::v1::estimate_max_model_len(0, 100, 32) == 0);
+// Upstream `new_mamba_spec()`: shapes ((2, 512), (3, 32, 32)), float32.
+std::shared_ptr<MambaSpec> NewMambaSpec(int block_size, int num_speculative_blocks,
+                                        const std::string& mode = "none") {
+  return std::make_shared<MambaSpec>(
+      block_size, std::vector<std::vector<int64_t>>{{2, 512}, {3, 32, 32}},
+      std::vector<vt::DType>{vt::DType::kF32, vt::DType::kF32},
+      /*page_size_padded=*/std::nullopt, mode, num_speculative_blocks);
+}
 
-  // Agreement with the predicate it stands in for, across the grid.
-  for (int64_t available = 0; available <= 1000; available += 37) {
-    const int64_t est = vllm::v1::estimate_max_model_len(available, 100, 32);
-    CHECK(vllm::v1::kv_memory_needed_bytes(est, 32, 100) <= available);
-    // One token more must NOT fit (unless nothing fit at all).
+vllm::v1::KVCacheConfig OneLayerPerGroup(
+    std::vector<std::shared_ptr<KVCacheSpec>> specs, int num_blocks = 0) {
+  vllm::v1::KVCacheConfig cfg{};
+  cfg.num_blocks = num_blocks;
+  int i = 0;
+  for (auto& spec : specs) {
+    cfg.kv_cache_groups.emplace_back(
+        std::vector<std::string>{"model.layers." + std::to_string(i++) + ".attn"},
+        std::move(spec));
+  }
+  return cfg;
+}
+
+constexpr int64_t kPage = 16 * 2 * 64 * 4 * 2;  // upstream mem_per_block_per_layer
+
+}  // namespace
+
+TEST_CASE("max_blocks_per_request mirrors each spec kind's per-request usage") {
+  // FullAttentionSpec.max_memory_usage_bytes (kv_cache_interface.py:464-469):
+  // whole blocks.
+  const auto full = NewKvCacheSpec(32);
+  CHECK(vllm::v1::max_blocks_per_request(*full, 32, 2048) == 1);
+  CHECK(vllm::v1::max_blocks_per_request(*full, 33, 2048) == 2);
+  CHECK(vllm::v1::max_blocks_per_request(*full, 64, 2048) == 2);
+  CHECK(vllm::v1::max_blocks_per_request(*full, 1, 2048) == 1);
+  CHECK(vllm::v1::max_blocks_per_request(*full, 0, 2048) == 0);
+
+  // SlidingWindowSpec (:704-738): the admission-cap function, window-bounded.
+  const SlidingWindowSpec swa(16, 2, 64, vt::DType::kF32, /*sliding_window=*/64);
+  CHECK(vllm::v1::max_blocks_per_request(swa, 8192, 32) ==
+        swa.max_admission_blocks_per_request(32, 8192));
+  CHECK(vllm::v1::max_blocks_per_request(swa, 8192, 32) == (64 - 1 + 32 + 15) / 16 + 1);
+  CHECK(vllm::v1::max_blocks_per_request(swa, 16, 32) == 2);  // min(.., len) + 1
+
+  // MambaSpec (:883-894). `align`: 2 + k.
+  CHECK(vllm::v1::max_blocks_per_request(*NewMambaSpec(16, 2, "align"), 8192, 2048) ==
+        4);
+  // `none` at upstream's resolved geometry (block_size = max_model_len,
+  // config.py:657) is upstream's `1 + k`...
+  CHECK(vllm::v1::max_blocks_per_request(*NewMambaSpec(8192, 2), 8192, 2048) == 3);
+  // ...and at this tree's attention block size it is what MambaManager claims
+  // for a fresh request, cdiv(len + bs*k, bs) = cdiv(len, bs) + k.
+  CHECK(vllm::v1::max_blocks_per_request(*NewMambaSpec(32, 3), 128, 2048) == 4 + 3);
+  CHECK(vllm::v1::max_blocks_per_request(*NewMambaSpec(32, 0), 128, 2048) == 4);
+}
+
+TEST_CASE("max_memory_usage_bytes_from_groups sums EVERY group's blocks") {
+  // _max_memory_usage_bytes_from_groups (kv_cache_utils.py:2029-2058): each
+  // group claims its own blocks from the one pool. A Qwen3.5 speculative shape
+  // (fa, gdn, fa_draft) needs three tables, not one.
+  const auto cfg = OneLayerPerGroup(
+      {NewKvCacheSpec(32), NewMambaSpec(32, 3), NewKvCacheSpec(32)});
+  const int64_t bpb = vllm::v1::KVBytesPerBlock(cfg);
+  REQUIRE(bpb == 2 * kPage * 2);  // two attention layers, 32-token pages
+  CHECK(vllm::v1::max_memory_usage_bytes_from_groups(cfg, 128, 2048) ==
+        bpb * (4 + (4 + 3) + 4));
+  // No paged KV: nothing to size.
+  CHECK(vllm::v1::max_memory_usage_bytes_from_groups(
+            OneLayerPerGroup({NewMambaSpec(32, 3)}), 128, 2048) == 0);
+}
+
+TEST_CASE("estimate_max_model_len_from_groups is the longest length that fits") {
+  // _estimate_max_model_len_from_groups (:2061-2093): upstream's binary search.
+  const auto cfg = OneLayerPerGroup({NewKvCacheSpec(16)});
+  const int64_t bpb = vllm::v1::KVBytesPerBlock(cfg);
+  CHECK(vllm::v1::estimate_max_model_len_from_groups(cfg, bpb * 10, 4096, 2048) ==
+        160);
+  // A partial block buys nothing.
+  CHECK(vllm::v1::estimate_max_model_len_from_groups(cfg, bpb * 10 + bpb - 1, 4096,
+                                                     2048) == 160);
+  // Capped at the length being searched.
+  CHECK(vllm::v1::estimate_max_model_len_from_groups(cfg, bpb * 10, 100, 2048) == 100);
+  // Not even one block: 0, which suppresses the "estimated maximum" clause.
+  CHECK(vllm::v1::estimate_max_model_len_from_groups(cfg, bpb - 1, 4096, 2048) == 0);
+  CHECK(vllm::v1::estimate_max_model_len_from_groups(cfg, 0, 4096, 2048) == 0);
+
+  // Agreement with the predicate it searches, across a grid, on the
+  // three-group shape.
+  const auto spec3 = OneLayerPerGroup(
+      {NewKvCacheSpec(32), NewMambaSpec(32, 3), NewKvCacheSpec(32)});
+  const int64_t bpb3 = vllm::v1::KVBytesPerBlock(spec3);
+  for (int64_t blocks = 0; blocks <= 40; ++blocks) {
+    const int64_t avail = blocks * bpb3;
+    const int64_t est =
+        vllm::v1::estimate_max_model_len_from_groups(spec3, avail, 4096, 2048);
     if (est > 0) {
-      CHECK(vllm::v1::kv_memory_needed_bytes(est + 1, 32, 100) > available);
+      CHECK(vllm::v1::max_memory_usage_bytes_from_groups(spec3, est, 2048) <= avail);
+      CHECK(vllm::v1::max_memory_usage_bytes_from_groups(spec3, est + 1, 2048) >
+            avail);
+    } else {
+      CHECK(vllm::v1::max_memory_usage_bytes_from_groups(spec3, 1, 2048) > avail);
     }
   }
 }
@@ -1024,18 +1104,70 @@ TEST_CASE("check_enough_kv_cache_memory refuses an empty pool by name") {
 }
 
 TEST_CASE("auto_fit_max_model_len reduces the context to what the pool holds") {
-  // :1967-2027. 1000 bytes / 100 per block = 10 blocks x 32 = 320 tokens.
-  CHECK(vllm::v1::auto_fit_max_model_len(/*derived_max_model_len=*/4096,
-                                         /*available_memory=*/1000,
-                                         /*bytes_per_block=*/100,
-                                         /*block_size=*/32) == 320);
-  // The full context fits: keep it (:2012-2017), never round it UP to the pool.
-  CHECK(vllm::v1::auto_fit_max_model_len(128, 1000, 100, 32) == 128);
-  CHECK(vllm::v1::auto_fit_max_model_len(320, 1000, 100, 32) == 320);
-  // Attention-free (no KV bytes at all): nothing to fit against (:1986-1992).
-  CHECK(vllm::v1::auto_fit_max_model_len(4096, 0, 0, 32) == 4096);
-  // Not even one token fits (:2005-2010).
-  CHECK_THROWS_WITH_AS(vllm::v1::auto_fit_max_model_len(4096, 99, 100, 32),
+  // _auto_fit_max_model_len (:2096-2157) after the null-block reservation
+  // (:2304-2311). 11 blocks = 10 usable x 16 = 160 tokens.
+  const auto cfg = OneLayerPerGroup({NewKvCacheSpec(16)});
+  const int64_t bpb = vllm::v1::KVBytesPerBlock(cfg);
+  CHECK(vllm::v1::auto_fit_max_model_len(cfg, bpb * 11, /*derived=*/4096, 2048) ==
+        160);
+  // The full context fits: keep it, never round it UP to the pool.
+  CHECK(vllm::v1::auto_fit_max_model_len(cfg, bpb * 11, 128, 2048) == 128);
+  CHECK(vllm::v1::auto_fit_max_model_len(cfg, bpb * 11, 160, 2048) == 160);
+  // Attention-free (no paged KV at all): nothing to fit against (:2113-2120).
+  CHECK(vllm::v1::auto_fit_max_model_len(vllm::v1::KVCacheConfig{}, 0, 4096, 2048) ==
+        4096);
+  // Only the null block: not even one token fits (:2133-2137).
+  CHECK_THROWS_WITH_AS(vllm::v1::auto_fit_max_model_len(cfg, bpb, 4096, 2048),
                        doctest::Contains("Cannot auto-fit max_model_len"),
                        std::invalid_argument);
+}
+
+// Upstream test_auto_fit_max_model_len_with_hybrid
+// (tests/v1/core/test_kv_cache_utils.py:2754-2776 @ e126687a9a). ADAPTATION,
+// recorded in .agents/specs/kv-pool-min-fit.md: the Mamba spec is built at the
+// block size upstream resolves for `none` mode, `max_model_len`
+// (config.py:657), because this port counts the allocator's claim
+// `cdiv(len, bs) + k`, which is upstream's `1 + k` only at that geometry.
+TEST_CASE("auto_fit_max_model_len with a hybrid (Mamba + attention) config") {
+  const int gamma = 2;
+  const auto cfg =
+      OneLayerPerGroup({NewMambaSpec(/*block_size=*/8192, gamma), NewKvCacheSpec()});
+  REQUIRE(vllm::v1::KVBytesPerBlock(cfg) == kPage);
+  // One extra block on top of what a 1024-token request needs: the pool
+  // reserves one block as the null block.
+  const int64_t available_memory = kPage * (1024 / 16 + 1 + gamma + 1);
+  CHECK(vllm::v1::auto_fit_max_model_len(cfg, available_memory, 8192, 2048) == 1024);
+}
+
+// Upstream test_auto_fit_max_model_len_reserves_null_block (:3189-3207).
+TEST_CASE("auto_fit_max_model_len reserves the null block") {
+  const auto cfg = OneLayerPerGroup({NewKvCacheSpec(16)});
+  // Exactly the 1024 / 16 = 64 blocks a full-length request would need.
+  CHECK(vllm::v1::auto_fit_max_model_len(cfg, kPage * 64, 1024, 2048) == 63 * 16);
+}
+
+// Upstream test_check_enough_kv_cache_memory_reserves_null_block (:3210-3229)
+// and test_kv_cache_reserves_null_block_for_max_model_len (:3164-3186).
+TEST_CASE("check_enough_kv_cache_memory reserves the null block") {
+  const auto cfg = OneLayerPerGroup({NewKvCacheSpec(16)});
+  // 512 / 16 = 32 blocks needed. 32 blocks -> 31 usable: one short -> reject.
+  CHECK_THROWS_WITH_AS(
+      vllm::v1::check_enough_kv_cache_memory(cfg, kPage * 32, 512, 2048),
+      doctest::Contains("max seq len"), std::invalid_argument);
+  // 33 blocks -> 32 usable -> accept.
+  CHECK_NOTHROW(vllm::v1::check_enough_kv_cache_memory(cfg, kPage * 33, 512, 2048));
+}
+
+TEST_CASE("check_enough_kv_cache_memory counts every group of a hybrid config") {
+  // The FIX-KV-POOL-MIN-FIT defect at unit scale: fa + gdn(k=3) + fa_draft at
+  // 128 tokens needs 4 + 7 + 4 = 15 blocks plus the null block.
+  const auto cfg = OneLayerPerGroup(
+      {NewKvCacheSpec(32), NewMambaSpec(32, 3), NewKvCacheSpec(32)});
+  const int64_t bpb = vllm::v1::KVBytesPerBlock(cfg);
+  CHECK_THROWS_WITH_AS(vllm::v1::check_enough_kv_cache_memory(cfg, bpb * 15, 128, 2048),
+                       doctest::Contains("max seq len (128)"), std::invalid_argument);
+  CHECK_NOTHROW(vllm::v1::check_enough_kv_cache_memory(cfg, bpb * 16, 128, 2048));
+  // No paged KV: never refused (upstream's `if kv_cache_spec:`).
+  CHECK_NOTHROW(vllm::v1::check_enough_kv_cache_memory(
+      OneLayerPerGroup({NewMambaSpec(32, 3)}), 0, 128, 2048));
 }

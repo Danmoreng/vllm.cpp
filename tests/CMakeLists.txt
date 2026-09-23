@@ -2334,6 +2334,12 @@ vllm_cpp_add_test(test_loaded_engine_dense vllm/entrypoints/test_loaded_engine_d
 # to src/. A hand-built KVCacheGroupSpec is a shape no registry emits and cannot
 # see the defect, which is exactly why the pre-existing unit coverage missed it.
 target_include_directories(test_loaded_engine_dense PRIVATE ${CMAKE_SOURCE_DIR}/src)
+# FIX-KV-POOL-MIN-FIT (ISSUE-LOCAL-01M36QVG0KGKEP4MSMKT18MMZ4): the startup
+# check that the KV pool holds one max_model_len request counts EVERY KV cache
+# group and the null block. Entered through the production LoadedEngine
+# constructor with the DFlash2 fixture, because the defect needs the
+# three-group (fa, gdn, fa_draft) speculative shape to be seen.
+vllm_cpp_add_test(test_kv_pool_min_fit vllm/entrypoints/test_kv_pool_min_fit.cpp)
 # KV-FP8 W3 (#1593): half-sized KV blocks, --kv-cache-dtype threading and the
 # checkpoint k/v-scale path, entered through the LoadedEngine loader.
 vllm_cpp_add_test(test_kv_cache_fp8_wiring vllm/entrypoints/test_kv_cache_fp8_wiring.cpp)

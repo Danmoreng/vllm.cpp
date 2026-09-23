@@ -165,12 +165,18 @@ Red first, through the production constructor
    pinned `max_model_len` and a pool one block short of the three-group need
    refuses at construction with `max seq len`. On the pre-fix tree it
    constructs. This is the red.
-2. The same engine with one more block constructs and serves a request whose
-   allocation reaches `max_model_len` in one step, to completion, within a
-   deadline. The refusal and the allocator agree at the boundary.
-3. The same boundary for a two-group model (no speculative config).
+2. The same engine with one more block constructs, and the scheduler's own
+   allocator, built from the engine's resolved config and lookahead, places a
+   fresh request whose allocation reaches `max_model_len`. With one block fewer
+   it cannot. The refusal and the allocator agree at the boundary. This case
+   calls the allocator directly instead of running the request through the
+   runner, because a max-length speculative request trips a separate
+   block-table overflow (`ISSUE-LOCAL-01M36YFXAHPXMCFAGWQABT6KCE`, `## Owed`).
+3. The same boundary for a two-group model (no speculative config), with the
+   max-length request served to completion through the engine within a
+   deadline.
 4. An unpinned `max_model_len` auto-fits to a length the three-group pool can
-   serve, and that length is served.
+   hold, and the allocator places a request of that length.
 
 Unit tests ported from upstream into `tests/vllm/v1/test_kv_cache_utils.cpp`:
 
@@ -209,9 +215,22 @@ before and after.
   at upstream geometry. This row counts the claim correctly and does not
   change it. Moving the block size is a shared-seam change across every hybrid
   registry and needs a developer decision.
+- `ISSUE-LOCAL-01M36YFXAHPXMCFAGWQABT6KCE`: the runner sizes every group's
+  block-table row at `cdiv(max_model_len, block_size)`, while vLLM sizes a
+  Mamba group's row from `MambaSpec.max_num_blocks_per_req`, which includes
+  `+ k`. A speculative request whose GDN claim exceeds the row writes past it
+  on the host. This row found it on the CPU tier (the DFlash2 fixture aborts
+  with `free(): invalid pointer` from 93 prompt tokens at `max_model_len 128`)
+  and does not fix it, because the fix is in the shared worker seam.
 - A pure recurrent model has `KVBytesPerBlock == 0`, and the check is skipped for
   it as before. Its Mamba group still claims pool blocks.
 
 ## Now
 
-`ACTIVE` on `row/FIX-KV-POOL-MIN-FIT`.
+`ACTIVE` on `row/FIX-KV-POOL-MIN-FIT`. The implementation and its gates are on
+the branch and wait for a fresh review. Three existing tests configured pools
+the new check refuses, because each held one block table:
+`test_loaded_engine_dense` (1 block), `test_engine_scratch_steady_state` (64
+blocks for 4096 tokens at block size 128) and `test_dflash2_ctx_capacity` (512
+blocks for 6144 tokens with three groups). Each now uses the pool its
+configuration needs.
