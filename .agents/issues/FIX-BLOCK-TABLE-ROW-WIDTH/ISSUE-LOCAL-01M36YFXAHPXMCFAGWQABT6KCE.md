@@ -1,14 +1,14 @@
 ID: ISSUE-LOCAL-01M36YFXAHPXMCFAGWQABT6KCE
 Title: engine: a speculative request near max_model_len writes past its GDN block-table row
-Row: -
-State: OPEN
+Row: FIX-BLOCK-TABLE-ROW-WIDTH
+State: CLOSED
 Kind: bug
 GitHub: -
 Mirror: PENDING
 Availability: FULL
 Created: 2026-09-23
 Updated: 2026-09-23
-Closed: -
+Closed: 2026-09-23
 
 ## Problem
 
@@ -16,4 +16,4 @@ MultiGroupBlockTable sizes every group's row at cdiv(max_model_len, block_size) 
 
 ## Resolution
 
--
+2026-09-23, row FIX-BLOCK-TABLE-ROW-WIDTH (.agents/specs/block-table-row-width.md). The runner now builds each KV cache group's block-table width from the group's spec (block_table_geometry, gpu_model_runner.py:7340-7360 @ e126687a9a): KVCacheSpec::max_num_blocks_per_req is cdiv(max_len, block_size), MambaSpec's is cdiv(max_len, block_size) + num_speculative_blocks (kv_cache_interface.py:896-905, with the recorded none-mode deviation for this tree's GDN block size), and a kNone (Mamba) row is not rounded to 128 tokens (block_table.py:322-331). BlockTable::append_row refuses a write past the row with upstream's 'Block table write for request R, group G exceeds row capacity (end > cap)' before any state changes (gpu/block_table.py:125-131). Red on the unfixed tree: test_block_table_row_width, DFlash2 fixture at max_model_len 128, a 93-token prompt and the 127-token prompt both SIGABRT (glibc 'corrupted size vs. prev_size'). Green: 3/3 cases, 32/32 assertions; the 127-token prompt finishes, its GDN claim equals the 7-block row exactly, and a 128-token prompt gets the input processor's named length refusal. Reachability: with the runner's geometry arguments deleted the two engine cases go red with the named row-capacity error (7 > 4) instead of an abort.

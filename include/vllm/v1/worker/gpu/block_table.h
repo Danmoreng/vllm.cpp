@@ -65,6 +65,44 @@
 
 namespace vllm::v1 {
 
+struct KVCacheConfig;
+
+// FIX-BLOCK-TABLE-ROW-WIDTH (ISSUE-LOCAL-01M36YFXAHPXMCFAGWQABT6KCE): every
+// upstream line anchor from here to the end of BlockTableGeometry, and in the
+// row-capacity check, is at the parity pin e126687a9a.
+// How a cache group maps scheduled tokens to cache slots. (Upstream
+// vllm/v1/worker/block_table.py:52-54 SlotMappingMode.) A Mamba/GDN group is
+// kNone: it reads its block table as recurrent-state indices.
+//
+// FIX-BLOCK-TABLE-ROW-WIDTH deviation (recorded): the mode selects the row
+// width rounding only (block_table.py:322-331). Upstream's compute_slot_mapping
+// also returns early for kNone (block_table.py:208-211); here a kNone group
+// still computes its slot mapping, because prepare_inputs.cpp copies every
+// group's mapping into the step inputs. A position below max_model_len indexes
+// a block below cdiv(max_model_len, block_size), so that read stays in the row.
+enum class SlotMappingMode { kTokenToKvSlot, kNone };
+
+// Upstream get_block_table_width (vllm/v1/worker/block_table.py:29-49): the
+// row width after the optional token alignment and the split into kernel
+// blocks. `token_alignment` nullopt is upstream's None (no rounding). Throws
+// std::invalid_argument where upstream raises ValueError.
+int get_block_table_width(int max_num_blocks, int block_size,
+                          std::optional<int> kernel_block_size = std::nullopt,
+                          std::optional<int> token_alignment = 128);
+
+// The per-group inputs of the worker's block table, built from the KV cache
+// config. (Upstream: the loop at vllm/v1/worker/gpu_model_runner.py:7340-7360,
+// `kv_cache_spec.max_num_blocks_per_req(vllm_config, max_model_len)` and
+// `SlotMappingMode.NONE` for a MAMBA group.) One entry per KV cache group, in
+// group order.
+struct BlockTableGeometry {
+  std::vector<int> block_sizes;
+  std::vector<int> max_num_blocks;
+  std::vector<SlotMappingMode> slot_mapping_modes;
+};
+BlockTableGeometry block_table_geometry(const KVCacheConfig& kv_cache_config,
+                                        int max_model_len);
+
 // The per-request KV-cache block table for a single KV cache group.
 // (Upstream: vllm/v1/worker/block_table.py BlockTable.)
 class BlockTable {
@@ -78,6 +116,10 @@ class BlockTable {
              int cp_kv_cache_interleave_size = 1);
 
   // Append block_ids to row_idx (extends the row from its current length).
+  // A write past the row capacity throws std::runtime_error before any state
+  // changes, with upstream's message ("Block table write for request R, group
+  // G exceeds row capacity (end > capacity)",
+  // vllm/v1/worker/gpu/block_table.py:125-131).
   void append_row(const std::vector<int>& block_ids, int row_idx);
   // Reset row_idx then append block_ids (a fresh row).
   void add_row(const std::vector<int>& block_ids, int row_idx);
@@ -138,6 +180,9 @@ class BlockTable {
   int max_num_reqs;
   int max_num_batched_tokens;
   int max_num_blocks_per_req;  // post blocks_per_kv_block multiply (row stride)
+  // The KV cache group this table serves, for the row-capacity error. Set by
+  // MultiGroupBlockTable; 0 for a table built on its own.
+  int group_index = 0;
   int blocks_per_kv_block;
   bool use_hybrid_blocks;
   std::vector<int32_t> num_blocks_per_row;
@@ -157,15 +202,20 @@ class MultiGroupBlockTable {
  public:
   // Upstream positional order: max_num_reqs, max_model_len,
   // max_num_batched_tokens, (pin_memory, device dropped), block_sizes,
-  // kernel_block_sizes, max_num_blocks=None, cp_kv_cache_interleave_size.
-  // When max_num_blocks is nullopt it is derived per group as
-  // cdiv(max_model_len, block_size) then aligned up to a multiple of
-  // (128 / block_size) for block_size <= 128.
+  // kernel_block_sizes, max_num_blocks, cp_kv_cache_interleave_size,
+  // slot_mapping_modes. When max_num_blocks is nullopt it is derived per group
+  // as cdiv(max_model_len, block_size) (the pinned upstream requires the list;
+  // the runner passes block_table_geometry's). Each width is then
+  // get_block_table_width(n, block_size), with token_alignment None for a
+  // kNone group (block_table.py:322-331). slot_mapping_modes nullopt is every
+  // group kTokenToKvSlot (block_table.py:308-309).
   MultiGroupBlockTable(int max_num_reqs, int max_model_len,
                        int max_num_batched_tokens, std::vector<int> block_sizes,
                        std::vector<int> kernel_block_sizes,
                        std::optional<std::vector<int>> max_num_blocks = std::nullopt,
-                       int cp_kv_cache_interleave_size = 1);
+                       int cp_kv_cache_interleave_size = 1,
+                       std::optional<std::vector<SlotMappingMode>>
+                           slot_mapping_modes = std::nullopt);
 
   // block_ids[i] are the blocks for the i-th group.
   void append_row(const std::vector<std::vector<int>>& block_ids, int row_idx);

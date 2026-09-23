@@ -126,6 +126,14 @@ struct KVCacheSpec {
 
   // The spec kind (upstream: get_kv_cache_spec_kind(spec)).
   virtual KVCacheSpecKind kind() const = 0;
+
+  // The number of block-table entries one request needs, i.e. the row length
+  // of the worker's block table for this group. (Upstream
+  // KVCacheSpec.max_num_blocks_per_req, kv_cache_interface.py:197-207 @
+  // e126687a9a: cdiv(max_len, block_size).) AttentionSpec's override
+  // (:432-435) divides by block_size * decode_context_parallel_size; this tree
+  // has no DCP, so it is this base value.
+  virtual int max_num_blocks_per_req(int max_len) const;
 };
 
 // (Upstream: @dataclass(frozen=True, kw_only=True) AttentionSpec.)
@@ -478,6 +486,11 @@ struct MambaSpec : KVCacheSpec {
 
   int64_t page_size_bytes() const override;
   KVCacheSpecKind kind() const override { return KVCacheSpecKind::kMamba; }
+
+  // Upstream MambaSpec.max_num_blocks_per_req (kv_cache_interface.py:896-905
+  // @ e126687a9a), with the `none` deviation recorded in the .cpp and in
+  // .agents/specs/block-table-row-width.md.
+  int max_num_blocks_per_req(int max_len) const override;
 };
 
 // How the workers should initialize a KV cache tensor. (Upstream KVCacheTensor.)
