@@ -1007,3 +1007,47 @@ TEST_CASE("W1 KVBytesPerBlock reads a SlidingWindowMLASpec group's PADDED page")
                                             swa}}};
   CHECK(KVBytesPerBlock(config) == 2 * 37440);
 }
+
+// ─── FIX-BLOCK-TABLE-ROW-WIDTH: max_num_blocks_per_req ──────────────────────
+// Upstream KVCacheSpec / MambaSpec.max_num_blocks_per_req
+// (vllm/v1/kv_cache_interface.py:197-207, :896-905 @ e126687a9a): the row
+// length of the worker's block table for one group.
+namespace {
+std::shared_ptr<MambaSpec> mamba_at(int block_size, const std::string& mode,
+                                    int num_speculative_blocks) {
+  return std::make_shared<MambaSpec>(
+      block_size, std::vector<std::vector<int64_t>>{{2, 512}, {3, 32, 32}},
+      std::vector<DType>{DType::kF32, DType::kF32},
+      /*page_size_padded=*/std::nullopt, mode, num_speculative_blocks);
+}
+}  // namespace
+
+TEST_CASE("max_num_blocks_per_req: attention is cdiv(max_len, block_size)") {
+  auto fa = new_kv_cache_spec();  // block_size 16
+  CHECK(fa->max_num_blocks_per_req(128) == 8);
+  CHECK(fa->max_num_blocks_per_req(129) == 9);
+  CHECK(fa->max_num_blocks_per_req(1) == 1);
+  auto sw = new_sliding_window_spec(/*sliding_window=*/64, /*block_size=*/32);
+  CHECK(sw->max_num_blocks_per_req(128) == 4);
+}
+
+TEST_CASE("max_num_blocks_per_req: a Mamba row holds cdiv(max_len, bs) + k") {
+  // align (:897-903): cdiv(max_len, block_size) + num_speculative_blocks.
+  CHECK(mamba_at(32, "align", 3)->max_num_blocks_per_req(128) == 7);
+  CHECK(mamba_at(32, "align", 0)->max_num_blocks_per_req(128) == 4);
+  // all (:884-887 via :905), with max_len == max_model_len.
+  CHECK(mamba_at(32, "all", 3)->max_num_blocks_per_req(128) == 7);
+  // none at this tree's geometry (block_size 32): the claim reaches
+  // cdiv(128, 32) + 3 = 7 blocks, so the row must too.
+  CHECK(mamba_at(32, "none", 3)->max_num_blocks_per_req(128) == 7);
+  CHECK(mamba_at(32, "none", 3)->max_num_blocks_per_req(129) == 8);
+  CHECK(mamba_at(32, "none", 0)->max_num_blocks_per_req(128) == 4);
+  // none at upstream's geometry (block_size = max_model_len, config.py:657):
+  // upstream's own value, cdiv(page * (1 + k), page) = 1 + k.
+  CHECK(mamba_at(128, "none", 3)->max_num_blocks_per_req(128) == 4);
+  CHECK(mamba_at(32768, "none", 2)->max_num_blocks_per_req(32768) == 3);
+  CHECK(mamba_at(32768, "none", 0)->max_num_blocks_per_req(32768) == 1);
+  // Through the base-class pointer the runner uses.
+  const KVCacheSpec& base = *mamba_at(32, "none", 3);
+  CHECK(base.max_num_blocks_per_req(128) == 7);
+}

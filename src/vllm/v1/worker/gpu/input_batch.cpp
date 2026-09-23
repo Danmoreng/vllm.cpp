@@ -102,13 +102,17 @@ const std::vector<int>& InputBatch::RemovedTracker::removed() {
 namespace {
 // Upstream builds MultiGroupBlockTable with per-group max_num_blocks derived
 // from max_model_len; block_sizes / kernel_block_sizes are the caller's groups.
-MultiGroupBlockTable make_block_table(int max_num_reqs, int max_model_len,
-                                      int max_num_batched_tokens,
-                                      std::vector<int> block_sizes,
-                                      std::vector<int> kernel_block_sizes) {
+MultiGroupBlockTable make_block_table(
+    int max_num_reqs, int max_model_len, int max_num_batched_tokens,
+    std::vector<int> block_sizes, std::vector<int> kernel_block_sizes,
+    std::optional<std::vector<int>> max_num_blocks_per_req,
+    std::optional<std::vector<SlotMappingMode>> slot_mapping_modes) {
   return MultiGroupBlockTable(max_num_reqs, max_model_len,
                               max_num_batched_tokens, std::move(block_sizes),
-                              std::move(kernel_block_sizes));
+                              std::move(kernel_block_sizes),
+                              std::move(max_num_blocks_per_req),
+                              /*cp_kv_cache_interleave_size=*/1,
+                              std::move(slot_mapping_modes));
 }
 }  // namespace
 
@@ -116,7 +120,9 @@ InputBatch::InputBatch(int max_num_reqs, int max_model_len,
                        int max_num_batched_tokens, int vocab_size,
                        std::vector<int> block_sizes,
                        std::vector<int> kernel_block_sizes,
-                       int num_speculative_steps)
+                       int num_speculative_steps,
+                       std::optional<std::vector<int>> max_num_blocks_per_req,
+                       std::optional<std::vector<SlotMappingMode>> slot_mapping_modes)
     : max_num_reqs(max_num_reqs),
       max_model_len(max_model_len),
       max_num_batched_tokens(max_num_batched_tokens),
@@ -124,7 +130,9 @@ InputBatch::InputBatch(int max_num_reqs, int max_model_len,
       num_speculative_steps(num_speculative_steps),
       block_table(make_block_table(max_num_reqs, max_model_len,
                                    max_num_batched_tokens, std::move(block_sizes),
-                                   std::move(kernel_block_sizes))) {
+                                   std::move(kernel_block_sizes),
+                                   std::move(max_num_blocks_per_req),
+                                   std::move(slot_mapping_modes))) {
   const size_t n = static_cast<size_t>(max_num_reqs);
   token_ids_cpu.assign(n * static_cast<size_t>(max_model_len), 0);
   num_tokens_no_spec.assign(n, 0);
