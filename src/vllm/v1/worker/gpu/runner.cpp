@@ -1,3 +1,4 @@
+#include "vllm/v1/core/recurrent_prefix_snapshot.h"
 // Ported from: vllm/v1/worker/gpu/model_runner.py @ e24d1b24
 // (initialize_kv_cache / execute_model / sample_tokens / sample /
 // postprocess_sampled — the T0 slice) + the decode-first reorder from
@@ -748,7 +749,10 @@ void GPUModelRunner::initialize_kv_cache(const KVCacheConfig& kv_cache_config) {
   // let remap_gdn_state_slots hand each sequence a base of num_spec+1 slots.
   const int spec_cols = spec_on() ? num_spec() + 1 : 1;
   const int64_t base_slots = max_num_reqs_ > 0 ? max_num_reqs_ : num_blocks_;
-  gdn_state_slots_ = base_slots * spec_cols;
+  prefix_snapshot_base_ = base_slots * spec_cols;
+  recurrent_prefix_snapshots_ = kv_cache_config.recurrent_prefix_snapshots;
+  VT_CHECK(!recurrent_prefix_snapshots_ || !spec_on(), "recurrent prefix snapshots require non-speculative execution");
+  gdn_state_slots_ = prefix_snapshot_base_ + (recurrent_prefix_snapshots_ ? recurrent_prefix_snapshots_->capacity() : 0);
   gdn_slot_of_req_.clear();
   gdn_free_slots_.clear();
   gdn_free_slots_.reserve(static_cast<size_t>(base_slots));
@@ -1983,8 +1987,56 @@ void GPUModelRunner::remap_gdn_state_slots(
       gdn_free_slots_.pop_back();
       gdn_slot_of_req_.emplace(rid, base);
     }
+    if (recurrent_prefix_snapshots_) {
+      if (auto snapshot = recurrent_prefix_snapshots_->Pinned(rid)) {
+        VT_CHECK(snapshot->tokens == input_batch_.num_computed_tokens_cpu[size_t(r)],
+                 "recurrent prefix snapshot position differs from scheduled context");
+        copy_recurrent_state_slot(prefix_snapshot_base_ + snapshot->slot, base);
+        vt::GetBackend(queue_.device).Synchronize(queue_);
+        recurrent_prefix_snapshots_->Release(rid);
+        if (std::getenv("VT_PREFIX_SNAPSHOT_TRACE"))
+          std::cerr << "PREFIX_RESTORE request=" << rid << " tokens=" << snapshot->tokens << " slot=" << snapshot->slot << "\n";
+      }
+    }
     for (int c = 0; c < spec_cols && c < gdn_cols; ++c) {
       gdn_bt[off + static_cast<size_t>(c)] = base + c;
+    }
+  }
+}
+
+void GPUModelRunner::copy_recurrent_state_slot(int64_t source, int64_t destination) {
+  VT_CHECK(source >= 0 && destination >= 0 && source < gdn_state_slots_ && destination < gdn_state_slots_,
+           "recurrent prefix state slot outside allocated pool");
+  for (const auto& layer : gdn_state_) {
+    for (const auto& state : layer.states) {
+      const auto bytes = size_t(state.stride[0]) * vt::SizeOf(state.dtype);
+      auto* data = static_cast<char*>(state.data);
+      vt::GetBackend(queue_.device).Copy(queue_, data + destination * bytes, data + source * bytes, bytes);
+    }
+  }
+}
+
+void GPUModelRunner::publish_recurrent_prefixes(const StepInputs& step) {
+  if (!recurrent_prefix_snapshots_) return;
+  const int block = recurrent_prefix_snapshots_->block_tokens();
+  for (size_t row = 0; row < step.seq_lens.size(); ++row) {
+    const auto& id = *input_batch_.req_ids[row];
+    const auto& request = req_states_.at(id);
+    const int tokens = step.seq_lens[row];
+    // The current prefill computes one final recurrent state per request.
+    // Publish only that exact boundary, never hashes of intermediate pages.
+    if (tokens <= 0 || tokens % block || tokens > request.num_prompt_tokens ||
+        size_t(tokens / block) > request.prompt_block_hashes.size()) continue;
+    auto reservation = recurrent_prefix_snapshots_->Reserve(request.prompt_block_hashes[size_t(tokens / block - 1)], tokens);
+    if (!reservation) continue;
+    try {
+      copy_recurrent_state_slot(gdn_slot_of_req_.at(id), prefix_snapshot_base_ + reservation->slot);
+      vt::GetBackend(queue_.device).Synchronize(queue_);
+      recurrent_prefix_snapshots_->Publish(*reservation);
+      if (std::getenv("VT_PREFIX_SNAPSHOT_TRACE"))
+        std::cerr << "PREFIX_PUBLISH request=" << id << " tokens=" << tokens << " slot=" << reservation->slot << "\n";
+    } catch (...) {
+      recurrent_prefix_snapshots_->Abort(*reservation); throw;
     }
   }
 }
@@ -2292,11 +2344,10 @@ std::optional<ModelRunnerOutput> GPUModelRunner::execute_model(
   // previous step's kernels still read exec_state_.
   //
   // ENG-MM-INPUT-PIPELINE P2 (#2379): `req_states_` is upstream's
-  // `self.requests`, and it is passed ONLY for a model that declares the
-  // multimodal seam. A text engine passes null and update_states is
-  // byte-identical.
+  // `self.requests`. Prefix snapshots also need its prompt hashes, including
+  // on language-only models, so their publication follows request identities.
   update_states(input_batch_, scheduler_output,
-                supports_mm_inputs() ? &req_states_ : nullptr);
+                (supports_mm_inputs() || recurrent_prefix_snapshots_) ? &req_states_ : nullptr);
 
   // ENG-MM-INPUT-PIPELINE P2 (#2379): the encoder half of the step, in
   // upstream's order — drop what the scheduler evicted, compute the M-RoPE
@@ -3175,6 +3226,7 @@ std::optional<ModelRunnerOutput> GPUModelRunner::execute_model(
   }
 
   ForwardLogits logits = ModelRegistry::Forward(*model_, forward_input);
+  publish_recurrent_prefixes(step);
 
   // KV-EXTERNAL-CACHE (LMCache): after the forward has written this step's KV,
   // STORE every newly-complete prompt block to the external cache (the worker

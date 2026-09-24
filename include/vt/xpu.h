@@ -13,7 +13,9 @@ struct MemoryInfo {
   bool free_known = false;
   size_t exl3_workspace_bytes = 0;  // included in allocated_bytes, shared by all queues
   size_t gdn_workspace_bytes = 0;   // included in allocated_bytes, chunk-64 scratch
+  size_t sampling_workspace_bytes = 0; // included in allocated_bytes, top-k/top-p scratch
   size_t attention_workspace_bytes = 0; // included in allocated_bytes, split-KV scratch
+  size_t peak_allocated_bytes = 0; // backend-tracked device high-water mark (excludes driver allocations)
 };
 int DeviceCount() noexcept;
 MemoryInfo GetMemoryInfo(int index = 0);

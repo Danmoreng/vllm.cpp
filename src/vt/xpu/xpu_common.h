@@ -16,6 +16,7 @@ sycl::queue& NativeQueue(Queue& q);
 bool WithExl3Workspace(Queue& q, size_t bytes, const std::function<void(void*)>& launch);
 bool WithGdnWorkspace(Queue& q, size_t bytes, const std::function<void(void*)>& launch);
 bool WithAttentionWorkspace(Queue& q, size_t bytes, const std::function<void(void*)>& launch);
+bool WithSamplingWorkspace(Queue& q, size_t bytes, const std::function<void(void*)>& launch);
 
 // Trivially copyable kernel argument; never capture Tensor's optional metadata.
 struct View {

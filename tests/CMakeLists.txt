@@ -73,6 +73,8 @@ function(vllm_cpp_add_test name)
 endfunction()
 if(VLLM_CPP_XPU)
   vllm_cpp_add_test(test_xpu_ops vt/test_xpu_ops.cpp)
+  vllm_cpp_add_test(test_xpu_sampling vt/test_xpu_sampling.cpp)
+  vllm_cpp_add_test(test_xpu_async_output vllm/v1/worker/test_xpu_async_output.cpp)
   vllm_cpp_add_test(test_xpu_exl3 vt/test_xpu_exl3.cpp)
   target_include_directories(test_xpu_exl3 PRIVATE ${CMAKE_SOURCE_DIR}/src)
   vllm_cpp_add_test(test_xpu_exl3_prefill vt/test_xpu_exl3_prefill.cpp)
@@ -1714,6 +1716,7 @@ vllm_cpp_add_test(test_request vllm/test_request.cpp)
 vllm_cpp_add_test(test_kv_cache_utils vllm/v1/test_kv_cache_utils.cpp)
 # issue #371: the recurrent-state budget (spec widens GDN state by k+1).
 vllm_cpp_add_test(test_kv_state_budget vllm/v1/core/test_kv_state_budget.cpp)
+vllm_cpp_add_test(test_recurrent_prefix_snapshot vllm/v1/core/test_recurrent_prefix_snapshot.cpp)
 # issue #1983: the recurrent-state pool sized by the KV budget, not by
 # --max-num-seqs. Driven from the REAL registry builder, never a hand-built group.
 vllm_cpp_add_test(test_hybrid_kv_budget vllm/v1/core/test_hybrid_kv_budget.cpp)

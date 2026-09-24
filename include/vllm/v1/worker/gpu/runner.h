@@ -881,6 +881,10 @@ class GPUModelRunner final : public ModelRunnerBase {
   // Flattened-token bound for one step; sizes the W4 device input_ids mirror.
   int max_num_batched_tokens_ = 0;
   int64_t gdn_state_slots_ = 0;
+  std::shared_ptr<RecurrentPrefixSnapshotIndex> recurrent_prefix_snapshots_;
+  int64_t prefix_snapshot_base_ = 0;
+  void copy_recurrent_state_slot(int64_t source, int64_t destination);
+  void publish_recurrent_prefixes(const StepInputs& step);
   // Compact GDN state-slot allocator: request identity (req_id) -> slot in
   // [0, gdn_state_slots_); free list of unused slots. Keyed on the sequence, not
   // the mamba pool block-id (see remap_gdn_state_slots for why block-id keying

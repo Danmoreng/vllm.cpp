@@ -13,6 +13,7 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include <array>
 #include <unistd.h>
 
 namespace {
@@ -41,6 +42,83 @@ std::string RepeatedPrompt(int count) {
   std::string text;
   for (int i = 0; i < count; ++i) text += " Hello";
   return text;
+}
+void CheckBatch(vllm_engine* engine) {
+  struct Result {
+    std::string text;
+    int chunks = 0, cancel_after = 0;
+    static bool Callback(const char* text, bool, void* opaque) {
+      auto& r = *static_cast<Result*>(opaque); r.text += text ? text : ""; ++r.chunks;
+      return !r.cancel_after || r.chunks < r.cancel_after;
+    }
+  };
+  std::array<std::string, 4> prompts, expected;
+  std::array<vllm_sampling_params, 4> settings;
+  const char* tails[] = {" The capital of France is", " The capital of Germany is", " The capital of Italy is", " The capital of Spain is"};
+  for (int i = 0; i < 4; ++i) {
+    prompts[i] = RepeatedPrompt(128 + 32 * i) + tails[i];
+    settings[i] = vllm_sampling_params_default();
+    settings[i].temperature = i == 0 ? 0 : .7f;
+    settings[i].has_seed = 1; settings[i].seed = 381 + i;
+    settings[i].top_k = 20; settings[i].top_p = .9f; settings[i].min_p = .05f;
+    settings[i].repetition_penalty = 1.05f;
+    settings[i].ignore_eos = 1; settings[i].max_tokens = 3 + i;
+    vllm_completion result{};
+    REQUIRE_MESSAGE(vllm_complete(engine, prompts[i].c_str(), &settings[i], &result) == VLLM_OK, std::string(vllm_last_error()));
+    CHECK(result.completion_tokens == settings[i].max_tokens);
+    expected[i] = result.text ? result.text : ""; vllm_completion_free(&result);
+  }
+  const auto baseline = vt::xpu::GetMemoryInfo().allocated_bytes;
+  using Request = std::unique_ptr<vllm_request, decltype(&vllm_request_free)>;
+  std::array<Result, 4> results;
+  std::vector<Request> requests;
+  // Submit longest first so short requests finish and the batch condenses.
+  for (int i : {3, 0, 2, 1}) {
+    vllm_request* raw = nullptr;
+    REQUIRE_MESSAGE(vllm_request_submit(engine, prompts[i].c_str(), &settings[i], Result::Callback, &results[i], &raw) == VLLM_OK, std::string(vllm_last_error()));
+    requests.emplace_back(raw, vllm_request_free);
+  }
+  for (auto& request : requests) REQUIRE_MESSAGE(vllm_request_wait(request.get()) == VLLM_OK, std::string(vllm_request_error(request.get())));
+  for (int i = 0; i < 4; ++i) {
+    CAPTURE(i);
+    CHECK(results[i].text == expected[i]);
+    std::cout << "BATCH case=" << i << " answer=" << nlohmann::json(results[i].text).dump() << std::endl;
+  }
+  requests.clear();
+  Result cancelled; cancelled.cancel_after = 2;
+  auto cancel_settings = settings[3]; cancel_settings.max_tokens = 16;
+  vllm_request* raw = nullptr;
+  REQUIRE(vllm_request_submit(engine, prompts[3].c_str(), &cancel_settings, Result::Callback, &cancelled, &raw) == VLLM_OK);
+  Request request(raw, vllm_request_free);
+  REQUIRE(vllm_request_wait(raw) == VLLM_OK); CHECK(cancelled.chunks >= 2); request.reset();
+  // Reuse after cancellation must start from its own clean recurrent state.
+  vllm_completion resumed{};
+  REQUIRE_MESSAGE(vllm_complete(engine, prompts[3].c_str(), &settings[3], &resumed) == VLLM_OK, std::string(vllm_last_error()));
+  CHECK(std::string(resumed.text ? resumed.text : "") == expected[3]); vllm_completion_free(&resumed);
+  CHECK(vt::xpu::GetMemoryInfo().allocated_bytes <= baseline + 64 * 1024 * 1024);
+}
+void CheckPrefix(vllm_engine* engine) {
+  const std::array<std::string, 2> prompts = {
+      RepeatedPrompt(256) + " The capital of France is",
+      RepeatedPrompt(256) + " The capital of Germany is"};
+  std::array<std::string, 2> reference;
+  auto sampling = vllm_sampling_params_default();
+  sampling.temperature = 0; sampling.max_tokens = 5; sampling.ignore_eos = 1;
+  size_t baseline = 0;
+  for (int step = 0; step < 5; ++step) {
+    const int which = step % 2;
+    vllm_completion result{};
+    REQUIRE_MESSAGE(vllm_complete(engine, prompts[which].c_str(), &sampling, &result) == VLLM_OK, std::string(vllm_last_error()));
+    REQUIRE(result.completion_tokens == 5);
+    const std::string answer = result.text ? result.text : "";
+    if (step < 2) reference[which] = answer; else CHECK(answer == reference[which]);
+    REQUIRE_FALSE(answer.empty()); vllm_completion_free(&result);
+    const auto memory = vt::xpu::GetMemoryInfo();
+    if (!step) baseline = memory.allocated_bytes;
+    CHECK(memory.allocated_bytes <= baseline + 64 * 1024 * 1024);
+    std::cout << "PREFIX case=" << which << " answer=" << nlohmann::json(answer).dump()
+              << " gpu_bytes=" << memory.allocated_bytes << " tracked_peak_gpu_bytes=" << memory.peak_allocated_bytes << std::endl;
+  }
 }
 void CheckQuality(vllm_engine* engine, int long_context) {
   namespace fs = std::filesystem;
@@ -177,6 +255,10 @@ TEST_CASE("XPU Qwen checkpoint: native text prefill and repeated greedy decode t
   const int tokens = Setting("VT_B70_MAX_TOKENS", 65), repeats = Setting("VT_B70_REPEATS", 2);
   const bool timing = Setting("VT_B70_TIMING", 0) != 0;
   const bool quality = Setting("VT_B70_QUALITY", 0) != 0;
+  const bool batch = Setting("VT_B70_BATCH", 0) != 0;
+  const bool prefix = Setting("VT_B70_PREFIX", 0) != 0;
+  REQUIRE_FALSE((prefix && timing));
+  REQUIRE_FALSE((batch && (quality || timing)));
   const int quality_context = Setting("VT_B70_QUALITY_CONTEXT", 0);
   REQUIRE((quality_context == 0 || quality_context == 4096 || quality_context == 32768));
   REQUIRE((quality_context == 0 || quality));
@@ -197,14 +279,17 @@ TEST_CASE("XPU Qwen checkpoint: native text prefill and repeated greedy decode t
   params.device = 0;  // auto must resolve to native XPU for this architecture.
   params.language_model_only = 1;
   params.speculative_config = nullptr;
-  params.enable_prefix_caching = 2;
-  params.max_num_seqs = 1;
+  params.enable_prefix_caching = prefix ? 1 : 2;
+  params.max_num_seqs = batch ? 4 : 1;
   params.max_num_batched_tokens = Setting("VT_B70_BATCH_TOKENS", quality_context ? 4096 : quality ? 512 : requested_prompt ? requested_prompt : timing ? 32 : 16);
   REQUIRE(params.max_num_batched_tokens > 0); REQUIRE(params.max_num_batched_tokens <= 6656);
   params.max_model_len = quality ? quality_context + 640 : std::max(128, requested_prompt + std::max({tokens, timing_outputs, 32}));
+  if (batch) { params.max_model_len = 512; params.max_num_batched_tokens = 128; }
+  if (prefix) { params.max_num_batched_tokens = 128; params.max_model_len = std::max(params.max_model_len, 512); }
   params.block_size = 16;
   // Hybrid attention/GDN pools also reserve a sentinel block per group.
   params.num_blocks = std::max(32, 2 * ((params.max_model_len + 15) / 16 + 1));
+  if (batch) params.num_blocks *= 4;
   const char* kv_dtype = std::getenv("VT_B70_KV_DTYPE");
   params.kv_cache_dtype = kv_dtype ? kv_dtype : "bfloat16";
   std::cout << "LOAD " << model << " device=xpu kv_dtype=" << params.kv_cache_dtype
@@ -217,11 +302,20 @@ TEST_CASE("XPU Qwen checkpoint: native text prefill and repeated greedy decode t
   std::cout << "LOADED gpu_bytes=" << vt::xpu::GetMemoryInfo().allocated_bytes
             << " rss_bytes=" << ResidentBytes() << " initialization_reference_hits=" << vt::GetReferenceTierHits() << std::endl;
   const auto initialization_hits = vt::GetReferenceTierHits();
+  if (batch) {
+    CheckBatch(engine.get());
+    CHECK(vt::GetReferenceTierHits() == initialization_hits);
+    return;
+  }
   if (quality) {
     CheckQuality(engine.get(), quality_context);
     std::cout << "QUALITY_MEMORY gpu_bytes=" << vt::xpu::GetMemoryInfo().allocated_bytes
               << " attention_workspace_bytes=" << vt::xpu::GetMemoryInfo().attention_workspace_bytes << std::endl;
     CHECK(vt::GetReferenceTierHits() == initialization_hits);
+    return;
+  }
+  if (prefix) {
+    CheckPrefix(engine.get()); CHECK(vt::GetReferenceTierHits() == initialization_hits);
     return;
   }
   if (timing) {

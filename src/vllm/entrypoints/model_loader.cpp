@@ -1,3 +1,4 @@
+#include "vllm/v1/core/recurrent_prefix_snapshot.h"
 // See include/vllm/entrypoints/model_loader.h. ORIGINAL packaging helper — the
 // shared model-load + engine-stack wiring behind both the OpenAI server and the
 // C ABI. Mirrors the M1.8 LLMEngine __init__ (vllm/v1/engine/llm_engine.py @
@@ -1835,13 +1836,21 @@ vllm::v1::KVCacheConfig LoadedEngine::MakeKVCacheResolved(
   // in half the bytes rather than twice the pool.
   ApplyResolvedCacheDType(params, probe);
   const int resolved = ResolveNumBlocks(params, probe);
+  auto with_recurrent_prefix = [&](vllm::v1::KVCacheConfig result) {
+    if (model.registration().architecture == "Qwen3_5ForConditionalGeneration" &&
+        ResolveEnablePrefixCaching(params, model.registration().info)) {
+      VT_CHECK(!spec.has_value(), "Qwen recurrent prefix snapshots with speculative decoding are not implemented yet");
+      result.recurrent_prefix_snapshots = std::make_shared<vllm::v1::RecurrentPrefixSnapshotIndex>(4, block_size);
+    }
+    return result;
+  };
   if (resolved == probe_blocks) {
-    return probe;
+    return with_recurrent_prefix(std::move(probe));
   }
   vllm::v1::KVCacheConfig sized =
       MakeKVCacheMaybeSpec(model, config, block_size, resolved, spec);
   ApplyResolvedCacheDType(params, sized);
-  return sized;
+  return with_recurrent_prefix(std::move(sized));
 }
 
 // Upstream's `logger.warning_once` for the defaulted-scale case

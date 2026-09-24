@@ -19,6 +19,16 @@ struct Registrar {
     XPU_OP(kMatmulBT, MatmulFn, MatmulBTKernel);
     XPU_OP(kRmsNorm, RmsNormFn, RmsNormKernel);
     XPU_OP(kGreedyArgmax, GreedyArgmaxFn, GreedyArgmaxKernel);
+    XPU_OP(kApplyTopKTopP, ApplyTopKTopPFn, ApplyTopKTopPKernel);
+    XPU_OP(kRandomSample, RandomSampleFn, RandomSampleKernel);
+    XPU_OP(kApplyTemperature, ApplyTemperatureFn, ApplyTemperatureKernel);
+    XPU_OP(kComputeProbs, ComputeProbsFn, ComputeProbsKernel);
+    XPU_OP(kComputeLogprobs, ComputeLogprobsFn, ComputeLogprobsKernel);
+    XPU_OP(kApplyMinP, ApplyMinPFn, ApplyMinPKernel);
+    XPU_OP(kApplyPenalties, ApplyPenaltiesFn, ApplyPenaltiesKernel);
+    XPU_OP(kApplyLogitBias, ApplyLogitBiasFn, ApplyLogitBiasKernel);
+    XPU_OP(kApplyTokenMask, ApplyTokenMaskFn, ApplyTokenMaskKernel);
+    XPU_OP(kApplyAllowedTokenIds, ApplyAllowedTokenIdsFn, ApplyAllowedTokenIdsKernel);
     XPU_OP(kExl3HadR128, Exl3HadR128Fn, Exl3HadR128Kernel);
     XPU_OP(kExl3Gemm, Exl3GemmFn, Exl3GemmKernel);
     XPU_OP(kCausalConv1dFwd, CausalConv1dFwdFn, CausalConv1dFwdKernel);
