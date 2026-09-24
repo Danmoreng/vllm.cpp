@@ -2,11 +2,24 @@
 #include "xpu_exl3.h"
 #include "xpu_kernels.h"
 #include <sycl/ext/oneapi/matrix/matrix.hpp>
+#include "xpu_exl3_register_gemm.h"
+#include <cstdlib>
+#include <string_view>
 
 namespace vt::xpu {
 namespace {
 constexpr size_t kWorkspaceBytes = 32 * 1024 * 1024;
 constexpr int kBM = 32, kBN = 64, kBK = 32;
+
+bool UseRegisterPanel(bool matrix, bool all_rows, int64_t rows) {
+  static const std::string_view mode = [] {
+    const char* value = std::getenv("VT_XPU_EXL3_PANEL_KERNEL");
+    return std::string_view(value ? value : "auto");
+  }();
+  VT_CHECK(mode == "auto" || mode == "reference" || mode == "register",
+           "Invalid EXL3 panel kernel selector");
+  return matrix && (mode == "register" || (mode == "auto" && all_rows && rows >= 512));
+}
 
 template<int Bits>
 void DecodePanel(Queue& q, sycl::half* panel, const uint32_t* packed,
@@ -101,6 +114,9 @@ bool Exl3PrefillKernel(Queue& q, Tensor& out, const Tensor& in_had,
   if (!device.has(sycl::aspect::ext_intel_device_id) ||
       device.get_info<sycl::ext::intel::info::device::device_id>() != 57891 ||
       !device.has(sycl::aspect::ext_intel_matrix) || m < 1 || m > 6656) return false;
+  // PERF-02 selects all-row text prefill at M>=512 on this B70. The register
+  // kernel passed the fixed model gates and wins for every measured text family.
+  const bool register_panel = UseRegisterPanel(matrix, all_rows, m);
   // The all-row schedule keeps every M row in the result panel, so each
   // compressed weight panel is decoded once across all rows.
   constexpr int64_t k_per_panel = 1024;
@@ -131,7 +147,9 @@ bool Exl3PrefillKernel(Queue& q, Tensor& out, const Tensor& in_had,
             case 6: DecodePanel<6>(q, panel, packed, count, n, base, column, width); break;
             default: VT_CHECK(false, "Unsupported EXL3 prefill width");
           }
-          if (matrix) PanelGemm(q, result, input + row * k + base, panel, rows, count, k, width, base == 0);
+          if (register_panel)
+            RegisterPanelGemm(q, result, input + row * k + base, panel, rows, count, k, width, base == 0);
+          else if (matrix) PanelGemm(q, result, input + row * k + base, panel, rows, count, k, width, base == 0);
           else if (width <= 1024)
             ExactPanelGemm<4>(q, result, input + row * k + base, panel, rows, count, k, width, base == 0);
           else ExactPanelGemm<8>(q, result, input + row * k + base, panel, rows, count, k, width, base == 0);
