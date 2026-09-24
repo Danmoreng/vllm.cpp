@@ -1,10 +1,10 @@
 # Native XPU development
 
 The optional SYCL/Level Zero backend provides the resource and core-operator
-foundation and EXL3 reference kernels from PR00–PR03 of the
+foundation, EXL3 and Conv/GDN reference kernels from PR00–PR04 of the
 [B70 implementation plan](B70-SYCL-Qwen38-EXL3-Implementation-Plan.md).
-It does not yet advertise a supported model architecture: GDN, attention,
-and the complete Qwen text path require PR04–PR06. The kernels prioritize
+It does not yet advertise a supported model architecture: attention
+and the complete Qwen text path require PR05–PR06. The kernels prioritize
 correctness; no model throughput or XMX performance claim is made.
 
 ## Build and focused checks
@@ -148,6 +148,36 @@ middle and last 128-column output blocks against independent CPU GEMMs
 (1,047 assertions). These B70 comparisons passed bitwise; they are not a
 whole-model or performance acceptance claim. Without `VT_B70_MODEL_DIR`, the
 checkpoint test explicitly exits with skip code 77.
+
+## Conv/GDN reference kernels
+
+The native operators are `CausalConv1dFwd`, `CausalConv1dUpdate`, `GdnPostConv`,
+`GdnPrefill`, `GdnDecode`, `RmsNormGated`, `GdnStateGather` and `GdnStateScatter`.
+Conv history contains raw inputs. Recurrence state stays F32; Q/K arrive already
+normalized and g/beta already transformed. Indexed decode permits negative
+null slots and refuses out-of-range or duplicate active slots before updates.
+Gather/scatter also supports the existing BF16-cache-to-F32-working-state
+contract, without advertising compressed in-place recurrence.
+
+Prefill runs the sequential reference recurrence. The existing CPU BF16 path
+defaults to a chunked algorithm with different intermediate rounding; the
+comparison explicitly sets `VT_GDN_CHUNKED=0` for its CPU oracle. The native XPU
+path currently remains sequential regardless of that variable. Chunked GDN is
+PR09 work, and donor chunked-wheel numerical parity is not claimed here.
+
+```sh
+cmake --build build-xpu --target test_xpu_gdn -j4
+VT_OP_PROVIDER_TRACE=/tmp/xpu-gdn.jsonl build-xpu/tests/test_xpu_gdn
+```
+
+The seven cases cover 10,240 convolution channels, kernel width four, lengths
+1/2/3/4/63/64/65 and empty varlen rows, padded input/gate strides, Hv/Hk=3,
+actual 16/48-head geometry, permuted/null slots and invalid metadata. Outputs
+and every final state element are compared to CPU. Full prefill versus split
+prefill plus decode is bitwise equal for both convolution and recurrence.
+Conv state and gather/scatter comparisons are exact; transcendental operations
+use per-element absolute/relative bounds (BF16 relative 0.008, F32 up to 2e-5,
+absolute 1e-6). No complete-model reachability or performance claim is implied.
 
 ## Opt-in provider trace
 

@@ -75,6 +75,17 @@ class Scratch {
   Scratch& operator=(const Scratch&) = delete;
   ~Scratch() { try { vt::Free(device_, data); } catch (...) { /* backend retains failed-wait allocations */ } }
 };
+template<class Check>
+void CheckDeviceMetadata(Queue& q, Check check, const char* message) {
+  Scratch scratch(q.device, sizeof(int));
+  auto* result = static_cast<int*>(scratch.data);
+  NativeQueue(q).single_task([=] { *result = check() ? 1 : 0; });
+  int valid = 0;
+  auto& backend = GetBackend(q.device);
+  backend.Copy(q, &valid, result, sizeof(valid));
+  backend.Synchronize(q);
+  VT_CHECK(valid, message);
+}
 // The correctness path snapshots only when the output could clobber an input.
 // Temporary releases drain their final kernel/copy use through Backend::Free.
 template<class Launch>
