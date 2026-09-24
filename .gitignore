@@ -35,6 +35,9 @@ a.out
 *.mp4
 generated/
 
+# Local GPTQ INT4 plan and per-tensor audit evidence
+/B70_GPTQ_INT4_Plan/
+
 # Derived from `gh issue list` by scripts/agent-issue-index.py --refresh.
 # Untracked on purpose: a tracked index is a surface every PR writes (#2290).
 .agents/issue-index.generated.md
