@@ -243,3 +243,34 @@ TEST_CASE("XPU GDN state gather/scatter and decode: permutation, null slot, pres
   CHECK(vt::GetReferenceTierHits() == 0);
   CHECK(vt::xpu::GetMemoryInfo().allocated_bytes == 0);
 }
+
+TEST_CASE("XPU compressed conv: direct BF16 cache equals the F32 working-copy path") {
+  Queue gpu(vt::DeviceType::kXPU);
+  for (bool prefill : {false, true}) {
+    constexpr auto cache_type = DType::kBF16;
+    constexpr int channels = 17, slots = 4, tokens = 4;
+    Buffer x(gpu.q, DType::kF32, {tokens, channels}), weight(gpu.q, DType::kF32, {channels, 4});
+    Buffer state(gpu.q, cache_type, {slots, channels, 6});
+    Buffer working(gpu.q, DType::kF32, {slots, channels, 6}), stored(gpu.q, cache_type, {slots, channels, 6});
+    Buffer out(gpu.q, DType::kF32, {tokens, channels}), reference(gpu.q, DType::kF32, {tokens, channels});
+    Buffer indices(gpu.q, DType::kI32, {tokens}), qsl(gpu.q, DType::kI32, {slots + 1}), flags(gpu.q, DType::kI8, {slots});
+    state.put(Values(slots * channels * 6, 2)); weight.put(Values(channels * 4, 3));
+    out.put(std::vector<float>(tokens * channels, -1)); reference.put(std::vector<float>(tokens * channels, -1));
+    const int32_t offsets[] = {0, 0, 1, 3, 4}; const int8_t initial[] = {1, 0, 1, 1};
+    qsl.upload(offsets); flags.upload(initial);
+    for (int step = 0; step < 8; ++step) {
+      x.put(Values(tokens * channels, step, .071f));
+      int32_t ids[tokens]; for (int i = 0; i < tokens; ++i) ids[i] = i == step % slots ? -1 : (i + step) % slots;
+      indices.upload(ids); vt::Copy(gpu.q, working.tensor, state.tensor);
+      if (prefill) {
+        vt::CausalConv1dFwd(gpu.q, out.tensor, x.tensor, weight.tensor, nullptr, state.tensor, qsl.tensor, flags.tensor, {});
+        vt::CausalConv1dFwd(gpu.q, reference.tensor, x.tensor, weight.tensor, nullptr, working.tensor, qsl.tensor, flags.tensor, {});
+      } else {
+        vt::CausalConv1dUpdate(gpu.q, out.tensor, x.tensor, weight.tensor, nullptr, state.tensor, {}, &indices.tensor);
+        vt::CausalConv1dUpdate(gpu.q, reference.tensor, x.tensor, weight.tensor, nullptr, working.tensor, {}, &indices.tensor);
+      }
+      vt::Copy(gpu.q, stored.tensor, working.tensor);
+      SameBytes(out.download(), reference.download()); SameBytes(state.download(), stored.download());
+    }
+  }
+}

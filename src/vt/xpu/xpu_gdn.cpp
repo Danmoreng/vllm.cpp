@@ -12,7 +12,7 @@ void CheckOffsets(Queue& q, const Tensor& qsl, int64_t sequences, int64_t tokens
     for (int64_t i = 0; i < sequences; ++i)
       if (offsets[i] < 0 || offsets[i + 1] < offsets[i] || offsets[i + 1] > tokens) return false;
     return true;
-  }, "XPU GDN/conv invalid sequence offsets");
+  }, "XPU GDN/conv invalid sequence offsets", {&qsl});
 }
 void CheckSlots(Queue& q, const Tensor& indices, int64_t slots, bool allow_null, bool unique) {
   const auto* ids = static_cast<const int32_t*>(indices.data);
@@ -24,7 +24,7 @@ void CheckSlots(Queue& q, const Tensor& indices, int64_t slots, bool allow_null,
         for (int64_t j = 0; j < i; ++j) if (ids[j] == ids[i]) return false;
     }
     return true;
-  }, "XPU GDN/conv invalid or duplicate state slot");
+  }, "XPU GDN/conv invalid or duplicate state slot", {&indices});
 }
 inline bool Initial(View flags, int64_t row) {
   return flags.dtype == DType::kI8 ? static_cast<const int8_t*>(flags.data)[row] != 0
@@ -36,29 +36,29 @@ inline float Silu(float x) { return x / (1.0f + sycl::exp(-x)); }
 void CausalConv1dFwdKernel(Queue& q, Tensor& out, const Tensor& x, const Tensor& weight,
                            const Tensor* bias, Tensor& state, const Tensor& qsl,
                            const Tensor& initial, const CausalConv1dArgs& args) {
-  TraceOpTensors(OpId::kCausalConv1dFwd, q, {&out, &x, &weight, bias, &state, &qsl, &initial});
+  TraceXpuOp(OpId::kCausalConv1dFwd, q, {&out, &x, &weight, bias, &state, &qsl, &initial});
   const auto sequences = state.shape[0], channels = x.shape[1], taps = weight.shape[1];
   const auto state_width = state.shape[2], width = taps - 1;
-  VT_CHECK(state.dtype == DType::kF32, "XPU conv state must be F32");
+  FloatTensor(state);
   VT_CHECK(!Overlap(state, x) && !Overlap(state, out) && !Overlap(state, weight)
                && (!bias || !Overlap(state, *bias)), "XPU conv state must have separate storage");
   CheckOffsets(q, qsl, sequences, x.shape[0]);
   WithOutput(q, out, {&x, &weight, bias}, [&](Tensor& target) {
     const View src(x), dst(target), w(weight), b(bias ? *bias : weight), flags(initial);
     const auto* offsets = static_cast<const int32_t*>(qsl.data);
-    auto* cache = static_cast<float*>(state.data);
+    const View cache(state);
     const bool has_bias = bias != nullptr, activation = args.silu_activation;
     NativeQueue(q).parallel_for(sycl::range<1>(sequences * channels), [=](sycl::id<1> item) {
       const int64_t seq = item[0] / channels, channel = item[0] % channels;
       const int64_t begin = offsets[seq], length = offsets[seq + 1] - begin;
-      auto* old = cache + (seq * channels + channel) * state_width;
+      const auto old = (seq * channels + channel) * state_width;
       const bool keep = Initial(flags, seq);
       for (int64_t t = 0; t < length; ++t) {
         float acc = has_bias ? Load(b, channel) : 0.0f;
         for (int64_t j = 0; j < taps; ++j) {
           const auto token = t - width + j;
           const float value = token >= 0 ? Load(src, (begin + token) * src.stride[0] + channel)
-                                        : keep ? old[width + token] : 0.0f;
+                                        : keep ? Load(cache, old + width + token) : 0.0f;
           acc += Load(w, channel * taps + j) * value;
         }
         Store(dst, (begin + t) * channels + channel, activation ? Silu(acc) : acc);
@@ -67,8 +67,9 @@ void CausalConv1dFwdKernel(Queue& q, Tensor& out, const Tensor& x, const Tensor&
       // History always contains raw activations, never the convolved output.
       for (int64_t j = 0; j < width; ++j) {
         const auto token = length - width + j;
-        old[j] = token >= 0 ? Load(src, (begin + token) * src.stride[0] + channel)
-                           : keep ? old[width + token] : 0.0f;
+        const float value = token >= 0 ? Load(src, (begin + token) * src.stride[0] + channel)
+                                      : keep ? Load(cache, old + width + token) : 0.0f;
+        Store(cache, old + j, value);
       }
     });
   });
@@ -77,37 +78,37 @@ void CausalConv1dFwdKernel(Queue& q, Tensor& out, const Tensor& x, const Tensor&
 void CausalConv1dUpdateKernel(Queue& q, Tensor& out, const Tensor& x, const Tensor& weight,
                               const Tensor* bias, Tensor& state, const Tensor* indices,
                               const CausalConv1dArgs& args) {
-  TraceOpTensors(OpId::kCausalConv1dUpdate, q, {&out, &x, &weight, bias, &state, indices});
+  TraceXpuOp(OpId::kCausalConv1dUpdate, q, {&out, &x, &weight, bias, &state, indices});
   const auto batch = x.shape[0], channels = x.shape[1], taps = weight.shape[1];
   const auto state_width = state.shape[2], width = taps - 1;
-  VT_CHECK(state.dtype == DType::kF32, "XPU conv state must be F32");
+  FloatTensor(state);
   VT_CHECK(!Overlap(state, x) && !Overlap(state, out) && !Overlap(state, weight)
                && (!bias || !Overlap(state, *bias)), "XPU conv state must have separate storage");
   if (indices) CheckSlots(q, *indices, state.shape[0], true, true);
   WithOutput(q, out, {&x, &weight, bias, indices}, [&](Tensor& target) {
     const View src(x), dst(target), w(weight), b(bias ? *bias : weight);
-    auto* cache = static_cast<float*>(state.data);
+    const View cache(state);
     const auto* ids = indices ? static_cast<const int32_t*>(indices->data) : nullptr;
     const bool has_bias = bias != nullptr, activation = args.silu_activation;
     NativeQueue(q).parallel_for(sycl::range<1>(batch * channels), [=](sycl::id<1> item) {
       const int64_t row = item[0] / channels, channel = item[0] % channels;
       const int64_t slot = ids ? ids[row] : row;
       if (slot < 0) return;  // VT conv contract leaves null-slot output unchanged.
-      auto* history = cache + (slot * channels + channel) * state_width;
+      const auto history = (slot * channels + channel) * state_width;
       const float current = Load(src, row * src.stride[0] + channel);
       float acc = has_bias ? Load(b, channel) : 0.0f;
-      for (int64_t j = 0; j < width; ++j) acc += Load(w, channel * taps + j) * history[j];
+      for (int64_t j = 0; j < width; ++j) acc += Load(w, channel * taps + j) * Load(cache, history + j);
       acc += Load(w, channel * taps + width) * current;
       Store(dst, row * channels + channel, activation ? Silu(acc) : acc);
-      for (int64_t j = 0; j + 1 < width; ++j) history[j] = history[j + 1];
-      if (width) history[width - 1] = current;
+      for (int64_t j = 0; j + 1 < width; ++j) Store(cache, history + j, Load(cache, history + j + 1));
+      if (width) Store(cache, history + width - 1, current);
     });
   }, true);
 }
 void GdnPostConvKernel(Queue& q, Tensor& qo, Tensor& ko, Tensor& vo, Tensor& go, Tensor& bo,
                         const Tensor& conv, const Tensor& araw, const Tensor& braw,
                         const Tensor& alog, const Tensor& bias, const L2NormArgs& args) {
-  TraceOpTensors(OpId::kGdnPostConv, q, {&qo, &ko, &vo, &go, &bo, &conv, &araw, &braw, &alog, &bias});
+  TraceXpuOp(OpId::kGdnPostConv, q, {&qo, &ko, &vo, &go, &bo, &conv, &araw, &braw, &alog, &bias});
   const int64_t tokens = conv.shape[0], hk = qo.shape[1], dk = qo.shape[2];
   const int64_t hv = vo.shape[1], dv = vo.shape[2], keys = hk * dk, values = hv * dv;
   const View src(conv), qs(qo), ks(ko), vs(vo), gs(go), bs(bo), a(araw), b(braw), al(alog), dt(bias);
@@ -186,7 +187,7 @@ void Recurrence(Queue& q, Tensor& out, const Tensor& qi, const Tensor& ki, const
 void GdnPrefillKernel(Queue& q, Tensor& out, const Tensor& qi, const Tensor& ki, const Tensor& vi,
                        const Tensor& g, const Tensor& beta, Tensor& state, const Tensor& qsl,
                        const GdnArgs& args) {
-  TraceOpTensors(OpId::kGdnPrefill, q, {&out, &qi, &ki, &vi, &g, &beta, &state, &qsl});
+  TraceXpuOp(OpId::kGdnPrefill, q, {&out, &qi, &ki, &vi, &g, &beta, &state, &qsl});
   enum class Mode { kAuto, kReference, kChunked };
   static const Mode mode = [] {
     const char* value = std::getenv("VT_XPU_GDN_PREFILL");
@@ -208,12 +209,12 @@ void GdnPrefillKernel(Queue& q, Tensor& out, const Tensor& qi, const Tensor& ki,
 void GdnDecodeKernel(Queue& q, Tensor& out, const Tensor& qi, const Tensor& ki, const Tensor& vi,
                       const Tensor& g, const Tensor& beta, Tensor& state, const Tensor* indices,
                       const GdnArgs& args) {
-  TraceOpTensors(OpId::kGdnDecode, q, {&out, &qi, &ki, &vi, &g, &beta, &state, indices});
+  TraceXpuOp(OpId::kGdnDecode, q, {&out, &qi, &ki, &vi, &g, &beta, &state, indices});
   Recurrence(q, out, qi, ki, vi, g, beta, state, nullptr, indices, args.scale);
 }
 void RmsNormGatedKernel(Queue& q, Tensor& out, const Tensor& x, const Tensor& gate,
                          const Tensor& weight, const RmsNormGatedArgs& args) {
-  TraceOpTensors(OpId::kRmsNormGated, q, {&out, &x, &gate, &weight});
+  TraceXpuOp(OpId::kRmsNormGated, q, {&out, &x, &gate, &weight});
   const auto width = x.shape[x.rank - 1], rows = x.Numel() / width;
   const auto group = gate.rank == 3 ? gate.shape[1] : 1;
   const auto eps = args.eps; const bool sigmoid = args.sigmoid_gate;
@@ -235,7 +236,7 @@ void RmsNormGatedKernel(Queue& q, Tensor& out, const Tensor& x, const Tensor& ga
 }
 void GdnStateGatherKernel(Queue& q, Tensor& working, const Tensor& cache,
                            const Tensor& indices, const Tensor* initial) {
-  TraceOpTensors(OpId::kGdnStateGather, q, {&working, &cache, &indices, initial});
+  TraceXpuOp(OpId::kGdnStateGather, q, {&working, &cache, &indices, initial});
   CheckSlots(q, indices, cache.shape[0], false, false);
   const auto inner = working.shape[working.rank - 1], physical = cache.shape[cache.rank - 1];
   const auto row_size = working.Numel() / indices.Numel(), mid = row_size / inner;
@@ -250,7 +251,7 @@ void GdnStateGatherKernel(Queue& q, Tensor& working, const Tensor& cache,
   });
 }
 void GdnStateScatterKernel(Queue& q, Tensor& cache, const Tensor& working, const Tensor& indices) {
-  TraceOpTensors(OpId::kGdnStateScatter, q, {&cache, &working, &indices});
+  TraceXpuOp(OpId::kGdnStateScatter, q, {&cache, &working, &indices});
   CheckSlots(q, indices, cache.shape[0], false, true);
   const auto inner = working.shape[working.rank - 1], physical = cache.shape[cache.rank - 1];
   const auto row_size = working.Numel() / indices.Numel(), mid = row_size / inner;

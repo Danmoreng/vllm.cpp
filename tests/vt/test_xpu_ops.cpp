@@ -238,6 +238,7 @@ TEST_CASE("XPU greedy: lowest tie, NaN/Inf contract, tails and production token 
   }
   CHECK(vt::GetReferenceTierHits() == 0);
   auto& platform = vllm::platforms::GetPlatform(vt::DeviceType::kXPU);
-  CHECK(platform.needs_weight_staging()); CHECK_FALSE(platform.supports_graph_capture());
+  CHECK(platform.needs_weight_staging()); CHECK(platform.supports_graph_capture());
+  CHECK_FALSE(platform.support_static_graph_mode());
   CHECK_FALSE(platform.get_device_capability().present());
 }

@@ -101,5 +101,5 @@ TEST_CASE("XPU EXL3 checkpoint: all real bit/K/N families, F16 and F32 to BF16")
   }
   REQUIRE(seen.size() == 11);
   CHECK(vt::GetReferenceTierHits() == 0);
-  CHECK(vt::xpu::GetMemoryInfo().allocated_bytes == 0);
+  CHECK(vt::xpu::GetMemoryInfo().allocated_bytes == vt::xpu::GetMemoryInfo().exl3_workspace_bytes);
 }

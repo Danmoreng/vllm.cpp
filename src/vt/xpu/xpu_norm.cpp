@@ -3,7 +3,7 @@
 namespace vt::xpu {
 void RmsNormKernel(Queue& q, Tensor& out, const Tensor& x, const Tensor& weight,
                    const RmsNormArgs& args, Tensor* residual) {
-  TraceOpTensors(OpId::kRmsNorm, q, {&out, &x, &weight, residual});
+  TraceXpuOp(OpId::kRmsNorm, q, {&out, &x, &weight, residual});
   FloatTensor(out); FloatTensor(x); FloatTensor(weight);
   VT_CHECK(x.shape[1] > 0, "XPU RMSNorm requires positive hidden width");
   if (residual) {

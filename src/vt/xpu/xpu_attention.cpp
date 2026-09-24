@@ -37,7 +37,7 @@ void CopyElement(View dst, int64_t to, View src, int64_t from) {
 }
 }
 void AttnGateSplitKernel(Queue& q, Tensor& queries, Tensor& gates, const Tensor& packed) {
-  TraceOpTensors(OpId::kAttnGateSplit, q, {&queries, &gates, &packed});
+  TraceXpuOp(OpId::kAttnGateSplit, q, {&queries, &gates, &packed});
   VT_CHECK(!Overlap(queries, packed) && !Overlap(gates, packed) && !Overlap(queries, gates),
            "XPU Q/gate split requires separate output storage");
   const View src(packed), dst(queries), gate(gates);
@@ -49,7 +49,7 @@ void AttnGateSplitKernel(Queue& q, Tensor& queries, Tensor& gates, const Tensor&
   });
 }
 void RopeNeoxKernel(Queue& q, Tensor& queries, Tensor& keys, const Tensor& positions, const RopeArgs& args) {
-  TraceOpTensors(OpId::kRopeNeox, q, {&queries, &keys, &positions});
+  TraceXpuOp(OpId::kRopeNeox, q, {&queries, &keys, &positions});
   VT_CHECK(NativeQueue(q).get_device().has(sycl::aspect::fp64), "XPU legacy RoPE requires FP64 frequency math");
   if (!args.rotary_dim) return;
   const View qs(queries), ks(keys), pos(positions);
@@ -62,7 +62,7 @@ void RopeNeoxKernel(Queue& q, Tensor& queries, Tensor& keys, const Tensor& posit
   });
 }
 void RopeCosSinCacheKernel(Queue& q, Tensor& cache, const Tensor& positions, const RopeArgs& args) {
-  TraceOpTensors(OpId::kRopeCosSinCache, q, {&cache, &positions});
+  TraceXpuOp(OpId::kRopeCosSinCache, q, {&cache, &positions});
   VT_CHECK(NativeQueue(q).get_device().has(sycl::aspect::fp64), "XPU legacy RoPE requires FP64 frequency math");
   if (!args.rotary_dim) return;
   const View dst(cache), pos(positions);
@@ -87,7 +87,7 @@ void RopeCosSinCacheKernel(Queue& q, Tensor& cache, const Tensor& positions, con
 }
 void RopeFromCacheKernel(Queue& q, Tensor& queries, Tensor* keys, const Tensor& positions,
                           const Tensor& cache, const RopeArgs& args) {
-  TraceOpTensors(OpId::kRopeFromCache, q, {&queries, keys, &positions, &cache});
+  TraceXpuOp(OpId::kRopeFromCache, q, {&queries, keys, &positions, &cache});
   VT_CHECK(positions.rank == 1, "XPU text RoPE does not yet implement multi-axis vision positions");
   if (!args.rotary_dim) return;
   const View qs(queries), ks(keys ? *keys : queries), pos(positions), cs(cache);
@@ -97,7 +97,7 @@ void RopeFromCacheKernel(Queue& q, Tensor& queries, Tensor* keys, const Tensor& 
   CheckDeviceMetadata(q, [=] {
     for (int64_t i = 0; i < tokens; ++i) if (Position(pos, i) < 0 || Position(pos, i) >= count) return false;
     return true;
-  }, "XPU RoPE position outside cache");
+  }, "XPU RoPE position outside cache", {&positions});
   const bool neox = args.is_neox_style;
   NativeQueue(q).parallel_for(sycl::range<1>(tokens * (hq + hk) * half), [=](sycl::id<1> item) {
     const int64_t pair = item[0] % half, head = (item[0] / half) % (hq + hk), token = item[0] / (half * (hq + hk));
@@ -117,7 +117,7 @@ void CacheWrite(Queue& q, const Tensor& keys, const Tensor& values, Tensor& key_
   CheckDeviceMetadata(q, [=] {
     for (int64_t t = 0; t < count; ++t) if (ids[t] >= blocks * page) return false;
     return true;
-  }, "XPU KV slot outside cache");
+  }, "XPU KV slot outside cache", {&slots});
   if (!count || !elements) return;
   const View ks(keys), vs(values), kc(key_cache), vc(value_cache);
   NativeQueue(q).submit([&](sycl::handler& h) {
@@ -151,13 +151,13 @@ void CacheWrite(Queue& q, const Tensor& keys, const Tensor& values, Tensor& key_
 }
 void ReshapeAndCacheKernel(Queue& q, const Tensor& keys, const Tensor& values, Tensor& key_cache,
                             Tensor& value_cache, const Tensor& slots) {
-  TraceOpTensors(OpId::kReshapeAndCache, q, {&keys, &values, &key_cache, &value_cache, &slots});
+  TraceXpuOp(OpId::kReshapeAndCache, q, {&keys, &values, &key_cache, &value_cache, &slots});
   CacheWrite<false>(q, keys, values, key_cache, value_cache, slots, 1, 1);
 }
 void ReshapeAndCacheFp8Kernel(Queue& q, const Tensor& keys, const Tensor& values, Tensor& key_cache,
                                Tensor& value_cache, const Tensor& slots, Fp8KVCacheDataType kind,
                                float k_scale, float v_scale) {
-  TraceOpTensors(OpId::kReshapeAndCacheFp8, q, {&keys, &values, &key_cache, &value_cache, &slots});
+  TraceXpuOp(OpId::kReshapeAndCacheFp8, q, {&keys, &values, &key_cache, &value_cache, &slots});
   VT_CHECK(kind == Fp8KVCacheDataType::kFp8E4M3 && std::isfinite(k_scale) && std::isfinite(v_scale),
            "XPU FP8 KV requires E4M3 and finite positive scales");
   CacheWrite<true>(q, keys, values, key_cache, value_cache, slots, k_scale, v_scale);
@@ -167,7 +167,7 @@ void PagedAttentionKernel(Queue& q, Tensor& out, const Tensor& query, const Tens
                            const Tensor& value_cache, const Tensor& block_table,
                            const Tensor& seq_lens, const Tensor& query_start_loc,
                            const PagedAttentionArgs& args) {
-  TraceOpTensors(OpId::kPagedAttention, q, {&out, &query, &key_cache, &value_cache,
+  TraceXpuOp(OpId::kPagedAttention, q, {&out, &query, &key_cache, &value_cache,
                                           &block_table, &seq_lens, &query_start_loc});
   VT_CHECK(args.kv_cache_dtype == Fp8KVCacheDataType::kAuto ||
                (args.kv_cache_dtype == Fp8KVCacheDataType::kFp8E4M3 &&
@@ -196,7 +196,7 @@ void PagedAttentionKernel(Queue& q, Tensor& out, const Tensor& query, const Tens
       }
     }
     return true;
-  }, "XPU paged attention invalid sequence offsets, lengths or block table");
+  }, "XPU paged attention invalid sequence offsets, lengths or block table", {&seq_lens, &query_start_loc, &block_table});
   if (!tokens) return;
   size_t lanes = 1;
   while (lanes < static_cast<uint64_t>(dim)) lanes *= 2;

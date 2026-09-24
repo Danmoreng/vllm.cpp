@@ -141,7 +141,7 @@ TEST_CASE("XPU EXL3 GEMM: bits 1-8, tail M, scratch alias, F16 and F32 to BF16")
   }
   CHECK_FALSE(vt::OpRegistered(vt::OpId::kExl3ReconstructGemm, device.q.device.type));
   CHECK(vt::GetReferenceTierHits() == 0);
-  CHECK(vt::xpu::GetMemoryInfo().allocated_bytes == 0);
+  CHECK(vt::xpu::GetMemoryInfo().allocated_bytes == vt::xpu::GetMemoryInfo().exl3_workspace_bytes);
 }
 
 TEST_CASE("XPU EXL3 GEMM: unaligned packed weights and output overlapping input scratch") {
@@ -156,4 +156,39 @@ TEST_CASE("XPU EXL3 GEMM: unaligned packed weights and output overlapping input 
       SameBytes(Gemm(device.q, fixture, 5, dtype, true, 2, unaligned, output_alias),
                 Gemm(host.q, fixture, 5, dtype, true, 2, unaligned, output_alias));
     }
+}
+
+TEST_CASE("XPU EXL3 cast fusion: explicit F16 input and F32 to BF16 output rounding is preserved") {
+  Queue gpu(vt::DeviceType::kXPU);
+  for (int bits : {3, 4, 5, 6}) for (int rows : {1, 5, 129})
+    for (auto input_type : {DType::kF16, DType::kBF16, DType::kF32})
+      for (auto output_type : {DType::kF16, DType::kBF16, DType::kF32}) {
+        CAPTURE(bits);
+        CAPTURE(rows);
+        CAPTURE(input_type);
+        CAPTURE(output_type);
+        constexpr int k = 256, n = 640;
+        const auto fixture = exl3_test::MakeFixture(k, n, bits, 0x421903u + bits);
+        Buffer in(gpu.q, input_type, {rows, k}), half(gpu.q, DType::kF16, {rows, k});
+        Buffer had(gpu.q, DType::kF16, {rows, k}), fused_had(gpu.q, DType::kF16, {rows, k});
+        Buffer packed(gpu.q, DType::kI8, {k / 16, n / 16, bits * 32});
+        Buffer suh(gpu.q, DType::kF16, {k}), svh(gpu.q, DType::kF16, {n});
+        Buffer raw(gpu.q, output_type == DType::kF16 ? DType::kF16 : DType::kF32, {rows, n});
+        Buffer reference(gpu.q, output_type, {rows, n}), fused(gpu.q, output_type, {rows, n});
+        auto values = xpu_test::Values(rows * k, 7, .17f);
+        values[0] = -0.f; values[1] = 0x1p-24f; values[2] = 0x1.001p0f;
+        values[3] = -0x1.003p0f; values[4] = 0x1p-25f;
+        in.put(values); packed.upload(fixture.trellis.data());
+        suh.upload(fixture.suh.data()); svh.upload(fixture.svh.data());
+        if (input_type == DType::kF16) vt::Copy(gpu.q, half.tensor, in.tensor);
+        else vt::CastF16(gpu.q, half.tensor, in.tensor);
+        vt::Exl3Gemm(gpu.q, raw.tensor, half.tensor, packed.tensor, suh.tensor, svh.tensor, had.tensor, {bits, 2});
+        if (output_type == DType::kBF16) vt::CastBf16(gpu.q, reference.tensor, raw.tensor);
+        else vt::Copy(gpu.q, reference.tensor, raw.tensor);
+        vt::Exl3GemmArgs args{bits, 2}; args.fuse_casts = true;
+        vt::Exl3Gemm(gpu.q, fused.tensor, in.tensor, packed.tensor, suh.tensor, svh.tensor, fused_had.tensor, args);
+        SameBytes(fused_had.download(), had.download());
+        SameBytes(fused.download(), reference.download());
+      }
+  CHECK(vt::GetReferenceTierHits() == 0);
 }

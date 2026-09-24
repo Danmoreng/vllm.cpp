@@ -16,6 +16,8 @@ struct MemoryInfo {
   size_t sampling_workspace_bytes = 0; // included in allocated_bytes, top-k/top-p scratch
   size_t attention_workspace_bytes = 0; // included in allocated_bytes, split-KV scratch
   size_t peak_allocated_bytes = 0; // backend-tracked device high-water mark (excludes driver allocations)
+  size_t graph_count = 0, graph_nodes = 0;
+  size_t graph_device_bytes = 0; // validation buffers plus SYCL-reported graph memory; excludes driver command lists
 };
 int DeviceCount() noexcept;
 MemoryInfo GetMemoryInfo(int index = 0);

@@ -5792,6 +5792,8 @@ void Exl3HadR128(Queue& q, Tensor& out, const Tensor& in, const Exl3HadArgs& arg
 
 void Exl3Gemm(Queue& q, Tensor& c, const Tensor& a, const Tensor& trellis, const Tensor& suh,
               const Tensor& svh, Tensor& a_had, const Exl3GemmArgs& args) {
+  VT_CHECK(!args.fuse_casts || q.device.type == DeviceType::kXPU,
+           "exl3_gemm: fused activation casts require native XPU");
   VT_CHECK(args.bits >= 1 && args.bits <= 8,
            "exl3_gemm: bits must be in [1, 8]; got " + std::to_string(args.bits));
   // ALL THREE CODEBOOKS UPSTREAM DEFINES: 0 (the original QTIP 3INST), 1 (MCG)
@@ -5823,13 +5825,13 @@ void Exl3Gemm(Queue& q, Tensor& c, const Tensor& a, const Tensor& trellis, const
   VT_CHECK(a.rank == 2 && c.rank == 2, "exl3_gemm: A and C must be rank-2");
   // `ldmatrix.sync.aligned.m8n8.x4.shared.b16` + `mma...f16.f16` read fp16
   // fragments (ptx.cuh:52-74,203-212), so A has no dtype freedom at all.
-  VT_CHECK(a.dtype == DType::kF16,
-           "exl3_gemm: A must be f16 (the tensor-core fragments are fp16); got " +
+  VT_CHECK(a.dtype == DType::kF16 || (args.fuse_casts && (a.dtype == DType::kBF16 || a.dtype == DType::kF32)),
+           "exl3_gemm: A must be f16, or bf16/f32 with native fused casts; got " +
                std::string(Name(a.dtype)));
   VT_CHECK(a_had.dtype == DType::kF16,
            "exl3_gemm: A_had must be f16 (it holds the transformed A); got " +
                std::string(Name(a_had.dtype)));
-  VT_CHECK(c.dtype == DType::kF16 || c.dtype == DType::kF32,
+  VT_CHECK(c.dtype == DType::kF16 || c.dtype == DType::kF32 || (args.fuse_casts && c.dtype == DType::kBF16),
            "exl3_gemm: C must be f16 (the default, exl3.py:72) or f32 (upstream's "
            "c_fp32 arm, exl3_gemm.cu:134); got " + std::string(Name(c.dtype)));
   VT_CHECK(trellis.dtype == DType::kI8,
@@ -5880,6 +5882,7 @@ void CheckExl3ReconstructGemm(const Queue& q, const Tensor& c, const Tensor& a,
                               const Tensor& trellis, const Tensor& suh, const Tensor& svh,
                               const Tensor& a_had, const Tensor* w_scratch,
                               const Exl3GemmArgs& args) {
+  VT_CHECK(!args.fuse_casts, "exl3_reconstruct_gemm: fused casts are not supported");
   VT_CHECK(args.bits >= 1 && args.bits <= 8,
            "exl3_reconstruct_gemm: bits must be in [1, 8]; got " + std::to_string(args.bits));
   VT_CHECK(args.codebook >= 0 && args.codebook <= 2,
