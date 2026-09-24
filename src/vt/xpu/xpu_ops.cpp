@@ -21,6 +21,14 @@ struct Registrar {
     XPU_OP(kGreedyArgmax, GreedyArgmaxFn, GreedyArgmaxKernel);
     XPU_OP(kExl3HadR128, Exl3HadR128Fn, Exl3HadR128Kernel);
     XPU_OP(kExl3Gemm, Exl3GemmFn, Exl3GemmKernel);
+    XPU_OP(kCausalConv1dFwd, CausalConv1dFwdFn, CausalConv1dFwdKernel);
+    XPU_OP(kCausalConv1dUpdate, CausalConv1dUpdateFn, CausalConv1dUpdateKernel);
+    XPU_OP(kGdnPostConv, GdnPostConvFn, GdnPostConvKernel);
+    XPU_OP(kGdnPrefill, GdnPrefillFn, GdnPrefillKernel);
+    XPU_OP(kGdnDecode, GdnDecodeFn, GdnDecodeKernel);
+    XPU_OP(kRmsNormGated, RmsNormGatedFn, RmsNormGatedKernel);
+    XPU_OP(kGdnStateGather, GdnStateGatherFn, GdnStateGatherKernel);
+    XPU_OP(kGdnStateScatter, GdnStateScatterFn, GdnStateScatterKernel);
 #undef XPU_OP
   }
 };
