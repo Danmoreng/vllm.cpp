@@ -1,5 +1,7 @@
 #include "xpu_common.h"
 #include "xpu_kernels.h"
+#include <cstdlib>
+#include <string_view>
 
 namespace vt::xpu {
 namespace {
@@ -185,6 +187,22 @@ void GdnPrefillKernel(Queue& q, Tensor& out, const Tensor& qi, const Tensor& ki,
                        const Tensor& g, const Tensor& beta, Tensor& state, const Tensor& qsl,
                        const GdnArgs& args) {
   TraceOpTensors(OpId::kGdnPrefill, q, {&out, &qi, &ki, &vi, &g, &beta, &state, &qsl});
+  enum class Mode { kAuto, kReference, kChunked };
+  static const Mode mode = [] {
+    const char* value = std::getenv("VT_XPU_GDN_PREFILL");
+    const std::string_view name = value ? value : "auto";
+    VT_CHECK(name == "auto" || name == "reference" || name == "chunked", "Invalid VT_XPU_GDN_PREFILL");
+    return name == "auto" ? Mode::kAuto : name == "chunked" ? Mode::kChunked : Mode::kReference;
+  }();
+  bool chunked = mode == Mode::kChunked;
+  if (mode == Mode::kAuto && qi.shape[1] == 16 && state.shape[1] == 48) {
+    const auto device = NativeQueue(q).get_device();
+    chunked = std::string_view(__VERSION__) == "Intel(R) oneAPI DPC++/C++ Compiler 2026.1.1 (2026.1.1.20260724)" &&
+        device.get_info<sycl::info::device::driver_version>() == "1.17.39758+10" &&
+        device.get_platform().get_info<sycl::info::platform::version>() == "1.17";
+  }
+  if (chunked && GdnChunkedPrefillEnabled() && qi.shape[0] >= 64 &&
+      GdnChunkedPrefillKernel(q, out, qi, ki, vi, g, beta, state, qsl, args)) return;
   Recurrence(q, out, qi, ki, vi, g, beta, state, &qsl, nullptr, args.scale);
 }
 void GdnDecodeKernel(Queue& q, Tensor& out, const Tensor& qi, const Tensor& ki, const Tensor& vi,

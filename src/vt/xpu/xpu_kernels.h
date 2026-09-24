@@ -17,6 +17,8 @@ void Exl3HadR128Kernel(Queue&, Tensor&, const Tensor&, const Exl3HadArgs&);
 void Exl3GemmKernel(Queue&, Tensor&, const Tensor&, const Tensor&, const Tensor&,
                     const Tensor&, Tensor&, const Exl3GemmArgs&);
 bool Exl3PrefillKernel(Queue&, Tensor&, const Tensor&, const Tensor&, const Tensor&, int, bool matrix = true);
+bool GdnChunkedPrefillKernel(Queue&, Tensor&, const Tensor&, const Tensor&, const Tensor&, const Tensor&,
+                             const Tensor&, Tensor&, const Tensor&, const GdnArgs&);
 void Exl3OutputHadPanel(Queue&, Tensor&, const Tensor&, const Tensor&, int64_t);
 void CausalConv1dFwdKernel(Queue&, Tensor&, const Tensor&, const Tensor&, const Tensor*,
                            Tensor&, const Tensor&, const Tensor&, const CausalConv1dArgs&);
