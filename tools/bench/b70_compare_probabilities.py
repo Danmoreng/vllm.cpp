@@ -57,10 +57,14 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("reference", type=Path)
     parser.add_argument("candidate", type=Path)
+    parser.add_argument("--long-context", action="store_true", help="compare the separate one-case long retrieval corpus")
     args = parser.parse_args()
     reference = json.loads((args.reference / "results.json").read_text())
     candidate = json.loads((args.candidate / "results.json").read_text())
-    assert len(reference) == len(candidate) == 8
+    assert len(reference) == len(candidate) == (1 if args.long_context else 8)
+    if args.long_context:
+        assert reference[0]["name"] == candidate[0]["name"] == "long_retrieval"
+        assert reference[0]["response"]["usage"]["prompt_tokens"] >= 4096
     failures = 0
     compared = 0
     for ref, got in zip(reference, candidate):

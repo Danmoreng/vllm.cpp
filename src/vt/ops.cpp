@@ -5202,9 +5202,9 @@ void PagedAttention(Queue& q, Tensor& out, const Tensor& query, const Tensor& k_
     // garbage. AGENTS.md: refuse an unimplemented arm with a message that names
     // the missing part. CPU landed in W1, CUDA in W2, ROCm in W6; Metal is owed.
     VT_CHECK(q.device.type == DeviceType::kCPU || q.device.type == DeviceType::kCUDA ||
-                 q.device.type == DeviceType::kROCM,
+                 q.device.type == DeviceType::kROCM || q.device.type == DeviceType::kXPU,
              "paged_attention: the fp8 KV read is implemented on CPU (KV-FP8 W1), "
-             "CUDA (KV-FP8 W2), and ROCm (KV-FP8 W6) only; this backend has no "
+             "CUDA (KV-FP8 W2), ROCm (KV-FP8 W6), and XPU only; this backend has no "
              "fp8 dequant on the cache read and would read the fp8 bytes as its "
              "float dtype");
   }

@@ -55,7 +55,7 @@ struct Context {
   sycl::device device;
   sycl::context context;
   std::mutex mutex;
-  Workspace exl3, gdn;
+  Workspace exl3, gdn, attention;
   std::unordered_map<sycl::queue*, std::unique_ptr<sycl::queue>> queues;
   std::unordered_map<void*, size_t> allocations, pinned;
   size_t total, budget, allocated = 0, pinned_bytes = 0;
@@ -275,6 +275,7 @@ MemoryInfo GetMemoryInfo(int index) {
   MemoryInfo info{c.total, c.budget, c.allocated, c.pinned_bytes, 0, false};
   info.exl3_workspace_bytes = c.exl3.bytes;
   info.gdn_workspace_bytes = c.gdn.bytes;
+  info.attention_workspace_bytes = c.attention.bytes;
   if (c.device.has(sycl::aspect::ext_intel_free_memory)) {
     info.free_bytes = c.device.get_info<sycl::ext::intel::info::device::free_memory>();
     info.free_known = true;
@@ -319,6 +320,10 @@ bool WithExl3Workspace(Queue& q, size_t bytes, const std::function<void(void*)>&
 bool WithGdnWorkspace(Queue& q, size_t bytes, const std::function<void(void*)>& launch) {
   VT_CHECK(bytes > 0 && bytes <= 16 * 1024 * 1024, "XPU GDN workspace exceeds 16 MiB budget");
   return WithWorkspace(q, GetContext(q.device.index).gdn, bytes, launch);
+}
+bool WithAttentionWorkspace(Queue& q, size_t bytes, const std::function<void(void*)>& launch) {
+  VT_CHECK(bytes > 0 && bytes <= 16 * 1024 * 1024, "XPU attention workspace exceeds 16 MiB budget");
+  return WithWorkspace(q, GetContext(q.device.index).attention, bytes, launch);
 }
 std::string DeviceDescription(int index) {
   const auto& d = DeviceAt(index);
