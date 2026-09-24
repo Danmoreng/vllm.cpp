@@ -1,11 +1,12 @@
 # Native XPU development
 
 The optional SYCL/Level Zero backend provides the resource and core-operator
-foundation, EXL3, Conv/GDN and attention reference kernels from PR00–PR05 of the
+foundation, EXL3, Conv/GDN, attention and the text engine path from PR00–PR06 of the
 [B70 implementation plan](B70-SYCL-Qwen38-EXL3-Implementation-Plan.md).
-It does not yet advertise a supported model architecture: the complete Qwen
-text path requires PR06. The kernels prioritize
-correctness; no model throughput or XMX performance claim is made.
+It supports the dense `Qwen3_5ForConditionalGeneration` text path with EXL3,
+BF16 residual/KV storage and F32 recurrent state. Use device `auto` with
+`language_model_only` enabled and speculation disabled. Kernels still prioritize
+correctness; fast decode, XMX prefill and production serving parity are later steps.
 
 ## Build and focused checks
 
@@ -14,6 +15,12 @@ a Level Zero GPU driver. The local B70 checks used oneAPI 2026.1.1
 (20260724), driver `1.17.39758+10`, device ID 57891, subgroups 16/32.
 `test_xpu_backend` prints the device, compiler, driver/runtime and supported
 matrix combinations as JSON. A missing GPU is an error, never a CPU substitute.
+
+For IntelLLVM, the build explicitly disables default unsafe floating-point
+reassociation and reciprocal transforms, in addition to FMA contraction.
+SYCL division and square root request correctly rounded FP32 results. Disabling
+FMA alone left `icpx` host reductions reordered and device division approximate;
+the first real-model RMSNorm exposed a BF16 rounding-boundary difference.
 
 ```sh
 cmake -S . -B build-xpu -G Ninja \
@@ -117,8 +124,7 @@ on its ordinary all-greedy path without requested logprobs.
 The six B70 operator cases passed 70,367 assertions, covering mixed dtypes,
 strides, tails, aliases, RMSNorm variants, BA dimensions, invalid indices and
 greedy vocabulary size 248,320. These are operator/sampler integration tests;
-actual full-model reachability and a model-derived execution trace remain the
-PR06 acceptance gate.
+the opt-in checkpoint check below exercises actual full-model reachability.
 
 ## EXL3 reference kernels
 
@@ -216,6 +222,73 @@ the rounded inverse frequency accurate. Its comparison also checks a separate
 scalar oracle (relative/absolute 1e-6); the CPU-library comparison allows
 absolute 1e-5 for observed float-math differences. Other RoPE comparisons use
 relative 4e-6 plus absolute 1e-6 (BF16 relative 0.008).
+
+## Text engine integration
+
+The XPU platform selects its own `XPU_ATTN` backend with NHD paged KV, without
+advertising FA2, FP8 cache, graphs, vision or MTP support. The model checks native
+operator availability before selecting fused attention or packed GDN decode.
+BF16 convolution history uses native gather into F32 working state, update, then
+scatter back to BF16; the recurrent state remains F32. All forward tensor work
+stays on the GPU. Tokenization, scheduling and one-token greedy readback remain
+host work.
+
+```sh
+cmake --build build-xpu --target test_xpu_platform test_xpu_qwen_checkpoint \
+  test_xpu_qwen_parity -j4
+build-xpu/tests/test_xpu_platform
+mkdir -p /tmp/b70-text-activations
+VT_B70_MODEL_DIR=/path/to/Qwen3.8-27B-EXL3-3.5bpw \
+  VT_DUMP_ACT=/tmp/b70-text-activations \
+  VT_OP_PROVIDER_TRACE=/tmp/b70-text-trace.jsonl \
+  build-xpu/tests/test_xpu_qwen_checkpoint
+VT_B70_MODEL_DIR=/path/to/Qwen3.8-27B-EXL3-3.5bpw \
+  VT_B70_XPU_ACTS=/tmp/b70-text-activations \
+  build-xpu/tests/test_xpu_qwen_parity
+```
+
+Use fresh dump/trace paths: manifests and trace records append. The default
+checkpoint test runs the pinned tokenizer and all 64 layers twice, with five
+input tokens and 65 greedy output tokens per request (64 decode steps). It checks
+repeat output, no counted CPU reference fallbacks, resident GPU weights and
+stable live GPU/host RSS after warmup. `VT_B70_MAX_TOKENS` and `VT_B70_REPEATS`
+allow shorter development probes; those do not satisfy the default acceptance.
+The parity test uses the same weight bytes in a four-layer CPU prefix (three GDN
+layers and one full-attention layer) and the CPU sequential GDN oracle. It also
+isolates the first RMSNorm with real input/weight values. This comparison is not
+a full-model Python-vLLM or donor-wheel quality qualification.
+
+The prefix comparison requires exact embedding values, first input RMSNorm,
+first EXL3 QKV projection, convolution and post-convolution Q/V. The first
+nonlinear GDN stages use relative RMS error at most `1/16384`; first-layer
+outputs and residual streams use `1/512`; subsequent projection outputs use
+`1/128` (one BF16 relative fraction step). Every stage also checks finiteness and
+peak absolute error at most `1e-5 + max(abs(reference))/64`. This is a separate
+two-step peak budget for the accumulated outputs, not per-element bit identity.
+The initial universal 0.2% RMS limit failed on chained BF16 projections and was
+replaced with these explicit stage contracts after isolating the exact stem and
+rechecking the unchanged EXL3/GDN/attention operator gates. The observed maxima
+over the four-layer prefix are 0.526% RMS in a projection and 0.090% in the
+residual stream; float nonlinearities still introduce rounding differences.
+
+On the local B70, the final repeated 65-token check passed all 27 assertions
+with identical text and zero counted CPU reference fallbacks (initialization
+also recorded zero). Live device allocations stayed at 14,397,796,028 bytes;
+host RSS was 323,104,768 then 325,066,752 bytes. The trace contains 52,130 EXL3
+calls (401 per forward), including 130 real six-bit head calls with trellis
+shape `[320,15520,192]` and output `[1,248320]`. The two complete requests took
+169.59 and 168.188 seconds with tracing enabled; these totals include prefill
+and are not a separate decode throughput metric. The four-layer reference
+comparison and real-input RMSNorm check passed 1,464 assertions together.
+
+For a short timing diagnostic, set `VT_B70_TIMING=1` on the checkpoint test and
+unset both dump variables and the provider trace. Each shape is warmed first,
+then measured twice with no prefix caching, batch one, greedy sampling and no
+MTP. Client prefill is input tokens / time to first token. Decode is remaining
+output tokens / time from first to last token. The five-token prompt generates
+17 tokens (16 decode steps); the 32-token diagnostic generates two. These short
+inputs do not substitute for a production context-length sweep. In particular,
+the productive Python engine uses another checkpoint, GPTQ INT4, FP8 KV and MTP4.
 
 ## Opt-in provider trace
 

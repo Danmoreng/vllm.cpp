@@ -77,6 +77,9 @@ if(VLLM_CPP_XPU)
   vllm_cpp_add_test(test_xpu_exl3_checkpoint vt/test_xpu_exl3_checkpoint.cpp)
   vllm_cpp_add_test(test_xpu_gdn vt/test_xpu_gdn.cpp)
   vllm_cpp_add_test(test_xpu_attention vt/test_xpu_attention.cpp)
+  vllm_cpp_add_test(test_xpu_qwen_checkpoint vllm/models/test_xpu_qwen_checkpoint.cpp)
+  vllm_cpp_add_test(test_xpu_qwen_parity vllm/models/test_xpu_qwen_parity.cpp)
+  vllm_cpp_add_test(test_xpu_platform vllm/platforms/test_xpu_platform.cpp)
 endif()
 
 # The gate on the golden-comparison helper itself (issue #449): a NaN operand

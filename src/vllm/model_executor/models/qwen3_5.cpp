@@ -4990,6 +4990,9 @@ StepDevInputs BuildStepDevInputs(Dev d, const std::vector<int32_t>& positions,
 void MaybeBuildAttnCosSin(Dev d, StepDevInputs& sdi, const HfConfig& cfg, int64_t T,
                           bool fp4_attn = false) {
   if (!FuseAttnPreambleOn(fp4_attn)) return;
+  // A cache is useful here only when the backend can consume the fused
+  // preamble. Otherwise preserve the unfused Q/K norm + RoPE text path.
+  if (!vt::OpRegistered(vt::OpId::kAttnQkNormRopeGate, d.q.device.type)) return;
   const int rot = static_cast<int>(cfg.rotary_dim);
   if (rot <= 0) return;
   sdi.attn_cos_sin = DBuf(d, DType::kF32, {T, rot});
@@ -5351,7 +5354,8 @@ DBuf GdnBlockPaged(Dev d, const GdnLayerWeights& w, const HfConfig& cfg,
                                      GdnFp8MergedInProjDType(indt, outdt),
                                      // MODEL-QWEN35-GDN-EXL3 (#2495 item 4).
                                      !w.in_proj_qkv_exl3.Empty()});
-  const bool packed_decode = detail::ShouldUsePackedGdnDecode(
+  const bool packed_decode = vt::OpRegistered(vt::OpId::kGdnPackedDecode, d.q.device.type) &&
+      detail::ShouldUsePackedGdnDecode(
       detail::GdnPackedDecodeEligibility{
           PackedGdnDecodeRuntimeEnabled(),
           vllm::platforms::GetPlatform(d.q.device.type).needs_weight_staging(),
@@ -5511,8 +5515,18 @@ DBuf GdnBlockPaged(Dev d, const GdnLayerWeights& w, const HfConfig& cfg,
     if (indexed_state_io) {
       Tensor gidx = SubView(sdi.gdn_state_idx.t(), 0, nd);
       Tensor conv_cache = state.conv_state;  // mutable view over the shared buffer
-      vt::CausalConv1dUpdate(d.q, dconv.t(), mixed, dcw, nullptr,
-                             conv_cache, vt::CausalConv1dArgs{true}, &gidx);
+      if (conv_cache.dtype == DType::kF32 || d.b.SupportsCompressedConvState()) {
+        vt::CausalConv1dUpdate(d.q, dconv.t(), mixed, dcw, nullptr,
+                               conv_cache, vt::CausalConv1dArgs{true}, &gidx);
+      } else {
+        // The cache dtype and native in-place update capability are distinct.
+        // Keep the cache contract; compute through the device's F32 working state.
+        DBuf dcs(d, DType::kF32, {nd, conv_dim, Kw - 1});
+        vt::GdnStateGather(d.q, dcs.t(), conv_cache, gidx);
+        vt::CausalConv1dUpdate(d.q, dconv.t(), mixed, dcw, nullptr,
+                               dcs.t(), vt::CausalConv1dArgs{true});
+        vt::GdnStateScatter(d.q, conv_cache, dcs.t(), gidx);
+      }
     } else {
       VT_CHECK(nd_tok == nd,
                "row-copy GDN conv decode requires one token per request");

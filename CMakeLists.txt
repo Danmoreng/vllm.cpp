@@ -52,6 +52,12 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 if(MSVC)
   add_compile_options($<$<COMPILE_LANGUAGE:CXX>:/fp:strict>)
 else()
+  if(CMAKE_CXX_COMPILER_ID STREQUAL "IntelLLVM")
+    # icpx defaults to unsafe reassociation/reciprocal transforms even without
+    # -ffast-math. Disabling contraction alone does not preserve the CPU oracle's
+    # sequential FP32 reductions (observed in the real Qwen input RMSNorm).
+    add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-fno-fast-math>)
+  endif()
   add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-ffp-contract=off>)
 endif()
 
@@ -1712,6 +1718,12 @@ if(VLLM_CPP_XPU)
     target_include_directories(${xpu_target} PRIVATE include src)
     target_include_directories(${xpu_target} SYSTEM PRIVATE third_party)
     target_compile_options(${xpu_target} PRIVATE -fsycl)
+    if(CMAKE_CXX_COMPILER_ID STREQUAL "IntelLLVM")
+      # Device division/sqrt approximations are a separate icpx default from
+      # host fast math and can flip BF16 rounding at layer boundaries.
+      target_compile_options(${xpu_target} PRIVATE
+        -foffload-fp32-prec-div -foffload-fp32-prec-sqrt)
+    endif()
     vllm_cpp_set_warnings(${xpu_target})
   endforeach()
   target_sources(vllm PRIVATE $<TARGET_OBJECTS:vllm_xpu> $<TARGET_OBJECTS:vllm_xpu_backend>
