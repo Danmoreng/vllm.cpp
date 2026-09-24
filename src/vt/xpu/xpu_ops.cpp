@@ -19,6 +19,8 @@ struct Registrar {
     XPU_OP(kMatmulBT, MatmulFn, MatmulBTKernel);
     XPU_OP(kRmsNorm, RmsNormFn, RmsNormKernel);
     XPU_OP(kGreedyArgmax, GreedyArgmaxFn, GreedyArgmaxKernel);
+    XPU_OP(kExl3HadR128, Exl3HadR128Fn, Exl3HadR128Kernel);
+    XPU_OP(kExl3Gemm, Exl3GemmFn, Exl3GemmKernel);
 #undef XPU_OP
   }
 };

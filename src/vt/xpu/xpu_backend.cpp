@@ -6,6 +6,7 @@
 #include <cerrno>
 #include <cstdlib>
 #include <cstdio>
+#include <cstring>
 #include <memory>
 #include <mutex>
 #include <unordered_map>
@@ -148,7 +149,37 @@ class XpuBackend final : public Backend {
   }
   void Copy(Queue& q, void* dst, const void* src, size_t bytes) override {
     auto& native = queue(q);
-    if (bytes) native.memcpy(dst, src, bytes);
+    if (!bytes) return;
+    const auto context = native.get_context();
+    const bool host_src = sycl::get_pointer_type(src, context) == sycl::usm::alloc::unknown;
+    const bool host_dst = sycl::get_pointer_type(dst, context) == sycl::usm::alloc::unknown;
+    if (!host_src && !host_dst) { native.memcpy(dst, src, bytes); return; }
+    if (host_src && host_dst) {
+      native.wait_and_throw();
+      std::memcpy(dst, src, bytes);
+      return;
+    }
+    // Ordinary host pointers include read-only, unaligned safetensors mmaps.
+    // Level Zero's direct import of those mappings can fault in the copy engine.
+    // Only known USM pointers reach DMA; bound staging independently of weights.
+    const size_t chunk = std::min(bytes, size_t{4 * 1024 * 1024});
+    void* staging = AllocPinned(chunk);
+    try {
+      for (size_t offset = 0; offset < bytes; offset += chunk) {
+        const size_t count = std::min(chunk, bytes - offset);
+        if (host_src) {
+          std::memcpy(staging, static_cast<const char*>(src) + offset, count);
+          native.memcpy(static_cast<char*>(dst) + offset, staging, count).wait_and_throw();
+        } else {
+          native.memcpy(staging, static_cast<const char*>(src) + offset, count).wait_and_throw();
+          std::memcpy(static_cast<char*>(dst) + offset, staging, count);
+        }
+      }
+    } catch (...) {
+      try { FreePinned(staging); } catch (...) { /* retained until context shutdown */ }
+      throw;
+    }
+    FreePinned(staging);
   }
   Queue CreateQueue() override {
     auto& c = ctx();

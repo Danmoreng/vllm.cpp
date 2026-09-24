@@ -1,10 +1,10 @@
 # Native XPU development
 
 The optional SYCL/Level Zero backend provides the resource and core-operator
-foundation from PR00–PR02 of the
+foundation and EXL3 reference kernels from PR00–PR03 of the
 [B70 implementation plan](B70-SYCL-Qwen38-EXL3-Implementation-Plan.md).
-It does not yet advertise a supported model architecture: EXL3, GDN, attention,
-and the complete Qwen text path require PR03–PR06. The kernels prioritize
+It does not yet advertise a supported model architecture: GDN, attention,
+and the complete Qwen text path require PR04–PR06. The kernels prioritize
 correctness; no model throughput or XMX performance claim is made.
 
 ## Build and focused checks
@@ -83,6 +83,11 @@ Device allocations are device USM and are **not host-addressable**. Each GPU has
 one context; every queue is in-order. Events support explicit dependencies
 between queues. Free waits for all owned queues before releasing storage.
 This conservative lifetime policy is deliberate and can introduce synchronization.
+Transfers to/from ordinary host pointers use a bounded 4 MiB pinned buffer.
+This supports unaligned, read-only checkpoint mappings without importing them
+directly into Level Zero; direct import faulted on the real LM-head upload.
+Known USM-to-USM copies remain asynchronous. Host staging is accounted as pinned
+memory and released after the copy completes.
 Auxiliary execution, graphs and compressed-state capabilities remain disabled.
 
 `vt::xpu::GetMemoryInfo()` separates physical capacity, process budget, live device
@@ -92,9 +97,10 @@ is reported only when available (`free_known`); it is never fabricated from the
 process allocation count. The budget does not reserve memory against other
 processes.
 
-The 15 registered native operations are `Copy`, `CastBf16`, `CastF16`, `CastF32`,
+The registered native operations include `Copy`, `CastBf16`, `CastF16`, `CastF32`,
 `Add`, `SiluAndMul`, `MoeSiluMul`, `SigmoidGateBf16`, `IndexSelect`, `IndexCopy`,
 `Embedding`, `Matmul`, `MatmulBT`, `RmsNorm`, and `GreedyArgmax`.
+EXL3 adds `Exl3HadR128` and `Exl3Gemm`; it does not register reconstruction.
 `Copy` adds all F16/BF16/F32 conversion pairs and same-dtype bit-preserving copies
 with nonnegative strides. Existing cast entry points retain their existing
 dtype restrictions. Copy and overlapping XPU outputs use snapshot semantics;
@@ -113,6 +119,35 @@ strides, tails, aliases, RMSNorm variants, BA dimensions, invalid indices and
 greedy vocabulary size 248,320. These are operator/sampler integration tests;
 actual full-model reachability and a model-derived execution trace remain the
 PR06 acceptance gate.
+
+## EXL3 reference kernels
+
+The native path supports bits 1–8 and all three existing codebooks, including
+the checkpoint's `mul1`. It applies FP16 input scaling, Had128, sequential F32
+accumulation over packed weights, then output Had128 and F16/F32 storage.
+Only activation scratch `[M,N]` is allocated; there is no decoded model copy.
+The GEMM currently synchronizes when releasing this scratch. Shape tuning,
+split-K and XMX are later performance work.
+
+```sh
+cmake --build build-xpu --target test_xpu_exl3_decode test_xpu_exl3 \
+  test_xpu_exl3_checkpoint -j4
+ctest --test-dir build-xpu --output-on-failure \
+  -R '^(test_xpu_exl3_decode|test_xpu_exl3)$'
+VT_B70_MODEL_DIR=/path/to/Qwen3.8-27B-EXL3-3.5bpw \
+  VT_OP_PROVIDER_TRACE=/tmp/exl3-checkpoint.jsonl \
+  build-xpu/tests/test_xpu_exl3_checkpoint
+```
+
+The decoder checks all 65,536 codewords for each codebook, cyclic windows for
+bits 1–8 and tile permutation (204,800 assertions). Hadamard/GEMM checks cover
+FP16 scaling, in-place input scratch, M=1/2/17, and F16 versus F32-to-BF16 output
+(247 assertions). The checkpoint test executes all 11 real `(bits,K,N)` families
+at full dimensions, including `lm_head [5120,248320]`, and compares first,
+middle and last 128-column output blocks against independent CPU GEMMs
+(1,047 assertions). These B70 comparisons passed bitwise; they are not a
+whole-model or performance acceptance claim. Without `VT_B70_MODEL_DIR`, the
+checkpoint test explicitly exits with skip code 77.
 
 ## Opt-in provider trace
 

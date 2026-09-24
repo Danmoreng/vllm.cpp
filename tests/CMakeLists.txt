@@ -23,6 +23,15 @@ vllm_cpp_set_warnings(b70_provider_trace_probe)
 add_test(NAME test_b70_provider_trace COMMAND ${Python3_EXECUTABLE}
   "${CMAKE_SOURCE_DIR}/tests/scripts/test_b70_provider_trace.py" $<TARGET_FILE:b70_provider_trace_probe>)
 if(VLLM_CPP_XPU)
+  add_executable(test_xpu_exl3_decode vt/test_xpu_exl3_decode.cpp
+    ${CMAKE_SOURCE_DIR}/src/vt/backend.cpp ${CMAKE_SOURCE_DIR}/src/vt/dtype.cpp
+    ${CMAKE_SOURCE_DIR}/src/vt/cpu/cpu_exl3_dequant.cpp $<TARGET_OBJECTS:vllm_xpu_backend>)
+  target_include_directories(test_xpu_exl3_decode PRIVATE ${CMAKE_SOURCE_DIR}/include ${CMAKE_SOURCE_DIR}/src)
+  target_compile_options(test_xpu_exl3_decode PRIVATE -fsycl -ffp-contract=off)
+  target_link_options(test_xpu_exl3_decode PRIVATE -fsycl)
+  target_link_libraries(test_xpu_exl3_decode PRIVATE vllm_test_main)
+  vllm_cpp_set_warnings(test_xpu_exl3_decode)
+  add_test(NAME test_xpu_exl3_decode COMMAND test_xpu_exl3_decode)
   add_executable(test_xpu_backend vt/test_xpu_backend.cpp
     ${CMAKE_SOURCE_DIR}/src/vt/backend.cpp $<TARGET_OBJECTS:vllm_xpu_backend>)
   target_include_directories(test_xpu_backend PRIVATE ${CMAKE_SOURCE_DIR}/include ${CMAKE_SOURCE_DIR}/src)
@@ -64,6 +73,8 @@ function(vllm_cpp_add_test name)
 endfunction()
 if(VLLM_CPP_XPU)
   vllm_cpp_add_test(test_xpu_ops vt/test_xpu_ops.cpp)
+  vllm_cpp_add_test(test_xpu_exl3 vt/test_xpu_exl3.cpp)
+  vllm_cpp_add_test(test_xpu_exl3_checkpoint vt/test_xpu_exl3_checkpoint.cpp)
 endif()
 
 # The gate on the golden-comparison helper itself (issue #449): a NaN operand

@@ -13,4 +13,7 @@ void MatmulKernel(Queue&, Tensor&, const Tensor&, const Tensor&);
 void MatmulBTKernel(Queue&, Tensor&, const Tensor&, const Tensor&);
 void RmsNormKernel(Queue&, Tensor&, const Tensor&, const Tensor&, const RmsNormArgs&, Tensor*);
 void GreedyArgmaxKernel(Queue&, Tensor&, const Tensor&);
+void Exl3HadR128Kernel(Queue&, Tensor&, const Tensor&, const Exl3HadArgs&);
+void Exl3GemmKernel(Queue&, Tensor&, const Tensor&, const Tensor&, const Tensor&,
+                    const Tensor&, Tensor&, const Exl3GemmArgs&);
 }  // namespace vt::xpu

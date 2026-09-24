@@ -5,6 +5,10 @@
 #include <cstring>
 #include <iostream>
 #include <string>
+#include <vector>
+#include <cstdio>
+#include <sys/mman.h>
+#include <unistd.h>
 
 int main(int argc, char**) {
   try {
@@ -88,6 +92,25 @@ int main(int argc, char**) {
       for (int inner = 0; inner < k; ++inner) sum += a[row * k + inner] * w[inner * n + col];
       VT_CHECK(result[row * n + col] == sum, "matrix probe mismatch");
     }
+    // Regression: read-only file mappings used to fault the Level Zero copy
+    // engine before the first real EXL3 kernel. Cross the bounded staging size.
+    constexpr size_t mapped_bytes = 6 * 1024 * 1024 + 13;
+    std::vector<unsigned char> source(mapped_bytes + 1), downloaded(mapped_bytes);
+    for (size_t i = 0; i < source.size(); ++i) source[i] = static_cast<unsigned char>(i * 13 + i / 251);
+    FILE* file = std::tmpfile();
+    VT_CHECK(file != nullptr, "mapping fixture file failed");
+    VT_CHECK(std::fwrite(source.data(), 1, source.size(), file) == source.size(), "mapping fixture write failed");
+    VT_CHECK(std::fflush(file) == 0, "mapping fixture flush failed");
+    void* mapping = mmap(nullptr, source.size(), PROT_READ, MAP_PRIVATE, fileno(file), 0);
+    VT_CHECK(mapping != MAP_FAILED, "read-only mapping failed");
+    void* mapped_device = b.Alloc(mapped_bytes);
+    b.Copy(q1, mapped_device, static_cast<const char*>(mapping) + 1, mapped_bytes);
+    b.Copy(q1, downloaded.data(), mapped_device, mapped_bytes);
+    b.Synchronize(q1);
+    VT_CHECK(std::memcmp(downloaded.data(), source.data() + 1, mapped_bytes) == 0,
+             "read-only unaligned mmap transfer differs");
+    b.Free(mapped_device);
+    munmap(mapping, source.size()); std::fclose(file);
     const auto after = vt::xpu::GetMemoryInfo();
     VT_CHECK(after.allocated_bytes == before.allocated_bytes && after.pinned_bytes == before.pinned_bytes,
              "memory not released");
@@ -96,6 +119,6 @@ int main(int argc, char**) {
       VT_CHECK(std::string(e.what()).find("exceeds memory budget") != std::string::npos, "wrong budget error");
     }
     vt::DestroyQueue(q1); vt::DestroyQueue(q2);
-    std::cout << "PASS: USM alloc/copy/memset/free, pinned memory, two queues/events, budget, F32 [3,13]x[13,9]\n";
+    std::cout << "PASS: USM alloc/copy/memset/free, pinned memory, two queues/events, budget, F32 [3,13]x[13,9], read-only mmap >4MiB\n";
   } catch (const std::exception& e) { std::cerr << e.what() << '\n'; return 1; }
 }
