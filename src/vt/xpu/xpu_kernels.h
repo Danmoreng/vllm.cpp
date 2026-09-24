@@ -38,6 +38,12 @@ void RopeNeoxKernel(Queue&, Tensor&, Tensor&, const Tensor&, const RopeArgs&);
 void RopeCosSinCacheKernel(Queue&, Tensor&, const Tensor&, const RopeArgs&);
 void RopeFromCacheKernel(Queue&, Tensor&, Tensor*, const Tensor&, const Tensor&, const RopeArgs&);
 void ReshapeAndCacheKernel(Queue&, const Tensor&, const Tensor&, Tensor&, Tensor&, const Tensor&);
+void ReshapeAndCacheFp8Kernel(Queue&, const Tensor&, const Tensor&, Tensor&, Tensor&, const Tensor&,
+                              Fp8KVCacheDataType, float, float);
 void PagedAttentionKernel(Queue&, Tensor&, const Tensor&, const Tensor&, const Tensor&,
                             const Tensor&, const Tensor&, const Tensor&, const PagedAttentionArgs&);
+bool PagedAttentionSplitKernel(Queue&, Tensor&, const Tensor&, const Tensor&, const Tensor&,
+                               const Tensor&, const Tensor&, const Tensor&, const PagedAttentionArgs&);
+bool PagedAttentionPrefillKernel(Queue&, Tensor&, const Tensor&, const Tensor&, const Tensor&,
+                                 const Tensor&, const Tensor&, const Tensor&, const PagedAttentionArgs&);
 }  // namespace vt::xpu

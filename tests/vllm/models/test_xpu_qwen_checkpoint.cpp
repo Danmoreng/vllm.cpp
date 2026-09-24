@@ -42,7 +42,7 @@ std::string RepeatedPrompt(int count) {
   for (int i = 0; i < count; ++i) text += " Hello";
   return text;
 }
-void CheckQuality(vllm_engine* engine) {
+void CheckQuality(vllm_engine* engine, int long_context) {
   namespace fs = std::filesystem;
   using nlohmann::json;
   const char* dump = std::getenv("VT_DUMP_LOGITS");
@@ -60,7 +60,7 @@ void CheckQuality(vllm_engine* engine) {
       "data to inspect. Each question is independent of previous questions; no previous answer is "
       "relevant to the current task.";
   struct Case { const char* name; const char* prompt; const char* expected; };
-  const Case cases[] = {
+  std::vector<Case> cases = {
     {"arithmetic", "A box contains 17 red balls and 25 blue balls. How many balls are in the box? Return only the number.", "42"},
     {"code", "What does this Python expression evaluate to: sum(x * x for x in [1, 2, 3, 4] if x % 2 == 0)? Return only the number.", "20"},
     {"german", "Übersetze das deutsche Wort Katze ins Englische. Antworte nur mit dem englischen Wort in Kleinbuchstaben.", "cat"},
@@ -72,6 +72,14 @@ void CheckQuality(vllm_engine* engine) {
     {"continuation", "Complete this sentence naturally in a few words: After the rain stopped, the garden", ""},
     {"explanation", "In one short sentence, explain why a cache can make repeated data access faster.", ""},
   };
+  // Opt-in long retrieval: the record precedes the entire distractor span.
+  // Keep the normal eight-case probability corpus unchanged.
+  const std::string long_prompt = long_context ?
+      "Records: Alice has a green bicycle; Bruno has a yellow bicycle; Clara has a blue bicycle. "
+      "The following repeated greeting is irrelevant to these records.\n" + RepeatedPrompt(long_context) +
+      "\nEnd of irrelevant greetings. Using the records at the beginning, who has the yellow bicycle? "
+      "Return only the person's first name." : "";
+  if (long_context) cases = {{"long_retrieval", long_prompt.c_str(), "Bruno"}};
   json results = json::array();
   for (const auto& item : cases) {
     CAPTURE(item.name);
@@ -89,7 +97,8 @@ void CheckQuality(vllm_engine* engine) {
     std::unique_ptr<char, decltype(&vllm_string_free)> owned(raw, vllm_string_free);
     const auto response = json::parse(raw);
     const int prompt_tokens = response.at("usage").at("prompt_tokens");
-    REQUIRE(prompt_tokens >= 128); REQUIRE(prompt_tokens <= 512);
+    REQUIRE(prompt_tokens >= (long_context ? long_context : 128));
+    REQUIRE(prompt_tokens <= (long_context ? long_context + 512 : 512));
     std::string answer = response.at("choices").at(0).at("message").at("content");
     const auto first = answer.find_first_not_of(" \r\n\t"), last = answer.find_last_not_of(" \r\n\t");
     answer = first == std::string::npos ? "" : answer.substr(first, last - first + 1);
@@ -109,6 +118,7 @@ void CheckQuality(vllm_engine* engine) {
   }
 }
 void MeasureWarm(vllm_engine* engine, int requested_prompt, int requested_outputs) {
+  std::cout << "DEVICE " << vt::xpu::DeviceDescription() << std::endl;
   // This is an opt-in, short end-to-end diagnostic, not a context-length sweep.
   // The no-MTP DELTA API emits exactly one callback per generated token.
   REQUIRE(std::getenv("VT_DUMP_ACT") == nullptr);
@@ -149,7 +159,8 @@ void MeasureWarm(vllm_engine* engine, int requested_prompt, int requested_output
                 << " tpot_seconds=" << decode / (sampling.max_tokens - 1)
                 << " gpu_bytes=" << memory.allocated_bytes
                 << " exl3_workspace_bytes=" << memory.exl3_workspace_bytes
-                << " gdn_workspace_bytes=" << memory.gdn_workspace_bytes << std::endl;
+                << " gdn_workspace_bytes=" << memory.gdn_workspace_bytes
+                << " attention_workspace_bytes=" << memory.attention_workspace_bytes << std::endl;
     }
   }
 }
@@ -166,6 +177,9 @@ TEST_CASE("XPU Qwen checkpoint: native text prefill and repeated greedy decode t
   const int tokens = Setting("VT_B70_MAX_TOKENS", 65), repeats = Setting("VT_B70_REPEATS", 2);
   const bool timing = Setting("VT_B70_TIMING", 0) != 0;
   const bool quality = Setting("VT_B70_QUALITY", 0) != 0;
+  const int quality_context = Setting("VT_B70_QUALITY_CONTEXT", 0);
+  REQUIRE((quality_context == 0 || quality_context == 4096 || quality_context == 32768));
+  REQUIRE((quality_context == 0 || quality));
   REQUIRE_FALSE((timing && quality));
   const int timing_outputs = Setting("VT_B70_TIMING_OUTPUT_TOKENS", 0);
   REQUIRE((timing_outputs == 0 || (timing_outputs >= 2 && timing_outputs <= 100)));
@@ -185,14 +199,17 @@ TEST_CASE("XPU Qwen checkpoint: native text prefill and repeated greedy decode t
   params.speculative_config = nullptr;
   params.enable_prefix_caching = 2;
   params.max_num_seqs = 1;
-  params.max_num_batched_tokens = Setting("VT_B70_BATCH_TOKENS", quality ? 512 : requested_prompt ? requested_prompt : timing ? 32 : 16);
+  params.max_num_batched_tokens = Setting("VT_B70_BATCH_TOKENS", quality_context ? 4096 : quality ? 512 : requested_prompt ? requested_prompt : timing ? 32 : 16);
   REQUIRE(params.max_num_batched_tokens > 0); REQUIRE(params.max_num_batched_tokens <= 6656);
-  params.max_model_len = quality ? 640 : std::max(128, requested_prompt + std::max({tokens, timing_outputs, 32}));
+  params.max_model_len = quality ? quality_context + 640 : std::max(128, requested_prompt + std::max({tokens, timing_outputs, 32}));
   params.block_size = 16;
   // Hybrid attention/GDN pools also reserve a sentinel block per group.
   params.num_blocks = std::max(32, 2 * ((params.max_model_len + 15) / 16 + 1));
-  params.kv_cache_dtype = "bfloat16";
-  std::cout << "LOAD " << model << " device=xpu" << std::endl;
+  const char* kv_dtype = std::getenv("VT_B70_KV_DTYPE");
+  params.kv_cache_dtype = kv_dtype ? kv_dtype : "bfloat16";
+  std::cout << "LOAD " << model << " device=xpu kv_dtype=" << params.kv_cache_dtype
+            << " max_context=" << params.max_model_len
+            << " batch_tokens=" << params.max_num_batched_tokens << std::endl;
   vllm_engine* raw = nullptr;
   auto status = vllm_engine_load(&params, &raw);
   REQUIRE_MESSAGE(status == VLLM_OK, std::string(vllm_last_error()));
@@ -201,7 +218,9 @@ TEST_CASE("XPU Qwen checkpoint: native text prefill and repeated greedy decode t
             << " rss_bytes=" << ResidentBytes() << " initialization_reference_hits=" << vt::GetReferenceTierHits() << std::endl;
   const auto initialization_hits = vt::GetReferenceTierHits();
   if (quality) {
-    CheckQuality(engine.get());
+    CheckQuality(engine.get(), quality_context);
+    std::cout << "QUALITY_MEMORY gpu_bytes=" << vt::xpu::GetMemoryInfo().allocated_bytes
+              << " attention_workspace_bytes=" << vt::xpu::GetMemoryInfo().attention_workspace_bytes << std::endl;
     CHECK(vt::GetReferenceTierHits() == initialization_hits);
     return;
   }

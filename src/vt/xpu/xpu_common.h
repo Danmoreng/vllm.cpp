@@ -15,6 +15,7 @@ sycl::queue& NativeQueue(Queue& q);
 // was insufficient; callers can retain their native non-panel path.
 bool WithExl3Workspace(Queue& q, size_t bytes, const std::function<void(void*)>& launch);
 bool WithGdnWorkspace(Queue& q, size_t bytes, const std::function<void(void*)>& launch);
+bool WithAttentionWorkspace(Queue& q, size_t bytes, const std::function<void(void*)>& launch);
 
 // Trivially copyable kernel argument; never capture Tensor's optional metadata.
 struct View {

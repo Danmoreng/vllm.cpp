@@ -16,6 +16,10 @@ TEST_CASE("XPU platform selects native generic attention without FA2 or unsuppor
   CHECK(vllm::v1::SelectAttentionBackendName(platform, "", cfg) == "XPU_ATTN");
   CHECK_NOTHROW(vllm::v1::CheckKvCacheShape(vt::DeviceType::kXPU, "XPU_ATTN", 4, 16, 4, 256, false));
   cfg.kv_cache_dtype = "fp8";
+  CHECK(vllm::v1::SelectAttentionBackendName(platform, "", cfg) == "XPU_ATTN");
+  cfg.kv_cache_dtype = "fp8_e4m3";
+  CHECK(vllm::v1::SelectAttentionBackendName(platform, "", cfg) == "XPU_ATTN");
+  cfg.kv_cache_dtype = "fp8_e5m2";
   CHECK_THROWS(vllm::v1::SelectAttentionBackendName(platform, "", cfg));
   cfg.kv_cache_dtype = "auto"; cfg.use_mla = true;
   CHECK_THROWS(vllm::v1::SelectAttentionBackendName(platform, "", cfg));

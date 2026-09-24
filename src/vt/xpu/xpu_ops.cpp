@@ -34,6 +34,7 @@ struct Registrar {
     XPU_OP(kRopeCosSinCache, RopeCosSinCacheFn, RopeCosSinCacheKernel);
     XPU_OP(kRopeFromCache, RopeFromCacheFn, RopeFromCacheKernel);
     XPU_OP(kReshapeAndCache, ReshapeAndCacheFn, ReshapeAndCacheKernel);
+    XPU_OP(kReshapeAndCacheFp8, ReshapeAndCacheFp8Fn, ReshapeAndCacheFp8Kernel);
     XPU_OP(kPagedAttention, PagedAttentionFn, PagedAttentionKernel);
 #undef XPU_OP
   }

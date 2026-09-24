@@ -16,6 +16,9 @@ class XpuAttentionBackend final : public v1::AttentionBackend {
     return {blocks, 2, page, heads, dim};
   }
   std::vector<DType> supported_dtypes() const override { return {DType::kF32, DType::kBF16, DType::kF16}; }
+  std::vector<std::string> supported_kv_cache_dtypes() const override {
+    return {"auto", "float16", "bfloat16", "fp8", "fp8_e4m3"};
+  }
   std::vector<int> get_supported_kernel_block_sizes() const override { return {16}; }
   bool supports_head_size(int head_size) const override { return head_size > 0 && head_size <= 256; }
   bool supports_non_causal() const override { return true; }
@@ -38,7 +41,7 @@ class XpuPlatform final : public Platform {
     p.device_memory_total_bytes = vt::xpu::GetMemoryInfo().total_bytes;
     return p;
   }
-  // Native text path: EXL3 projections, F32 GDN state and BF16 paged KV.
+  // Native text path: EXL3 projections, F32 GDN state and float/E4M3 paged KV.
   // Vision and speculative draft execution are not enabled by this backend.
   bool supports_model_architecture(std::string_view architecture) const override {
     return architecture == "Qwen3_5ForConditionalGeneration";

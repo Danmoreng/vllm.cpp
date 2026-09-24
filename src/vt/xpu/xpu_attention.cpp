@@ -1,6 +1,9 @@
 #include "xpu_common.h"
 #include "xpu_kernels.h"
+#include "xpu_fp8.h"
 #include <limits>
+#include <cstdlib>
+#include <string_view>
 
 namespace vt::xpu {
 namespace {
@@ -104,9 +107,10 @@ void RopeFromCacheKernel(Queue& q, Tensor& queries, Tensor* keys, const Tensor& 
            Load(cs, base + pair), Load(cs, base + half + pair));
   });
 }
-void ReshapeAndCacheKernel(Queue& q, const Tensor& keys, const Tensor& values, Tensor& key_cache,
-                            Tensor& value_cache, const Tensor& slots) {
-  TraceOpTensors(OpId::kReshapeAndCache, q, {&keys, &values, &key_cache, &value_cache, &slots});
+namespace {
+template<bool Fp8>
+void CacheWrite(Queue& q, const Tensor& keys, const Tensor& values, Tensor& key_cache,
+                Tensor& value_cache, const Tensor& slots, float k_scale, float v_scale) {
   const int64_t count = slots.Numel(), page = key_cache.shape[1], blocks = key_cache.shape[0];
   const auto elements = keys.shape[1] * keys.shape[2];
   const auto* ids = static_cast<const int64_t*>(slots.data);
@@ -114,16 +118,49 @@ void ReshapeAndCacheKernel(Queue& q, const Tensor& keys, const Tensor& values, T
     for (int64_t t = 0; t < count; ++t) if (ids[t] >= blocks * page) return false;
     return true;
   }, "XPU KV slot outside cache");
+  if (!count || !elements) return;
   const View ks(keys), vs(values), kc(key_cache), vc(value_cache);
-  NativeQueue(q).parallel_for(sycl::range<1>(count * elements), [=](sycl::id<1> item) {
-    const int64_t token = item[0] / elements, col = item[0] % elements, slot = ids[token];
-    if (slot < 0) return;
-    // Match the CPU loop if a caller repeats a slot: the last token wins.
-    for (int64_t later = token + 1; later < count; ++later) if (ids[later] == slot) return;
-    const auto block = slot / page, offset = slot % page;
-    CopyElement(kc, block * kc.stride[0] + offset * kc.stride[1] + col, ks, token * ks.stride[0] + col);
-    CopyElement(vc, block * vc.stride[0] + offset * vc.stride[1] + col, vs, token * vs.stride[0] + col);
+  NativeQueue(q).submit([&](sycl::handler& h) {
+    sycl::local_accessor<int> keep(1, h);
+    h.parallel_for(sycl::nd_range<1>(count * 128, 128), [=](sycl::nd_item<1> item) {
+      const int64_t token = item.get_group(0), slot = ids[token];
+      if (item.get_local_id(0) == 0) {
+        // Last writer wins, checked once per token rather than per K/V value.
+        int active = slot >= 0;
+        for (int64_t later = token + 1; active && later < count; ++later)
+          if (ids[later] == slot) active = 0;
+        keep[0] = active;
+      }
+      item.barrier(sycl::access::fence_space::local_space);
+      if (!keep[0]) return;
+      const auto block = slot / page, offset = slot % page;
+      for (int64_t col = item.get_local_id(0); col < elements; col += 128) {
+        const auto kd = block * kc.stride[0] + offset * kc.stride[1] + col;
+        const auto vd = block * vc.stride[0] + offset * vc.stride[1] + col;
+        if constexpr (Fp8) {
+          static_cast<uint8_t*>(kc.data)[kd] = EncodeE4M3(Load(ks, token * ks.stride[0] + col) / k_scale);
+          static_cast<uint8_t*>(vc.data)[vd] = EncodeE4M3(Load(vs, token * vs.stride[0] + col) / v_scale);
+        } else {
+          CopyElement(kc, kd, ks, token * ks.stride[0] + col);
+          CopyElement(vc, vd, vs, token * vs.stride[0] + col);
+        }
+      }
+    });
   });
+}
+}
+void ReshapeAndCacheKernel(Queue& q, const Tensor& keys, const Tensor& values, Tensor& key_cache,
+                            Tensor& value_cache, const Tensor& slots) {
+  TraceOpTensors(OpId::kReshapeAndCache, q, {&keys, &values, &key_cache, &value_cache, &slots});
+  CacheWrite<false>(q, keys, values, key_cache, value_cache, slots, 1, 1);
+}
+void ReshapeAndCacheFp8Kernel(Queue& q, const Tensor& keys, const Tensor& values, Tensor& key_cache,
+                               Tensor& value_cache, const Tensor& slots, Fp8KVCacheDataType kind,
+                               float k_scale, float v_scale) {
+  TraceOpTensors(OpId::kReshapeAndCacheFp8, q, {&keys, &values, &key_cache, &value_cache, &slots});
+  VT_CHECK(kind == Fp8KVCacheDataType::kFp8E4M3 && std::isfinite(k_scale) && std::isfinite(v_scale),
+           "XPU FP8 KV requires E4M3 and finite positive scales");
+  CacheWrite<true>(q, keys, values, key_cache, value_cache, slots, k_scale, v_scale);
 }
 
 void PagedAttentionKernel(Queue& q, Tensor& out, const Tensor& query, const Tensor& key_cache,
@@ -132,7 +169,10 @@ void PagedAttentionKernel(Queue& q, Tensor& out, const Tensor& query, const Tens
                            const PagedAttentionArgs& args) {
   TraceOpTensors(OpId::kPagedAttention, q, {&out, &query, &key_cache, &value_cache,
                                           &block_table, &seq_lens, &query_start_loc});
-  VT_CHECK(args.kv_cache_dtype == Fp8KVCacheDataType::kAuto, "XPU paged attention requires float KV cache");
+  VT_CHECK(args.kv_cache_dtype == Fp8KVCacheDataType::kAuto ||
+               (args.kv_cache_dtype == Fp8KVCacheDataType::kFp8E4M3 &&
+                std::isfinite(args.k_scale) && std::isfinite(args.v_scale)),
+           "XPU paged attention requires float KV or E4M3 with finite positive scales");
   const auto tokens = query.shape[0], heads = query.shape[1], dim = query.shape[2];
   const auto page = key_cache.shape[1], blocks = key_cache.shape[0], ratio = heads / key_cache.shape[2];
   const auto requests = seq_lens.Numel(), columns = block_table.shape[1];
@@ -163,10 +203,29 @@ void PagedAttentionKernel(Queue& q, Tensor& out, const Tensor& query, const Tens
   VT_CHECK(lanes <= NativeQueue(q).get_device().get_info<sycl::info::device::max_work_group_size>(),
            "XPU paged attention head exceeds workgroup limit");
   const float scale = args.scale, cap = args.logits_soft_cap;
+  const float k_scale = args.k_scale, v_scale = args.v_scale;
   const bool causal = args.causal;
   const int64_t left = args.window_size ? args.window_size->left : -1;
   const int64_t right = args.window_size ? args.window_size->right : -1;
   WithOutput(q, out, {&query, &key_cache, &value_cache, &block_table, &seq_lens, &query_start_loc}, [&](Tensor& target) {
+    const char* setting = std::getenv("VT_XPU_ATTENTION");
+    const std::string_view mode = setting ? setting : "auto";
+    VT_CHECK(mode == "auto" || mode == "reference" || mode == "split" || mode == "prefill", "Invalid VT_XPU_ATTENTION");
+    const auto device = NativeQueue(q).get_device();
+    // Qualified against the pinned checkpoint's answer and probability corpus.
+    // FP8 remains an explicit cache choice; its quantization has a separate
+    // quality delta, so do not treat the BF16 qualification as an FP8 gate.
+    const bool automatic = mode == "auto" && query.shape[1] == 24 && dim == 256 &&
+        key_cache.shape[2] == 4 && key_cache.dtype == DType::kBF16 &&
+        device.has(sycl::aspect::ext_intel_device_id) &&
+        device.get_info<sycl::ext::intel::info::device::device_id>() == 57891 &&
+        std::string_view(__VERSION__) == "Intel(R) oneAPI DPC++/C++ Compiler 2026.1.1 (2026.1.1.20260724)" &&
+        device.get_info<sycl::info::device::driver_version>() == "1.17.39758+10" &&
+        device.get_platform().get_info<sycl::info::platform::version>() == "1.17";
+    if ((automatic || mode == "split" || mode == "prefill") && PagedAttentionSplitKernel(q, target, query, key_cache, value_cache,
+                                                      block_table, seq_lens, query_start_loc, args)) return;
+    if ((automatic || mode == "prefill") && PagedAttentionPrefillKernel(q, target, query, key_cache, value_cache,
+                                                         block_table, seq_lens, query_start_loc, args)) return;
     const View qs(query), kc(key_cache), vc(value_cache), dst(target);
     NativeQueue(q).submit([&](sycl::handler& h) {
       sycl::local_accessor<float, 1> partial(sycl::range<1>(lanes), h);
@@ -191,7 +250,7 @@ void PagedAttentionKernel(Queue& q, Tensor& out, const Tensor& query, const Tens
           const int64_t block = table[request * bt_row + (key / page) * bt_col];
           const auto kbase = block * kc.stride[0] + (key % page) * kc.stride[1] + (head / ratio) * kc.stride[2];
           const auto vbase = block * vc.stride[0] + (key % page) * vc.stride[1] + (head / ratio) * vc.stride[2];
-          partial[lane] = active ? qvalue * Load(kc, kbase + lane) : 0;
+          partial[lane] = active ? qvalue * LoadKV(kc, kbase + lane, k_scale) : 0;
           item.barrier(sycl::access::fence_space::local_space);
           for (size_t step = lanes / 2; step > 0; step /= 2) {
             if (lane < step) partial[lane] += partial[lane + step];
@@ -202,7 +261,7 @@ void PagedAttentionKernel(Queue& q, Tensor& out, const Tensor& query, const Tens
           const float next = sycl::max(maximum, score);
           const float old_scale = sycl::exp(maximum - next), probability = sycl::exp(score - next);
           denominator = denominator * old_scale + probability;
-          if (active) accumulator = accumulator * old_scale + probability * Load(vc, vbase + lane);
+          if (active) accumulator = accumulator * old_scale + probability * LoadKV(vc, vbase + lane, v_scale);
           maximum = next;
           item.barrier(sycl::access::fence_space::local_space);
         }

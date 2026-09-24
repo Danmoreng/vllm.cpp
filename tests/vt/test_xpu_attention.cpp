@@ -1,5 +1,7 @@
 #include "xpu_test_helpers.h"
 #include "vt/xpu.h"
+#include "vt/fp8_kv.h"
+#include <limits>
 #include <numeric>
 
 namespace {
@@ -138,13 +140,14 @@ TEST_CASE("XPU KV write: unbind strides, padded inputs, null/repeated slots and 
     }
   }
   CHECK(vt::GetReferenceTierHits() == 0);
-  CHECK(vt::xpu::GetMemoryInfo().allocated_bytes == 0);
+  CHECK(vt::xpu::GetMemoryInfo().allocated_bytes == vt::xpu::GetMemoryInfo().attention_workspace_bytes);
 }
 
 TEST_CASE("XPU paged attention: appended queries, GQA, causal alignment, strides and BF16 cache") {
   Queue cpu(vt::DeviceType::kCPU), gpu(vt::DeviceType::kXPU);
   for (int requests : {1, 4}) for (int chunk : {1, 5}) for (int page : {3, 16})
-    for (auto dtype : {DType::kF32, DType::kBF16}) for (int mode : {0, 1, 2}) {
+    for (auto dtype : {DType::kF32, DType::kBF16}) for (int mode : {0, 1, 2})
+    for (bool fp8 : {false, true}) {
       CAPTURE(requests);
       CAPTURE(chunk);
       CAPTURE(page);
@@ -168,18 +171,29 @@ TEST_CASE("XPU paged attention: appended queries, GQA, causal alignment, strides
       std::vector<float> expected;
       for (auto* q : {&cpu.q, &gpu.q}) {
         Buffer query(*q, dtype, {tokens, heads, dim}), output(*q, dtype, {tokens, heads, dim});
-        Buffer storage(*q, DType::kBF16, {blocks, 2 * page, kvheads, dim});
+        Buffer storage(*q, fp8 ? DType::kI8 : DType::kBF16, {blocks, 2 * page, kvheads, dim});
         Buffer keys(*q, DType::kBF16, {tokens, kvheads, dim}), values(*q, DType::kBF16, {tokens, kvheads, dim});
         Buffer bt(*q, DType::kI32, {requests, 2 * columns + 1}), lens(*q, DType::kI32, {requests});
         Buffer qsl(*q, DType::kI32, {requests + 1}), ids(*q, DType::kI64, {tokens});
-        query.put(Values(query.tensor.Numel(), 7, 0.2f)); storage.put(Values(storage.tensor.Numel(), 3, 0.08f));
+        query.put(Values(query.tensor.Numel(), 7, 0.2f));
+        auto initial = Values(storage.tensor.Numel(), 3, 0.08f);
+        if (fp8) {
+          std::vector<uint8_t> bytes(initial.size());
+          for (size_t i = 0; i < bytes.size(); ++i) bytes[i] = vt::F32ToF8E4M3(initial[i]);
+          storage.upload(bytes.data());
+        } else storage.put(initial);
         keys.put(Values(keys.tensor.Numel(), 13, 0.2f)); values.put(Values(values.tensor.Numel(), 11));
         bt.upload(table.data()); lens.upload(lengths.data()); qsl.upload(offsets.data()); ids.upload(slots.data());
         bt.tensor.shape[1] = columns; bt.tensor.stride[1] = 2;
         auto kc = CacheView(storage.tensor, 0, blocks, page, kvheads, dim);
         auto vc = CacheView(storage.tensor, 1, blocks, page, kvheads, dim);
-        vt::ReshapeAndCache(*q, keys.tensor, values.tensor, kc, vc, ids.tensor);
         vt::PagedAttentionArgs args;
+        if (fp8) {
+          args.kv_cache_dtype = vt::Fp8KVCacheDataType::kFp8E4M3;
+          args.k_scale = 0.3f; args.v_scale = 1.7f;
+          vt::ReshapeAndCacheFp8(*q, keys.tensor, values.tensor, kc, vc, ids.tensor,
+                                 args.kv_cache_dtype, args.k_scale, args.v_scale);
+        } else vt::ReshapeAndCache(*q, keys.tensor, values.tensor, kc, vc, ids.tensor);
         args.scale = 1.0f / 16.0f; args.causal = mode != 1;
         if (mode == 2) { args.window_size = vt::AttentionWindow{3, 2}; args.logits_soft_cap = 0.7f; }
         // Also exercise alias snapshot on the one-token decode path.
@@ -191,7 +205,7 @@ TEST_CASE("XPU paged attention: appended queries, GQA, causal alignment, strides
       }
     }
   CHECK(vt::GetReferenceTierHits() == 0);
-  CHECK(vt::xpu::GetMemoryInfo().allocated_bytes == 0);
+  CHECK(vt::xpu::GetMemoryInfo().allocated_bytes == vt::xpu::GetMemoryInfo().attention_workspace_bytes);
 }
 
 TEST_CASE("XPU paged attention: head tails, empty requests, F16 queries and invalid device metadata") {
@@ -225,4 +239,71 @@ TEST_CASE("XPU paged attention: head tails, empty requests, F16 queries and inva
       Close(output.floats(), expected, 2e-5f);
     }
   }
+}
+
+TEST_CASE("XPU E4M3 KV codec: all bytes, ties, adjacent floats, saturation and independent scales") {
+  Queue cpu(vt::DeviceType::kCPU), gpu(vt::DeviceType::kXPU);
+  std::vector<float> input;
+  for (int code = 0; code < 126; ++code) {
+    const float a = vt::F8E4M3ToF32(code), b = vt::F8E4M3ToF32(code + 1);
+    const float mid = (a + b) * 0.5f;
+    for (float v : {a, std::nextafter(mid, a), mid, std::nextafter(mid, b)}) {
+      input.push_back(v); input.push_back(-v);
+    }
+  }
+  for (float v : {0.0f, -0.0f, 448.0f, -448.0f, 1000.0f, -1000.0f,
+                 std::numeric_limits<float>::infinity(), -std::numeric_limits<float>::infinity(),
+                 std::numeric_limits<float>::quiet_NaN()}) input.push_back(v);
+  const int64_t dim = input.size();
+  for (auto dtype : {DType::kF32, DType::kBF16, DType::kF16}) for (float scale : {1.0f, 0.125f, 2.7f}) {
+    CAPTURE(dtype);
+    CAPTURE(scale);
+    std::vector<unsigned char> expected;
+    for (auto* q : {&cpu.q, &gpu.q}) {
+      Buffer k(*q, dtype, {3, 2, dim}), v(*q, dtype, {3, 2, dim});
+      Buffer cache(*q, DType::kI8, {2, 4, 1, dim}), slots(*q, DType::kI64, {3});
+      std::vector<float> source(6 * dim);
+      for (int i = 0; i < 6; ++i) std::copy(input.begin(), input.end(), source.begin() + i * dim);
+      for (int64_t i = 0; i < 4 * dim; ++i) source[i] = -source[i]; // earlier duplicate differs
+      k.put(source); v.put(source);
+      k.tensor.shape[1] = v.tensor.shape[1] = 1; // padded token strides
+      const int64_t mapping[] = {3, -1, 3}; slots.upload(mapping);
+      std::vector<uint8_t> initial(cache.bytes, 0x23); cache.upload(initial.data());
+      auto kc = CacheView(cache.tensor, 0, 2, 2, 1, dim);
+      auto vc = CacheView(cache.tensor, 1, 2, 2, 1, dim);
+      vt::ReshapeAndCacheFp8(*q, k.tensor, v.tensor, kc, vc, slots.tensor,
+                              vt::Fp8KVCacheDataType::kFp8E4M3, scale, 3.0f * scale);
+      if (q == &cpu.q) expected = cache.download();
+      else {
+        SameBytes(cache.download(), expected);
+        const int64_t invalid[] = {3, -1, 4}; slots.upload(invalid);
+        CHECK_THROWS(vt::ReshapeAndCacheFp8(*q, k.tensor, v.tensor, kc, vc, slots.tensor,
+                                           vt::Fp8KVCacheDataType::kFp8E4M3, scale, scale));
+        SameBytes(cache.download(), expected);
+      }
+    }
+  }
+  // A single visible key makes attention return V unchanged, independently
+  // checking every decoder byte (including zero and the two NaNs).
+  for (float scale : {1.0f, 0.125f, 2.7f}) {
+    Buffer query(gpu.q, DType::kF32, {1, 1, 256}), out(gpu.q, DType::kF32, {1, 1, 256});
+    Buffer keys(gpu.q, DType::kI8, {1, 1, 1, 256}), values(gpu.q, DType::kI8, {1, 1, 1, 256});
+    Buffer table(gpu.q, DType::kI32, {1, 1}), lengths(gpu.q, DType::kI32, {1}), offsets(gpu.q, DType::kI32, {2});
+    query.put(std::vector<float>(256, 0)); std::vector<uint8_t> bytes(256, 0); keys.upload(bytes.data());
+    std::iota(bytes.begin(), bytes.end(), 0); values.upload(bytes.data());
+    const int32_t zero = 0, one = 1, qsl[] = {0, 1};
+    table.upload(&zero); lengths.upload(&one); offsets.upload(qsl);
+    vt::PagedAttentionArgs args; args.scale = 1; args.v_scale = scale;
+    args.kv_cache_dtype = vt::Fp8KVCacheDataType::kFp8E4M3;
+    vt::PagedAttention(gpu.q, out.tensor, query.tensor, keys.tensor, values.tensor,
+                       table.tensor, lengths.tensor, offsets.tensor, args);
+    const auto actual = out.floats();
+    for (int i = 0; i < 256; ++i) {
+      CAPTURE(i);
+      CAPTURE(scale);
+      if ((i & 127) == 127) CHECK(std::isnan(actual[i]));
+      else CHECK(actual[i] == vt::F8E4M3ToF32(i) * scale);
+    }
+  }
+  CHECK(vt::GetReferenceTierHits() == 0);
 }
