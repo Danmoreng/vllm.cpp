@@ -3,6 +3,8 @@
 #include "vllm/platforms/interface.h"
 #include "vllm/v1/attention/registry.h"
 #include "vt/xpu.h"
+#include <cstdlib>
+#include <string_view>
 
 namespace vllm::platforms {
 namespace {
@@ -35,6 +37,12 @@ class XpuPlatform final : public Platform {
   DeviceCapability get_device_capability() const override { return {}; }
   std::vector<DType> supported_dtypes() const override { return {DType::kBF16, DType::kF16, DType::kF32}; }
   bool needs_weight_staging() const override { return true; }
+  bool support_static_graph_mode() const override {
+    const char* setting = std::getenv("VT_XPU_GRAPH");
+    return setting && std::string_view(setting) == "1" && backend().SupportsGraphCapture();
+  }
+  bool static_graph_requires_persistent_inputs() const override { return true; }
+  int max_static_graph_batch_size() const override { return 4; }
   ResidencyPolicy residency_policy() const override {
     ResidencyPolicy p;
     p.release_host_weights_after_upload = true;

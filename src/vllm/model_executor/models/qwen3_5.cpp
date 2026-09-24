@@ -11116,7 +11116,8 @@ struct Qwen3_5DecodeGraph::Impl {
               !vllm::platforms::GetPlatform(queue.device.type)
                    .static_graph_requires_opt_in(config.architectures) &&
               b.SupportsGraphCapture();
-    dbuf = enabled && DecodeGraphDoubleBufferEnabled();
+    dbuf = enabled && (DecodeGraphDoubleBufferEnabled() ||
+        vllm::platforms::GetPlatform(queue.device.type).static_graph_requires_persistent_inputs());
     poison = enabled && std::getenv("VT_ASYNC_EXECUTOR_POISON") != nullptr;
   }
   ~Impl() {
@@ -11753,7 +11754,8 @@ struct Qwen3_5DenseDecodeGraph::Impl {
               !vllm::platforms::GetPlatform(queue.device.type)
                    .static_graph_requires_opt_in(config.architectures) &&
               b.SupportsGraphCapture();
-    dbuf = enabled && DecodeGraphDoubleBufferEnabled();
+    dbuf = enabled && (DecodeGraphDoubleBufferEnabled() ||
+        vllm::platforms::GetPlatform(queue.device.type).static_graph_requires_persistent_inputs());
     poison = enabled && std::getenv("VT_ASYNC_EXECUTOR_POISON") != nullptr;
   }
   ~Impl() {

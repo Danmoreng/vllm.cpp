@@ -46,7 +46,7 @@ void SparseMask(Queue& q, Tensor& logits, const Tensor& rows, const Tensor& cols
   CheckDeviceMetadata(q, [=] {
     for (int64_t i = 0; i < count; ++i) if (rr[i] < 0 || rr[i] >= n || cc[i] < 0 || cc[i] >= v) return false;
     return true;
-  }, "XPU sampling sparse index outside logits");
+  }, "XPU sampling sparse index outside logits", {&rows, &cols});
   NativeQueue(q).parallel_for(sycl::range<1>(count), [=](sycl::id<1> item) {
     const int64_t i = item[0], index = int64_t(rr[i]) * v + cc[i];
     // Preserve the reference's addition order for repeated bias coordinates;
@@ -61,7 +61,7 @@ void SparseMask(Queue& q, Tensor& logits, const Tensor& rows, const Tensor& cols
 }
 }
 void ApplyTemperatureKernel(Queue& q, Tensor& logits, const Tensor& temp, bool all_random) {
-  TraceOpTensors(OpId::kApplyTemperature, q, {&logits, &temp});
+  TraceXpuOp(OpId::kApplyTemperature, q, {&logits, &temp});
   if (!logits.Numel()) return;
   const auto vocab = logits.shape[1];
   auto* values = static_cast<float*>(logits.data);
@@ -73,21 +73,21 @@ void ApplyTemperatureKernel(Queue& q, Tensor& logits, const Tensor& temp, bool a
   });
 }
 void ComputeProbsKernel(Queue& q, Tensor& probs, const Tensor& logits) {
-  TraceOpTensors(OpId::kComputeProbs, q, {&probs, &logits});
+  TraceXpuOp(OpId::kComputeProbs, q, {&probs, &logits});
   WithOutput(q, probs, {&logits}, [&](Tensor& target) { Normalize<0>(q, target, logits); });
 }
 void ComputeLogprobsKernel(Queue& q, Tensor& probs, const Tensor& logits) {
-  TraceOpTensors(OpId::kComputeLogprobs, q, {&probs, &logits});
+  TraceXpuOp(OpId::kComputeLogprobs, q, {&probs, &logits});
   WithOutput(q, probs, {&logits}, [&](Tensor& target) { Normalize<1>(q, target, logits); });
 }
 void ApplyMinPKernel(Queue& q, Tensor& logits, const Tensor& min_p) {
-  TraceOpTensors(OpId::kApplyMinP, q, {&logits, &min_p});
+  TraceXpuOp(OpId::kApplyMinP, q, {&logits, &min_p});
   Normalize<2>(q, logits, logits, &min_p);
 }
 void ApplyPenaltiesKernel(Queue& q, Tensor& logits, const Tensor& prompt_mask,
                            const Tensor& counts, const Tensor& output_mask,
                            const Tensor& frequency, const Tensor& presence, const Tensor& repetition) {
-  TraceOpTensors(OpId::kApplyPenalties, q, {&logits, &prompt_mask, &counts, &output_mask, &frequency, &presence, &repetition});
+  TraceXpuOp(OpId::kApplyPenalties, q, {&logits, &prompt_mask, &counts, &output_mask, &frequency, &presence, &repetition});
   if (!logits.Numel()) return;
   const auto vocab = logits.shape[1];
   auto* values = static_cast<float*>(logits.data);
@@ -106,22 +106,22 @@ void ApplyPenaltiesKernel(Queue& q, Tensor& logits, const Tensor& prompt_mask,
   });
 }
 void ApplyLogitBiasKernel(Queue& q, Tensor& logits, const Tensor& rows, const Tensor& cols, const Tensor& biases) {
-  TraceOpTensors(OpId::kApplyLogitBias, q, {&logits, &rows, &cols, &biases});
+  TraceXpuOp(OpId::kApplyLogitBias, q, {&logits, &rows, &cols, &biases});
   SparseMask<true>(q, logits, rows, cols, &biases);
 }
 void ApplyTokenMaskKernel(Queue& q, Tensor& logits, const Tensor& rows, const Tensor& cols) {
-  TraceOpTensors(OpId::kApplyTokenMask, q, {&logits, &rows, &cols});
+  TraceXpuOp(OpId::kApplyTokenMask, q, {&logits, &rows, &cols});
   SparseMask<false>(q, logits, rows, cols, nullptr);
 }
 void ApplyAllowedTokenIdsKernel(Queue& q, Tensor& logits, const Tensor& mask) {
-  TraceOpTensors(OpId::kApplyAllowedTokenIds, q, {&logits, &mask});
+  TraceXpuOp(OpId::kApplyAllowedTokenIds, q, {&logits, &mask});
   if (!logits.Numel()) return;
   auto* values = static_cast<float*>(logits.data);
   const auto* m = static_cast<const int8_t*>(mask.data);
   NativeQueue(q).parallel_for(sycl::range<1>(logits.Numel()), [=](sycl::id<1> i) { if (m[i]) values[i] = NegInf; });
 }
 void ApplyTopKTopPKernel(Queue& q, Tensor& logits, const Tensor* k, const Tensor* p) {
-  TraceOpTensors(OpId::kApplyTopKTopP, q, {&logits, k, p});
+  TraceXpuOp(OpId::kApplyTopKTopP, q, {&logits, k, p});
   const int64_t rows = logits.shape[0], vocab = logits.shape[1];
   if (!rows || !vocab) return;
   // Process at most four rows at once, with a fixed 16 MiB context workspace.
@@ -218,7 +218,7 @@ void ApplyTopKTopPKernel(Queue& q, Tensor& logits, const Tensor* k, const Tensor
   VT_CHECK(available, "XPU top-k/top-p cannot reserve its 16 MiB sampling workspace");
 }
 void RandomSampleKernel(Queue& q, Tensor& token_ids, const Tensor& probs, const Tensor& seeds) {
-  TraceOpTensors(OpId::kRandomSample, q, {&token_ids, &probs, &seeds});
+  TraceXpuOp(OpId::kRandomSample, q, {&token_ids, &probs, &seeds});
   const auto rows = probs.shape[0], vocab = probs.shape[1];
   if (!rows) return;
   VT_CHECK(vocab > 0, "XPU random sampling requires a nonempty vocabulary");
@@ -256,7 +256,7 @@ void RandomSampleKernel(Queue& q, Tensor& token_ids, const Tensor& probs, const 
   });
 }
 void GreedyArgmaxKernel(Queue& q, Tensor& token_ids, const Tensor& logits) {
-  TraceOpTensors(OpId::kGreedyArgmax, q, {&token_ids, &logits});
+  TraceXpuOp(OpId::kGreedyArgmax, q, {&token_ids, &logits});
   if (logits.shape[0] == 0) return;
   const auto rows = static_cast<size_t>(logits.shape[0]);
   const auto vocab = logits.shape[1];

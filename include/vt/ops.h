@@ -1042,6 +1042,11 @@ struct Exl3GemmArgs {
   // upstream's does. It exists so a device gate measures the arm it names
   // instead of whatever the occupancy query happened to choose.
   int force_gemv = -1;
+  // Native XPU can fold the activation's F16 cast into input Hadamard and
+  // the final F32->BF16 cast into output Hadamard/scale. Intermediate rounding
+  // is identical to the explicit casts; A_had remains F16. Other backends
+  // refuse this opt-in instead of silently interpreting the input as F16.
+  bool fuse_casts = false;
 };
 
 // ─── The fused MoE MLP — MODEL-DSV4-EXL3 W2d ─────────────────────────────────

@@ -329,7 +329,10 @@ inline Tensor ResidentWeight(Dev d, const OwnedTensor& w, std::vector<int64_t> s
 // The OUTPUT dtype is never inherited from the kernel: `Exl3Gemm` writes f16 or
 // f32, so an f16 or f32 request is written straight and a bf16 request is
 // written f32 and cast ONCE. That is the polarity AGENTS.md §"Inherit vLLM
-// defaults" requires, and the one a token gate cannot check for you.
+// defaults" requires, and the one a token gate cannot check for you. Native XPU
+// folds these casts into the Hadamard kernels while retaining both FP16 input
+// rounding steps and the single final BF16 store. Different suh projections
+// still receive their own transformed activation.
 inline DBuf Exl3MatmulD(Dev d, const vt::Tensor& x, const Exl3Weight& w,
                         vt::DType out_dtype) {
   const int64_t M = x.shape[0];
@@ -343,9 +346,14 @@ inline DBuf Exl3MatmulD(Dev d, const vt::Tensor& x, const Exl3Weight& w,
                out_dtype == vt::DType::kF16,
            "exl3 linear: out_dtype must be f32, bf16 or f16");
 
+  static const bool xpu_cast_fusion = [] {
+    const char* setting = std::getenv("VT_XPU_EXL3_CAST_FUSION");
+    return setting == nullptr || std::string(setting) != "0";
+  }();
+  const bool fuse_casts = d.q.device.type == vt::DeviceType::kXPU && xpu_cast_fusion;
   DBuf a_owned;
   vt::Tensor a = x;
-  if (x.dtype != vt::DType::kF16) {
+  if (x.dtype != vt::DType::kF16 && !fuse_casts) {
     a_owned = DBuf(d, vt::DType::kF16, {M, K});
     vt::CastF16(d.q, a_owned.t(), x);
     a = a_owned.t();
@@ -387,6 +395,7 @@ inline DBuf Exl3MatmulD(Dev d, const vt::Tensor& x, const Exl3Weight& w,
   vt::Exl3GemmArgs args;
   args.bits = w.Bits();
   args.codebook = w.codebook;
+  args.fuse_casts = fuse_casts;
 
   auto run_gemm = [&](vt::Tensor& out) {
     if (use_reconstruct) {
@@ -396,8 +405,8 @@ inline DBuf Exl3MatmulD(Dev d, const vt::Tensor& x, const Exl3Weight& w,
     }
   };
 
-  if (out_dtype == vt::DType::kF16) {
-    DBuf c(d, vt::DType::kF16, {M, N});
+  if (out_dtype == vt::DType::kF16 || fuse_casts) {
+    DBuf c(d, out_dtype, {M, N});
     run_gemm(c.t());
     return c;
   }

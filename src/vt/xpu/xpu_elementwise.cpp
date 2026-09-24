@@ -2,8 +2,26 @@
 #include "xpu_kernels.h"
 
 namespace vt::xpu {
+void TraceXpuOp(OpId op, Queue& q, std::initializer_list<const Tensor*> tensors) {
+  vt::TraceOpTensors(op, q, tensors);
+  const auto mark = [&](size_t i) {
+    if (i < tensors.size() && tensors.begin()[i]) {
+      const auto& tensor = *tensors.begin()[i]; RecordGraphWrite(q, tensor.data, Span(tensor));
+    }
+  };
+  switch (op) {
+    case OpId::kReshapeAndCache: case OpId::kReshapeAndCacheFp8: mark(2); mark(3); break;
+    case OpId::kGdnPostConv: for (size_t i = 0; i < 5; ++i) mark(i); break;
+    case OpId::kAttnGateSplit: case OpId::kRopeNeox: case OpId::kRopeFromCache: mark(0); mark(1); break;
+    case OpId::kGdnDecode: case OpId::kGdnPrefill: mark(0); mark(6); break;
+    case OpId::kCausalConv1dFwd: case OpId::kCausalConv1dUpdate: mark(0); mark(4); break;
+    case OpId::kRmsNorm: mark(0); mark(3); break;
+    case OpId::kExl3Gemm: mark(0); mark(5); break;
+    default: mark(0); break;
+  }
+}
 void CopyKernel(Queue& q, Tensor& out, const Tensor& in) {
-  TraceOpTensors(OpId::kCopy, q, {&out, &in});
+  TraceXpuOp(OpId::kCopy, q, {&out, &in});
   const auto n = out.Numel();
   if (!n) return;
   const size_t bytes = SizeOf(out.dtype);
@@ -24,7 +42,7 @@ void CopyKernel(Queue& q, Tensor& out, const Tensor& in) {
   });
 }
 void AddKernel(Queue& q, Tensor& out, const Tensor& a, const Tensor& b) {
-  TraceOpTensors(OpId::kAdd, q, {&out, &a, &b});
+  TraceXpuOp(OpId::kAdd, q, {&out, &a, &b});
   FloatTensor(out); FloatTensor(a); FloatTensor(b);
   WithOutput(q, out, {&a, &b}, [&](Tensor& target) {
     const View dst(target), av(a), bv(b);
@@ -37,7 +55,7 @@ void AddKernel(Queue& q, Tensor& out, const Tensor& a, const Tensor& b) {
   });
 }
 void MoeSiluMulKernel(Queue& q, Tensor& out, const Tensor& gate, const Tensor& up) {
-  TraceOpTensors(OpId::kMoeSiluMul, q, {&out, &gate, &up});
+  TraceXpuOp(OpId::kMoeSiluMul, q, {&out, &gate, &up});
   FloatTensor(out); FloatTensor(gate); FloatTensor(up);
   WithOutput(q, out, {&gate, &up}, [&](Tensor& target) {
     const View dst(target), gv(gate), uv(up);
@@ -49,7 +67,7 @@ void MoeSiluMulKernel(Queue& q, Tensor& out, const Tensor& gate, const Tensor& u
   });
 }
 void SiluAndMulKernel(Queue& q, Tensor& out, const Tensor& in) {
-  TraceOpTensors(OpId::kSiluAndMul, q, {&out, &in});
+  TraceXpuOp(OpId::kSiluAndMul, q, {&out, &in});
   FloatTensor(out); FloatTensor(in);
   WithOutput(q, out, {&in}, [&](Tensor& target) {
     const View dst(target), src(in);
@@ -62,7 +80,7 @@ void SiluAndMulKernel(Queue& q, Tensor& out, const Tensor& in) {
   });
 }
 void SigmoidGateKernel(Queue& q, Tensor& out, const Tensor& attn, const Tensor& gate) {
-  TraceOpTensors(OpId::kSigmoidGateBf16, q, {&out, &attn, &gate});
+  TraceXpuOp(OpId::kSigmoidGateBf16, q, {&out, &attn, &gate});
   FloatTensor(out); FloatTensor(attn); FloatTensor(gate);
   WithOutput(q, out, {&attn, &gate}, [&](Tensor& target) {
     const View dst(target), av(attn), gv(gate);
@@ -79,22 +97,14 @@ int64_t Index(View idx, int64_t row) {
 }
 void CheckIndices(Queue& q, const Tensor& idx, int64_t limit) {
   if (!idx.Numel()) return;
-  Scratch status(q.device, sizeof(int));
-  auto* result = static_cast<int*>(status.data);
   const View ids(idx); const auto rows = idx.Numel();
-  NativeQueue(q).single_task([=] {
-    int bad = 0;
-    for (int64_t r = 0; r < rows; ++r) if (Index(ids, r) < 0 || Index(ids, r) >= limit) bad = 1;
-    *result = bad;
-  });
-  int bad = 0;
-  auto& backend = GetBackend(q.device);
-  backend.Copy(q, &bad, result, sizeof(bad));
-  backend.Synchronize(q);
-  VT_CHECK(bad == 0, "XPU index out of range");
+  CheckDeviceMetadata(q, [=] {
+    for (int64_t r = 0; r < rows; ++r) if (Index(ids, r) < 0 || Index(ids, r) >= limit) return false;
+    return true;
+  }, "XPU index out of range", {&idx});
 }
 void Rows(Queue& q, Tensor& out, const Tensor& in, const Tensor& idx, bool scatter, bool embedding) {
-  TraceOpTensors(embedding ? OpId::kEmbedding : scatter ? OpId::kIndexCopy : OpId::kIndexSelect, q, {&out, &in, &idx});
+  TraceXpuOp(embedding ? OpId::kEmbedding : scatter ? OpId::kIndexCopy : OpId::kIndexSelect, q, {&out, &in, &idx});
   CheckIndices(q, idx, scatter ? out.shape[0] : in.shape[0]);
   if (idx.Numel() == 0) return;
   if (embedding) { FloatTensor(out); FloatTensor(in); }
@@ -119,7 +129,7 @@ void Rows(Queue& q, Tensor& out, const Tensor& in, const Tensor& idx, bool scatt
   }, scatter);
 }
 void Matmul(Queue& q, Tensor& out, const Tensor& a, const Tensor& b, bool transpose) {
-  TraceOpTensors(transpose ? OpId::kMatmulBT : OpId::kMatmul, q, {&out, &a, &b});
+  TraceXpuOp(transpose ? OpId::kMatmulBT : OpId::kMatmul, q, {&out, &a, &b});
   FloatTensor(out); FloatTensor(a); FloatTensor(b);
   WithOutput(q, out, {&a, &b}, [&](Tensor& target) {
     const View dst(target), av(a), bv(b);

@@ -62,7 +62,10 @@ void CheckBatch(vllm_engine* engine) {
     settings[i].has_seed = 1; settings[i].seed = 381 + i;
     settings[i].top_k = 20; settings[i].top_p = .9f; settings[i].min_p = .05f;
     settings[i].repetition_penalty = 1.05f;
-    settings[i].ignore_eos = 1; settings[i].max_tokens = 3 + i;
+    // Leave enough decode steps to warm and capture both slots at B=4, then
+    // exercise condensation into the smaller buckets as requests complete.
+    settings[i].ignore_eos = 1;
+    settings[i].max_tokens = 3 + i + (Setting("VT_XPU_GRAPH", 0) == 1 ? 6 : 0);
     vllm_completion result{};
     REQUIRE_MESSAGE(vllm_complete(engine, prompts[i].c_str(), &settings[i], &result) == VLLM_OK, std::string(vllm_last_error()));
     CHECK(result.completion_tokens == settings[i].max_tokens);
@@ -85,6 +88,22 @@ void CheckBatch(vllm_engine* engine) {
     std::cout << "BATCH case=" << i << " answer=" << nlohmann::json(results[i].text).dump() << std::endl;
   }
   requests.clear();
+  if (Setting("VT_XPU_GRAPH", 0) == 1) {
+    // Condensation can cross B=2 for only one step. A second, sustained pair
+    // proves that this bucket also captures both slots and stays within the
+    // six-executable bound for buckets 1/2/4.
+    std::array<Result, 4> pair;
+    for (int i : {3, 1}) {
+      vllm_request* raw = nullptr;
+      REQUIRE(vllm_request_submit(engine, prompts[i].c_str(), &settings[i], Result::Callback, &pair[i], &raw) == VLLM_OK);
+      requests.emplace_back(raw, vllm_request_free);
+    }
+    for (auto& request : requests) REQUIRE_MESSAGE(vllm_request_wait(request.get()) == VLLM_OK,
+                                                   std::string(vllm_request_error(request.get())));
+    for (int i : {3, 1}) CHECK(pair[i].text == expected[i]);
+    requests.clear();
+    CHECK(vt::xpu::GetMemoryInfo().graph_count == 6);
+  }
   Result cancelled; cancelled.cancel_after = 2;
   auto cancel_settings = settings[3]; cancel_settings.max_tokens = 16;
   vllm_request* raw = nullptr;
@@ -206,16 +225,20 @@ void MeasureWarm(vllm_engine* engine, int requested_prompt, int requested_output
       std::vector<std::string>{"The capital of France is", RepeatedPrompt(32)};
   for (const std::string& prompt : prompts) {
     auto sampling = vllm_sampling_params_default();
-    sampling.temperature = 0; sampling.ignore_eos = 1; sampling.max_tokens = 2;
+    // Both persistent input slots must complete their cold/warm/capture phases
+    // before timing. Two output tokens would charge graph capture to decode.
+    const int warm_outputs = Setting("VT_XPU_GRAPH", 0) == 1 ? 10 : 2;
+    sampling.temperature = 0; sampling.ignore_eos = 1; sampling.max_tokens = warm_outputs;
     vllm_completion warm{};
     REQUIRE_MESSAGE(vllm_complete(engine, prompt.c_str(), &sampling, &warm) == VLLM_OK,
                     std::string(vllm_last_error()));
     const int prompt_tokens = warm.prompt_tokens;
-    CHECK(warm.completion_tokens == 2);
+    CHECK(warm.completion_tokens == warm_outputs);
     vllm_completion_free(&warm);
     REQUIRE(prompt_tokens > 0); REQUIRE(prompt_tokens <= std::max(32, requested_prompt));
     if (requested_prompt) REQUIRE(prompt_tokens == requested_prompt);
     const auto warm_gpu = vt::xpu::GetMemoryInfo().allocated_bytes, warm_rss = ResidentBytes();
+    const auto warm_captures = vt::GetBackend(vt::DeviceType::kXPU).GraphsCaptured();
     sampling.max_tokens = requested_outputs ? requested_outputs : prompt_tokens == 5 ? 17 : 2;
     for (int round = 0; round < 2; ++round) {
       TokenTimes times;
@@ -229,6 +252,7 @@ void MeasureWarm(vllm_engine* engine, int requested_prompt, int requested_output
       const auto memory = vt::xpu::GetMemoryInfo();
       CHECK(memory.allocated_bytes <= warm_gpu + size_t{64} * 1024 * 1024);
       CHECK(ResidentBytes() <= warm_rss + size_t{256} * 1024 * 1024);
+      CHECK(vt::GetBackend(vt::DeviceType::kXPU).GraphsCaptured() == warm_captures);
       std::cout << "TIMING round=" << round << " prompt_tokens=" << prompt_tokens
                 << " output_tokens=" << sampling.max_tokens << " ttft_seconds=" << ttft
                 << " prefill_client_tokens_per_second=" << prompt_tokens / ttft
@@ -238,7 +262,9 @@ void MeasureWarm(vllm_engine* engine, int requested_prompt, int requested_output
                 << " gpu_bytes=" << memory.allocated_bytes
                 << " exl3_workspace_bytes=" << memory.exl3_workspace_bytes
                 << " gdn_workspace_bytes=" << memory.gdn_workspace_bytes
-                << " attention_workspace_bytes=" << memory.attention_workspace_bytes << std::endl;
+                << " attention_workspace_bytes=" << memory.attention_workspace_bytes
+                << " graph_count=" << memory.graph_count << " graph_nodes=" << memory.graph_nodes
+                << " graph_device_bytes=" << memory.graph_device_bytes << std::endl;
     }
   }
 }
@@ -268,11 +294,23 @@ TEST_CASE("XPU Qwen checkpoint: native text prefill and repeated greedy decode t
   const int requested_prompt = Setting("VT_B70_PROMPT_TOKENS", 0);
   REQUIRE(requested_prompt >= 0); REQUIRE(requested_prompt <= 6656);
   REQUIRE(tokens > 0); REQUIRE(tokens <= 100); REQUIRE(repeats > 0);
+  struct GraphCoverage {
+    bool enabled;
+    int64_t captures, replays;
+    ~GraphCoverage() {
+      auto& backend = vt::GetBackend(vt::DeviceType::kXPU);
+      const auto captured = backend.GraphsCaptured() - captures, replayed = backend.GraphReplays() - replays;
+      if (enabled) { CHECK(captured > 0); CHECK(replayed > 0); }
+      std::cout << "GRAPH captures=" << captured << " replays=" << replayed << std::endl;
+    }
+  } graph_coverage{Setting("VT_XPU_GRAPH", 0) == 1, vt::GetBackend(vt::DeviceType::kXPU).GraphsCaptured(),
+                    vt::GetBackend(vt::DeviceType::kXPU).GraphReplays()};
   auto& platform = vllm::platforms::CurrentPlatform();
   REQUIRE(platform.device_type() == vt::DeviceType::kXPU);
   CHECK(platform.needs_weight_staging());
   CHECK_FALSE(platform.supports_fa2_attention());
-  CHECK_FALSE(platform.supports_graph_capture());
+  CHECK(platform.supports_graph_capture());
+  CHECK(platform.support_static_graph_mode() == (Setting("VT_XPU_GRAPH", 0) == 1));
 
   auto params = vllm_model_params_default();
   params.model_path = model;

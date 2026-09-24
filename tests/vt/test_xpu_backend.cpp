@@ -28,9 +28,9 @@ int main(int argc, char**) {
     std::cout << vt::xpu::DeviceDescription() << '\n';
     auto& b = vt::GetBackend(device);
     VT_CHECK(!b.DeviceMemoryIsHostAddressable() && !b.UnifiedMemory(), "device USM contract");
-    VT_CHECK(!b.SupportsGraphCapture() && !b.SupportsAuxStream()
-                 && !b.SupportsCompressedGdnState() && !b.SupportsCompressedConvState(),
-             "unimplemented capabilities advertised");
+    VT_CHECK(b.SupportsGraphCapture() && !b.SupportsAuxStream()
+                 && !b.SupportsCompressedGdnState() && b.SupportsCompressedConvState(),
+             "native XPU capability contract");
     auto q1 = vt::CreateQueue(device), q2 = vt::CreateQueue(device);
     VT_CHECK(q1.handle != q2.handle && q1.id != q2.id, "queues are not independent");
     VT_CHECK(vt::xpu::NativeQueue(q1).is_in_order() && vt::xpu::NativeQueue(q2).is_in_order(),

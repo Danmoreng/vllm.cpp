@@ -192,7 +192,7 @@ bool GdnChunkedPrefillKernel(Queue& queue, Tensor& out, const Tensor& qi, const 
     if (offsets[0] != 0 || offsets[sequences] != tokens) return false;
     for (int i = 0; i < sequences; ++i) if (offsets[i] < 0 || offsets[i] > offsets[i + 1]) return false;
     return true;
-  }, "XPU chunked GDN invalid sequence offsets");
+  }, "XPU chunked GDN invalid sequence offsets", {&qsl});
   return WithGdnWorkspace(queue, WorkspaceBytes, [&](void* storage) {
     ChunkScratch scratch(storage, heads);
     WithOutput(queue, out, {&qi, &ki, &vi, &g, &beta}, [&](Tensor& target) {

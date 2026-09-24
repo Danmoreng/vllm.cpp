@@ -2,6 +2,7 @@
 #include "xpu_common.h"
 #include "vt/xpu.h"
 #include <sycl/ext/oneapi/matrix/matrix.hpp>
+#include <sycl/ext/oneapi/experimental/graph.hpp>
 #include <algorithm>
 #include <cerrno>
 #include <cstdlib>
@@ -9,12 +10,50 @@
 #include <cstring>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <unordered_map>
 #include <vector>
 #include <nlohmann/json.hpp>
 
 namespace vt::xpu {
 namespace {
+namespace graph_api = sycl::ext::oneapi::experimental;
+using RecordingGraph = graph_api::command_graph<graph_api::graph_state::modifiable>;
+using ExecutableGraph = graph_api::command_graph<graph_api::graph_state::executable>;
+constexpr size_t MaxGraphs = 8, MaxGraphNodes = 65536, MaxGraphDeviceBytes = 64 * 1024 * 1024;
+constexpr size_t MaxGraphChecks = 1024, GraphCheckBytes = MaxGraphChecks * sizeof(int);
+struct GraphChecks {
+  sycl::context context;
+  int* device = nullptr;
+  int* host = nullptr;
+  std::vector<std::string> messages;
+  GraphChecks(const sycl::context& c, const sycl::device& d) : context(c) {
+    device = static_cast<int*>(sycl::aligned_alloc_device(64, GraphCheckBytes, d, c));
+    try {
+      VT_CHECK(device != nullptr, "XPU graph validation allocation failed");
+      host = static_cast<int*>(sycl::aligned_alloc_host(64, GraphCheckBytes, c));
+      VT_CHECK(host != nullptr, "XPU graph validation readback allocation failed");
+    } catch (...) { if (device) sycl::free(device, context); throw; }
+  }
+  ~GraphChecks() { if (device) sycl::free(device, context); if (host) sycl::free(host, context); }
+};
+struct Recording {
+  RecordingGraph compute, validation;
+  std::unique_ptr<GraphChecks> checks;
+  struct Span { uintptr_t start, end; };
+  std::vector<Span> writes, metadata;
+  unsigned workspace_mask = 0;
+  Recording(const sycl::context& c, const sycl::device& d)
+      : compute(c, d), validation(c, d), checks(std::make_unique<GraphChecks>(c, d)) {}
+};
+struct Graph {
+  ExecutableGraph executable;
+  std::optional<ExecutableGraph> validation;
+  std::unique_ptr<GraphChecks> checks;
+  size_t nodes, bytes;
+  unsigned workspace_mask;
+  std::optional<sycl::event> last;
+};
 struct Devices {
   std::vector<sycl::device> gpu;
   std::string error;
@@ -50,6 +89,7 @@ struct Workspace {
   std::mutex mutex;
   void* data = nullptr;
   size_t bytes = 0;
+  std::optional<sycl::event> last;
 };
 struct Context {
   sycl::device device;
@@ -57,6 +97,11 @@ struct Context {
   std::mutex mutex;
   Workspace exl3, gdn, attention, sampling;
   std::unordered_map<sycl::queue*, std::unique_ptr<sycl::queue>> queues;
+  std::unordered_map<sycl::queue*, std::unique_ptr<Recording>> recordings;
+  std::unordered_map<void*, std::unique_ptr<Graph>> graphs;
+  std::unordered_map<sycl::queue*, void*> default_graphs;
+  size_t graph_nodes = 0, graph_bytes = 0;
+  int64_t captures = 0, replays = 0;
   std::unordered_map<void*, size_t> allocations, pinned;
   size_t total, budget, allocated = 0, pinned_bytes = 0, peak_allocated = 0;
   explicit Context(int index) : device(DeviceAt(index)), context(device),
@@ -69,9 +114,14 @@ struct Context {
   // which do not carry allocation lifetime metadata in VT's current ABI.
   void Drain() { for (auto& [_, q] : queues) q->wait_and_throw(); }
   ~Context() {
+    for (auto& [_, graph] : recordings) {
+      try { graph->compute.end_recording(); } catch (...) {}
+    }
+    recordings.clear();
     try { Drain(); } catch (const std::exception& e) {
       std::fprintf(stderr, "[vt xpu] shutdown wait failed: %s\n", e.what());
     }
+    graphs.clear();
     for (const auto& [p, _] : allocations) sycl::free(p, context);
     for (const auto& [p, _] : pinned) sycl::free(p, context);
   }
@@ -110,7 +160,8 @@ class XpuBackend final : public Backend {
     auto& c = ctx();
     bytes = std::max(bytes, size_t{1});
     std::lock_guard<std::mutex> lock(c.mutex);
-    VT_CHECK(bytes <= c.budget - c.allocated, "XPU device allocation exceeds memory budget");
+    VT_CHECK(c.recordings.empty(), "XPU graph capture requires preallocated device buffers");
+    VT_CHECK(bytes <= c.budget - c.allocated - c.graph_bytes, "XPU device allocation exceeds memory budget");
     void* p = sycl::aligned_alloc_device(64, bytes, c.device, c.context);
     VT_CHECK(p != nullptr, "XPU device USM allocation failed");
     try { c.allocations.emplace(p, bytes); } catch (...) { sycl::free(p, c.context); throw; }
@@ -122,6 +173,7 @@ class XpuBackend final : public Backend {
     if (p == nullptr) return;
     auto& c = ctx();
     std::lock_guard<std::mutex> lock(c.mutex);
+    VT_CHECK(c.recordings.empty(), "XPU graph capture cannot free device buffers");
     const auto it = c.allocations.find(p);
     VT_CHECK(it != c.allocations.end(), "XPU free: pointer not owned by this device");
     c.Drain();
@@ -133,6 +185,7 @@ class XpuBackend final : public Backend {
     auto& c = ctx();
     bytes = std::max(bytes, size_t{1});
     std::lock_guard<std::mutex> lock(c.mutex);
+    VT_CHECK(c.recordings.empty(), "XPU graph capture requires preallocated pinned buffers");
     void* p = sycl::aligned_alloc_host(64, bytes, c.context);
     VT_CHECK(p != nullptr, "XPU pinned host USM allocation failed");
     try { c.pinned.emplace(p, bytes); } catch (...) { sycl::free(p, c.context); throw; }
@@ -143,6 +196,7 @@ class XpuBackend final : public Backend {
     if (p == nullptr) return;
     auto& c = ctx();
     std::lock_guard<std::mutex> lock(c.mutex);
+    VT_CHECK(c.recordings.empty(), "XPU graph capture cannot free pinned buffers");
     const auto it = c.pinned.find(p);
     VT_CHECK(it != c.pinned.end(), "XPU pinned free: pointer not owned by this device");
     c.Drain();
@@ -151,16 +205,22 @@ class XpuBackend final : public Backend {
     c.pinned.erase(it);
   }
   void Memset(Queue& q, void* p, int value, size_t bytes) override {
+    RecordGraphWrite(q, p, bytes);
     auto& native = queue(q);
     if (bytes) native.memset(p, value, bytes);
   }
   void Copy(Queue& q, void* dst, const void* src, size_t bytes) override {
+    RecordGraphWrite(q, dst, bytes);
     auto& native = queue(q);
     if (!bytes) return;
     const auto context = native.get_context();
     const bool host_src = sycl::get_pointer_type(src, context) == sycl::usm::alloc::unknown;
     const bool host_dst = sycl::get_pointer_type(dst, context) == sycl::usm::alloc::unknown;
     if (!host_src && !host_dst) { native.memcpy(dst, src, bytes); return; }
+    {
+      auto& c = ctx(); std::lock_guard lock(c.mutex);
+      VT_CHECK(!c.recordings.count(&native), "XPU graph capture requires persistent USM copy endpoints");
+    }
     if (host_src && host_dst) {
       native.wait_and_throw();
       std::memcpy(dst, src, bytes);
@@ -200,19 +260,155 @@ class XpuBackend final : public Backend {
   }
   void DestroyQueue(Queue& q) override {
     if (q.handle == nullptr) return;
+    auto* native = &queue(q);
+    void* default_graph = nullptr;
+    {
+      auto& c = ctx(); std::lock_guard lock(c.mutex);
+      VT_CHECK(!c.recordings.count(native), "XPU queue is still recording a graph");
+      if (auto it = c.default_graphs.find(native); it != c.default_graphs.end()) default_graph = it->second;
+    }
     queue(q).wait_and_throw();
+    if (default_graph) DestroyGraph(default_graph);
     auto& c = ctx();
     std::lock_guard<std::mutex> lock(c.mutex);
     c.queues.erase(static_cast<sycl::queue*>(q.handle));
     q.handle = nullptr;
   }
-  void Synchronize(Queue& q) override { queue(q).wait_and_throw(); }
+  void Synchronize(Queue& q) override {
+    auto& native = queue(q);
+    { auto& c = ctx(); std::lock_guard lock(c.mutex);
+      VT_CHECK(!c.recordings.count(&native), "XPU graph capture cannot synchronize its recording queue"); }
+    native.wait_and_throw();
+  }
+  bool SupportsGraphCapture() const override {
+    return ctx().device.has(sycl::aspect::ext_oneapi_graph) ||
+           ctx().device.has(sycl::aspect::ext_oneapi_limited_graph);
+  }
+  bool SupportsCompressedConvState() const override { return true; }
+  void BeginCapture(Queue& q) override {
+    auto& native = queue(q); auto& c = ctx();
+    std::lock_guard lock(c.mutex);
+    VT_CHECK(SupportsGraphCapture(), "XPU device does not support SYCL command graphs");
+    VT_CHECK(!c.recordings.count(&native), "XPU queue is already recording a graph");
+    VT_CHECK(c.graphs.size() + c.recordings.size() < MaxGraphs, "XPU live graph limit exceeded");
+    VT_CHECK(GraphCheckBytes <= c.budget - c.allocated - c.graph_bytes &&
+             GraphCheckBytes <= MaxGraphDeviceBytes - c.graph_bytes, "XPU graph validation exceeds memory budget");
+    native.wait_and_throw();
+    auto [it, inserted] = c.recordings.emplace(&native, std::make_unique<Recording>(c.context, c.device));
+    (void)inserted;
+    try { it->second->compute.begin_recording(native); }
+    catch (...) { c.recordings.erase(it); throw; }
+    c.graph_bytes += GraphCheckBytes; c.pinned_bytes += GraphCheckBytes;
+  }
+  void* EndCaptureGraph(Queue& q) override {
+    auto& native = queue(q); auto& c = ctx();
+    std::lock_guard lock(c.mutex);
+    auto it = c.recordings.find(&native);
+    VT_CHECK(it != c.recordings.end(), "XPU queue has no active graph capture");
+    auto recording = std::move(it->second); c.recordings.erase(it);
+    try {
+      recording->compute.end_recording(native);
+      // Preflight is valid only for externally staged metadata. A graph that
+      // produces or overwrites its own indices must use an eager boundary; it
+      // cannot validate yesterday's indices and then execute on today's ones.
+      for (const auto& metadata : recording->metadata)
+        for (const auto& write : recording->writes)
+          VT_CHECK(metadata.start >= write.end || write.start >= metadata.end,
+                   "XPU graph metadata must be staged outside capture and remain read-only during replay");
+      const size_t nodes = recording->compute.get_nodes().size() + recording->validation.get_nodes().size();
+      VT_CHECK(nodes <= MaxGraphNodes - c.graph_nodes, "XPU graph node budget exceeded");
+      auto executable = recording->compute.finalize();
+      std::optional<ExecutableGraph> validation;
+      if (!recording->checks->messages.empty()) validation = recording->validation.finalize();
+      const size_t bytes = executable.get_required_mem_size() + (validation ? validation->get_required_mem_size() : 0);
+      VT_CHECK(bytes <= MaxGraphDeviceBytes - c.graph_bytes && bytes <= c.budget - c.allocated - c.graph_bytes,
+               "XPU graph device-memory budget exceeded");
+      auto graph = std::make_unique<Graph>(Graph{std::move(executable), std::move(validation),
+          std::move(recording->checks), nodes, bytes + GraphCheckBytes, recording->workspace_mask, std::nullopt});
+      void* handle = graph.get();
+      c.graphs.emplace(handle, std::move(graph));
+      c.graph_nodes += nodes; c.graph_bytes += bytes; ++c.captures;
+      return handle;
+    } catch (...) {
+      try { recording->compute.end_recording(native); } catch (...) {}
+      c.graph_bytes -= GraphCheckBytes; c.pinned_bytes -= GraphCheckBytes;
+      throw;
+    }
+  }
+  void ReplayGraph(Queue& q, void* handle) override {
+    auto& native = queue(q); auto& c = ctx();
+    // The bounded workspaces belong to the device, not to each captured slot.
+    // Share their ordering with eager callers; a second queue must wait for
+    // the prior user's GPU event before overwriting the same scratch.
+    std::scoped_lock workspaces(c.exl3.mutex, c.gdn.mutex, c.attention.mutex, c.sampling.mutex);
+    std::lock_guard lock(c.mutex);
+    auto it = c.graphs.find(handle);
+    VT_CHECK(it != c.graphs.end(), "XPU graph handle is not owned by this device");
+    VT_CHECK(!c.recordings.count(&native), "XPU graph replay cannot be nested in a capture");
+    auto& graph = *it->second;
+    Workspace* scratch[] = {&c.exl3, &c.gdn, &c.attention, &c.sampling};
+    if (graph.validation) {
+      // All check kernels share one small D2H. They read the freshly staged
+      // metadata on this queue; invalid indices fail before compute can write
+      // KV or recurrent state. Never reuse capture-time validation results.
+      native.submit([&](sycl::handler& h) {
+        if (graph.last) h.depends_on(*graph.last);
+        h.ext_oneapi_graph(*graph.validation);
+      });
+      native.memcpy(graph.checks->host, graph.checks->device,
+                    graph.checks->messages.size() * sizeof(int)).wait_and_throw();
+      for (size_t i = 0; i < graph.checks->messages.size(); ++i)
+        VT_CHECK(graph.checks->host[i] != 0, graph.checks->messages[i]);
+    }
+    // Replays of the same executable serialize even when callers switch queues;
+    // distinct executables may overlap when their buffers are independent.
+    graph.last = native.submit([&](sycl::handler& h) {
+      if (graph.last) h.depends_on(*graph.last);
+      for (unsigned i = 0; i < 4; ++i)
+        if ((graph.workspace_mask & (1u << i)) && scratch[i]->last) h.depends_on(*scratch[i]->last);
+      h.ext_oneapi_graph(graph.executable);
+    });
+    for (unsigned i = 0; i < 4; ++i) if (graph.workspace_mask & (1u << i)) scratch[i]->last = graph.last;
+    ++c.replays;
+  }
+  void DestroyGraph(void* handle) override {
+    if (!handle) return;
+    auto& c = ctx(); std::lock_guard lock(c.mutex);
+    auto it = c.graphs.find(handle);
+    VT_CHECK(it != c.graphs.end(), "XPU graph handle is not owned by this device");
+    if (it->second->last) it->second->last->wait_and_throw();
+    c.graph_nodes -= it->second->nodes; c.graph_bytes -= it->second->bytes;
+    c.pinned_bytes -= GraphCheckBytes;
+    for (auto p = c.default_graphs.begin(); p != c.default_graphs.end();) {
+      if (p->second == handle) p = c.default_graphs.erase(p); else ++p;
+    }
+    c.graphs.erase(it);
+  }
+  void EndCapture(Queue& q) override {
+    void* old = nullptr;
+    { auto& c = ctx(); std::lock_guard lock(c.mutex);
+      auto it = c.default_graphs.find(static_cast<sycl::queue*>(q.handle));
+      if (it != c.default_graphs.end()) old = it->second; }
+    void* handle = EndCaptureGraph(q);
+    if (old) DestroyGraph(old);
+    auto& c = ctx(); std::lock_guard lock(c.mutex);
+    c.default_graphs[static_cast<sycl::queue*>(q.handle)] = handle;
+  }
+  void Replay(Queue& q) override {
+    void* handle = nullptr;
+    { auto& c = ctx(); std::lock_guard lock(c.mutex);
+      auto it = c.default_graphs.find(static_cast<sycl::queue*>(q.handle));
+      VT_CHECK(it != c.default_graphs.end(), "XPU queue has no default graph"); handle = it->second; }
+    ReplayGraph(q, handle);
+  }
+  int64_t GraphsCaptured() const override { auto& c = ctx(); std::lock_guard lock(c.mutex); return c.captures; }
+  int64_t GraphReplays() const override { auto& c = ctx(); std::lock_guard lock(c.mutex); return c.replays; }
   bool UnifiedMemory() const override { return false; }
   bool DeviceMemoryIsHostAddressable() const override { return false; }
   bool DeviceMemoryInfo(size_t* free, size_t* total) const override {
     const auto info = GetMemoryInfo(index_);
     if (!info.free_known) return false;
-    if (free) *free = std::min(info.free_bytes, info.budget_bytes - info.allocated_bytes);
+    if (free) *free = std::min(info.free_bytes, info.budget_bytes - info.allocated_bytes - info.graph_device_bytes);
     if (total) *total = info.total_bytes;
     return true;
   }
@@ -270,6 +466,33 @@ sycl::queue& NativeQueue(Queue& q) {
   VT_CHECK(it != c.queues.end(), "XPU queue does not belong to this context");
   return *it->second;
 }
+bool CaptureMetadataCheck(Queue& q, const std::function<void(sycl::handler&, int*)>& submit, const char* message,
+                          std::initializer_list<const Tensor*> inputs) {
+  auto& native = NativeQueue(q); auto& c = GetContext(q.device.index);
+  std::lock_guard lock(c.mutex);
+  auto it = c.recordings.find(&native);
+  if (it == c.recordings.end()) return false;
+  auto& recording = *it->second;
+  const size_t index = recording.checks->messages.size();
+  VT_CHECK(index < MaxGraphChecks, "XPU graph metadata validation budget exceeded");
+  for (const auto* input : inputs) if (input && input->Numel()) {
+    const auto start = reinterpret_cast<uintptr_t>(input->data);
+    recording.metadata.push_back({start, start + Span(*input)});
+  }
+  recording.validation.add([&](sycl::handler& h) { submit(h, recording.checks->device + index); });
+  recording.checks->messages.emplace_back(message);
+  return true;
+}
+void RecordGraphWrite(Queue& q, const void* data, size_t bytes) {
+  if (!bytes) return;
+  auto& native = NativeQueue(q); auto& c = GetContext(q.device.index);
+  std::lock_guard lock(c.mutex);
+  if (auto it = c.recordings.find(&native); it != c.recordings.end()) {
+    const auto start = reinterpret_cast<uintptr_t>(data);
+    VT_CHECK(bytes <= UINTPTR_MAX - start, "XPU graph write span overflow");
+    it->second->writes.push_back({start, start + bytes});
+  }
+}
 MemoryInfo GetMemoryInfo(int index) {
   auto& c = GetContext(index);
   std::lock_guard<std::mutex> lock(c.mutex);
@@ -279,6 +502,8 @@ MemoryInfo GetMemoryInfo(int index) {
   info.attention_workspace_bytes = c.attention.bytes;
   info.sampling_workspace_bytes = c.sampling.bytes;
   info.peak_allocated_bytes = c.peak_allocated;
+  info.graph_count = c.graphs.size(); info.graph_nodes = c.graph_nodes;
+  info.graph_device_bytes = c.graph_bytes;
   if (c.device.has(sycl::aspect::ext_intel_free_memory)) {
     info.free_bytes = c.device.get_info<sycl::ext::intel::info::device::free_memory>();
     info.free_known = true;
@@ -286,15 +511,24 @@ MemoryInfo GetMemoryInfo(int index) {
   return info;
 }
 namespace {
-bool WithWorkspace(Queue& q, Workspace& workspace, size_t bytes, const std::function<void(void*)>& launch) {
+bool WithWorkspace(Queue& q, Workspace& workspace, unsigned mask, size_t bytes, const std::function<void(void*)>& launch) {
   auto& native = NativeQueue(q);
   auto& c = GetContext(q.device.index);
   std::lock_guard<std::mutex> execution(workspace.mutex);
+  bool capturing = false;
+  {
+    std::lock_guard lock(c.mutex);
+    if (auto it = c.recordings.find(&native); it != c.recordings.end()) {
+      VT_CHECK(workspace.data != nullptr, "XPU graph workspace must be warmed before capture");
+      it->second->workspace_mask |= mask;
+      capturing = true;
+    }
+  }
   if (!workspace.data) {
     std::lock_guard<std::mutex> lock(c.mutex);
     // Reserve and account under the same lock as ordinary allocations: another
     // queue must not consume this budget between the check and allocation.
-    if (bytes > c.budget - c.allocated) return false;
+    if (bytes > c.budget - c.allocated - c.graph_bytes) return false;
     void* storage = sycl::aligned_alloc_device(64, bytes, c.device, c.context);
     VT_CHECK(storage != nullptr, "XPU persistent workspace allocation failed");
     try { c.allocations.emplace(storage, bytes); }
@@ -305,13 +539,14 @@ bool WithWorkspace(Queue& q, Workspace& workspace, size_t bytes, const std::func
     workspace.bytes = bytes;
   }
   VT_CHECK(bytes <= workspace.bytes, "XPU persistent workspace cannot grow");
+  if (!capturing && workspace.last) native.ext_oneapi_submit_barrier({*workspace.last});
   try {
     launch(workspace.data);
-    native.wait_and_throw();
+    if (!capturing) { native.wait_and_throw(); workspace.last.reset(); }
   } catch (...) {
     // Even when host-side submission throws, complete earlier kernels before
     // releasing this workspace to another queue.
-    try { native.wait_and_throw(); } catch (...) {}
+    if (!capturing) { try { native.wait_and_throw(); } catch (...) {} }
     throw;
   }
   return true;
@@ -319,19 +554,19 @@ bool WithWorkspace(Queue& q, Workspace& workspace, size_t bytes, const std::func
 }
 bool WithExl3Workspace(Queue& q, size_t bytes, const std::function<void(void*)>& launch) {
   VT_CHECK(bytes > 0 && bytes <= 32 * 1024 * 1024, "XPU EXL3 workspace exceeds 32 MiB budget");
-  return WithWorkspace(q, GetContext(q.device.index).exl3, bytes, launch);
+  return WithWorkspace(q, GetContext(q.device.index).exl3, 1, bytes, launch);
 }
 bool WithGdnWorkspace(Queue& q, size_t bytes, const std::function<void(void*)>& launch) {
   VT_CHECK(bytes > 0 && bytes <= 16 * 1024 * 1024, "XPU GDN workspace exceeds 16 MiB budget");
-  return WithWorkspace(q, GetContext(q.device.index).gdn, bytes, launch);
+  return WithWorkspace(q, GetContext(q.device.index).gdn, 2, bytes, launch);
 }
 bool WithAttentionWorkspace(Queue& q, size_t bytes, const std::function<void(void*)>& launch) {
   VT_CHECK(bytes > 0 && bytes <= 16 * 1024 * 1024, "XPU attention workspace exceeds 16 MiB budget");
-  return WithWorkspace(q, GetContext(q.device.index).attention, bytes, launch);
+  return WithWorkspace(q, GetContext(q.device.index).attention, 4, bytes, launch);
 }
 bool WithSamplingWorkspace(Queue& q, size_t bytes, const std::function<void(void*)>& launch) {
   VT_CHECK(bytes > 0 && bytes <= 16 * 1024 * 1024, "XPU sampling workspace exceeds 16 MiB budget");
-  return WithWorkspace(q, GetContext(q.device.index).sampling, bytes, launch);
+  return WithWorkspace(q, GetContext(q.device.index).sampling, 8, bytes, launch);
 }
 std::string DeviceDescription(int index) {
   const auto& d = DeviceAt(index);

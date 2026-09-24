@@ -17,6 +17,12 @@ bool WithExl3Workspace(Queue& q, size_t bytes, const std::function<void(void*)>&
 bool WithGdnWorkspace(Queue& q, size_t bytes, const std::function<void(void*)>& launch);
 bool WithAttentionWorkspace(Queue& q, size_t bytes, const std::function<void(void*)>& launch);
 bool WithSamplingWorkspace(Queue& q, size_t bytes, const std::function<void(void*)>& launch);
+// Captured metadata checks run in a separate graph before the mutating graph.
+// False means eager execution; the caller performs its ordinary checked readback.
+bool CaptureMetadataCheck(Queue& q, const std::function<void(sycl::handler&, int*)>& submit, const char* message,
+                          std::initializer_list<const Tensor*> inputs);
+void RecordGraphWrite(Queue& q, const void* data, size_t bytes);
+void TraceXpuOp(OpId op, Queue& q, std::initializer_list<const Tensor*> tensors);
 
 // Trivially copyable kernel argument; never capture Tensor's optional metadata.
 struct View {
@@ -84,7 +90,11 @@ class Scratch {
   ~Scratch() { try { vt::Free(device_, data); } catch (...) { /* backend retains failed-wait allocations */ } }
 };
 template<class Check>
-void CheckDeviceMetadata(Queue& q, Check check, const char* message) {
+void CheckDeviceMetadata(Queue& q, Check check, const char* message,
+                          std::initializer_list<const Tensor*> inputs) {
+  if (CaptureMetadataCheck(q, [check](sycl::handler& h, int* result) {
+        h.single_task([=] { *result = check() ? 1 : 0; });
+      }, message, inputs)) return;
   Scratch scratch(q.device, sizeof(int));
   auto* result = static_cast<int*>(scratch.data);
   NativeQueue(q).single_task([=] { *result = check() ? 1 : 0; });

@@ -188,7 +188,7 @@ ForwardLogits ForwardQwen3_5Dense(LoadedModel& model,
       platforms::GetPlatform(input.queue.device.type).support_static_graph_mode() &&
       !platforms::GetPlatform(input.queue.device.type)
            .static_graph_requires_opt_in(input.config.architectures);
-  constexpr int kMaxDecodeGraphBatch = 64;
+  const int kMaxDecodeGraphBatch = platforms::GetPlatform(input.queue.device.type).max_static_graph_batch_size();
 
   // SPEC-DSPARK W8 (#442): mirror vLLM's UNIFORM-decode predicate instead of
   // "query_len == 1". Upstream's captured decode length is
