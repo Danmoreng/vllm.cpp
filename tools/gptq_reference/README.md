@@ -13,16 +13,17 @@ branch. The model, image, and operators below were inspected on 2026-09-24.
   pack_dtype=int32, dense LM head
 - Safetensors index: 2,399 tensors, 400 quantized matrices, no quantized LM
   head; all 400 qweight/scales/qzeros/g_idx headers passed the included
-  contract inspector
+  local contract inspector
 - qzeros: every value and every g_idx passed the full auxiliary audit with
   disk zero offset 1; disk words encode 7 and the effective symmetric runtime
   zero point is 8
 - All five local safetensors shards match their Hugging Face snapshot blob
-  SHA-256 names; full records are in
-  B70_GPTQ_INT4_Plan/evidence/local_shard_sha256.json
-- Header and auxiliary reports are in
-  B70_GPTQ_INT4_Plan/evidence/local_headers.json and
-  B70_GPTQ_INT4_Plan/evidence/local_aux_v1.json
+  SHA-256 names. Detailed per-shard hashes and per-tensor audit reports remain
+  local under `B70_GPTQ_INT4_Plan/evidence/`; that entire plan directory is
+  Git-ignored and is not part of this branch.
+- In this checkout, the header and auxiliary reports are
+  `B70_GPTQ_INT4_Plan/evidence/local_headers.json` and
+  `B70_GPTQ_INT4_Plan/evidence/local_aux_v1.json`.
 
 The audit reads headers and GPTQ auxiliaries. It does not validate qweight
 values, scale finiteness, or model quality.
@@ -59,4 +60,7 @@ run_w4a16_fixture.sh runs one isolated B70 W4A16 operation from the actual
 checkpoint. It captures a deterministic synthetic FP16 activation, the
 post-load packed words/scales/runtime zero point, and the output. It does not
 load the full model or claim model-level parity. Its log is saved beside the
-fixture so the oneDNN verbose line and build identity remain reviewable.
+fixture so the oneDNN verbose line and build identity remain reviewable. By
+default, both files are written under the Git-ignored
+`B70_GPTQ_INT4_Plan/evidence/`; the runner recreates that directory when
+needed. The current captured fixture is local and is not part of this branch.
