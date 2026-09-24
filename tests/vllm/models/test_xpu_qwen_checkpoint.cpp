@@ -108,7 +108,7 @@ void CheckQuality(vllm_engine* engine) {
               << " answer=" << json(answer).dump() << std::endl;
   }
 }
-void MeasureWarm(vllm_engine* engine, int requested_prompt) {
+void MeasureWarm(vllm_engine* engine, int requested_prompt, int requested_outputs) {
   // This is an opt-in, short end-to-end diagnostic, not a context-length sweep.
   // The no-MTP DELTA API emits exactly one callback per generated token.
   REQUIRE(std::getenv("VT_DUMP_ACT") == nullptr);
@@ -128,7 +128,7 @@ void MeasureWarm(vllm_engine* engine, int requested_prompt) {
     REQUIRE(prompt_tokens > 0); REQUIRE(prompt_tokens <= std::max(32, requested_prompt));
     if (requested_prompt) REQUIRE(prompt_tokens == requested_prompt);
     const auto warm_gpu = vt::xpu::GetMemoryInfo().allocated_bytes, warm_rss = ResidentBytes();
-    sampling.max_tokens = prompt_tokens == 5 ? 17 : 2;
+    sampling.max_tokens = requested_outputs ? requested_outputs : prompt_tokens == 5 ? 17 : 2;
     for (int round = 0; round < 2; ++round) {
       TokenTimes times;
       const auto start = std::chrono::steady_clock::now();
@@ -148,7 +148,8 @@ void MeasureWarm(vllm_engine* engine, int requested_prompt) {
                 << " decode_tokens_per_second=" << (sampling.max_tokens - 1) / decode
                 << " tpot_seconds=" << decode / (sampling.max_tokens - 1)
                 << " gpu_bytes=" << memory.allocated_bytes
-                << " workspace_bytes=" << memory.exl3_workspace_bytes << std::endl;
+                << " exl3_workspace_bytes=" << memory.exl3_workspace_bytes
+                << " gdn_workspace_bytes=" << memory.gdn_workspace_bytes << std::endl;
     }
   }
 }
@@ -166,6 +167,8 @@ TEST_CASE("XPU Qwen checkpoint: native text prefill and repeated greedy decode t
   const bool timing = Setting("VT_B70_TIMING", 0) != 0;
   const bool quality = Setting("VT_B70_QUALITY", 0) != 0;
   REQUIRE_FALSE((timing && quality));
+  const int timing_outputs = Setting("VT_B70_TIMING_OUTPUT_TOKENS", 0);
+  REQUIRE((timing_outputs == 0 || (timing_outputs >= 2 && timing_outputs <= 100)));
   const int requested_prompt = Setting("VT_B70_PROMPT_TOKENS", 0);
   REQUIRE(requested_prompt >= 0); REQUIRE(requested_prompt <= 6656);
   REQUIRE(tokens > 0); REQUIRE(tokens <= 100); REQUIRE(repeats > 0);
@@ -184,7 +187,7 @@ TEST_CASE("XPU Qwen checkpoint: native text prefill and repeated greedy decode t
   params.max_num_seqs = 1;
   params.max_num_batched_tokens = Setting("VT_B70_BATCH_TOKENS", quality ? 512 : requested_prompt ? requested_prompt : timing ? 32 : 16);
   REQUIRE(params.max_num_batched_tokens > 0); REQUIRE(params.max_num_batched_tokens <= 6656);
-  params.max_model_len = quality ? 640 : std::max(128, requested_prompt + std::max(tokens, 32));
+  params.max_model_len = quality ? 640 : std::max(128, requested_prompt + std::max({tokens, timing_outputs, 32}));
   params.block_size = 16;
   // Hybrid attention/GDN pools also reserve a sentinel block per group.
   params.num_blocks = std::max(32, 2 * ((params.max_model_len + 15) / 16 + 1));
@@ -203,7 +206,7 @@ TEST_CASE("XPU Qwen checkpoint: native text prefill and repeated greedy decode t
     return;
   }
   if (timing) {
-    MeasureWarm(engine.get(), requested_prompt);
+    MeasureWarm(engine.get(), requested_prompt, timing_outputs);
     CHECK(vt::GetReferenceTierHits() == initialization_hits);
     return;
   }

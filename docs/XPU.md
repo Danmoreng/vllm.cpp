@@ -522,13 +522,118 @@ The final automatic operator run measured 1,785.59 weighted ms at M=128 and
 passed all eleven CPU comparisons. The final automatic quality run again
 passed all 64 assertions and the same 35 distribution checks. Both 128- and
 512-token timing tests pass 36 assertions and report no counted CPU fallback.
-The 512-token test
-and holds live GPU allocation at 14,669,092,992 bytes across both warm rounds,
+The 512-token test holds live GPU allocation at 14,669,092,992 bytes across both warm rounds,
 including the same 33,554,432-byte workspace. The short decode measurement
 uses one post-first-token interval per round and is diagnostic. PR08 improves
 128-token TTFT about 5.4x; it does not close the decode gap to 31.84 tok/s at
 4K or establish production-equivalent prefill. Chunked GDN (PR09), attention
 and the later serving optimizations remain necessary.
+
+## PR09: chunk-64 GDN prefill
+
+The native GDN prefill now has a bounded chunk-64 implementation for BF16
+Q/K/V, Dk=Dv=128, up to 48 value heads, four variable-length sequences and
+6,656 total tokens. It follows the Intel Xe2 donor's Prepare, A, triangular
+inverse, W/U and Output/State decomposition, using VT views and the owning
+SYCL queue. Inputs already carry VT's Q/K normalization and transformed
+log-decay/sigmoid gates, so neither transformation is repeated.
+
+The implementation uses subgroup-16 BF16 XMX for K K^T with F32 accumulation.
+The inverse, W/U, deltas, state snapshot and state update remain F32. In
+particular, the state operand is not rounded to BF16. This differs from the
+donor's BF16 intermediate choices and is tested against VT's sequential CPU
+recurrence, not asserted to be bitwise donor-wheel parity. Query scaling stays
+inside the F32 dot, as in the VT contract; Q K^T and state products use SIMD
+F32 rather than narrowing the scaled query. A preliminary version factored
+the scale out of the dot and failed one full-model probability check (2.044%
+total variation). That version was not activated; the thresholds were retained.
+
+One persistent 16 MiB workspace belongs to the device context. It holds one
+sequence/chunk at a time, with 12,619,776 active bytes at 48 heads, and shares
+the same allocation accounting and serialized-lifetime implementation as
+EXL3. Its size does not depend on token count, sequence count or layer count.
+Together the EXL3 and GDN workspaces reserve 48 MiB; ordinary activations and
+KV are additional. Gates and decay factors are computed once per chunk/head
+and reused. Unsupported dimensions/dtypes, small M and insufficient workspace
+budget retain the native sequential implementation.
+
+`VT_XPU_GDN_PREFILL=auto|reference|chunked` selects the policy, sampled once per
+process. Automatic selection requires the measured B70/compiler/driver domain,
+Hk=16, Hv=48 and at least 64 tokens; the kernel additionally checks its shape
+and matrix capability limits. `VT_GDN_CHUNKED=0` disables chunking even when
+the XPU override requests it. Decode keeps its existing F32 recurrence.
+
+Focused validation covers initial zero/nonzero state, lengths
+1/63/64/65/127/128/129, real 16:48 heads, F32/BF16 output, four unequal
+sequences including an empty sequence, 4,097-token drift, 1,025 tokens with
+zero decay and beta=0/1, prefill-to-decode continuation, and queue replacement.
+All 544 assertions pass. Maximum F32 relative RMS across these output/state
+comparisons is 5.48e-7; BF16 output RMS is at most 4.25e-5. Predeclared F32
+bounds are RMS <=3e-5 and peak error <=`2e-6 + 3e-5*reference_peak`;
+BF16 output uses RMS <=1e-3 and peak <=`2e-6 + 0.008*reference_peak`.
+The empty sequence's entire state is also checked exactly. The 8 MiB budget
+case passes 29 assertions and allocates no GDN workspace. All 823 existing
+GDN/Conv assertions pass with the new path available.
+
+The combined PR08+PR09 full-model quality run passes the same six exact-answer
+tasks and two distribution probes. All eight answers and all 35 compared
+greedy choices match the original pre-PR08 scalar reference. Against that
+original reference, maximum KL is 0.000480 and maximum total variation
+0.012671, within the unchanged 0.01/0.02 limits. Comparing to the original
+reference also checks cumulative drift across both optimization steps.
+This remains a small short-prompt regression corpus, not general or
+long-context quality qualification.
+
+The isolated real-head GDN benchmark uses BF16 normalized Q/K/V, F32 state,
+BF16 output, one sequence, five timed samples after JIT and at least 200 ms
+warmup, resetting state outside each timed interval. It includes submission
+and synchronization. Final medians on the same B70 setup as PR08:
+
+| Input tokens | Sequential GDN (ms) | Chunk-64 GDN (ms) | Speedup |
+|---:|---:|---:|---:|
+| 128 | 16.851 | 1.253 | 13.4x |
+| 512 | 67.263 | 5.272 | 12.8x |
+| 2,048 | 268.975 | 21.654 | 12.4x |
+| 4,096 | 537.538 | 42.927 | 12.5x |
+
+The final automatic full engine at 128 tokens measures TTFT 2.273 s and
+56.311–56.321 client prefill tok/s (PR08: 42.4). At 512 tokens, TTFT is
+6.547–6.556 s and prefill is 78.094–78.202 tok/s (PR08: 54.3). Decode remains
+1.308 and 1.284 tok/s respectively. Both timing tests pass 37 assertions with
+zero counted CPU fallback; live GPU allocations remain constant across the
+two measured rounds, at 14,490,016,928 and 14,685,870,208 bytes respectively.
+These short decode diagnostics have one post-first-token interval per round.
+
+At 4,096 input tokens the final automatic path was warmed once and then
+measured twice with 17 output tokens per request (16 decode intervals).
+TTFT was 70.622/70.657 s, client prefill 57.999/57.970 tok/s, decode
+1.12198/1.12194 tok/s and TPOT 891.282/891.316 ms. All 37 assertions passed;
+live GPU allocations stayed at 16,541,586,336 bytes with no counted CPU
+fallback and the same 32+16 MiB persistent workspaces. The larger-context
+decode result is about 28.4x below the sibling project's 31.84 tok/s no-MTP
+target. The checkpoints and KV dtypes still differ, and client prefill
+includes TTFT overhead unlike that project's native compute-only prefill.
+Longer prompts expose remaining EXL3/attention costs; these results do not
+establish long-context answer quality. PR10's attention/FP8 work and further
+decode-kernel/launch optimization remain open.
+
+```sh
+cmake --build build-xpu --target test_xpu_gdn_chunked test_xpu_gdn \
+  test_xpu_qwen_checkpoint -j4
+build-xpu/tests/test_xpu_gdn_chunked
+VT_XPU_GDN_PREFILL=chunked build-xpu/tests/test_xpu_gdn
+VT_B70_LOW_MEMORY_TEST=1 VT_XPU_MEMORY_BUDGET_BYTES=8388608 \
+  VT_XPU_GDN_PREFILL=chunked build-xpu/tests/test_xpu_gdn_chunked --test-case='*budget*'
+VT_B70_GDN_BENCH=1 build-xpu/tests/test_xpu_gdn_chunked --test-case='*timing*'
+VT_B70_MODEL_DIR=/path/to/Qwen3.8-27B-EXL3-3.5bpw \
+  VT_B70_TIMING=1 VT_B70_PROMPT_TOKENS=4096 VT_B70_TIMING_OUTPUT_TOKENS=17 \
+  build-xpu/tests/test_xpu_qwen_checkpoint
+```
+
+`VT_B70_TIMING_OUTPUT_TOKENS` optionally extends the timing sample to 2–100
+output tokens; the default still uses 17 tokens for the five-token prompt and
+two for larger prompts. The quality-corpus commands from PR08 also apply,
+using `VT_XPU_GDN_PREFILL=reference` when generating a sequential GDN oracle.
 
 ## Opt-in provider trace
 
