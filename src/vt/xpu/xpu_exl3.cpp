@@ -5,6 +5,7 @@
 #include "xpu_exl3_strategy.h"
 #include "xpu_kernels.h"
 #include "vt/xpu.h"
+#include <cstdio>
 #include <cstdlib>
 #include <mutex>
 #include <string_view>
@@ -21,7 +22,7 @@ float FlipSign(float x) { return sycl::bit_cast<float>(sycl::bit_cast<uint32_t>(
 template<int Bits>
 void PackedGemm(Queue& q, float* out, const sycl::half* in, const uint32_t* packed,
                 int64_t m, int64_t k, int64_t n) {
-  NativeQueue(q).parallel_for(sycl::range<1>(m * n), [=](sycl::id<1> item) {
+  const auto event = NativeQueue(q).parallel_for(sycl::range<1>(m * n), [=](sycl::id<1> item) {
     const int64_t row = item[0] / n, col = item[0] % n;
     float acc = 0;
     for (int64_t tile_k = 0; tile_k < k / 16; ++tile_k) {
@@ -35,6 +36,7 @@ void PackedGemm(Queue& q, float* out, const sycl::half* in, const uint32_t* pack
     }
     out[item[0]] = acc;
   });
+  RecordProfileEvent(q, "exl3_packed_gemm", event);
 }
 
 // Each workgroup owns a complete 128-column Hadamard block. Register
@@ -45,7 +47,7 @@ template<int Bits, int Rows>
 void FusedPackedGemm(Queue& q, const View out, const sycl::half* in, const uint32_t* packed,
                      const sycl::half* scales, int64_t m, int64_t k, int64_t n) {
   const int64_t tiles_n = n / 128, groups = ((m + Rows - 1) / Rows) * tiles_n;
-  NativeQueue(q).submit([&](sycl::handler& h) {
+  const auto event = NativeQueue(q).submit([&](sycl::handler& h) {
     sycl::local_accessor<float> shared(Rows * 128, h);
     h.parallel_for(sycl::nd_range<1>(groups * 128, 128), [=](sycl::nd_item<1> item) {
       const int lane = item.get_local_id(0);
@@ -95,6 +97,7 @@ void FusedPackedGemm(Queue& q, const View out, const sycl::half* in, const uint3
       }
     });
   });
+  RecordProfileEvent(q, "exl3_fused_gemm_hadamard", event);
 }
 
 using exl3::Strategy;
@@ -122,21 +125,63 @@ Strategy SelectedStrategy() {
     if (name == "fused") return Strategy::kFused;
     if (name == "prefill") return Strategy::kPrefill;
     if (name == "panel") return Strategy::kPanel;
+    if (name == "prefill_all_rows") return Strategy::kPrefillAllRows;
     VT_CHECK(name == "auto", "Invalid VT_XPU_EXL3_STRATEGY");
     return Strategy::kAuto;
   }();
   return strategy;
 }
 
+const char* StrategyName(Strategy strategy) {
+  switch (strategy) {
+    case Strategy::kAuto: return "auto";
+    case Strategy::kReference: return "reference";
+    case Strategy::kPacked: return "packed";
+    case Strategy::kFused: return "fused";
+    case Strategy::kPrefill: return "prefill";
+    case Strategy::kPanel: return "panel";
+    case Strategy::kPrefillAllRows: return "prefill_all_rows";
+  }
+  return "unknown";
+}
+
+void TraceExl3Dispatch(Queue& q, const Tensor& in, const Tensor& out, int bits, int codebook,
+                       const char* name,
+                       Strategy selected, const char* leaf, const char* reason) {
+  static const bool enabled = [] {
+    const char* value = std::getenv("VT_XPU_EXL3_TRACE");
+    return value && std::string_view(value) == "1";
+  }();
+  if (!enabled) return;
+  int layer = -1;
+  if (name) {
+    const std::string_view matrix(name);
+    const size_t marker = matrix.find(".layers.");
+    if (marker != std::string_view::npos) {
+      const size_t first = marker + sizeof(".layers.") - 1;
+      if (first < matrix.size() && matrix[first] >= '0' && matrix[first] <= '9')
+        layer = std::atoi(name + first);
+    }
+  }
+  const nlohmann::json event = {{"event", "exl3_dispatch"}, {"queue_id", q.id},
+      {"matrix", name ? name : ""}, {"layer", layer},
+      {"bits", bits}, {"codebook", codebook}, {"m", in.shape[0]}, {"k", in.shape[1]},
+      {"n", out.shape[1]}, {"input_dtype", Name(in.dtype)}, {"output_dtype", Name(out.dtype)},
+      {"requested", StrategyName(SelectedStrategy())}, {"selected", StrategyName(selected)},
+      {"leaf", leaf}, {"rejection_reason", reason}};
+  std::fprintf(stderr, "EXL3_DISPATCH %s\n", event.dump().c_str());
+}
+
 template<bool StridedOutput = false, bool CastInputToHalf = false>
-void Had(Queue& q, Tensor& out, const Tensor& in, const Tensor* pre, const Tensor* post, float scale) {
+void Had(Queue& q, Tensor& out, const Tensor& in, const Tensor* pre, const Tensor* post,
+         float scale, const char* profile_stage = "exl3_hadamard") {
   if (in.Numel() == 0) return;
   const View src(in), dst(out);
   const auto cols = in.shape[1];
   const auto* pre_values = pre ? static_cast<const sycl::half*>(pre->data) : nullptr;
   const auto* post_values = post ? static_cast<const sycl::half*>(post->data) : nullptr;
   const auto blocks = static_cast<size_t>(in.Numel() / 128);
-  NativeQueue(q).submit([&](sycl::handler& h) {
+  const auto event = NativeQueue(q).submit([&](sycl::handler& h) {
     sycl::local_accessor<float> shared(128, h);
     h.parallel_for(sycl::nd_range<1>(blocks * 32, 32), [=](sycl::nd_item<1> item) {
       const int lane = item.get_local_id(0);
@@ -172,6 +217,7 @@ void Had(Queue& q, Tensor& out, const Tensor& in, const Tensor* pre, const Tenso
       }
     });
   });
+  RecordProfileEvent(q, profile_stage, event);
 }
 }
 
@@ -181,7 +227,7 @@ void Exl3OutputHadPanel(Queue& q, Tensor& out, const Tensor& raw, const Tensor& 
   panel.stride[0] = out.shape[1];
   auto scales = Tensor::Contiguous(static_cast<char*>(svh.data) + column * sizeof(sycl::half),
       svh.dtype, svh.device, {raw.shape[1]});
-  Had<true>(q, panel, raw, nullptr, &scales, kInvSqrt128);
+  Had<true>(q, panel, raw, nullptr, &scales, kInvSqrt128, "exl3_output_hadamard");
 }
 
 void Exl3HadR128Kernel(Queue& q, Tensor& out, const Tensor& in, const Exl3HadArgs& args) {
@@ -190,16 +236,19 @@ void Exl3HadR128Kernel(Queue& q, Tensor& out, const Tensor& in, const Exl3HadArg
   VT_CHECK(!sc || sc->IsContiguous(), "XPU EXL3 Had128 requires contiguous scale");
   // Exact in-place is safe: each workgroup reads its whole block before stores.
   if (out.data == in.data && (!sc || !Overlap(out, *sc))) {
-    Had(q, out, in, args.pre_scale, args.post_scale, args.scale * kInvSqrt128);
+    Had(q, out, in, args.pre_scale, args.post_scale, args.scale * kInvSqrt128,
+        args.pre_scale ? "exl3_input_hadamard" : "exl3_output_hadamard");
   } else {
     WithOutput(q, out, {&in, sc}, [&](Tensor& target) {
-      Had(q, target, in, args.pre_scale, args.post_scale, args.scale * kInvSqrt128);
+      Had(q, target, in, args.pre_scale, args.post_scale, args.scale * kInvSqrt128,
+          args.pre_scale ? "exl3_input_hadamard" : "exl3_output_hadamard");
     });
   }
 }
 
 void Exl3GemmKernel(Queue& q, Tensor& out, const Tensor& in, const Tensor& trellis,
                     const Tensor& suh, const Tensor& svh, Tensor& in_had, const Exl3GemmArgs& args) {
+  const ProfileMatrixScope profile_matrix(args.debug_name);
   TraceXpuOp(OpId::kExl3Gemm, q, {&out, &in, &trellis, &suh, &svh, &in_had});
   const int64_t m = in.shape[0], k = in.shape[1], n = out.shape[1];
   if (m == 0 || k == 0 || n == 0) return;
@@ -209,7 +258,7 @@ void Exl3GemmKernel(Queue& q, Tensor& out, const Tensor& in, const Tensor& trell
            "XPU EXL3 output may not overwrite weights");
   if (args.fuse_casts && in.dtype != DType::kF16) {
     WithOutput(q, in_had, {&in, &suh}, [&](Tensor& target) {
-      Had<false, true>(q, target, in, &suh, nullptr, kInvSqrt128);
+      Had<false, true>(q, target, in, &suh, nullptr, kInvSqrt128, "exl3_input_hadamard");
     });
   } else Exl3HadR128Kernel(q, in_had, in, Exl3HadArgs{&suh, nullptr, 1.0f});
   const auto* ah = static_cast<const sycl::half*>(in_had.data);
@@ -218,15 +267,24 @@ void Exl3GemmKernel(Queue& q, Tensor& out, const Tensor& in, const Tensor& trell
   auto strategy = SelectedStrategy();
   // The prefill override selects only large-M calls; the head gather and
   // subsequent decode retain the measured PR07 policy.
-  if ((strategy == Strategy::kPrefill || strategy == Strategy::kPanel) && m < 128) strategy = Strategy::kAuto;
+  if ((strategy == Strategy::kPrefill || strategy == Strategy::kPanel) && m < 128)
+    strategy = Strategy::kAuto;
+  if (strategy == Strategy::kPrefillAllRows && m < 512) strategy = Strategy::kAuto;
   if (strategy == Strategy::kAuto)
     strategy = AutomaticStrategy(q, bits, k, n, m, out.dtype == DType::kBF16 ? DType::kF32 : out.dtype);
   const bool specialized = strategy != Strategy::kReference && cb == 2 && bits >= 3 && bits <= 6 &&
       reinterpret_cast<uintptr_t>(packed) % alignof(uint32_t) == 0;
-  if (specialized && (strategy == Strategy::kPrefill || strategy == Strategy::kPanel) && !Overlap(out, in_had) &&
-      Exl3PrefillKernel(q, out, in_had, trellis, svh, bits, strategy == Strategy::kPrefill)) return;
+  if (specialized && (strategy == Strategy::kPrefill || strategy == Strategy::kPanel ||
+      strategy == Strategy::kPrefillAllRows) && !Overlap(out, in_had) &&
+      Exl3PrefillKernel(q, out, in_had, trellis, svh, bits,
+                        strategy != Strategy::kPanel, strategy == Strategy::kPrefillAllRows)) {
+    TraceExl3Dispatch(q, in, out, bits, cb, args.debug_name,
+                      strategy, StrategyName(strategy), "none");
+    return;
+  }
   const bool fused = specialized && !Overlap(out, in_had) && strategy == Strategy::kFused;
   if (fused) {
+    TraceExl3Dispatch(q, in, out, bits, cb, args.debug_name, strategy, "fused", "none");
     const auto* words = reinterpret_cast<const uint32_t*>(packed);
     const auto* scales = static_cast<const sycl::half*>(svh.data);
     auto launch = [&]<int Bits>() {
@@ -241,6 +299,18 @@ void Exl3GemmKernel(Queue& q, Tensor& out, const Tensor& in, const Tensor& trell
     }
     return;
   }
+  const char* reason = "none";
+  if (strategy == Strategy::kReference) reason = "reference_selected";
+  else if (cb != 2) reason = "unsupported_codebook";
+  else if (bits < 3 || bits > 6) reason = "unsupported_bits";
+  else if (reinterpret_cast<uintptr_t>(packed) % alignof(uint32_t) != 0) reason = "unaligned_trellis";
+  else if ((strategy == Strategy::kFused || strategy == Strategy::kPrefill ||
+            strategy == Strategy::kPanel || strategy == Strategy::kPrefillAllRows) &&
+           Overlap(out, in_had)) reason = "output_overlaps_input_scratch";
+  else if (strategy == Strategy::kPrefill || strategy == Strategy::kPanel ||
+           strategy == Strategy::kPrefillAllRows) reason = "prefill_kernel_rejected";
+  TraceExl3Dispatch(q, in, out, bits, cb, args.debug_name,
+                    strategy, specialized ? "packed" : "reference", reason);
   const size_t raw_bytes = m * n * sizeof(float);
   auto launch = [&](void* storage) {
     auto raw = Tensor::Contiguous(storage, DType::kF32, q.device, {m, n});
@@ -253,7 +323,8 @@ void Exl3GemmKernel(Queue& q, Tensor& out, const Tensor& in, const Tensor& trell
         case 5: PackedGemm<5>(q, result, ah, words, m, k, n); break;
         case 6: PackedGemm<6>(q, result, ah, words, m, k, n); break;
       }
-    } else NativeQueue(q).parallel_for(sycl::range<1>(m * n), [=](sycl::id<1> item) {
+    } else {
+      const auto event = NativeQueue(q).parallel_for(sycl::range<1>(m * n), [=](sycl::id<1> item) {
       const int64_t row = item[0] / n, col = item[0] % n;
       float acc = 0;
       for (int64_t inner = 0; inner < k; ++inner) {
@@ -264,8 +335,10 @@ void Exl3GemmKernel(Queue& q, Tensor& out, const Tensor& in, const Tensor& trell
         acc += value * exl3::Decode(exl3::Codeword(tile, bits, t), cb);
       }
       result[item[0]] = acc;
-    });
-    Had(q, out, raw, nullptr, &svh, kInvSqrt128);
+      });
+      RecordProfileEvent(q, "exl3_reference_gemm", event);
+    }
+    Had(q, out, raw, nullptr, &svh, kInvSqrt128, "exl3_output_hadamard");
   };
   // Reuse the same bounded buffer as prefill. Decode graphs retain its address
   // and the backend orders all eager/graph users across queues. Larger eager

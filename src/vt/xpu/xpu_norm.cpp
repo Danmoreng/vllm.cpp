@@ -17,7 +17,7 @@ void RmsNormKernel(Queue& q, Tensor& out, const Tensor& x, const Tensor& weight,
     const auto eps = args.eps; const bool gemma = args.gemma;
     // One work-item per row preserves the CPU's sequential FP32 variance sum.
     // PR02 correctness reference; parallel reductions can be tuned separately.
-    NativeQueue(q).parallel_for(sycl::range<1>(x.shape[0]), [=](sycl::id<1> item) {
+    const auto event = NativeQueue(q).parallel_for(sycl::range<1>(x.shape[0]), [=](sycl::id<1> item) {
       const auto row = item[0];
       float sum = 0;
       for (int64_t col = 0; col < width; ++col) {
@@ -37,6 +37,7 @@ void RmsNormKernel(Queue& q, Tensor& out, const Tensor& x, const Tensor& weight,
         Store(dst, row * dst.stride[0] + col, value * scale * weight_value);
       }
     });
+    RecordProfileEvent(q, "rms_norm", event);
   });
 }
 }  // namespace vt::xpu

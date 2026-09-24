@@ -4,6 +4,7 @@
 #include <sycl/ext/oneapi/matrix/matrix.hpp>
 #include <sycl/ext/oneapi/experimental/graph.hpp>
 #include <algorithm>
+#include <chrono>
 #include <cerrno>
 #include <cstdlib>
 #include <cstdio>
@@ -85,11 +86,34 @@ size_t Budget(size_t total) {
            "VT_XPU_MEMORY_BUDGET_BYTES must be positive and no larger than device memory");
   return static_cast<size_t>(bytes);
 }
+bool ProfileQueuesEnabled() {
+  static const bool enabled = [] {
+    const char* value = std::getenv("VT_XPU_PROFILE");
+    return value && std::strcmp(value, "1") == 0;
+  }();
+  return enabled;
+}
+bool GraphProfileEnabled() {
+  static const bool enabled = [] {
+    const char* value = std::getenv("VT_XPU_GRAPH_PROFILE");
+    return value && std::strcmp(value, "1") == 0;
+  }();
+  VT_CHECK(!enabled || ProfileQueuesEnabled(), "XPU graph profiling requires VT_XPU_PROFILE=1");
+  return enabled;
+}
+thread_local const char* current_profile_matrix = nullptr;
+struct ProfileAnchorKernel { void operator()() const {} };
 struct Workspace {
   std::mutex mutex;
   void* data = nullptr;
   size_t bytes = 0;
   std::optional<sycl::event> last;
+};
+struct PendingProfileEvent {
+  const char* stage;
+  std::string matrix;
+  uint64_t queue_id;
+  sycl::event event;
 };
 struct Context {
   sycl::device device;
@@ -97,6 +121,8 @@ struct Context {
   std::mutex mutex;
   Workspace exl3, gdn, attention, sampling;
   std::unordered_map<sycl::queue*, std::unique_ptr<sycl::queue>> queues;
+  std::vector<PendingProfileEvent> profile_events;
+  std::vector<HostProfileRecord> host_profile_records;
   std::unordered_map<sycl::queue*, std::unique_ptr<Recording>> recordings;
   std::unordered_map<void*, std::unique_ptr<Graph>> graphs;
   std::unordered_map<sycl::queue*, void*> default_graphs;
@@ -126,6 +152,23 @@ struct Context {
     for (const auto& [p, _] : pinned) sycl::free(p, context);
   }
 };
+void AppendProfileEvent(Context& c, Queue& q, const char* stage,
+                        const char* matrix, const sycl::event& event) {
+  constexpr size_t kMaxProfileEvents = 1000000;
+  VT_CHECK(c.profile_events.size() < kMaxProfileEvents,
+           "XPU profile event limit exceeded; narrow or drain the diagnostic window");
+  c.profile_events.push_back({stage, matrix ? matrix : "", q.id, event});
+}
+uint64_t SteadyNs() {
+  return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+      std::chrono::steady_clock::now().time_since_epoch()).count());
+}
+void AppendHostProfileRecord(Context& c, Queue& q, const char* stage, uint64_t start, uint64_t end) {
+  constexpr size_t kMaxHostProfileRecords = 100000;
+  VT_CHECK(c.host_profile_records.size() < kMaxHostProfileRecords,
+           "XPU host profile record limit exceeded; narrow or drain the diagnostic window");
+  c.host_profile_records.push_back({stage, q.id, start, end});
+}
 Context& GetContext(int index) {
   // Stable per-device storage; construction is lazy and failures reach the caller.
   static std::mutex mutex;
@@ -250,9 +293,15 @@ class XpuBackend final : public Backend {
   }
   Queue CreateQueue() override {
     auto& c = ctx();
-    auto q = std::make_unique<sycl::queue>(c.context, c.device,
-        [](sycl::exception_list errors) { for (auto e : errors) std::rethrow_exception(e); },
-        sycl::property_list{sycl::property::queue::in_order{}});
+    const auto errors = [](sycl::exception_list errors) {
+      for (auto e : errors) std::rethrow_exception(e);
+    };
+    auto q = ProfileQueuesEnabled()
+        ? std::make_unique<sycl::queue>(c.context, c.device, errors,
+              sycl::property_list{sycl::property::queue::in_order{},
+                                  sycl::property::queue::enable_profiling{}})
+        : std::make_unique<sycl::queue>(c.context, c.device, errors,
+              sycl::property_list{sycl::property::queue::in_order{}});
     auto* handle = q.get();
     std::lock_guard<std::mutex> lock(c.mutex);
     c.queues.emplace(handle, std::move(q));
@@ -317,9 +366,14 @@ class XpuBackend final : public Backend {
                    "XPU graph metadata must be staged outside capture and remain read-only during replay");
       const size_t nodes = recording->compute.get_nodes().size() + recording->validation.get_nodes().size();
       VT_CHECK(nodes <= MaxGraphNodes - c.graph_nodes, "XPU graph node budget exceeded");
-      auto executable = recording->compute.finalize();
+      const bool graph_profile = GraphProfileEnabled();
+      const sycl::property_list profile_properties{graph_api::property::graph::enable_profiling{}};
+      auto executable = graph_profile ? recording->compute.finalize(profile_properties)
+                                      : recording->compute.finalize();
       std::optional<ExecutableGraph> validation;
-      if (!recording->checks->messages.empty()) validation = recording->validation.finalize();
+      if (!recording->checks->messages.empty())
+        validation = graph_profile ? recording->validation.finalize(profile_properties)
+                                   : recording->validation.finalize();
       const size_t bytes = executable.get_required_mem_size() + (validation ? validation->get_required_mem_size() : 0);
       VT_CHECK(bytes <= MaxGraphDeviceBytes - c.graph_bytes && bytes <= c.budget - c.allocated - c.graph_bytes,
                "XPU graph device-memory budget exceeded");
@@ -346,28 +400,43 @@ class XpuBackend final : public Backend {
     VT_CHECK(it != c.graphs.end(), "XPU graph handle is not owned by this device");
     VT_CHECK(!c.recordings.count(&native), "XPU graph replay cannot be nested in a capture");
     auto& graph = *it->second;
+    const bool graph_profile = GraphProfileEnabled();
     Workspace* scratch[] = {&c.exl3, &c.gdn, &c.attention, &c.sampling};
     if (graph.validation) {
       // All check kernels share one small D2H. They read the freshly staged
       // metadata on this queue; invalid indices fail before compute can write
       // KV or recurrent state. Never reuse capture-time validation results.
-      native.submit([&](sycl::handler& h) {
+      const auto validation_start = graph_profile ? SteadyNs() : 0;
+      const auto validation_event = native.submit([&](sycl::handler& h) {
         if (graph.last) h.depends_on(*graph.last);
         h.ext_oneapi_graph(*graph.validation);
       });
+      if (graph_profile) {
+        AppendProfileEvent(c, q, "graph_validation", nullptr, validation_event);
+        AppendHostProfileRecord(c, q, "graph_validation_submit", validation_start, SteadyNs());
+      }
+      const auto d2h_start = graph_profile ? SteadyNs() : 0;
       native.memcpy(graph.checks->host, graph.checks->device,
                     graph.checks->messages.size() * sizeof(int)).wait_and_throw();
+      if (graph_profile) AppendHostProfileRecord(c, q, "graph_validation_d2h_wait", d2h_start, SteadyNs());
+      const auto scan_start = graph_profile ? SteadyNs() : 0;
       for (size_t i = 0; i < graph.checks->messages.size(); ++i)
         VT_CHECK(graph.checks->host[i] != 0, graph.checks->messages[i]);
+      if (graph_profile) AppendHostProfileRecord(c, q, "graph_validation_scan", scan_start, SteadyNs());
     }
     // Replays of the same executable serialize even when callers switch queues;
     // distinct executables may overlap when their buffers are independent.
+    const auto compute_submit_start = graph_profile ? SteadyNs() : 0;
     graph.last = native.submit([&](sycl::handler& h) {
       if (graph.last) h.depends_on(*graph.last);
       for (unsigned i = 0; i < 4; ++i)
         if ((graph.workspace_mask & (1u << i)) && scratch[i]->last) h.depends_on(*scratch[i]->last);
       h.ext_oneapi_graph(graph.executable);
     });
+    if (graph_profile) {
+      AppendProfileEvent(c, q, "graph_compute", nullptr, *graph.last);
+      AppendHostProfileRecord(c, q, "graph_compute_submit", compute_submit_start, SteadyNs());
+    }
     for (unsigned i = 0; i < 4; ++i) if (graph.workspace_mask & (1u << i)) scratch[i]->last = graph.last;
     ++c.replays;
   }
@@ -465,6 +534,72 @@ sycl::queue& NativeQueue(Queue& q) {
   auto it = c.queues.find(static_cast<sycl::queue*>(q.handle));
   VT_CHECK(it != c.queues.end(), "XPU queue does not belong to this context");
   return *it->second;
+}
+ProfileMatrixScope::ProfileMatrixScope(const char* matrix) noexcept
+    : previous_(current_profile_matrix) { current_profile_matrix = matrix; }
+ProfileMatrixScope::~ProfileMatrixScope() noexcept { current_profile_matrix = previous_; }
+void RecordProfileEvent(Queue& q, const char* stage, const sycl::event& event) {
+  if (!ProfileQueuesEnabled()) return;
+  auto& c = GetContext(q.device.index);
+  std::lock_guard<std::mutex> lock(c.mutex);
+  auto* native = static_cast<sycl::queue*>(q.handle);
+  VT_CHECK(c.queues.count(native) != 0, "XPU profiling requires a live queue");
+  if (c.recordings.count(native)) return;  // Graph nodes need separate profiling.
+  AppendProfileEvent(c, q, stage, current_profile_matrix, event);
+}
+ProfileClockAnchor CaptureProfileClockAnchor(int index) {
+  VT_CHECK(ProfileQueuesEnabled(), "XPU profile clock anchor requires VT_XPU_PROFILE=1");
+  auto& c = GetContext(index);
+  sycl::queue queue(c.context, c.device,
+      sycl::property_list{sycl::property::queue::in_order{}, sycl::property::queue::enable_profiling{}});
+  auto warm = queue.single_task(ProfileAnchorKernel{});
+  warm.wait_and_throw();
+  const auto host_ns = [](auto point) {
+    return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+        point.time_since_epoch()).count());
+  };
+  const auto before = std::chrono::steady_clock::now();
+  auto event = queue.single_task(ProfileAnchorKernel{});
+  event.wait_and_throw();
+  const auto after = std::chrono::steady_clock::now();
+  return {host_ns(before), host_ns(after),
+      event.get_profiling_info<sycl::info::event_profiling::command_start>(),
+      event.get_profiling_info<sycl::info::event_profiling::command_end>()};
+}
+std::vector<ProfileRecord> DrainProfileEvents(int index) {
+  if (!ProfileQueuesEnabled()) return {};
+  auto& c = GetContext(index);
+  std::vector<PendingProfileEvent> pending;
+  {
+    std::lock_guard<std::mutex> lock(c.mutex);
+    pending.swap(c.profile_events);
+  }
+  std::vector<ProfileRecord> records;
+  records.reserve(pending.size());
+  for (auto& item : pending) {
+    item.event.wait_and_throw();
+    records.push_back({item.stage, std::move(item.matrix), item.queue_id,
+        item.event.get_profiling_info<sycl::info::event_profiling::command_submit>(),
+        item.event.get_profiling_info<sycl::info::event_profiling::command_start>(),
+        item.event.get_profiling_info<sycl::info::event_profiling::command_end>()});
+  }
+  return records;
+}
+std::vector<HostProfileRecord> DrainHostProfileRecords(int index) {
+  if (!GraphProfileEnabled()) return {};
+  auto& c = GetContext(index);
+  std::vector<HostProfileRecord> records;
+  {
+    std::lock_guard<std::mutex> lock(c.mutex);
+    records.swap(c.host_profile_records);
+  }
+  return records;
+}
+size_t PendingProfileEventCount(int index) {
+  if (!ProfileQueuesEnabled()) return 0;
+  auto& c = GetContext(index);
+  std::lock_guard<std::mutex> lock(c.mutex);
+  return c.profile_events.size();
 }
 bool CaptureMetadataCheck(Queue& q, const std::function<void(sycl::handler&, int*)>& submit, const char* message,
                           std::initializer_list<const Tensor*> inputs) {
@@ -575,6 +710,7 @@ std::string DeviceDescription(int index) {
       {"driver", d.get_info<sycl::info::device::driver_version>()},
       {"runtime", d.get_platform().get_info<sycl::info::platform::version>()},
       {"compiler", __VERSION__}, {"sycl_language", SYCL_LANGUAGE_VERSION},
+      {"queue_profiling", ProfileQueuesEnabled()},
       {"subgroups", d.get_info<sycl::info::device::sub_group_sizes>()},
       {"total_bytes", d.get_info<sycl::info::device::global_mem_size>()}};
   if (d.has(sycl::aspect::ext_intel_device_id))

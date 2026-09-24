@@ -4,6 +4,7 @@
 #include <cstdlib>
 #include <iostream>
 #include <chrono>
+#include <map>
 #include <nlohmann/json.hpp>
 
 namespace {
@@ -112,6 +113,29 @@ TEST_CASE("XPU GDN chunk64: full output and F32 state against sequential CPU") {
   }
   CHECK(vt::xpu::GetMemoryInfo().gdn_workspace_bytes == 16 * 1024 * 1024);
   CHECK(vt::GetReferenceTierHits() == 0);
+}
+
+TEST_CASE("XPU GDN profile: chunk stages and decode recurrence"
+          * doctest::skip(!std::getenv("VT_XPU_PROFILE"))) {
+  Queue cpu(vt::DeviceType::kCPU), gpu(vt::DeviceType::kXPU);
+  const auto expected = Run(cpu.q, {0, 65}, 6, DType::kF32, true);
+  (void)vt::xpu::DrainProfileEvents();
+  const auto actual = Run(gpu.q, {0, 65}, 6, DType::kF32, true, 64);
+  Accuracy(actual.output, expected.output);
+  Accuracy(actual.state, expected.state);
+  const auto records = vt::xpu::DrainProfileEvents();
+  std::map<std::string, size_t> counts;
+  for (const auto& record : records) {
+    ++counts[record.stage];
+    CHECK(record.queue_id == gpu.q.id);
+    CHECK(record.start_ns > 0);
+    CHECK(record.end_ns >= record.start_ns);
+  }
+  for (const char* stage : {"gdn_chunk_gates", "gdn_chunk_inputs", "gdn_chunk_dots",
+                            "gdn_chunk_system", "gdn_chunk_inverse", "gdn_chunk_wu",
+                            "gdn_chunk_delta", "gdn_chunk_output", "gdn_chunk_state",
+                            "gdn_decode_recurrence"}) CHECK(counts[stage] == 1);
+  CHECK(records.size() == 10);
 }
 
 TEST_CASE("XPU GDN chunk64: empty and unequal sequences, long drift, decode continuation") {

@@ -396,6 +396,7 @@ inline DBuf Exl3MatmulD(Dev d, const vt::Tensor& x, const Exl3Weight& w,
   args.bits = w.Bits();
   args.codebook = w.codebook;
   args.fuse_casts = fuse_casts;
+  args.debug_name = w.name.c_str();
 
   auto run_gemm = [&](vt::Tensor& out) {
     if (use_reconstruct) {

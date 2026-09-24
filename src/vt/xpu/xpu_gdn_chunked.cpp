@@ -34,7 +34,7 @@ void Prepare(Queue& queue, ChunkScratch s, View qi, View ki, View gates, const f
   auto& q = NativeQueue(queue);
   // VT has already normalized q/k and transformed g/beta. Only a chunk-local
   // prefix sum belongs here; do not repeat donor softplus, sigmoid or L2Norm.
-  q.parallel_for(sycl::range<1>(heads), [=](sycl::id<1> item) {
+  const auto gates_event = q.parallel_for(sycl::range<1>(heads), [=](sycl::id<1> item) {
     const int h = item[0], first = offsets[sequence] + base, end = offsets[sequence + 1];
     float sum = 0;
     for (int i = 0; i < C; ++i) {
@@ -46,7 +46,8 @@ void Prepare(Queue& queue, ChunkScratch s, View qi, View ki, View gates, const f
       s.tail_decay[h * C + i] = sycl::exp(sum - s.g[h * C + i]);
     }
   });
-  q.parallel_for(sycl::range<1>(heads * D * D), [=](sycl::id<1> item) {
+  RecordProfileEvent(queue, "gdn_chunk_gates", gates_event);
+  const auto inputs_event = q.parallel_for(sycl::range<1>(heads * D * D), [=](sycl::id<1> item) {
     const int h = item[0] / (D * D), inner = item[0] % (D * D), v = inner / D, k = inner % D;
     s.state_t[(h * D + k) * D + v] = state[(sequence * heads + h) * D * D + inner];
     if (inner < C * D) {
@@ -59,13 +60,14 @@ void Prepare(Queue& queue, ChunkScratch s, View qi, View ki, View gates, const f
       s.kt[(h * D + d) * C + row] = kv;
     }
   });
+  RecordProfileEvent(queue, "gdn_chunk_inputs", inputs_event);
 }
 
 // Compute K K^T using native BF16 XMX, F32 accumulation. Each SG16
 // owns a 16x16 tile; no state operand is converted to BF16 for this operation.
 void Dots(Queue& queue, ChunkScratch s, int heads) {
   namespace mx = sycl::ext::oneapi::experimental::matrix;
-  NativeQueue(queue).parallel_for(sycl::nd_range<1>(heads * 16 * 16, 16),
+  const auto event = NativeQueue(queue).parallel_for(sycl::nd_range<1>(heads * 16 * 16, 16),
       [=](sycl::nd_item<1> item) [[sycl::reqd_sub_group_size(16)]] {
     auto sg = item.get_sub_group();
     const int tile = item.get_group(0);
@@ -87,12 +89,13 @@ void Dots(Queue& queue, ChunkScratch s, int heads) {
     mx::joint_matrix_store(sg, acc, sycl::address_space_cast<sycl::access::address_space::global_space,
         sycl::access::decorated::no>(out), C, mx::layout::row_major);
   });
+  RecordProfileEvent(queue, "gdn_chunk_dots", event);
 }
 
 void System(Queue& queue, ChunkScratch s, View beta, const int32_t* offsets,
             int sequence, int base, int heads, float scale) {
   auto& q = NativeQueue(queue);
-  q.parallel_for(sycl::range<1>(heads * C * C), [=](sycl::id<1> item) {
+  const auto system_event = q.parallel_for(sycl::range<1>(heads * C * C), [=](sycl::id<1> item) {
     const int index = item[0], h = index / (C * C), row = (index / C) % C, col = index % C;
     const int token = offsets[sequence] + base + row;
     const bool valid = token < offsets[sequence + 1];
@@ -107,9 +110,10 @@ void System(Queue& queue, ChunkScratch s, View beta, const int32_t* offsets,
           (static_cast<float>(s.q[(h * C + row) * D + d]) * scale);
     s.qk[index] = dot * decay;
   });
+  RecordProfileEvent(queue, "gdn_chunk_system", system_event);
   // Each work-item solves one column of (I + lower)^-1. Dependencies stay in
   // that column, so neither subgroup barriers nor cross-workgroup waits occur.
-  q.parallel_for(sycl::range<1>(heads * C), [=](sycl::id<1> item) {
+  const auto inverse_event = q.parallel_for(sycl::range<1>(heads * C), [=](sycl::id<1> item) {
     const int h = item[0] / C, col = item[0] % C;
     auto* inverse = s.inverse + h * C * C;
     const auto* lower = s.lower + h * C * C;
@@ -122,11 +126,12 @@ void System(Queue& queue, ChunkScratch s, View beta, const int32_t* offsets,
       inverse[row * C + col] = value;
     }
   });
+  RecordProfileEvent(queue, "gdn_chunk_inverse", inverse_event);
 }
 
 void ComputeWU(Queue& queue, ChunkScratch s, View vi, View beta, const int32_t* offsets,
                int sequence, int base, int heads) {
-  NativeQueue(queue).parallel_for(sycl::range<1>(heads * C * D), [=](sycl::id<1> item) {
+  const auto event = NativeQueue(queue).parallel_for(sycl::range<1>(heads * C * D), [=](sycl::id<1> item) {
     const int index = item[0], h = index / (C * D), row = (index / D) % C, d = index % D;
     const int first = offsets[sequence] + base, n = sycl::min(C, sycl::max(0, offsets[sequence + 1] - first));
     float w = 0, u = 0;
@@ -138,18 +143,20 @@ void ComputeWU(Queue& queue, ChunkScratch s, View vi, View beta, const int32_t* 
     }
     s.w[index] = w; s.u[index] = u;
   });
+  RecordProfileEvent(queue, "gdn_chunk_wu", event);
 }
 
 void OutputState(Queue& queue, ChunkScratch s, View output, float* state, const int32_t* offsets,
                  int sequence, int base, int heads, float scale) {
   auto& q = NativeQueue(queue);
-  q.parallel_for(sycl::range<1>(heads * C * D), [=](sycl::id<1> item) {
+  const auto delta_event = q.parallel_for(sycl::range<1>(heads * C * D), [=](sycl::id<1> item) {
     const int index = item[0], h = index / (C * D), row = (index / D) % C, v = index % D;
     float prediction = 0;
     for (int d = 0; d < D; ++d) prediction += s.w[(h * C + row) * D + d] * s.state_t[(h * D + d) * D + v];
     s.delta[index] = s.u[index] - prediction;
   });
-  q.parallel_for(sycl::range<1>(heads * C * D), [=](sycl::id<1> item) {
+  RecordProfileEvent(queue, "gdn_chunk_delta", delta_event);
+  const auto output_event = q.parallel_for(sycl::range<1>(heads * C * D), [=](sycl::id<1> item) {
     const int index = item[0], h = index / (C * D), row = (index / D) % C, v = index % D;
     const int token = offsets[sequence] + base + row;
     if (token >= offsets[sequence + 1]) return;
@@ -160,7 +167,8 @@ void OutputState(Queue& queue, ChunkScratch s, View output, float* state, const 
       intra += s.qk[(h * C + row) * C + j] * s.delta[(h * C + j) * D + v];
     Store(output, (token * heads + h) * D + v, cross * s.exp_g[h * C + row] + intra);
   });
-  q.parallel_for(sycl::range<1>(heads * D * D), [=](sycl::id<1> item) {
+  RecordProfileEvent(queue, "gdn_chunk_output", output_event);
+  const auto state_event = q.parallel_for(sycl::range<1>(heads * D * D), [=](sycl::id<1> item) {
     const int h = item[0] / (D * D), v = (item[0] / D) % D, d = item[0] % D;
     const int n = sycl::min(C, sycl::max(0, offsets[sequence + 1] - offsets[sequence] - base));
     if (!n) return;
@@ -170,6 +178,7 @@ void OutputState(Queue& queue, ChunkScratch s, View output, float* state, const 
           static_cast<float>(s.k[(h * C + j) * D + d]);
     state[(sequence * heads + h) * D * D + v * D + d] = value;
   });
+  RecordProfileEvent(queue, "gdn_chunk_state", state_event);
 }
 }
 

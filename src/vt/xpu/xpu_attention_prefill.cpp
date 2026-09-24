@@ -51,8 +51,9 @@ bool PagedAttentionPrefillKernel(Queue& q, Tensor& out, const Tensor& query, con
   const int64_t tiles = (tokens + Q - 1) / Q + requests - 1;
   Scratch status(q.device, sizeof(int));
   auto* unsafe = static_cast<int*>(status.data);
-  NativeQueue(q).memset(unsafe, 0, sizeof(int));
-  NativeQueue(q).submit([&](sycl::handler& h) {
+  const auto reset_event = NativeQueue(q).memset(unsafe, 0, sizeof(int));
+  RecordProfileEvent(q, "attention_prefill_status_reset", reset_event);
+  const auto event = NativeQueue(q).submit([&](sycl::handler& h) {
     sycl::local_accessor<sycl::half> query_tile(Q * D, h), kv(K * D, h), prob(Q * K, h);
     sycl::local_accessor<sycl::half> query_low(Q * D, h), prob_low(Q * K, h);
     sycl::local_accessor<float> scores(Q * K, h), maxval(Q, h), denom(Q, h), oldscale(Q, h);
@@ -171,6 +172,7 @@ bool PagedAttentionPrefillKernel(Queue& q, Tensor& out, const Tensor& query, con
       });
     }});
   });
+  RecordProfileEvent(q, "attention_prefill", event);
   int invalid = 0;
   GetBackend(q.device).Copy(q, &invalid, unsafe, sizeof(int));
   // If FP16 could not represent an operand, the caller re-runs its generic

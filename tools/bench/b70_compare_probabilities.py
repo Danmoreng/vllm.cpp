@@ -12,6 +12,7 @@ import array
 import json
 import math
 from pathlib import Path
+import re
 import sys
 
 VOCAB = 248320
@@ -21,21 +22,44 @@ MAX_TV = 0.02
 
 def read_dump(directory, case):
     path = directory / case["logits"]
+    expected = case.get("teacher_forced", {}).get(
+        "planned_steps", case["response"]["usage"]["completion_tokens"])
+    assert case["response"]["usage"]["completion_tokens"] == expected, path
+    assert 0 < expected <= case["request"]["max_tokens"], path
     values = array.array("f")
     with path.open("rb") as stream:
         values.frombytes(stream.read())
     if sys.byteorder != "little":
         values.byteswap()
-    assert len(values) and len(values) % VOCAB == 0, path
+    assert len(values) == expected * VOCAB, (path, len(values) // VOCAB, expected)
     assert all(math.isfinite(x) for x in values), path
     ids = [tuple(map(int, line.split())) for line in path.with_suffix(".ids.txt").read_text().splitlines()]
-    assert len(ids) == len(values) // VOCAB, path
+    assert len(ids) == expected, (path, len(ids), expected)
     rows = []
     for step, (recorded_step, best) in enumerate(ids):
         row = values[step * VOCAB:(step + 1) * VOCAB]
         assert recorded_step == step and max(range(VOCAB), key=row.__getitem__) == best, path
         rows.append((row, best))
     return rows
+
+
+def check_forced_metadata(reference, candidate):
+    required = ("planned_steps", "forced_token_ids", "prefix_hashes", "prefix_hash_algorithm", "position_ids",
+                "chunk_schedule", "state_reset", "checkpoint_revision")
+    left, right = reference["teacher_forced"], candidate["teacher_forced"]
+    assert all(key in left and key in right and left[key] == right[key] for key in required)
+    steps = left["planned_steps"]
+    assert isinstance(steps, int) and steps > 0
+    assert len(left["forced_token_ids"]) == len(left["prefix_hashes"]) == len(left["position_ids"]) == steps
+    assert all(isinstance(token, int) and 0 <= token < VOCAB for token in left["forced_token_ids"])
+    assert all(isinstance(position, int) and position >= 0 for position in left["position_ids"])
+    assert all(re.fullmatch(r"[0-9a-f]{64}", value) for value in left["prefix_hashes"])
+    assert left["prefix_hash_algorithm"] == "blake3-token-ids-le32-v1"
+    assert isinstance(left["state_reset"], bool) and left["state_reset"]
+    assert left["checkpoint_revision"]
+    assert left["chunk_schedule"] and all(isinstance(chunk, int) and chunk > 0
+                                          for chunk in left["chunk_schedule"])
+    return steps
 
 
 def distances(reference, candidate):
@@ -58,40 +82,50 @@ def main():
     parser.add_argument("reference", type=Path)
     parser.add_argument("candidate", type=Path)
     parser.add_argument("--long-context", action="store_true", help="compare the separate one-case long retrieval corpus")
+    parser.add_argument("--teacher-forced", action="store_true", help="compare all 32 fixed steps of the 24-case corpus")
     args = parser.parse_args()
+    assert not (args.long_context and args.teacher_forced)
     reference = json.loads((args.reference / "results.json").read_text())
     candidate = json.loads((args.candidate / "results.json").read_text())
-    assert len(reference) == len(candidate) == (1 if args.long_context else 8)
+    expected_cases = 1 if args.long_context else 24 if args.teacher_forced else 8
+    assert len(reference) == len(candidate) == expected_cases
     if args.long_context:
         assert reference[0]["name"] == candidate[0]["name"] == "long_retrieval"
         assert reference[0]["response"]["usage"]["prompt_tokens"] >= 4096
-    failures = 0
+    failed_distributions = 0
+    failed_answers = 0
     compared = 0
     for ref, got in zip(reference, candidate):
         assert ref["name"] == got["name"] and ref["request"] == got["request"]
         assert ref["response"]["usage"]["prompt_tokens"] == got["response"]["usage"]["prompt_tokens"]
+        if args.teacher_forced:
+            assert check_forced_metadata(ref, got) == 32
         left, right = read_dump(args.reference, ref), read_dump(args.candidate, got)
         count, worst_kl, worst_tv = 0, 0.0, 0.0
         for (p, p_best), (q, q_best) in zip(left, right):
             kl, tv = distances(p, q)
             worst_kl, worst_tv = max(worst_kl, kl), max(worst_tv, tv)
-            failures += int(kl > MAX_KL or tv > MAX_TV)
+            failed_distributions += int(kl > MAX_KL or tv > MAX_TV)
             count += 1
             # The current distribution has the same conditioning prefix. Once
             # greedy choices diverge, subsequent rows no longer do; don't claim
             # that comparing them measures numerical drift at identical input.
-            if p_best != q_best:
+            if not args.teacher_forced and p_best != q_best:
                 break
         assert count > 0
+        same_answer = ref["answer"] == got["answer"]
+        if not args.teacher_forced:
+            failed_answers += int(not same_answer)
         compared += count
         print(json.dumps({"case": ref["name"], "comparable_steps": count,
                           "reference_steps": len(left), "candidate_steps": len(right),
                           "max_kl": worst_kl, "max_tv": worst_tv,
-                          "same_answer": ref["answer"] == got["answer"]}), flush=True)
+                          "same_answer": same_answer}), flush=True)
     print(json.dumps({"cases": len(reference), "compared_distributions": compared,
-                      "failed_distributions": failures, "max_allowed_kl": MAX_KL,
+                      "failed_distributions": failed_distributions, "failed_answers": failed_answers,
+                      "max_allowed_kl": MAX_KL,
                       "max_allowed_tv": MAX_TV}), flush=True)
-    return int(failures != 0)
+    return int(failed_distributions != 0 or failed_answers != 0)
 
 
 if __name__ == "__main__":

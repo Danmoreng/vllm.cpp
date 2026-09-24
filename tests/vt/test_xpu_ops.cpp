@@ -5,6 +5,7 @@
 #include "vllm/v1/sample/sampler.h"
 #include "vllm/platforms/interface.h"
 #include <cmath>
+#include <cstdlib>
 #include <cstring>
 #include <limits>
 #include <vector>
@@ -209,6 +210,29 @@ TEST_CASE("XPU Matmul and MatmulBT: mixed dtypes, strided activation and real BA
     Buffer out(*q, DType::kBF16, {1, 48}); a.put(Values(5120)); b.put(Values(48 * 5120));
     vt::MatmulBT(*q, out.t, a.t, b.t);
     if (q == &qs.cpu) expected = out.floats(); else CHECK(out.floats() == expected);
+  }
+}
+
+TEST_CASE("XPU profile: RMSNorm and BA MatmulBT carry device timestamps"
+          * doctest::skip(!std::getenv("VT_XPU_PROFILE"))) {
+  Queues qs;
+  Buffer x(qs.gpu, DType::kBF16, {1, 5120}), w(qs.gpu, DType::kBF16, {5120});
+  Buffer norm(qs.gpu, DType::kBF16, {1, 5120});
+  Buffer ba(qs.gpu, DType::kBF16, {96, 5120}), out(qs.gpu, DType::kF32, {1, 96});
+  x.put(Values(5120)); w.put(Values(5120, 4)); ba.put(Values(96 * 5120, 5));
+  (void)vt::xpu::DrainProfileEvents();
+  vt::RmsNorm(qs.gpu, norm.t, x.t, w.t, {1e-6f, true});
+  vt::MatmulBT(qs.gpu, out.t, norm.t, ba.t);
+  CHECK(out.floats().size() == 96);
+  const auto records = vt::xpu::DrainProfileEvents();
+  REQUIRE(records.size() == 2);
+  CHECK(records[0].stage == "rms_norm");
+  CHECK(records[1].stage == "matmul_bt");
+  for (const auto& record : records) {
+    CHECK(record.matrix.empty());
+    CHECK(record.queue_id == qs.gpu.id);
+    CHECK(record.submit_ns > 0);
+    CHECK(record.end_ns >= record.start_ns);
   }
 }
 

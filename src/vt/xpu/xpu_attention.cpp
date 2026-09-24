@@ -42,11 +42,12 @@ void AttnGateSplitKernel(Queue& q, Tensor& queries, Tensor& gates, const Tensor&
            "XPU Q/gate split requires separate output storage");
   const View src(packed), dst(queries), gate(gates);
   const auto width = queries.shape[2];
-  NativeQueue(q).parallel_for(sycl::range<1>(queries.Numel()), [=](sycl::id<1> item) {
+  const auto event = NativeQueue(q).parallel_for(sycl::range<1>(queries.Numel()), [=](sycl::id<1> item) {
     const int64_t head = item[0] / width, col = item[0] % width;
     Store(dst, item[0], Load(src, head * 2 * width + col));
     Store(gate, item[0], Load(src, head * 2 * width + width + col));
   });
+  RecordProfileEvent(q, "attn_gate_split", event);
 }
 void RopeNeoxKernel(Queue& q, Tensor& queries, Tensor& keys, const Tensor& positions, const RopeArgs& args) {
   TraceXpuOp(OpId::kRopeNeox, q, {&queries, &keys, &positions});
@@ -54,12 +55,13 @@ void RopeNeoxKernel(Queue& q, Tensor& queries, Tensor& keys, const Tensor& posit
   if (!args.rotary_dim) return;
   const View qs(queries), ks(keys), pos(positions);
   const int64_t hq = queries.shape[1], hk = keys.shape[1], half = args.rotary_dim / 2;
-  NativeQueue(q).parallel_for(sycl::range<1>(queries.shape[0] * (hq + hk) * half), [=](sycl::id<1> item) {
+  const auto event = NativeQueue(q).parallel_for(sycl::range<1>(queries.shape[0] * (hq + hk) * half), [=](sycl::id<1> item) {
     const int64_t pair = item[0] % half, head = (item[0] / half) % (hq + hk), token = item[0] / (half * (hq + hk));
     const double angle = double(Position(pos, token)) * Frequency(pair, args);
     const float c = float(sycl::cos(angle)), s = float(sycl::sin(angle));
     Rotate(head < hq ? qs : ks, token, head < hq ? head : head - hq, pair, pair + half, c, s);
   });
+  RecordProfileEvent(q, "rope_neox", event);
 }
 void RopeCosSinCacheKernel(Queue& q, Tensor& cache, const Tensor& positions, const RopeArgs& args) {
   TraceXpuOp(OpId::kRopeCosSinCache, q, {&cache, &positions});
@@ -67,7 +69,7 @@ void RopeCosSinCacheKernel(Queue& q, Tensor& cache, const Tensor& positions, con
   if (!args.rotary_dim) return;
   const View dst(cache), pos(positions);
   const auto rot = args.rotary_dim, half = rot / 2;
-  NativeQueue(q).parallel_for(sycl::range<1>(cache.shape[0] * half), [=](sycl::id<1> item) {
+  const auto event = NativeQueue(q).parallel_for(sycl::range<1>(cache.shape[0] * half), [=](sycl::id<1> item) {
     const int64_t row = item[0] / half, pair = item[0] % half, p = Position(pos, row);
     float c, s;
     if (args.linear_scaling_factor > 0) {
@@ -84,6 +86,7 @@ void RopeCosSinCacheKernel(Queue& q, Tensor& cache, const Tensor& positions, con
     }
     Store(dst, row * rot + pair, c); Store(dst, row * rot + half + pair, s);
   });
+  RecordProfileEvent(q, "rope_cache_produce", event);
 }
 void RopeFromCacheKernel(Queue& q, Tensor& queries, Tensor* keys, const Tensor& positions,
                           const Tensor& cache, const RopeArgs& args) {
@@ -99,13 +102,14 @@ void RopeFromCacheKernel(Queue& q, Tensor& queries, Tensor* keys, const Tensor& 
     return true;
   }, "XPU RoPE position outside cache", {&positions});
   const bool neox = args.is_neox_style;
-  NativeQueue(q).parallel_for(sycl::range<1>(tokens * (hq + hk) * half), [=](sycl::id<1> item) {
+  const auto event = NativeQueue(q).parallel_for(sycl::range<1>(tokens * (hq + hk) * half), [=](sycl::id<1> item) {
     const int64_t pair = item[0] % half, head = (item[0] / half) % (hq + hk), token = item[0] / (half * (hq + hk));
     const auto base = Position(pos, token) * rot;
     Rotate(head < hq ? qs : ks, token, head < hq ? head : head - hq,
            neox ? pair : 2 * pair, neox ? pair + half : 2 * pair + 1,
            Load(cs, base + pair), Load(cs, base + half + pair));
   });
+  RecordProfileEvent(q, "rope_cache_consume", event);
 }
 namespace {
 template<bool Fp8>
@@ -120,7 +124,7 @@ void CacheWrite(Queue& q, const Tensor& keys, const Tensor& values, Tensor& key_
   }, "XPU KV slot outside cache", {&slots});
   if (!count || !elements) return;
   const View ks(keys), vs(values), kc(key_cache), vc(value_cache);
-  NativeQueue(q).submit([&](sycl::handler& h) {
+  const auto event = NativeQueue(q).submit([&](sycl::handler& h) {
     sycl::local_accessor<int> keep(1, h);
     h.parallel_for(sycl::nd_range<1>(count * 128, 128), [=](sycl::nd_item<1> item) {
       const int64_t token = item.get_group(0), slot = ids[token];
@@ -147,6 +151,7 @@ void CacheWrite(Queue& q, const Tensor& keys, const Tensor& values, Tensor& key_
       }
     });
   });
+  RecordProfileEvent(q, Fp8 ? "kv_write_fp8" : "kv_write", event);
 }
 }
 void ReshapeAndCacheKernel(Queue& q, const Tensor& keys, const Tensor& values, Tensor& key_cache,
@@ -227,7 +232,7 @@ void PagedAttentionKernel(Queue& q, Tensor& out, const Tensor& query, const Tens
     if ((automatic || mode == "prefill") && PagedAttentionPrefillKernel(q, target, query, key_cache, value_cache,
                                                          block_table, seq_lens, query_start_loc, args)) return;
     const View qs(query), kc(key_cache), vc(value_cache), dst(target);
-    NativeQueue(q).submit([&](sycl::handler& h) {
+    const auto event = NativeQueue(q).submit([&](sycl::handler& h) {
       sycl::local_accessor<float, 1> partial(sycl::range<1>(lanes), h);
       // One group per query/head; each lane owns one value component. Scores
       // reduce in F32, and online softmax never materializes a scores matrix.
@@ -268,6 +273,7 @@ void PagedAttentionKernel(Queue& q, Tensor& out, const Tensor& query, const Tens
         if (active) Store(dst, qbase + lane, accumulator / denominator);
       });
     });
+    RecordProfileEvent(q, "attention_reference", event);
   });
 }
 }  // namespace vt::xpu
