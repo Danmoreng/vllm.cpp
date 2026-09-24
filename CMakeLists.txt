@@ -1706,7 +1706,7 @@ if(VLLM_CPP_XPU)
   add_library(vllm_xpu OBJECT
     src/vt/xpu/xpu_elementwise.cpp src/vt/xpu/xpu_norm.cpp
     src/vt/xpu/xpu_sampling.cpp src/vt/xpu/xpu_ops.cpp src/vt/xpu/xpu_exl3.cpp
-    src/vt/xpu/xpu_gdn.cpp)
+    src/vt/xpu/xpu_gdn.cpp src/vt/xpu/xpu_attention.cpp)
   foreach(xpu_target vllm_xpu vllm_xpu_backend)
     set_target_properties(${xpu_target} PROPERTIES POSITION_INDEPENDENT_CODE ON)
     target_include_directories(${xpu_target} PRIVATE include src)
