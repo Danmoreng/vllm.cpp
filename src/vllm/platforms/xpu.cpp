@@ -1,10 +1,30 @@
 // Platform values follow vLLM platforms/xpu.py @ e126687a9a. Kernels and USM
 // ownership are native VT implementations; Torch's memory allocator is not used.
 #include "vllm/platforms/interface.h"
+#include "vllm/v1/attention/registry.h"
 #include "vt/xpu.h"
 
 namespace vllm::platforms {
 namespace {
+// Native generic paged attention, with the engine's NHD cache layout. This
+// descriptor does not borrow FlashAttention's kernel/capability declarations.
+class XpuAttentionBackend final : public v1::AttentionBackend {
+ public:
+  std::string get_name() const override { return "XPU_ATTN"; }
+  std::vector<int64_t> get_kv_cache_shape(int64_t blocks, int64_t page, int64_t heads,
+                                        int64_t dim, const std::string&) const override {
+    return {blocks, 2, page, heads, dim};
+  }
+  std::vector<DType> supported_dtypes() const override { return {DType::kF32, DType::kBF16, DType::kF16}; }
+  std::vector<int> get_supported_kernel_block_sizes() const override { return {16}; }
+  bool supports_head_size(int head_size) const override { return head_size > 0 && head_size <= 256; }
+  bool supports_non_causal() const override { return true; }
+  bool supports_sliding_window() const override { return true; }
+};
+const v1::AttentionBackendRegistrar attention{
+    DeviceType::kXPU, "XPU_ATTN", []() -> std::unique_ptr<v1::AttentionBackend> {
+      return std::make_unique<XpuAttentionBackend>();
+    }};
 class XpuPlatform final : public Platform {
  public:
   DeviceType device_type() const override { return DeviceType::kXPU; }
@@ -18,8 +38,15 @@ class XpuPlatform final : public Platform {
     p.device_memory_total_bytes = vt::xpu::GetMemoryInfo().total_bytes;
     return p;
   }
-  // PR03-06 add quantization, recurrent kernels, attention, and model execution.
-  bool supports_model_architecture(std::string_view) const override { return false; }
+  // Native text path: EXL3 projections, F32 GDN state and BF16 paged KV.
+  // Vision and speculative draft execution are not enabled by this backend.
+  bool supports_model_architecture(std::string_view architecture) const override {
+    return architecture == "Qwen3_5ForConditionalGeneration";
+  }
+  std::vector<std::string> get_attn_backend_priority(const AttnSelectorConfig& cfg) const override {
+    if (cfg.use_mla || cfg.use_sparse) return {};
+    return {"XPU_ATTN"};
+  }
 };
 struct Registrar {
   Registrar() {
