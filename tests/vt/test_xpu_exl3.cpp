@@ -3,6 +3,7 @@
 #include "vt/xpu.h"
 #include "vt/xpu/xpu_exl3_strategy.h"
 #include <array>
+#include <cstring>
 
 namespace {
 using vt::DType;
@@ -67,7 +68,8 @@ TEST_CASE("XPU EXL3 strategy: cache identity, measured regimes and bounded growt
   CHECK(cache.Get(domain, {6, 5120, 248320, 1, DType::kF32}) == Strategy::kPacked);
   CHECK(cache.Get(domain, {6, 5120, 248320, 5, DType::kF32}) == Strategy::kFused);
   for (int m : {128, 129, 512, 2048, 6656}) {
-    CHECK(cache.Get(domain, {3, 17408, 5120, m, DType::kF32}) == Strategy::kPrefill);
+    CHECK(cache.Get(domain, {3, 17408, 5120, m, DType::kF32}) ==
+          (m >= 512 ? Strategy::kPrefillAllRows : Strategy::kPrefill));
     CHECK(cache.Get(domain, {6, 5120, 248320, m, DType::kF32}) == Strategy::kPrefill);
   }
   for (const Shape unknown : {Shape{3, 17408, 5120, 17, DType::kF32},
@@ -88,7 +90,8 @@ TEST_CASE("XPU EXL3 strategy: cache identity, measured regimes and bounded growt
   }
   for (int64_t m = 21; m < 600; ++m) {
     CHECK(cache.Get(domain, {3, 17408, 5120, m, DType::kF32}) ==
-          (m >= 128 ? Strategy::kPrefill : Strategy::kPacked));
+          (m >= 512 ? Strategy::kPrefillAllRows :
+           m >= 128 ? Strategy::kPrefill : Strategy::kPacked));
     CHECK(cache.Size() <= 512);
   }
   CHECK(cache.Get(domain, decode) == Strategy::kFused);

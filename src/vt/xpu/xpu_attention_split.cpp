@@ -30,7 +30,7 @@ bool PagedAttentionSplitKernel(Queue& q, Tensor& out, const Tensor& query, const
   return WithAttentionWorkspace(q, Workspace, [&](void* storage) {
     auto* partial = static_cast<float*>(storage);
     const int64_t groups = tokens * kvheads * pairs * parts;
-    NativeQueue(q).parallel_for(sycl::nd_range<1>(groups * SG, SG),
+    const auto partial_event = NativeQueue(q).parallel_for(sycl::nd_range<1>(groups * SG, SG),
         [=](sycl::nd_item<1> item) [[sycl::reqd_sub_group_size(16)]] {
       const auto sg = item.get_sub_group();
       const int lane = item.get_local_id(0);
@@ -89,7 +89,8 @@ bool PagedAttentionSplitKernel(Queue& q, Tensor& out, const Tensor& query, const
         for (int c = 0; c < Components; ++c) if (lane + c * SG < dim) result[lane + c * SG] = acc[r][c];
       }
     });
-    NativeQueue(q).parallel_for(sycl::range<1>(tokens * heads * dim), [=](sycl::id<1> item) {
+    RecordProfileEvent(q, "attention_split_partial", partial_event);
+    const auto reduce_event = NativeQueue(q).parallel_for(sycl::range<1>(tokens * heads * dim), [=](sycl::id<1> item) {
       const int64_t row = item[0] / dim, d = item[0] % dim;
       const auto* src = partial + row * parts * stride;
       float maximum = -std::numeric_limits<float>::infinity();
@@ -103,6 +104,7 @@ bool PagedAttentionSplitKernel(Queue& q, Tensor& out, const Tensor& query, const
       }
       Store(dst, item[0], value / sum);
     });
+    RecordProfileEvent(q, "attention_split_reduce", reduce_event);
   });
 }
 }  // namespace vt::xpu

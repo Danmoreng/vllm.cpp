@@ -1,6 +1,7 @@
 #include "xpu_test_helpers.h"
 #include "vt/xpu.h"
 #include <array>
+#include <cstdlib>
 #include <memory>
 
 TEST_CASE("XPU graphs: two slots replay changing inputs without capture-time execution") {
@@ -65,6 +66,21 @@ TEST_CASE("XPU graphs: two slots replay changing inputs without capture-time exe
     }
   }
   const auto after = vt::xpu::GetMemoryInfo();
+  if (std::getenv("VT_XPU_GRAPH_PROFILE")) {
+    const auto records = vt::xpu::DrainProfileEvents();
+    const auto host = vt::xpu::DrainHostProfileRecords();
+    REQUIRE(records.size() == 34);
+    REQUIRE(host.size() == 34);
+    for (const auto& record : host) {
+      CHECK(record.stage == "graph_compute_submit");
+      CHECK(record.end_steady_ns >= record.start_steady_ns);
+    }
+    for (const auto& record : records) {
+      CHECK(record.stage == "graph_compute");
+      CHECK(record.start_ns > 0);
+      CHECK(record.end_ns >= record.start_ns);
+    }
+  }
   CHECK(after.graph_count == before.graph_count); CHECK(after.graph_nodes == before.graph_nodes);
   CHECK(after.allocated_bytes == before.allocated_bytes);
   CHECK(vt::GetReferenceTierHits() == 0);

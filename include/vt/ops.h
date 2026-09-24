@@ -1047,6 +1047,7 @@ struct Exl3GemmArgs {
   // is identical to the explicit casts; A_had remains F16. Other backends
   // refuse this opt-in instead of silently interpreting the input as F16.
   bool fuse_casts = false;
+  const char* debug_name = nullptr;  // Host-only, optional EXL3 dispatch trace label.
 };
 
 // ─── The fused MoE MLP — MODEL-DSV4-EXL3 W2d ─────────────────────────────────

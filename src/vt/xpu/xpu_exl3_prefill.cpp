@@ -11,11 +11,12 @@ constexpr int kBM = 32, kBN = 64, kBK = 32;
 template<int Bits>
 void DecodePanel(Queue& q, sycl::half* panel, const uint32_t* packed,
                  int64_t k, int64_t n, int64_t base_k, int64_t column, int64_t width) {
-  NativeQueue(q).parallel_for(sycl::range<1>(k * width), [=](sycl::id<1> i) {
+  const auto event = NativeQueue(q).parallel_for(sycl::range<1>(k * width), [=](sycl::id<1> i) {
     const int64_t r = base_k + i[0] / width, c = column + i[0] % width;
     const auto* tile = packed + ((r / 16) * (n / 16) + c / 16) * (8 * Bits);
     panel[i[0]] = sycl::half(exl3::Decode(exl3::PackedCodeword<Bits>(tile, r % 16, c % 16), 2));
   });
+  RecordProfileEvent(q, "exl3_panel_decode", event);
 }
 
 // Eight 16-lane subgroups cover one 32x64 tile. Two SLM stages overlap the
@@ -25,7 +26,7 @@ void PanelGemm(Queue& q, float* out, const sycl::half* input, const sycl::half* 
                int64_t m, int64_t k, int64_t leading_k, int64_t width, bool first) {
   namespace mx = sycl::ext::oneapi::experimental::matrix;
   const int64_t tiles_n = width / kBN, groups = ((m + kBM - 1) / kBM) * tiles_n;
-  NativeQueue(q).submit([&](sycl::handler& h) {
+  const auto event = NativeQueue(q).submit([&](sycl::handler& h) {
     sycl::local_accessor<sycl::half> a(2 * kBM * kBK, h), b(2 * kBK * kBN, h);
     h.parallel_for(sycl::nd_range<1>(groups * 128, 128), [=](sycl::nd_item<1> item)
                      [[sycl::reqd_sub_group_size(16)]] {
@@ -66,12 +67,13 @@ void PanelGemm(Queue& q, float* out, const sycl::half* input, const sycl::half* 
       mx::joint_matrix_store(sg, jc, output, width, mx::layout::row_major);
     });
   });
+  RecordProfileEvent(q, "exl3_panel_gemm", event);
 }
 
 template<int rows>
 void ExactPanelGemm(Queue& q, float* out, const sycl::half* input, const sycl::half* panel,
                     int64_t m, int64_t k, int64_t leading_k, int64_t width, bool first) {
-  NativeQueue(q).parallel_for(sycl::range<1>(((m + rows - 1) / rows) * width), [=](sycl::id<1> item) {
+  const auto event = NativeQueue(q).parallel_for(sycl::range<1>(((m + rows - 1) / rows) * width), [=](sycl::id<1> item) {
     const int64_t row = (item[0] / width) * rows, col = item[0] % width;
     float acc[rows] = {};
     #pragma unroll
@@ -88,20 +90,26 @@ void ExactPanelGemm(Queue& q, float* out, const sycl::half* input, const sycl::h
     #pragma unroll
     for (int r = 0; r < rows; ++r) if (row + r < m) out[(row + r) * width + col] = acc[r];
   });
+  RecordProfileEvent(q, "exl3_panel_exact_gemm", event);
 }
 }
 
 bool Exl3PrefillKernel(Queue& q, Tensor& out, const Tensor& in_had,
-                       const Tensor& trellis, const Tensor& svh, int bits, bool matrix) {
+                       const Tensor& trellis, const Tensor& svh, int bits, bool matrix, bool all_rows) {
   const int64_t m = in_had.shape[0], k = in_had.shape[1], n = out.shape[1];
   const auto device = NativeQueue(q).get_device();
   if (!device.has(sycl::aspect::ext_intel_device_id) ||
       device.get_info<sycl::ext::intel::info::device::device_id>() != 57891 ||
       !device.has(sycl::aspect::ext_intel_matrix) || m < 1 || m > 6656) return false;
-  // Bound all three dimensions. Wide N panels expose enough workgroups even
-  // at M=128; row chunks keep the six-bit head independent of full M*N size.
-  constexpr int64_t columns = 4096, rows_per_panel = 256, k_per_panel = 1024;
-  static_assert(columns * (2 * k_per_panel + 4 * rows_per_panel) <= kWorkspaceBytes);
+  // The all-row schedule keeps every M row in the result panel, so each
+  // compressed weight panel is decoded once across all rows.
+  constexpr int64_t k_per_panel = 1024;
+  const int64_t columns = all_rows ? 1024 : 4096;
+  const int64_t rows_per_panel = all_rows ? m : 256;
+  const int64_t padded_rows = ((rows_per_panel + kBM - 1) / kBM) * kBM;
+  if (all_rows && !matrix) return false;
+  if (columns * (2 * k_per_panel + 4 * padded_rows) > static_cast<int64_t>(kWorkspaceBytes))
+    return false;
   return WithExl3Workspace(q, kWorkspaceBytes, [&](void* workspace) {
     auto* panel = static_cast<sycl::half*>(workspace);
     auto* result = reinterpret_cast<float*>(panel + k_per_panel * columns);

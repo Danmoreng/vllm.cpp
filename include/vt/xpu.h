@@ -1,7 +1,9 @@
 // Native SYCL/Level Zero resource queries. No vendor types cross this interface.
 #pragma once
 #include <cstddef>
+#include <cstdint>
 #include <string>
+#include <vector>
 
 namespace vt::xpu {
 struct MemoryInfo {
@@ -22,4 +24,30 @@ struct MemoryInfo {
 int DeviceCount() noexcept;
 MemoryInfo GetMemoryInfo(int index = 0);
 std::string DeviceDescription(int index = 0);
+// Eager SYCL submission timestamps. Drain only at a request boundary; collection
+// is disabled unless VT_XPU_PROFILE=1 was set before queue creation.
+struct ProfileRecord {
+  std::string stage;
+  std::string matrix;
+  uint64_t queue_id = 0;
+  // On the pinned Level Zero stack, submit and device start can straddle
+  // different clock calibrations. Do not infer a delay from their raw difference.
+  uint64_t submit_ns = 0, start_ns = 0, end_ns = 0;
+};
+// Brackets one profiled device command between two steady-clock reads. Device
+// and host clocks have different epochs on the pinned stack; use the bracket
+// to align intervals and report its width as calibration uncertainty.
+struct ProfileClockAnchor {
+  uint64_t host_before_ns = 0, host_after_ns = 0;
+  uint64_t device_start_ns = 0, device_end_ns = 0;
+};
+struct HostProfileRecord {
+  std::string stage;
+  uint64_t queue_id = 0;
+  uint64_t start_steady_ns = 0, end_steady_ns = 0;
+};
+ProfileClockAnchor CaptureProfileClockAnchor(int index = 0);
+std::vector<ProfileRecord> DrainProfileEvents(int index = 0);
+std::vector<HostProfileRecord> DrainHostProfileRecords(int index = 0);
+size_t PendingProfileEventCount(int index = 0);
 }  // namespace vt::xpu

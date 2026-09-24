@@ -48,7 +48,7 @@ void CausalConv1dFwdKernel(Queue& q, Tensor& out, const Tensor& x, const Tensor&
     const auto* offsets = static_cast<const int32_t*>(qsl.data);
     const View cache(state);
     const bool has_bias = bias != nullptr, activation = args.silu_activation;
-    NativeQueue(q).parallel_for(sycl::range<1>(sequences * channels), [=](sycl::id<1> item) {
+    const auto event = NativeQueue(q).parallel_for(sycl::range<1>(sequences * channels), [=](sycl::id<1> item) {
       const int64_t seq = item[0] / channels, channel = item[0] % channels;
       const int64_t begin = offsets[seq], length = offsets[seq + 1] - begin;
       const auto old = (seq * channels + channel) * state_width;
@@ -72,6 +72,7 @@ void CausalConv1dFwdKernel(Queue& q, Tensor& out, const Tensor& x, const Tensor&
         Store(cache, old + j, value);
       }
     });
+    RecordProfileEvent(q, "conv1d_prefill", event);
   });
 }
 
@@ -90,7 +91,7 @@ void CausalConv1dUpdateKernel(Queue& q, Tensor& out, const Tensor& x, const Tens
     const View cache(state);
     const auto* ids = indices ? static_cast<const int32_t*>(indices->data) : nullptr;
     const bool has_bias = bias != nullptr, activation = args.silu_activation;
-    NativeQueue(q).parallel_for(sycl::range<1>(batch * channels), [=](sycl::id<1> item) {
+    const auto event = NativeQueue(q).parallel_for(sycl::range<1>(batch * channels), [=](sycl::id<1> item) {
       const int64_t row = item[0] / channels, channel = item[0] % channels;
       const int64_t slot = ids ? ids[row] : row;
       if (slot < 0) return;  // VT conv contract leaves null-slot output unchanged.
@@ -103,6 +104,7 @@ void CausalConv1dUpdateKernel(Queue& q, Tensor& out, const Tensor& x, const Tens
       for (int64_t j = 0; j + 1 < width; ++j) Store(cache, history + j, Load(cache, history + j + 1));
       if (width) Store(cache, history + width - 1, current);
     });
+    RecordProfileEvent(q, "conv1d_decode", event);
   }, true);
 }
 void GdnPostConvKernel(Queue& q, Tensor& qo, Tensor& ko, Tensor& vo, Tensor& go, Tensor& bo,
@@ -113,7 +115,7 @@ void GdnPostConvKernel(Queue& q, Tensor& qo, Tensor& ko, Tensor& vo, Tensor& go,
   const int64_t hv = vo.shape[1], dv = vo.shape[2], keys = hk * dk, values = hv * dv;
   const View src(conv), qs(qo), ks(ko), vs(vo), gs(go), bs(bo), a(araw), b(braw), al(alog), dt(bias);
   const float eps = args.eps;
-  NativeQueue(q).parallel_for(sycl::range<1>(tokens * (hk + hv)), [=](sycl::id<1> item) {
+  const auto event = NativeQueue(q).parallel_for(sycl::range<1>(tokens * (hk + hv)), [=](sycl::id<1> item) {
     const int64_t token = item[0] / (hk + hv), head = item[0] % (hk + hv);
     const int64_t base = token * (2 * keys + values);
     if (head < hk) {
@@ -137,6 +139,7 @@ void GdnPostConvKernel(Queue& q, Tensor& qo, Tensor& ko, Tensor& vo, Tensor& go,
       Store(bs, token * hv + h, 1.0f / (1.0f + sycl::exp(-Load(b, token * b.stride[0] + h))));
     }
   });
+  RecordProfileEvent(q, "gdn_postconv", event);
 }
 
 namespace {
@@ -158,7 +161,7 @@ void Recurrence(Queue& q, Tensor& out, const Tensor& qi, const Tensor& ki, const
     auto* cache = static_cast<float*>(state.data);
     // One work-item owns one value row of S. Tokens remain sequential; no
     // extra q/k normalization or gate transformation occurs inside recurrence.
-    NativeQueue(q).parallel_for(sycl::range<1>(rows * hv * dv), [=](sycl::id<1> item) {
+    const auto event = NativeQueue(q).parallel_for(sycl::range<1>(rows * hv * dv), [=](sycl::id<1> item) {
       const int64_t row = item[0] / (hv * dv), head = (item[0] / dv) % hv, value = item[0] % dv;
       const int64_t kh = head / (hv / hk), slot = ids ? ids[row] : row;
       if (slot < 0) { Store(dst, (row * hv + head) * dv + value, 0.0f); return; }
@@ -181,6 +184,7 @@ void Recurrence(Queue& q, Tensor& out, const Tensor& qi, const Tensor& ki, const
         Store(dst, (token * hv + head) * dv + value, output);
       }
     });
+    RecordProfileEvent(q, decode ? "gdn_decode_recurrence" : "gdn_prefill_recurrence", event);
   });
 }
 }
@@ -220,7 +224,7 @@ void RmsNormGatedKernel(Queue& q, Tensor& out, const Tensor& x, const Tensor& ga
   const auto eps = args.eps; const bool sigmoid = args.sigmoid_gate;
   WithOutput(q, out, {&x, &gate, &weight}, [&](Tensor& target) {
     const View src(x), dst(target), z(gate), w(weight);
-    NativeQueue(q).parallel_for(sycl::range<1>(rows), [=](sycl::id<1> item) {
+    const auto event = NativeQueue(q).parallel_for(sycl::range<1>(rows), [=](sycl::id<1> item) {
       const auto row = item[0];
       float sum = 0;
       for (int64_t j = 0; j < width; ++j) { const float v = Load(src, row * width + j); sum += v * v; }
@@ -232,6 +236,7 @@ void RmsNormGatedKernel(Queue& q, Tensor& out, const Tensor& x, const Tensor& ga
         Store(dst, row * width + j, Load(src, row * width + j) * inv * Load(w, j) * act);
       }
     });
+    RecordProfileEvent(q, "gdn_gated_norm", event);
   });
 }
 void GdnStateGatherKernel(Queue& q, Tensor& working, const Tensor& cache,
@@ -243,11 +248,12 @@ void GdnStateGatherKernel(Queue& q, Tensor& working, const Tensor& cache,
   WithOutput(q, working, {&cache, &indices, initial}, [&](Tensor& target) {
     const View dst(target), src(cache), flags(initial ? *initial : indices);
     const auto* ids = static_cast<const int32_t*>(indices.data); const bool has_flags = initial != nullptr;
-    NativeQueue(q).parallel_for(sycl::range<1>(working.Numel()), [=](sycl::id<1> item) {
+    const auto event = NativeQueue(q).parallel_for(sycl::range<1>(working.Numel()), [=](sycl::id<1> item) {
       const auto row = item[0] / row_size, col = item[0] % row_size;
       const auto from = (ids[row] * mid + col / inner) * physical + col % inner;
       Store(dst, item[0], !has_flags || Initial(flags, row) ? Load(src, from) : 0.0f);
     });
+    RecordProfileEvent(q, "gdn_state_gather", event);
   });
 }
 void GdnStateScatterKernel(Queue& q, Tensor& cache, const Tensor& working, const Tensor& indices) {
@@ -257,11 +263,12 @@ void GdnStateScatterKernel(Queue& q, Tensor& cache, const Tensor& working, const
   const auto row_size = working.Numel() / indices.Numel(), mid = row_size / inner;
   WithOutput(q, cache, {&working, &indices}, [&](Tensor& target) {
     const View dst(target), src(working); const auto* ids = static_cast<const int32_t*>(indices.data);
-    NativeQueue(q).parallel_for(sycl::range<1>(working.Numel()), [=](sycl::id<1> item) {
+    const auto event = NativeQueue(q).parallel_for(sycl::range<1>(working.Numel()), [=](sycl::id<1> item) {
       const auto row = item[0] / row_size, col = item[0] % row_size;
       const auto to = (ids[row] * mid + col / inner) * physical + col % inner;
       Store(dst, to, Load(src, item[0]));
     });
+    RecordProfileEvent(q, "gdn_state_scatter", event);
   }, true);
 }
 }  // namespace vt::xpu

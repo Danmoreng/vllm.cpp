@@ -263,7 +263,7 @@ void GreedyArgmaxKernel(Queue& q, Tensor& token_ids, const Tensor& logits) {
   const auto* values = static_cast<const float*>(logits.data);
   auto* ids = static_cast<int64_t*>(token_ids.data);
   constexpr size_t lanes = 128;
-  NativeQueue(q).submit([&](sycl::handler& h) {
+  const auto event = NativeQueue(q).submit([&](sycl::handler& h) {
     sycl::local_accessor<float> best_values(lanes, h);
     sycl::local_accessor<int64_t> best_ids(lanes, h);
     h.parallel_for(sycl::nd_range<1>(rows * lanes, lanes), [=](sycl::nd_item<1> item) {
@@ -290,5 +290,6 @@ void GreedyArgmaxKernel(Queue& q, Tensor& token_ids, const Tensor& logits) {
       if (lane == 0) ids[row] = best_ids[0];
     });
   });
+  RecordProfileEvent(q, "greedy_argmax", event);
 }
 }  // namespace vt::xpu

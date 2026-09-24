@@ -2,6 +2,7 @@
 #include "vt/xpu.h"
 #include "vt/xpu/xpu_common.h"
 #include <array>
+#include <cstdlib>
 #include <cstring>
 #include <iostream>
 #include <string>
@@ -35,6 +36,10 @@ int main(int argc, char**) {
     VT_CHECK(q1.handle != q2.handle && q1.id != q2.id, "queues are not independent");
     VT_CHECK(vt::xpu::NativeQueue(q1).is_in_order() && vt::xpu::NativeQueue(q2).is_in_order(),
              "reference queues must be in order");
+    const bool profiling = std::getenv("VT_XPU_PROFILE") &&
+                           std::string(std::getenv("VT_XPU_PROFILE")) == "1";
+    VT_CHECK(vt::xpu::NativeQueue(q1).has_property<sycl::property::queue::enable_profiling>() == profiling,
+             "XPU queue profiling mode mismatch");
     VT_CHECK(vt::xpu::NativeQueue(q1).get_context() == vt::xpu::NativeQueue(q2).get_context(),
              "queues on one GPU must share a context");
     const auto before = vt::xpu::GetMemoryInfo();
@@ -79,14 +84,31 @@ int main(int argc, char**) {
     auto* dw = static_cast<float*>(vt::Alloc(device, sizeof(w)));
     auto* dc = static_cast<float*>(vt::Alloc(device, sizeof(result)));
     b.Copy(q1, da, a.data(), sizeof(a)); b.Copy(q1, dw, w.data(), sizeof(w));
-    vt::xpu::NativeQueue(q1).parallel_for(sycl::range<1>(m * n), [=](sycl::id<1> id) {
+    auto matrix_event = vt::xpu::NativeQueue(q1).parallel_for(sycl::range<1>(m * n), [=](sycl::id<1> id) {
       const int row = id[0] / n, col = id[0] % n;
       float sum = 0;
       for (int inner = 0; inner < k; ++inner) sum += da[row * k + inner] * dw[inner * n + col];
       dc[id[0]] = sum;
     });
+    vt::xpu::RecordProfileEvent(q1, "probe_matrix", matrix_event);
+    VT_CHECK(vt::xpu::PendingProfileEventCount() == (profiling ? 1u : 0u),
+             "XPU pending profile event count");
     b.Copy(q1, result.data(), dc, sizeof(result));
     vt::Free(device, dc); vt::Free(device, da); vt::Free(device, dw);
+    const auto profile_records = vt::xpu::DrainProfileEvents();
+    VT_CHECK(profile_records.size() == (profiling ? 1u : 0u), "XPU eager profile event count");
+    VT_CHECK(vt::xpu::PendingProfileEventCount() == 0, "XPU profile drain did not clear pending events");
+    if (profiling) {
+      const auto anchor = vt::xpu::CaptureProfileClockAnchor();
+      VT_CHECK(anchor.host_before_ns > 0 && anchor.host_after_ns >= anchor.host_before_ns &&
+                   anchor.device_start_ns > 0 && anchor.device_end_ns >= anchor.device_start_ns,
+               "XPU profile clock anchor unavailable or out of order");
+      const auto& record = profile_records.front();
+      VT_CHECK(record.stage == "probe_matrix" && record.queue_id == q1.id &&
+                   record.submit_ns > 0 && record.start_ns > 0 &&
+                   record.end_ns >= record.start_ns,
+               "XPU kernel profiling timestamps unavailable or out of order");
+    }
     for (int row = 0; row < m; ++row) for (int col = 0; col < n; ++col) {
       float sum = 0;
       for (int inner = 0; inner < k; ++inner) sum += a[row * k + inner] * w[inner * n + col];

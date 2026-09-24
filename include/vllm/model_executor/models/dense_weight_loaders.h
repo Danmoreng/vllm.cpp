@@ -732,6 +732,7 @@ inline Exl3Weight LoadExl3(const TensorResolver& get,
                std::to_string(svh.shape.empty() ? -1 : svh.shape[0]) + "]");
 
   Exl3Weight r;
+  r.name = proj;
   // THE CODEBOOK IS SELECTED BY TENSOR PRESENCE, and the polarity is the
   // opposite of the obvious guess. `LinearEXL3` sets
   // `self.mcg = (self.mcg_tensor is not None)` and likewise for `mul1`

@@ -6,6 +6,7 @@
 #include <iostream>
 #include <array>
 #include <future>
+#include <map>
 
 namespace {
 using vt::DType;
@@ -13,7 +14,8 @@ using xpu_test::Buffer;
 using xpu_test::Queue;
 
 std::vector<float> Run(vt::Queue& q, int m, int k, int n, int bits, DType dtype,
-                       bool matrix = true, bool public_gemm = false) {
+                       bool matrix = true, bool public_gemm = false,
+                       const char* matrix_name = nullptr, bool all_rows = false) {
   const auto fixture = exl3_test::MakeFixture(k, n, bits, 0x976315u + bits);
   Buffer a(q, DType::kF16, {m, k}), ah(q, DType::kF16, {m, k});
   Buffer trellis(q, DType::kI8, {k / 16, n / 16, bits * 32});
@@ -26,8 +28,13 @@ std::vector<float> Run(vt::Queue& q, int m, int k, int n, int bits, DType dtype,
   suh.upload(fixture.suh.data()); svh.upload(fixture.svh.data());
   if (q.device.type == vt::DeviceType::kXPU && !public_gemm) {
     vt::Exl3HadR128(q, ah.tensor, a.tensor, {&suh.tensor, nullptr, 1.0f});
-    REQUIRE(vt::xpu::Exl3PrefillKernel(q, out.tensor, ah.tensor, trellis.tensor, svh.tensor, bits, matrix));
-  } else vt::Exl3Gemm(q, out.tensor, a.tensor, trellis.tensor, suh.tensor, svh.tensor, ah.tensor, {bits, 2});
+    REQUIRE(vt::xpu::Exl3PrefillKernel(q, out.tensor, ah.tensor, trellis.tensor, svh.tensor,
+                                      bits, matrix, all_rows));
+  } else {
+    vt::Exl3GemmArgs args{bits, 2};
+    args.debug_name = matrix_name;
+    vt::Exl3Gemm(q, out.tensor, a.tensor, trellis.tensor, suh.tensor, svh.tensor, ah.tensor, args);
+  }
   return out.floats();
 }
 
@@ -49,6 +56,28 @@ void Accuracy(const std::vector<float>& got, const std::vector<float>& ref, DTyp
   CHECK(relative <= (dtype == DType::kF32 ? 3e-5 : 1e-3));
   CHECK(peak_error <= 2e-6 + (dtype == DType::kF32 ? 3e-4 : 1e-3) * peak);
 }
+}
+
+TEST_CASE("XPU EXL3 all-row prefill reuses K panels across a padded M tail") {
+  Queue cpu(vt::DeviceType::kCPU), gpu(vt::DeviceType::kXPU);
+  const auto reference = Run(cpu.q, 257, 1152, 256, 4, DType::kF32);
+  vt::xpu::DrainProfileEvents();
+  Accuracy(Run(gpu.q, 257, 1152, 256, 4, DType::kF32,
+               true, false, nullptr, true), reference, DType::kF32);
+  if (std::getenv("VT_XPU_PROFILE")) {
+    std::map<std::string, size_t> counts;
+    for (const auto& record : vt::xpu::DrainProfileEvents()) ++counts[record.stage];
+    CHECK(counts["exl3_panel_decode"] == 2);
+    CHECK(counts["exl3_panel_gemm"] == 2);
+    CHECK(counts["exl3_output_hadamard"] == 1);
+  }
+  const auto column_tail = Run(cpu.q, 129, 128, 4224, 4, DType::kF32);
+  Accuracy(Run(gpu.q, 129, 128, 4224, 4, DType::kF32,
+               true, false, nullptr, true), column_tail, DType::kF32);
+  const auto max_rows = Run(cpu.q, 6656, 128, 128, 4, DType::kF32);
+  Accuracy(Run(gpu.q, 6656, 128, 128, 4, DType::kF32,
+               true, false, nullptr, true), max_rows, DType::kF32);
+  CHECK(vt::xpu::GetMemoryInfo().exl3_workspace_bytes == 32 * 1024 * 1024);
 }
 
 TEST_CASE("XPU EXL3 prefill: packed widths, output dtypes, row and column panel tails") {
@@ -80,6 +109,32 @@ TEST_CASE("XPU EXL3 prefill: packed widths, output dtypes, row and column panel 
   CHECK(info.exl3_workspace_bytes == 32 * 1024 * 1024);
   CHECK(info.allocated_bytes == info.exl3_workspace_bytes);
   CHECK(vt::GetReferenceTierHits() == 0);
+}
+
+TEST_CASE("XPU EXL3 prefill: profiled stages retain submission timestamps"
+          * doctest::skip(!std::getenv("VT_XPU_PROFILE"))) {
+  Queue cpu(vt::DeviceType::kCPU), gpu(vt::DeviceType::kXPU);
+  const auto reference = Run(cpu.q, 31, 128, 256, 4, DType::kF32);
+  Accuracy(Run(gpu.q, 31, 128, 256, 4, DType::kF32), reference, DType::kF32);
+  const auto records = vt::xpu::DrainProfileEvents();
+  std::map<std::string, size_t> counts;
+  for (const auto& record : records) {
+    ++counts[record.stage];
+    CHECK(record.queue_id == gpu.q.id);
+    CHECK(record.submit_ns > 0);
+    CHECK(record.start_ns > 0);
+    CHECK(record.end_ns >= record.start_ns);
+  }
+  CHECK(counts["exl3_input_hadamard"] == 1);
+  CHECK(counts["exl3_panel_decode"] == 1);
+  CHECK(counts["exl3_panel_gemm"] == 1);
+  CHECK(counts["exl3_output_hadamard"] == 1);
+  CHECK(vt::xpu::DrainProfileEvents().empty());
+  constexpr const char* name = "model.layers.7.mlp.down_proj";
+  Accuracy(Run(gpu.q, 31, 128, 256, 4, DType::kF32, true, true, name), reference, DType::kF32);
+  const auto named = vt::xpu::DrainProfileEvents();
+  REQUIRE_FALSE(named.empty());
+  for (const auto& record : named) CHECK(record.matrix == name);
 }
 
 TEST_CASE("XPU EXL3 prefill: shared workspace survives queue replacement without growth") {

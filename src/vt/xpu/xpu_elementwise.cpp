@@ -134,7 +134,7 @@ void Matmul(Queue& q, Tensor& out, const Tensor& a, const Tensor& b, bool transp
   WithOutput(q, out, {&a, &b}, [&](Tensor& target) {
     const View dst(target), av(a), bv(b);
     const auto n = out.shape[1], k = a.shape[1];
-    NativeQueue(q).parallel_for(sycl::range<1>(out.Numel()), [=](sycl::id<1> item) {
+    const auto event = NativeQueue(q).parallel_for(sycl::range<1>(out.Numel()), [=](sycl::id<1> item) {
       const auto row = item[0] / n, col = item[0] % n;
       float sum = 0;
       for (int64_t inner = 0; inner < k; ++inner) {
@@ -144,6 +144,7 @@ void Matmul(Queue& q, Tensor& out, const Tensor& a, const Tensor& b, bool transp
       }
       Store(dst, row * dst.stride[0] + col * dst.stride[1], sum);
     });
+    RecordProfileEvent(q, transpose ? "matmul_bt" : "matmul", event);
   });
 }
 }

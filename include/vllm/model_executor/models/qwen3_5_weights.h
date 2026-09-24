@@ -625,6 +625,7 @@ struct ResidentSlot {
 // says so ("scale is no longer used"), and a reader looking for one is reading
 // a different format.
 struct Exl3Weight {
+  std::string name;  // Checkpoint projection name for optional dispatch tracing.
   // I8 [k/16, n/16, 32*bits] — the SAME BYTES the checkpoint stores as
   // `I16 [k/16, n/16, 16*bits]`, held at byte width because that is the shape
   // `vt::Exl3Gemm` reads and because `vt::DType` has no 16-bit integer.

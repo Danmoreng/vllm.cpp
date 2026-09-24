@@ -18,6 +18,7 @@
 #include <filesystem>
 #include <iostream>
 #include <map>
+#include <memory>
 #include <string_view>
 #include <tuple>
 #include <vector>
@@ -43,6 +44,36 @@ struct Buffer {
   }
 };
 struct Family { std::string prefix; int count = 0; };
+
+// Retain the actual compressed checkpoint tensors on the device so a timed
+// pass visits all projections rather than one cache-hot representative.
+struct Projection {
+  std::string name;
+  int bits;
+  Buffer trellis, suh, svh, input, had, output;
+  Projection(vt::Queue& q, std::string prefix, int m, int k, int n, int width,
+             const vllm::StTensor& packed, const vllm::StTensor& u, const vllm::StTensor& v)
+      : name(std::move(prefix)), bits(width),
+        trellis(q, vt::DType::kI8, {k / 16, n / 16, 32 * width}),
+        suh(q, vt::DType::kF16, {k}), svh(q, vt::DType::kF16, {n}),
+        input(q, vt::DType::kF16, {m, k}), had(q, vt::DType::kF16, {m, k}),
+        output(q, vt::DType::kF32, {m, n}) {
+    VT_CHECK(trellis.t.Bytes() == packed.nbytes && suh.t.Bytes() == u.nbytes &&
+             svh.t.Bytes() == v.nbytes, "Sequence checkpoint byte count mismatch");
+    trellis.Upload(packed.data); suh.Upload(u.data); svh.Upload(v.data);
+    std::vector<uint16_t> values(m * k);
+    uint32_t seed = 0x7248135u;
+    for (auto& value : values) {
+      seed ^= seed << 13; seed ^= seed >> 17; seed ^= seed << 5;
+      value = vt::F32ToF16((static_cast<int>(seed % 65536) - 32768) / 32768.0f * 0.2f);
+    }
+    input.Upload(values.data());
+  }
+  void Run(vt::Queue& q) {
+    vt::Exl3GemmArgs args{bits, 2}; args.debug_name = name.c_str();
+    vt::Exl3Gemm(q, output.t, input.t, trellis.t, suh.t, svh.t, had.t, args);
+  }
+};
 
 nlohmann::json CheckPanels(vt::Queue& cpu, const std::vector<float>& actual,
     const std::vector<uint16_t>& input, const vllm::StTensor& packed,
@@ -78,7 +109,7 @@ nlohmann::json CheckPanels(vt::Queue& cpu, const std::vector<float>& actual,
   if (approximate) {
     // XMX uses hardware FP32 reduction order. Retain the operator budget even
     // after qualification by separate model-level answer/probability gates.
-    VT_CHECK(relative <= 3e-5 && peak_error <= 2e-6 + 3e-4 * peak_value, "XMX reference error exceeds probe budget");
+    VT_CHECK(relative <= 3e-5 && peak_error <= 2e-6 + 3e-4 * peak_value, "EXL3 reference error exceeds probe budget");
   } else VT_CHECK(different == 0, "Bit-exact strategy differs from CPU reference");
   return {{"elements", elements}, {"different_bits", different}, {"relative_rms", relative}, {"max_abs", peak_error}};
 }
@@ -123,8 +154,13 @@ int main(int argc, char** argv) {
         {"kernel_version", vt::xpu::exl3::kKernelVersion},
         {"warmup_min_ms", 200}}.dump() << std::endl;
     double weighted_ms = 0;
+    size_t measured_families = 0;
     for (const auto& [key, family] : families) {
       const auto [bits, k, n] = key;
+      // Normal prefill gathers one final row before the 248320-wide head.
+      // Keep the head in M=1/2/4 decode surveys, not large-M text surveys.
+      if (m >= 128 && n == 248320) continue;
+      ++measured_families;
       const auto& packed = get(family.prefix + ".trellis");
       const auto& u = get(family.prefix + ".suh"); const auto& v = get(family.prefix + ".svh");
       VT_CHECK(vt::LoadUnaligned<uint32_t>(get(family.prefix + ".mul1").data) == 0x83DCD12Du,
@@ -194,27 +230,71 @@ int main(int argc, char** argv) {
       }
       vt::GetBackend(q.device).Synchronize(q);
       std::string selected(strategy_name);
-      if (strategy_name == "auto" || (m < 128 && (strategy_name == "prefill" || strategy_name == "panel"))) {
+      if (strategy_name == "auto" || (m < 128 && (strategy_name == "prefill" ||
+          strategy_name == "panel")) || (m < 512 && strategy_name == "prefill_all_rows")) {
         const auto choice = vt::xpu::exl3::MeasuredStrategy(domain, {bits, k, n, m, vt::DType::kF32});
-        selected = choice == vt::xpu::exl3::Strategy::kPrefill ? "prefill" :
+        selected = choice == vt::xpu::exl3::Strategy::kPrefillAllRows ? "prefill_all_rows" :
+            choice == vt::xpu::exl3::Strategy::kPrefill ? "prefill" :
             choice == vt::xpu::exl3::Strategy::kFused ? "fused" : "packed";
       }
       const auto accuracy = CheckPanels(cpu.q, result, sampled_input, packed, u, v, bits, rows.size(), k, n,
-          matrix_probe || selected == "prefill");
+          matrix_probe || selected == "prefill" || selected == "prefill_all_rows");
       const int64_t scratch_rows = matrix_probe && m != 1 ? ((m + 7) / 8) * 8 : m;
       std::cout << nlohmann::json{{"event", "family"}, {"prefix", family.prefix}, {"count", family.count},
           {"bits", bits}, {"k", k}, {"n", n}, {"m", m}, {"median_ms", median},
           {"min_ms", times.front()}, {"max_ms", times.back()}, {"packed_bytes", packed.nbytes},
           {"samples_ms", times}, {"warmups", warmups}, {"selected", selected},
           {"validated_rows", rows}, {"persistent_workspace_bytes", vt::xpu::GetMemoryInfo().exl3_workspace_bytes},
-          {"global_gemm_scratch_bytes", selected == "fused" || selected == "prefill" || selected == "panel" ? 0 : scratch_rows * n * 4},
+          {"global_gemm_scratch_bytes", selected == "fused" || selected == "prefill" ||
+              selected == "prefill_all_rows" || selected == "panel" ? 0 : scratch_rows * n * 4},
           {"slm_bytes", selected == "fused" ? (m == 1 ? 512 : 2048) :
-              (selected == "prefill" ? 12288 :
+              (selected == "prefill" || selected == "prefill_all_rows" ? 12288 :
               (matrix_probe ? (m == 1 ? (32 + 32 * 64) * 2 : (8 * 16 + 16 * 16) * 2) : 0))},
           {"accuracy", accuracy}}.dump() << std::endl;
     }
     VT_CHECK(vt::GetReferenceTierHits() == initial_refs, "CPU reference fallback in benchmark");
-    std::cout << nlohmann::json{{"event", "summary"}, {"families", families.size()},
+    std::cout << nlohmann::json{{"event", "summary"}, {"families", measured_families},
         {"weighted_projection_ms", weighted_ms}, {"note", "sum of isolated family medians, not an engine timing"}}.dump() << std::endl;
+    const char* sequence_flag = std::getenv("VT_B70_EXL3_SEQUENCE");
+    if (sequence_flag && std::string_view(sequence_flag) == "1") {
+      VT_CHECK(m <= 4, "Weight-cycling sequence currently supports M=1/2/4 only");
+      std::vector<std::unique_ptr<Projection>> projections;
+      for (const auto& [name, shard] : index) {
+        (void)shard;
+        if (!name.ends_with(".trellis") || name.starts_with("mtp.")) continue;
+        const auto& packed = get(name);
+        const int bits = packed.shape[2] / 16, k = packed.shape[0] * 16, n = packed.shape[1] * 16;
+        const auto prefix = name.substr(0, name.size() - 8);
+        VT_CHECK(vt::LoadUnaligned<uint32_t>(get(prefix + ".mul1").data) == 0x83DCD12Du,
+                 "Sequence requires the pinned mul1 checkpoint");
+        projections.push_back(std::make_unique<Projection>(q, prefix, m, k, n, bits,
+            packed, get(prefix + ".suh"), get(prefix + ".svh")));
+      }
+      VT_CHECK(projections.size() == 401, "Expected 401 non-MTP EXL3 projections");
+      auto run_sequence = [&] {
+        for (auto& projection : projections) projection->Run(q);
+        vt::GetBackend(q.device).Synchronize(q);
+      };
+      run_sequence();
+      std::vector<double> samples;
+      for (int rep = 0; rep < repeats; ++rep) {
+        const auto start = std::chrono::steady_clock::now();
+        run_sequence();
+        samples.push_back(std::chrono::duration<double, std::milli>(
+            std::chrono::steady_clock::now() - start).count());
+      }
+      auto sorted = samples;
+      std::sort(sorted.begin(), sorted.end());
+      const double median = (sorted[(sorted.size() - 1) / 2] + sorted[sorted.size() / 2]) / 2;
+      VT_CHECK(vt::GetReferenceTierHits() == initial_refs, "CPU fallback in sequence");
+      const auto memory = vt::xpu::GetMemoryInfo();
+      std::cout << nlohmann::json{{"event", "sequence"}, {"m", m},
+          {"strategy", strategy ? strategy : "auto"}, {"projections", projections.size()},
+          {"order", "lexical_checkpoint_name"}, {"warmup_passes", 1},
+          {"samples_ms", samples}, {"median_ms", median},
+          {"allocated_bytes", memory.allocated_bytes}, {"peak_allocated_bytes", memory.peak_allocated_bytes},
+          {"note", "Actual compressed weights cycled; operator wall time includes Hadamards and synchronization"}}.dump()
+          << std::endl;
+    }
   } catch (const std::exception& e) { std::cerr << e.what() << '\n'; return 1; }
 }

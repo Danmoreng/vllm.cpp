@@ -5,8 +5,8 @@
 #include <tuple>
 
 namespace vt::xpu::exl3 {
-enum class Strategy { kAuto, kReference, kPacked, kFused, kPrefill, kPanel };
-inline constexpr char kKernelVersion[] = "exl3-packed-fused-panel-v2";
+enum class Strategy { kAuto, kReference, kPacked, kFused, kPrefill, kPanel, kPrefillAllRows };
+inline constexpr char kKernelVersion[] = "exl3-packed-fused-panel-allrows-v3";
 
 struct StrategyDomain {
   int device_id;
@@ -43,6 +43,7 @@ inline Strategy MeasuredStrategy(const StrategyDomain& domain, const Shape& shap
     // All eleven real families: CPU panel oracles at M=128/512/2048/6656,
     // synthetic panel tails, and same-checkpoint answer/probability gates.
     // The hardware matrix reduction is bounded-error, unlike packed/fused.
+    if (m >= 512 && m <= 6656 && n != 248320) return Strategy::kPrefillAllRows;
     if (m >= 128 && m <= 6656) return Strategy::kPrefill;
     if (m <= 20 && (row.rows & (1u << m))) return Strategy::kFused;
   }
