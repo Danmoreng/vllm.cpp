@@ -1,10 +1,10 @@
 # Native XPU development
 
 The optional SYCL/Level Zero backend provides the resource and core-operator
-foundation, EXL3 and Conv/GDN reference kernels from PR00–PR04 of the
+foundation, EXL3, Conv/GDN and attention reference kernels from PR00–PR05 of the
 [B70 implementation plan](B70-SYCL-Qwen38-EXL3-Implementation-Plan.md).
-It does not yet advertise a supported model architecture: attention
-and the complete Qwen text path require PR05–PR06. The kernels prioritize
+It does not yet advertise a supported model architecture: the complete Qwen
+text path requires PR06. The kernels prioritize
 correctness; no model throughput or XMX performance claim is made.
 
 ## Build and focused checks
@@ -178,6 +178,44 @@ prefill plus decode is bitwise equal for both convolution and recurrence.
 Conv state and gather/scatter comparisons are exact; transcendental operations
 use per-element absolute/relative bounds (BF16 relative 0.008, F32 up to 2e-5,
 absolute 1e-6). No complete-model reachability or performance claim is implied.
+
+## Attention and BF16 KV cache
+
+The native operators are `AttnGateSplit`, `RopeNeox`, `RopeCosSinCache`,
+`RopeFromCache`, `ReshapeAndCache` and `PagedAttention`; Q/K normalization uses
+the existing `RmsNorm`. The preamble remains unfused. No FA2 capability is
+advertised, so the existing generic FP32-query model path keeps its precision.
+KV writes copy raw bits (including NaN payloads), use each tensor's strides,
+skip negative slots and preserve the CPU's last-write behavior for repeated slots.
+
+Paged attention uses F32 dot-product reduction and online softmax, with no
+materialized scores matrix. It supports GQA, appended-query causal alignment,
+local windows, logit soft-capping, float query dtypes, and F32/BF16 output.
+Device metadata is checked before cache reads or writes; inactive request rows
+may contain unused metadata. This baseline synchronizes for metadata validation;
+it is not a graph-capture or tuned-performance implementation. FP8 KV and
+multi-axis vision RoPE remain later plan steps.
+
+```sh
+cmake --build build-xpu --target test_xpu_attention -j4
+VT_OP_PROVIDER_TRACE=/tmp/xpu-attention.jsonl build-xpu/tests/test_xpu_attention
+```
+
+Five cases compare against CPU at 24 Q / 4 KV heads, D=256, scale=1/16,
+rotary width 64, batches 1/4, M=1 and M>1, page sizes 3/16, permuted pages,
+padded inputs, strided NHD cache views and block tables. They also exercise
+head-size tails, inactive requests, output aliases and invalid metadata.
+Attention's F32 bounds are relative 1e-4 plus absolute 5e-6; BF16 bounds are
+relative 0.008 plus absolute 2e-5. The online reduction changes rounding relative
+to CPU's sequential dot product and three-pass softmax.
+
+Legacy RoPE uses B70 FP64 frequencies/trigonometry before F32 rotation, as the
+CPU path does. The primary cache mode rounds the power and reciprocal to F32,
+then computes the position-scaled angle in F32. Device FP64 intermediates keep
+the rounded inverse frequency accurate. Its comparison also checks a separate
+scalar oracle (relative/absolute 1e-6); the CPU-library comparison allows
+absolute 1e-5 for observed float-math differences. Other RoPE comparisons use
+relative 4e-6 plus absolute 1e-6 (BF16 relative 0.008).
 
 ## Opt-in provider trace
 
