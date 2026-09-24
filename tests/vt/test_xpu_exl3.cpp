@@ -66,7 +66,13 @@ TEST_CASE("XPU EXL3 strategy: cache identity, measured regimes and bounded growt
   // Head6 is selected separately: small-batch fusion won, M=1 did not.
   CHECK(cache.Get(domain, {6, 5120, 248320, 1, DType::kF32}) == Strategy::kPacked);
   CHECK(cache.Get(domain, {6, 5120, 248320, 5, DType::kF32}) == Strategy::kFused);
+  for (int m : {128, 129, 512, 2048, 6656}) {
+    CHECK(cache.Get(domain, {3, 17408, 5120, m, DType::kF32}) == Strategy::kPrefill);
+    CHECK(cache.Get(domain, {6, 5120, 248320, m, DType::kF32}) == Strategy::kPrefill);
+  }
   for (const Shape unknown : {Shape{3, 17408, 5120, 17, DType::kF32},
+       Shape{3, 17408, 5120, 127, DType::kF32}, Shape{3, 17408, 5120, 6657, DType::kF32},
+       Shape{3, 17408, 5120, 128, DType::kF16},
        Shape{3, 17408, 5120, 1, DType::kF16}, Shape{3, 17408, 256, 1, DType::kF32},
        Shape{7, 17408, 5120, 1, DType::kF32}})
     CHECK(cache.Get(domain, unknown) == Strategy::kPacked);
@@ -78,9 +84,11 @@ TEST_CASE("XPU EXL3 strategy: cache identity, measured regimes and bounded growt
     if (field == 3) changed.compiler += "+new";
     if (field == 4) changed.kernel += "+new";
     CHECK(cache.Get(changed, decode) == Strategy::kPacked);
+    CHECK(cache.Get(changed, {3, 17408, 5120, 128, DType::kF32}) == Strategy::kPacked);
   }
   for (int64_t m = 21; m < 600; ++m) {
-    CHECK(cache.Get(domain, {3, 17408, 5120, m, DType::kF32}) == Strategy::kPacked);
+    CHECK(cache.Get(domain, {3, 17408, 5120, m, DType::kF32}) ==
+          (m >= 128 ? Strategy::kPrefill : Strategy::kPacked));
     CHECK(cache.Size() <= 512);
   }
   CHECK(cache.Get(domain, decode) == Strategy::kFused);

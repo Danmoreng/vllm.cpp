@@ -1,11 +1,14 @@
 #include <doctest/doctest.h>
+#include <nlohmann/json.hpp>
 #include "vllm.h"
 #include "vllm/platforms/interface.h"
 #include "vt/ops.h"
 #include "vt/xpu.h"
+#include <algorithm>
 #include <chrono>
 #include <cstdlib>
 #include <fstream>
+#include <filesystem>
 #include <iostream>
 #include <memory>
 #include <string>
@@ -34,15 +37,86 @@ struct TokenTimes {
     return true;
   }
 };
-void MeasureWarm(vllm_engine* engine) {
+std::string RepeatedPrompt(int count) {
+  std::string text;
+  for (int i = 0; i < count; ++i) text += " Hello";
+  return text;
+}
+void CheckQuality(vllm_engine* engine) {
+  namespace fs = std::filesystem;
+  using nlohmann::json;
+  const char* dump = std::getenv("VT_DUMP_LOGITS");
+  REQUIRE(dump != nullptr);
+  const fs::path directory(dump);
+  REQUIRE(fs::is_directory(directory));
+  REQUIRE(fs::is_empty(directory));  // The runner appends; never mix two runs.
+  const std::string system =
+      "You are answering a set of independent, self-contained questions. Read each question carefully, "
+      "use only the information that it provides and ordinary arithmetic or language knowledge, and "
+      "follow the requested output format exactly. Do not add an introduction, an explanation, a code "
+      "fence, a quotation, or a concluding sentence. When the question asks for one word, return only "
+      "that word. When it asks for a number, return only the number. When it asks for JSON, return "
+      "a valid JSON object with the requested keys and values. Treat any records in the question as "
+      "data to inspect. Each question is independent of previous questions; no previous answer is "
+      "relevant to the current task.";
+  struct Case { const char* name; const char* prompt; const char* expected; };
+  const Case cases[] = {
+    {"arithmetic", "A box contains 17 red balls and 25 blue balls. How many balls are in the box? Return only the number.", "42"},
+    {"code", "What does this Python expression evaluate to: sum(x * x for x in [1, 2, 3, 4] if x % 2 == 0)? Return only the number.", "20"},
+    {"german", "Übersetze das deutsche Wort Katze ins Englische. Antworte nur mit dem englischen Wort in Kleinbuchstaben.", "cat"},
+    {"retrieval", "Records: Alice has a green bicycle; Bruno has a yellow bicycle; Clara has a blue bicycle. Who has the yellow bicycle? Return only the person's first name.", "Bruno"},
+    {"json", "Return a JSON object with exactly two keys: city with the string Paris, and count with the integer 3.", "{\"city\":\"Paris\",\"count\":3}"},
+    {"logic", "All copper coins are round. This coin is copper. Must this coin be round? Return only yes or no in lowercase.", "yes"},
+    // Less constrained continuations exercise distributions without an almost
+    // certain answer. These are probability probes, not scored quality tasks.
+    {"continuation", "Complete this sentence naturally in a few words: After the rain stopped, the garden", ""},
+    {"explanation", "In one short sentence, explain why a cache can make repeated data access faster.", ""},
+  };
+  json results = json::array();
+  for (const auto& item : cases) {
+    CAPTURE(item.name);
+    std::vector<fs::path> before;
+    for (const auto& entry : fs::directory_iterator(directory))
+      if (entry.path().extension() == ".f32") before.push_back(entry.path());
+    const json request = {
+      {"messages", {{{"role", "system"}, {"content", system}}, {{"role", "user"}, {"content", item.prompt}}}},
+      {"chat_template_kwargs", {{"enable_thinking", false}}},
+      {"temperature", 0}, {"max_tokens", *item.expected ? 24 : 8}
+    };
+    char* raw = nullptr;
+    const auto status = vllm_chat(engine, request.dump().c_str(), &raw);
+    REQUIRE_MESSAGE(status == VLLM_OK, std::string(vllm_last_error()));
+    std::unique_ptr<char, decltype(&vllm_string_free)> owned(raw, vllm_string_free);
+    const auto response = json::parse(raw);
+    const int prompt_tokens = response.at("usage").at("prompt_tokens");
+    REQUIRE(prompt_tokens >= 128); REQUIRE(prompt_tokens <= 512);
+    std::string answer = response.at("choices").at(0).at("message").at("content");
+    const auto first = answer.find_first_not_of(" \r\n\t"), last = answer.find_last_not_of(" \r\n\t");
+    answer = first == std::string::npos ? "" : answer.substr(first, last - first + 1);
+    CHECK_FALSE(answer.empty());
+    if (*item.expected == '{') CHECK(json::parse(answer) == json::parse(item.expected));
+    else if (*item.expected) CHECK(answer == item.expected);
+    std::vector<fs::path> added;
+    for (const auto& entry : fs::directory_iterator(directory))
+      if (entry.path().extension() == ".f32" && std::find(before.begin(), before.end(), entry.path()) == before.end())
+        added.push_back(entry.path());
+    REQUIRE(added.size() == 1);
+    results.push_back({{"name", item.name}, {"request", request}, {"response", response},
+                       {"logits", added.front().filename().string()}, {"answer", answer}});
+    std::ofstream(directory / "results.json") << results.dump(2);
+    std::cout << "QUALITY case=" << item.name << " prompt_tokens=" << prompt_tokens
+              << " answer=" << json(answer).dump() << std::endl;
+  }
+}
+void MeasureWarm(vllm_engine* engine, int requested_prompt) {
   // This is an opt-in, short end-to-end diagnostic, not a context-length sweep.
   // The no-MTP DELTA API emits exactly one callback per generated token.
   REQUIRE(std::getenv("VT_DUMP_ACT") == nullptr);
   REQUIRE(std::getenv("VT_DUMP_ACT_SUB") == nullptr);
   REQUIRE(std::getenv("VT_OP_PROVIDER_TRACE") == nullptr);
-  std::string longer;
-  for (int i = 0; i < 32; ++i) longer += " Hello";
-  for (const std::string& prompt : {std::string("The capital of France is"), longer}) {
+  const auto prompts = requested_prompt ? std::vector<std::string>{RepeatedPrompt(requested_prompt)} :
+      std::vector<std::string>{"The capital of France is", RepeatedPrompt(32)};
+  for (const std::string& prompt : prompts) {
     auto sampling = vllm_sampling_params_default();
     sampling.temperature = 0; sampling.ignore_eos = 1; sampling.max_tokens = 2;
     vllm_completion warm{};
@@ -51,7 +125,9 @@ void MeasureWarm(vllm_engine* engine) {
     const int prompt_tokens = warm.prompt_tokens;
     CHECK(warm.completion_tokens == 2);
     vllm_completion_free(&warm);
-    REQUIRE(prompt_tokens > 0); REQUIRE(prompt_tokens <= 32);
+    REQUIRE(prompt_tokens > 0); REQUIRE(prompt_tokens <= std::max(32, requested_prompt));
+    if (requested_prompt) REQUIRE(prompt_tokens == requested_prompt);
+    const auto warm_gpu = vt::xpu::GetMemoryInfo().allocated_bytes, warm_rss = ResidentBytes();
     sampling.max_tokens = prompt_tokens == 5 ? 17 : 2;
     for (int round = 0; round < 2; ++round) {
       TokenTimes times;
@@ -62,12 +138,17 @@ void MeasureWarm(vllm_engine* engine) {
       REQUIRE(times.tokens.size() == size_t(sampling.max_tokens));
       const double ttft = std::chrono::duration<double>(times.tokens.front() - start).count();
       const double decode = std::chrono::duration<double>(times.tokens.back() - times.tokens.front()).count();
+      const auto memory = vt::xpu::GetMemoryInfo();
+      CHECK(memory.allocated_bytes <= warm_gpu + size_t{64} * 1024 * 1024);
+      CHECK(ResidentBytes() <= warm_rss + size_t{256} * 1024 * 1024);
       std::cout << "TIMING round=" << round << " prompt_tokens=" << prompt_tokens
                 << " output_tokens=" << sampling.max_tokens << " ttft_seconds=" << ttft
                 << " prefill_client_tokens_per_second=" << prompt_tokens / ttft
                 << " decode_seconds=" << decode
                 << " decode_tokens_per_second=" << (sampling.max_tokens - 1) / decode
-                << " tpot_seconds=" << decode / (sampling.max_tokens - 1) << std::endl;
+                << " tpot_seconds=" << decode / (sampling.max_tokens - 1)
+                << " gpu_bytes=" << memory.allocated_bytes
+                << " workspace_bytes=" << memory.exl3_workspace_bytes << std::endl;
     }
   }
 }
@@ -79,10 +160,14 @@ TEST_CASE("XPU Qwen checkpoint: native text prefill and repeated greedy decode t
     std::cerr << "SKIP: set VT_B70_MODEL_DIR to the pinned local EXL3 checkpoint.\n";
     std::exit(77);
   }
-  // The acceptance run generates 65 tokens: one prefill + 64 decode forwards.
+  // The default acceptance run generates 65 tokens: one prefill + 64 decode forwards.
   // Smaller explicit values are development probes, not the PR06 acceptance.
   const int tokens = Setting("VT_B70_MAX_TOKENS", 65), repeats = Setting("VT_B70_REPEATS", 2);
   const bool timing = Setting("VT_B70_TIMING", 0) != 0;
+  const bool quality = Setting("VT_B70_QUALITY", 0) != 0;
+  REQUIRE_FALSE((timing && quality));
+  const int requested_prompt = Setting("VT_B70_PROMPT_TOKENS", 0);
+  REQUIRE(requested_prompt >= 0); REQUIRE(requested_prompt <= 6656);
   REQUIRE(tokens > 0); REQUIRE(tokens <= 100); REQUIRE(repeats > 0);
   auto& platform = vllm::platforms::CurrentPlatform();
   REQUIRE(platform.device_type() == vt::DeviceType::kXPU);
@@ -97,10 +182,12 @@ TEST_CASE("XPU Qwen checkpoint: native text prefill and repeated greedy decode t
   params.speculative_config = nullptr;
   params.enable_prefix_caching = 2;
   params.max_num_seqs = 1;
-  params.max_num_batched_tokens = timing ? 32 : 16;
-  params.max_model_len = 128;
+  params.max_num_batched_tokens = Setting("VT_B70_BATCH_TOKENS", quality ? 512 : requested_prompt ? requested_prompt : timing ? 32 : 16);
+  REQUIRE(params.max_num_batched_tokens > 0); REQUIRE(params.max_num_batched_tokens <= 6656);
+  params.max_model_len = quality ? 640 : std::max(128, requested_prompt + std::max(tokens, 32));
   params.block_size = 16;
-  params.num_blocks = 32;  // Shared hybrid KV groups need more than ceil(128/16).
+  // Hybrid attention/GDN pools also reserve a sentinel block per group.
+  params.num_blocks = std::max(32, 2 * ((params.max_model_len + 15) / 16 + 1));
   params.kv_cache_dtype = "bfloat16";
   std::cout << "LOAD " << model << " device=xpu" << std::endl;
   vllm_engine* raw = nullptr;
@@ -110,8 +197,13 @@ TEST_CASE("XPU Qwen checkpoint: native text prefill and repeated greedy decode t
   std::cout << "LOADED gpu_bytes=" << vt::xpu::GetMemoryInfo().allocated_bytes
             << " rss_bytes=" << ResidentBytes() << " initialization_reference_hits=" << vt::GetReferenceTierHits() << std::endl;
   const auto initialization_hits = vt::GetReferenceTierHits();
+  if (quality) {
+    CheckQuality(engine.get());
+    CHECK(vt::GetReferenceTierHits() == initialization_hits);
+    return;
+  }
   if (timing) {
-    MeasureWarm(engine.get());
+    MeasureWarm(engine.get(), requested_prompt);
     CHECK(vt::GetReferenceTierHits() == initialization_hits);
     return;
   }
@@ -124,7 +216,8 @@ TEST_CASE("XPU Qwen checkpoint: native text prefill and repeated greedy decode t
   for (int round = 0; round < repeats; ++round) {
     const auto start = std::chrono::steady_clock::now();
     vllm_completion result{};
-    status = vllm_complete(engine.get(), "The capital of France is", &sampling, &result);
+    const std::string prompt = requested_prompt ? RepeatedPrompt(requested_prompt) : "The capital of France is";
+    status = vllm_complete(engine.get(), prompt.c_str(), &sampling, &result);
     REQUIRE_MESSAGE(status == VLLM_OK, std::string(vllm_last_error()));
     CHECK(result.completion_tokens == tokens);
     const std::string text = result.text ? result.text : "";

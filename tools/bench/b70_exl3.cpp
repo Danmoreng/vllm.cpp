@@ -6,6 +6,7 @@
 #include "vt/unaligned.h"
 #include "vt/xpu.h"
 #include "vt/xpu/xpu_exl3_strategy.h"
+#include "vt/xpu/xpu_common.h"
 #include "b70_exl3_xmx.h"
 #include <nlohmann/json.hpp>
 #include <algorithm>
@@ -75,8 +76,8 @@ nlohmann::json CheckPanels(vt::Queue& cpu, const std::vector<float>& actual,
   }
   const double relative = std::sqrt(error / std::max(norm, 1e-30));
   if (approximate) {
-    // Experimental XMX uses hardware FP32 reduction order. Diagnose it with
-    // explicit bounds; it is NOT admitted to the bit-exact automatic policy.
+    // XMX uses hardware FP32 reduction order. Retain the operator budget even
+    // after qualification by separate model-level answer/probability gates.
     VT_CHECK(relative <= 3e-5 && peak_error <= 2e-6 + 3e-4 * peak_value, "XMX reference error exceeds probe budget");
   } else VT_CHECK(different == 0, "Bit-exact strategy differs from CPU reference");
   return {{"elements", elements}, {"different_bits", different}, {"relative_rms", relative}, {"max_abs", peak_error}};
@@ -92,7 +93,7 @@ int main(int argc, char** argv) {
     const std::filesystem::path root(argv[1]);
     const int m = argc > 2 ? std::stoi(argv[2]) : 1;
     const int repeats = argc > 3 ? std::stoi(argv[3]) : 5;
-    VT_CHECK(m > 0 && m <= 128 && repeats >= 3 && repeats <= 20, "Invalid M or repeat count");
+    VT_CHECK(m > 0 && m <= 6656 && repeats >= 3 && repeats <= 20, "Invalid M or repeat count");
     const auto index = vllm::LoadSafetensorsIndex((root / "model.safetensors.index.json").string());
     std::map<std::string, vllm::SafetensorsFile> files;
     auto get = [&](const std::string& name) -> const vllm::StTensor& {
@@ -163,23 +164,53 @@ int main(int argc, char** argv) {
       std::sort(times.begin(), times.end());
       const double median = (times[(times.size() - 1) / 2] + times[times.size() / 2]) / 2;
       weighted_ms += family.count * median;
-      std::vector<float> result(m * n);
-      vt::GetBackend(q.device).Copy(q, result.data(), out.t.data, out.t.Bytes());
+      Buffer finite(q, vt::DType::kI32, {1});
+      auto& backend = vt::GetBackend(q.device);
+      backend.Memset(q, finite.t.data, 0, sizeof(int));
+      const auto* values = static_cast<const float*>(out.t.data);
+      auto* invalid = static_cast<int*>(finite.t.data);
+      vt::xpu::NativeQueue(q).parallel_for(sycl::range<1>(m * n), [=](sycl::id<1> i) {
+        if (!sycl::isfinite(values[i[0]]))
+          sycl::atomic_ref<int, sycl::memory_order::relaxed, sycl::memory_scope::device,
+              sycl::access::address_space::global_space>(*invalid).store(1);
+      });
+      int nonfinite = 0;
+      backend.Copy(q, &nonfinite, finite.t.data, sizeof(int));
+      backend.Synchronize(q);
+      VT_CHECK(nonfinite == 0, "Non-finite benchmark output");
+      std::vector<int64_t> rows;
+      if (m <= 20) for (int64_t row = 0; row < m; ++row) rows.push_back(row);
+      else {
+        rows = {0, 1, 15, 16, 31, 32, m / 2, m - 1};
+        std::sort(rows.begin(), rows.end());
+        rows.erase(std::remove_if(rows.begin(), rows.end(), [&](int64_t row) { return row >= m; }), rows.end());
+        rows.erase(std::unique(rows.begin(), rows.end()), rows.end());
+      }
+      std::vector<float> result(rows.size() * n);
+      std::vector<uint16_t> sampled_input(rows.size() * k);
+      for (size_t i = 0; i < rows.size(); ++i) {
+        backend.Copy(q, result.data() + i * n, values + rows[i] * n, n * sizeof(float));
+        std::copy_n(input.data() + rows[i] * k, k, sampled_input.data() + i * k);
+      }
       vt::GetBackend(q.device).Synchronize(q);
-      for (float value : result) VT_CHECK(std::isfinite(value), "Non-finite benchmark output");
-      const auto accuracy = CheckPanels(cpu.q, result, input, packed, u, v, bits, m, k, n,
-          matrix_probe);
-      const auto selected = strategy_name == "auto" ?
-          (vt::xpu::exl3::MeasuredStrategy(domain, {bits, k, n, m, vt::DType::kF32}) ==
-           vt::xpu::exl3::Strategy::kFused ? "fused" : "packed") : std::string(strategy_name);
+      std::string selected(strategy_name);
+      if (strategy_name == "auto" || (m < 128 && (strategy_name == "prefill" || strategy_name == "panel"))) {
+        const auto choice = vt::xpu::exl3::MeasuredStrategy(domain, {bits, k, n, m, vt::DType::kF32});
+        selected = choice == vt::xpu::exl3::Strategy::kPrefill ? "prefill" :
+            choice == vt::xpu::exl3::Strategy::kFused ? "fused" : "packed";
+      }
+      const auto accuracy = CheckPanels(cpu.q, result, sampled_input, packed, u, v, bits, rows.size(), k, n,
+          matrix_probe || selected == "prefill");
       const int64_t scratch_rows = matrix_probe && m != 1 ? ((m + 7) / 8) * 8 : m;
       std::cout << nlohmann::json{{"event", "family"}, {"prefix", family.prefix}, {"count", family.count},
           {"bits", bits}, {"k", k}, {"n", n}, {"m", m}, {"median_ms", median},
           {"min_ms", times.front()}, {"max_ms", times.back()}, {"packed_bytes", packed.nbytes},
           {"samples_ms", times}, {"warmups", warmups}, {"selected", selected},
-          {"global_gemm_scratch_bytes", selected == "fused" ? 0 : scratch_rows * n * 4},
+          {"validated_rows", rows}, {"persistent_workspace_bytes", vt::xpu::GetMemoryInfo().exl3_workspace_bytes},
+          {"global_gemm_scratch_bytes", selected == "fused" || selected == "prefill" || selected == "panel" ? 0 : scratch_rows * n * 4},
           {"slm_bytes", selected == "fused" ? (m == 1 ? 512 : 2048) :
-              (matrix_probe ? (m == 1 ? (32 + 32 * 64) * 2 : (8 * 16 + 16 * 16) * 2) : 0)},
+              (selected == "prefill" ? 12288 :
+              (matrix_probe ? (m == 1 ? (32 + 32 * 64) * 2 : (8 * 16 + 16 * 16) * 2) : 0))},
           {"accuracy", accuracy}}.dump() << std::endl;
     }
     VT_CHECK(vt::GetReferenceTierHits() == initial_refs, "CPU reference fallback in benchmark");

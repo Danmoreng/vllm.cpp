@@ -5,10 +5,15 @@
 #include "vt/ops.h"
 #include <algorithm>
 #include <initializer_list>
+#include <functional>
 
 namespace vt::xpu {
 // All kernels use the queue's owning context. No ambient/default SYCL queue.
 sycl::queue& NativeQueue(Queue& q);
+// One persistent, serialized EXL3 workspace per device context. The callback's
+// GPU work is completed before another queue can reuse it. False means budget
+// was insufficient; callers can retain their native non-panel path.
+bool WithExl3Workspace(Queue& q, size_t bytes, const std::function<void(void*)>& launch);
 
 // Trivially copyable kernel argument; never capture Tensor's optional metadata.
 struct View {

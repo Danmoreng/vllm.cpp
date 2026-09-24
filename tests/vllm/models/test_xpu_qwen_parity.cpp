@@ -28,7 +28,7 @@ struct Blob {
   size_t bytes = 0;
 };
 using Key = std::pair<int64_t, std::string>;
-std::map<Key, Blob> Manifest(const fs::path& dir) {
+std::map<Key, Blob> Manifest(const fs::path& dir, int layers = 4, int wanted_step = 0) {
   std::ifstream input(dir / "manifest.tsv");
   REQUIRE(input.good());
   std::map<Key, Blob> blobs;
@@ -37,7 +37,7 @@ std::map<Key, Blob> Manifest(const fs::path& dir) {
     std::istringstream row(line);
     int64_t step, layer; std::string stage; Blob blob;
     REQUIRE(bool(row >> step >> layer >> stage >> blob.dtype >> blob.rows >> blob.cols >> blob.bytes >> blob.file));
-    if (step == 0 && layer < 4) REQUIRE(blobs.emplace(Key{layer, stage}, blob).second);
+    if (step == wanted_step && layer < layers) REQUIRE(blobs.emplace(Key{layer, stage}, blob).second);
   }
   return blobs;
 }
@@ -59,6 +59,52 @@ std::vector<float> Read(const fs::path& dir, const Blob& blob) {
   }
   return values;
 }
+}
+
+TEST_CASE("XPU Qwen prefill: full-stack drift diagnostic and optional exact comparison") {
+  const char* actual_env = std::getenv("VT_B70_XPU_ACTS");
+  const char* reference_env = std::getenv("VT_B70_REFERENCE_ACTS");
+  if (!actual_env || !reference_env) std::exit(77);
+  const fs::path actual_dir(actual_env), reference_dir(reference_env);
+  double worst = 0;
+  // Compare prefill and its first decode continuation. The scalar GPU path
+  // preserves CPU accumulation and has its separate PR06 CPU-prefix gate.
+  // XMX changes accumulation order. Internal nonlinear activation drift is a
+  // diagnostic, not a proxy for answer quality. Its separate quality corpus
+  // gates answers and probability distributions at identical token prefixes.
+  // The panel fallback additionally requires exact equality at every stage.
+  for (int step : {0, 1}) {
+    const auto actual = Manifest(actual_dir, 64, step), reference = Manifest(reference_dir, 64, step);
+    REQUIRE(actual.size() == reference.size());
+    REQUIRE(actual.contains({63, "res"}));
+    REQUIRE(actual.at({-1, "hidden"}).rows == (step == 0 ? 128 : 1));
+    for (const auto& [key, blob] : reference) {
+      CAPTURE(step);
+      CAPTURE(key.first);
+      CAPTURE(key.second);
+      REQUIRE(actual.contains(key));
+      const auto& got_blob = actual.at(key);
+      REQUIRE(got_blob.dtype == blob.dtype); REQUIRE(got_blob.rows == blob.rows); REQUIRE(got_blob.cols == blob.cols);
+      const auto expected = Read(reference_dir, blob), got = Read(actual_dir, got_blob);
+      if (std::getenv("VT_B70_EXACT_ACTS")) CHECK(got == expected);
+      if (key.first == -1) CHECK(got == expected);
+      double error = 0, norm = 0, peak = 0, peak_error = 0;
+      for (size_t i = 0; i < got.size(); ++i) {
+        if (!std::isfinite(got[i]) || !std::isfinite(expected[i])) FAIL("Non-finite full-stack activation");
+        const double d = double(got[i]) - expected[i];
+        error += d * d; norm += double(expected[i]) * expected[i];
+        peak = std::max(peak, std::abs(double(expected[i]))); peak_error = std::max(peak_error, std::abs(d));
+      }
+      const double relative = std::sqrt(error / std::max(norm, 1e-30));
+      CAPTURE(relative);
+      CAPTURE(peak_error);
+      std::cout << "PREFILL_DRIFT step=" << step << " layer=" << key.first
+                << " stage=" << key.second << " relative_rms=" << relative
+                << " max_abs=" << peak_error << " reference_peak=" << peak << '\n';
+      worst = std::max(worst, relative);
+    }
+  }
+  std::cout << "PREFILL_PARITY full_layers=64 prefill_tokens=128 decode_steps=1 max_relative_rms=" << worst << '\n';
 }
 
 TEST_CASE("XPU Qwen checkpoint: first input RMSNorm matches CPU at BF16 rounding boundaries") {

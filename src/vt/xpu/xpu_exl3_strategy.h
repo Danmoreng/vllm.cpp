@@ -5,8 +5,8 @@
 #include <tuple>
 
 namespace vt::xpu::exl3 {
-enum class Strategy { kAuto, kReference, kPacked, kFused };
-inline constexpr char kKernelVersion[] = "exl3-packed-fused-v1";
+enum class Strategy { kAuto, kReference, kPacked, kFused, kPrefill, kPanel };
+inline constexpr char kKernelVersion[] = "exl3-packed-fused-panel-v2";
 
 struct StrategyDomain {
   int device_id;
@@ -20,7 +20,7 @@ inline Strategy MeasuredStrategy(const StrategyDomain& domain, const Shape& shap
       domain.compiler != "Intel(R) oneAPI DPC++/C++ Compiler 2026.1.1 (2026.1.1.20260724)" ||
       domain.kernel != kKernelVersion) return Strategy::kPacked;
   const auto [bits, k, n, m, dtype] = shape;
-  if (dtype != DType::kF32 || m < 1 || m > 20) return Strategy::kPacked;
+  if (dtype != DType::kF32 || m < 1) return Strategy::kPacked;
   constexpr uint32_t large = (1u << 16) | (1u << 20);
   // Two independent five-sample medians per strategy after >=200 ms warmup.
   // Admit fusion only for >=10% mean improvement, with neither fused median
@@ -39,9 +39,13 @@ inline Strategy MeasuredStrategy(const StrategyDomain& domain, const Shape& shap
     {5, 6144, 5120, (1u << 1) | (1u << 8) | large},
     {6, 5120, 248320, (1u << 2) | (1u << 4) | (1u << 5) | (1u << 8) | large},
   };
-  for (const auto& row : winners)
-    if (row.bits == bits && row.k == k && row.n == n && (row.rows & (1u << m)))
-      return Strategy::kFused;
+  for (const auto& row : winners) if (row.bits == bits && row.k == k && row.n == n) {
+    // All eleven real families: CPU panel oracles at M=128/512/2048/6656,
+    // synthetic panel tails, and same-checkpoint answer/probability gates.
+    // The hardware matrix reduction is bounded-error, unlike packed/fused.
+    if (m >= 128 && m <= 6656) return Strategy::kPrefill;
+    if (m <= 20 && (row.rows & (1u << m))) return Strategy::kFused;
+  }
   return Strategy::kPacked;
 }
 
