@@ -13,6 +13,16 @@ void MatmulKernel(Queue&, Tensor&, const Tensor&, const Tensor&);
 void MatmulBTKernel(Queue&, Tensor&, const Tensor&, const Tensor&);
 void RmsNormKernel(Queue&, Tensor&, const Tensor&, const Tensor&, const RmsNormArgs&, Tensor*);
 void GreedyArgmaxKernel(Queue&, Tensor&, const Tensor&);
+void ApplyTopKTopPKernel(Queue&, Tensor&, const Tensor*, const Tensor*);
+void RandomSampleKernel(Queue&, Tensor&, const Tensor&, const Tensor&);
+void ApplyTemperatureKernel(Queue&, Tensor&, const Tensor&, bool);
+void ComputeProbsKernel(Queue&, Tensor&, const Tensor&);
+void ComputeLogprobsKernel(Queue&, Tensor&, const Tensor&);
+void ApplyMinPKernel(Queue&, Tensor&, const Tensor&);
+void ApplyPenaltiesKernel(Queue&, Tensor&, const Tensor&, const Tensor&, const Tensor&, const Tensor&, const Tensor&, const Tensor&);
+void ApplyLogitBiasKernel(Queue&, Tensor&, const Tensor&, const Tensor&, const Tensor&);
+void ApplyTokenMaskKernel(Queue&, Tensor&, const Tensor&, const Tensor&);
+void ApplyAllowedTokenIdsKernel(Queue&, Tensor&, const Tensor&);
 void Exl3HadR128Kernel(Queue&, Tensor&, const Tensor&, const Exl3HadArgs&);
 void Exl3GemmKernel(Queue&, Tensor&, const Tensor&, const Tensor&, const Tensor&,
                     const Tensor&, Tensor&, const Exl3GemmArgs&);

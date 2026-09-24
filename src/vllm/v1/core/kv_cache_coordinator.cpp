@@ -1,3 +1,4 @@
+#include "vllm/v1/core/recurrent_prefix_snapshot.h"
 // Ported from: vllm/v1/core/kv_cache_coordinator.py @ e24d1b24
 // See include/vllm/v1/core/kv_cache_coordinator.h for the scope / deferred list
 // and the CROSS-GROUP find_longest_cache_hit algorithm this task turns on.
@@ -161,6 +162,8 @@ KVCacheCoordinator::KVCacheCoordinator(KVCacheConfig kv_cache_config,
         this->kv_cache_config.kv_cache_groups[i].kv_cache_spec,
         max_num_batched_tokens_, max_model_len, block_pool, enable_caching,
         static_cast<int>(i), scheduler_block_size));
+    if (auto* mamba = dynamic_cast<MambaManager*>(single_type_managers.back().get()))
+      mamba->prefix_snapshots = this->kv_cache_config.recurrent_prefix_snapshots;
   }
 
   // retention_interval stays nullopt (dense caching); env read deferred.

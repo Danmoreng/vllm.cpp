@@ -55,10 +55,10 @@ struct Context {
   sycl::device device;
   sycl::context context;
   std::mutex mutex;
-  Workspace exl3, gdn, attention;
+  Workspace exl3, gdn, attention, sampling;
   std::unordered_map<sycl::queue*, std::unique_ptr<sycl::queue>> queues;
   std::unordered_map<void*, size_t> allocations, pinned;
-  size_t total, budget, allocated = 0, pinned_bytes = 0;
+  size_t total, budget, allocated = 0, pinned_bytes = 0, peak_allocated = 0;
   explicit Context(int index) : device(DeviceAt(index)), context(device),
       total(device.get_info<sycl::info::device::global_mem_size>()), budget(Budget(total)) {
     VT_CHECK(device.has(sycl::aspect::usm_device_allocations)
@@ -115,6 +115,7 @@ class XpuBackend final : public Backend {
     VT_CHECK(p != nullptr, "XPU device USM allocation failed");
     try { c.allocations.emplace(p, bytes); } catch (...) { sycl::free(p, c.context); throw; }
     c.allocated += bytes;
+    c.peak_allocated = std::max(c.peak_allocated, c.allocated);
     return p;
   }
   void Free(void* p) override {
@@ -276,6 +277,8 @@ MemoryInfo GetMemoryInfo(int index) {
   info.exl3_workspace_bytes = c.exl3.bytes;
   info.gdn_workspace_bytes = c.gdn.bytes;
   info.attention_workspace_bytes = c.attention.bytes;
+  info.sampling_workspace_bytes = c.sampling.bytes;
+  info.peak_allocated_bytes = c.peak_allocated;
   if (c.device.has(sycl::aspect::ext_intel_free_memory)) {
     info.free_bytes = c.device.get_info<sycl::ext::intel::info::device::free_memory>();
     info.free_known = true;
@@ -297,6 +300,7 @@ bool WithWorkspace(Queue& q, Workspace& workspace, size_t bytes, const std::func
     try { c.allocations.emplace(storage, bytes); }
     catch (...) { sycl::free(storage, c.context); throw; }
     c.allocated += bytes;
+    c.peak_allocated = std::max(c.peak_allocated, c.allocated);
     workspace.data = storage;
     workspace.bytes = bytes;
   }
@@ -324,6 +328,10 @@ bool WithGdnWorkspace(Queue& q, size_t bytes, const std::function<void(void*)>& 
 bool WithAttentionWorkspace(Queue& q, size_t bytes, const std::function<void(void*)>& launch) {
   VT_CHECK(bytes > 0 && bytes <= 16 * 1024 * 1024, "XPU attention workspace exceeds 16 MiB budget");
   return WithWorkspace(q, GetContext(q.device.index).attention, bytes, launch);
+}
+bool WithSamplingWorkspace(Queue& q, size_t bytes, const std::function<void(void*)>& launch) {
+  VT_CHECK(bytes > 0 && bytes <= 16 * 1024 * 1024, "XPU sampling workspace exceeds 16 MiB budget");
+  return WithWorkspace(q, GetContext(q.device.index).sampling, bytes, launch);
 }
 std::string DeviceDescription(int index) {
   const auto& d = DeviceAt(index);

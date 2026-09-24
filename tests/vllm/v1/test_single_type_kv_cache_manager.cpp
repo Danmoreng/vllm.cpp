@@ -924,6 +924,18 @@ TEST_CASE("MambaManager: find_longest_cache_hit keeps only the rightmost state")
         mgr.find_longest_cache_hit(bh, 6, {0}, pool, *spec, false, 2)[0];
     CHECK(computed.empty());
   }
+  SUBCASE("PR11 draft drop excludes the final recurrent snapshot") {
+    MockCache(pool, "h0", &pool.blocks[10]);
+    MockCache(pool, "h1", &pool.blocks[11]);
+    MockCache(pool, "h2", &pool.blocks[12]);
+    const auto computed = mgr.find_longest_cache_hit(bh, 6, {0}, pool, *spec, true, 2)[0];
+    REQUIRE(computed.size() == 2);
+    CHECK(computed[0] == pool.null_block);
+    CHECK(computed[1] == &pool.blocks[11]);
+    CHECK(mgr.find_longest_cache_hit(bh, 2, {0}, pool, *spec, true, 2)[0].empty());
+    // Published pages are read-only throughout the search.
+    CHECK(pool.get_cached_block("h2", {0}).value()[0] == &pool.blocks[12]);
+  }
 }
 
 TEST_CASE("MambaManager: allocate_new_blocks (mode none) does not record block ids") {

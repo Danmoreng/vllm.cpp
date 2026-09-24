@@ -1,3 +1,4 @@
+#include "vllm/v1/core/recurrent_prefix_snapshot.h"
 // Ported from: vllm/v1/core/kv_cache_utils.py @ e24d1b24
 // See include/vllm/v1/core/kv_cache_utils.h for scope, the BlockHash/Task 2
 // coordination note, and recorded deviations.
@@ -966,8 +967,9 @@ int64_t recurrent_state_bytes(const KVCacheConfig& kv_cfg, int max_num_seqs) {
     const int64_t slots_per_seq =
         static_cast<int64_t>(1 + mamba->num_speculative_blocks);
     const int64_t layers = static_cast<int64_t>(group.layer_names.size());
+    const int64_t prefix_slots = kv_cfg.recurrent_prefix_snapshots ? kv_cfg.recurrent_prefix_snapshots->capacity() : 0;
     total += mamba->page_size_bytes() * layers *
-             static_cast<int64_t>(max_num_seqs) * slots_per_seq;
+             (static_cast<int64_t>(max_num_seqs) * slots_per_seq + prefix_slots);
   }
   return total;
 }
