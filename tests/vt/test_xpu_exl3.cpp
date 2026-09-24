@@ -1,6 +1,7 @@
 #include "exl3_fixture.h"
 #include "xpu_test_helpers.h"
 #include "vt/xpu.h"
+#include "vt/xpu/xpu_exl3_strategy.h"
 #include <array>
 
 namespace {
@@ -16,28 +17,73 @@ std::vector<uint16_t> Input(int64_t elements) {
   return result;
 }
 std::vector<unsigned char> Gemm(vt::Queue& q, const exl3_test::Exl3Fixture& fixture,
-                                int rows, DType output, bool alias, int cb) {
+                                int rows, DType output, bool alias, int cb,
+                                bool unaligned = false, bool output_alias = false) {
   const auto k = fixture.k, n = fixture.n;
   Buffer a(q, DType::kF16, {rows, k}), ah(q, DType::kF16, {rows, k});
-  Buffer b(q, DType::kI8, {k / 16, n / 16, 32 * fixture.bits});
+  const size_t packed_size = fixture.trellis.size() * sizeof(fixture.trellis[0]);
+  Buffer b(q, DType::kI8, {int64_t(packed_size) + int(unaligned)});
   Buffer suh(q, DType::kF16, {k}), svh(q, DType::kF16, {n});
   Buffer c(q, output, {rows, n});
   a.upload(Input(rows * k).data());
-  b.upload(fixture.trellis.data(), true);
+  std::vector<unsigned char> packed_bytes(packed_size + int(unaligned));
+  std::memcpy(packed_bytes.data() + int(unaligned), fixture.trellis.data(), packed_size);
+  b.upload(packed_bytes.data(), true);
+  auto packed = vt::Tensor::Contiguous(static_cast<unsigned char*>(b.tensor.data) + int(unaligned),
+      DType::kI8, q.device, {k / 16, n / 16, 32 * fixture.bits});
   suh.upload(fixture.suh.data(), true); svh.upload(fixture.svh.data(), true);
   auto& scratch = alias ? a.tensor : ah.tensor;
-  vt::Exl3Gemm(q, c.tensor, a.tensor, b.tensor, suh.tensor, svh.tensor, scratch,
+  auto result_tensor = c.tensor;
+  if (output_alias) {
+    REQUIRE(c.bytes <= scratch.Bytes());
+    result_tensor.data = scratch.data;
+  }
+  vt::Exl3Gemm(q, result_tensor, a.tensor, packed, suh.tensor, svh.tensor, scratch,
                vt::Exl3GemmArgs{fixture.bits, cb});
+  std::vector<unsigned char> result(c.bytes);
+  vt::GetBackend(q.device).Copy(q, result.data(), result_tensor.data, result.size());
+  vt::GetBackend(q.device).Synchronize(q);
   if (output == DType::kF32) {
     Buffer bf(q, DType::kBF16, {rows, n});
-    vt::CastBf16(q, bf.tensor, c.tensor);
-    auto result = c.download();
+    vt::CastBf16(q, bf.tensor, result_tensor);
     const auto converted = bf.download();
     result.insert(result.end(), converted.begin(), converted.end());
     return result;
   }
-  return c.download();
+  return result;
 }
+}
+
+TEST_CASE("XPU EXL3 strategy: cache identity, measured regimes and bounded growth") {
+  using namespace vt::xpu::exl3;
+  const StrategyDomain domain{57891, "1.17.39758+10", "1.17",
+      "Intel(R) oneAPI DPC++/C++ Compiler 2026.1.1 (2026.1.1.20260724)", kKernelVersion};
+  StrategyCache cache;
+  const Shape decode{3, 17408, 5120, 1, DType::kF32};
+  CHECK(cache.Get(domain, decode) == Strategy::kFused);
+  CHECK(cache.Get(domain, decode) == Strategy::kFused);
+  CHECK(cache.Size() == 1);
+  // Head6 is selected separately: small-batch fusion won, M=1 did not.
+  CHECK(cache.Get(domain, {6, 5120, 248320, 1, DType::kF32}) == Strategy::kPacked);
+  CHECK(cache.Get(domain, {6, 5120, 248320, 5, DType::kF32}) == Strategy::kFused);
+  for (const Shape unknown : {Shape{3, 17408, 5120, 17, DType::kF32},
+       Shape{3, 17408, 5120, 1, DType::kF16}, Shape{3, 17408, 256, 1, DType::kF32},
+       Shape{7, 17408, 5120, 1, DType::kF32}})
+    CHECK(cache.Get(domain, unknown) == Strategy::kPacked);
+  for (int field = 0; field < 5; ++field) {
+    auto changed = domain;
+    if (field == 0) changed.device_id++;
+    if (field == 1) changed.driver += "+new";
+    if (field == 2) changed.runtime += "+new";
+    if (field == 3) changed.compiler += "+new";
+    if (field == 4) changed.kernel += "+new";
+    CHECK(cache.Get(changed, decode) == Strategy::kPacked);
+  }
+  for (int64_t m = 21; m < 600; ++m) {
+    CHECK(cache.Get(domain, {3, 17408, 5120, m, DType::kF32}) == Strategy::kPacked);
+    CHECK(cache.Size() <= 512);
+  }
+  CHECK(cache.Get(domain, decode) == Strategy::kFused);
 }
 
 TEST_CASE("XPU EXL3 Had128: F16/F32, pre/post scales, in-place, model width") {
@@ -70,7 +116,7 @@ TEST_CASE("XPU EXL3 Had128: F16/F32, pre/post scales, in-place, model width") {
 
 TEST_CASE("XPU EXL3 GEMM: bits 1-8, tail M, scratch alias, F16 and F32 to BF16") {
   Queue host(vt::DeviceType::kCPU), device(vt::DeviceType::kXPU);
-  for (int bits = 1; bits <= 8; ++bits) for (int rows : {1, 2, 17})
+  for (int bits = 1; bits <= 8; ++bits) for (int rows : {1, 2, 4, 5, 8, 16, 17, 20})
     for (auto dtype : {DType::kF16, DType::kF32}) {
       CAPTURE(bits);
       CAPTURE(rows);
@@ -88,4 +134,18 @@ TEST_CASE("XPU EXL3 GEMM: bits 1-8, tail M, scratch alias, F16 and F32 to BF16")
   CHECK_FALSE(vt::OpRegistered(vt::OpId::kExl3ReconstructGemm, device.q.device.type));
   CHECK(vt::GetReferenceTierHits() == 0);
   CHECK(vt::xpu::GetMemoryInfo().allocated_bytes == 0);
+}
+
+TEST_CASE("XPU EXL3 GEMM: unaligned packed weights and output overlapping input scratch") {
+  Queue host(vt::DeviceType::kCPU), device(vt::DeviceType::kXPU);
+  for (int bits : {3, 4, 5, 6}) for (auto dtype : {DType::kF16, DType::kF32})
+    for (bool unaligned : {false, true}) for (bool output_alias : {false, true}) {
+      CAPTURE(bits);
+      CAPTURE(dtype);
+      CAPTURE(unaligned);
+      CAPTURE(output_alias);
+      auto fixture = exl3_test::MakeFixture(512, 256, bits, 0x125719u);
+      SameBytes(Gemm(device.q, fixture, 5, dtype, true, 2, unaligned, output_alias),
+                Gemm(host.q, fixture, 5, dtype, true, 2, unaligned, output_alias));
+    }
 }

@@ -45,4 +45,15 @@ inline int Fragment(int row, int col) {
   return (((col & 7) * 4 + ((row & 7) >> 1)) * 8) +
          (row & 1) + ((row >> 3) * 2) + ((col >> 3) * 4);
 }
+// Aligned specialization used by the packed kernels and the XMX probe.
+template<int Bits>
+uint16_t PackedCodeword(const uint32_t* tile, int inner, int col) {
+  const int t = Fragment(inner, col);
+  const int end = t * Bits + Bits + 256 * Bits;
+  const int first = (end - 16) / 32, last = (end - 1) / 32;
+  const int shift = (last + 1) * 32 - end;
+  const uint32_t hi = tile[first % (8 * Bits)], lo = tile[last % (8 * Bits)];
+  return static_cast<uint16_t>(shift == 0 ? lo : (lo >> shift) | (hi << (32 - shift)));
+}
+
 }  // namespace vt::xpu::exl3

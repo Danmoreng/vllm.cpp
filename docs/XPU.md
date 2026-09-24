@@ -290,6 +290,118 @@ output tokens / time from first to last token. The five-token prompt generates
 inputs do not substitute for a production context-length sweep. In particular,
 the productive Python engine uses another checkpoint, GPTQ INT4, FP8 KV and MTP4.
 
+## EXL3 decode and small-M optimization (PR07)
+
+The regular inference path keeps the PR03 arithmetic contract: sequential FP32
+accumulation, no contraction, and the original Had128 rounding order. Aligned
+codebook-2 weights at 3/4/5/6 bits use compile-time width specialization and
+32-bit packed-word loads. The optional fused variant reuses each decoded
+weight over four input rows (one for M=1), retains accumulators in registers,
+and performs the output Had128 in 512 or 2,048 bytes of SLM. It removes the
+`4*M*N` global intermediate and its allocation/free synchronization. Input
+Had128 scratch remains `2*M*K`; no decoded weight matrix is materialized.
+Output overlapping input scratch uses the unfused path. Unaligned weights,
+other codebooks and widths retain the original reference implementation.
+There are four packed and eight fused specialized GEMM binaries, independent
+of the number of checkpoint matrices. Split-K is not enabled: these kernels
+retain the scalar reduction order.
+
+`VT_XPU_EXL3_STRATEGY=auto|reference|packed|fused` is sampled at first use.
+The default selects measured winners separately by bits, K, N, M and output
+dtype. A mutex-protected cache is bounded to 512 entries; its key also includes
+device ID, driver, runtime, compiler and `exl3-packed-fused-v1`. Only the measured
+B70/driver/compiler domain uses the fusion table. Other domains, F16 outputs
+and unmeasured shapes use packed specialization where eligible. The table is
+an offline tuning result, not a runtime search or a persistent disk cache.
+Head6 and MLP3 have independent entries; M=1 Head6 keeps the packed kernel.
+
+Selection used two independent five-sample medians for each strategy and each
+real projection family, after JIT and at least 200 ms of warmup per family.
+The limits were fixed before selection: at least 10% mean improvement, and no
+fused run median more than 5% slower than either packed run median. All 11
+families (401 projections, including the six-bit head) were measured at
+M=1/2/4/5/8/16/20. Weighted operator times below sum each family's median times
+its occurrence count. They include both transforms, synchronization and scratch
+lifetime, exclude weight upload, and are **not full-model timings or pure device
+kernel timestamps**. The selected column is calculated from those independent
+measurements, rather than a single mixed-policy run.
+
+| M | Packed (ms) | All fused (ms) | Selected (ms) |
+|---:|---:|---:|---:|
+| 1 | 395.76 | 346.74 | 338.19 |
+| 2 | 487.48 | 555.74 | 431.55 |
+| 4 | 667.18 | 750.89 | 532.02 |
+| 5 | 714.99 | 794.99 | 591.41 |
+| 8 | 1,226.06 | 926.33 | 927.59 |
+| 16 | 2,130.32 | 1,232.11 | 1,211.65 |
+| 20 | 2,724.96 | 1,299.85 | 1,280.67 |
+
+Reproduce an operator measurement with the opt-in tool:
+
+```sh
+cmake --build build-xpu --target b70_exl3_bench test_xpu_exl3 -j4
+build-xpu/tests/test_xpu_exl3
+VT_XPU_EXL3_STRATEGY=fused build-xpu/tests/test_xpu_exl3
+VT_XPU_EXL3_STRATEGY=auto \
+  build-xpu/b70_exl3_bench /path/to/Qwen3.8-27B-EXL3-3.5bpw 5 5
+```
+
+The tool uses real packed weights, deterministic F16 input, F32 output and a
+single GPU queue. It records hardware/toolchain identity, warmup count, all
+samples, selected strategy and GEMM workspace. After timing, it compares the
+first, middle and last 128-column blocks at full K against the CPU oracle,
+for every input row and family. Normal strategies must be bit-exact. CPU
+oracle calls are explicit validation, not inference fallbacks.
+
+The final mixed-policy run checked 236,544 real output elements over all 77
+family/M combinations with zero differing bits. Its weighted times for
+M=1/2/4/5/8/16/20 were 337.83/431.54/528.41/586.92/921.22/1,202.70/1,267.83 ms.
+No family regressed by more than 0.1% against its previous packed mean; the
+largest difference occurred in an unchanged packed family. The focused
+unit test passed four cases and 1,676 assertions with both automatic selection
+and forced fusion, including F16 output, M=17 tails, unaligned input and output
+aliasing, as well as cache identity and bounded growth.
+
+A benchmark-only `VT_XPU_EXL3_STRATEGY=matrix` probes FP16 `joint_matrix` with
+FP32 accumulation (1x64x32 for M=1, 8x16x16 otherwise, subgroup 16, 128-thread
+cooperative SLM staging). This implementation is linked only into the benchmark;
+it is not registered as an inference operator or considered by the strategy
+cache. Its isolated weighted times were 806.67 ms at M=1, 374.41 ms at M=5 and
+943.53 ms at M=20. The changed FP32 reduction order fails the original bit-exact
+tests; sampled real-weight relative RMS error was at most 2.55e-6. The probe
+checks a predeclared diagnostic budget of RMS <=3e-5 and peak absolute error
+<=`2e-6 + 3e-4*max(abs(reference))`. This budget does not relax regular inference
+gates or establish full-model quality. Matrix-instruction disassembly, register
+pressure/spill analysis and inference qualification remain outstanding for the
+prefill optimization; no XMX inference speedup is claimed here.
+
+Local measurements used the pinned EXL3 checkpoint, the PR06 base commit
+`3050cea77` plus the PR07 changes, Intel Arc Pro B70 (device 57891), oneAPI
+2026.1.1.20260724, Level Zero runtime 1.17, driver 1.17.39758+10 and the unchanged
+180 W power cap. The engine used batch one, BF16 KV, greedy sampling, no prefix
+cache, no graphs and no MTP. Warmed client measurements repeated twice:
+
+| Engine path | Decode, 5-token input (tok/s) | TPOT (ms) | Prefill, 32-token input (tok/s) |
+|---|---:|---:|---:|
+| PR06 scalar reference | 0.3917 | 2,553 | 1.814–1.815 |
+| PR07 packed | 1.2155 | 822.7 | 7.233–7.241 |
+| PR07 selected | 1.3132 | 761.5 | 7.263–7.269 |
+
+The final engine check also passed all 27 assertions across two 65-token
+requests. Generated text matched both the previous PR06 output and the other
+request. Live GPU allocations stayed at 14,397,796,028 bytes and host RSS at
+403,705,856 bytes in both rounds, with zero counted CPU reference fallbacks.
+Request totals were 51.47 and 49.75 seconds; they include prefill and are not
+used as a separate decode-rate measurement.
+
+These are short diagnostics under the definitions above, not a 4K/long-context
+benchmark. The sibling project's no-MTP GPTQ/FP8-KV baseline at 4K and one
+request is 31.84 native decode tok/s and 1,558.62 native prefill compute tok/s
+(`2026-09-22-vllm-030-no-mtp/summary.json`). Quantization, context, KV dtype and
+prefill timing boundaries differ. The current short decode rate is about 24x
+below that target; the production target is not achieved. Prefill XMX, chunked
+GDN, tuned attention and serving remain separate plan steps.
+
 ## Opt-in provider trace
 
 ```sh
