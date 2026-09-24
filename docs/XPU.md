@@ -402,6 +402,134 @@ prefill timing boundaries differ. The current short decode rate is about 24x
 below that target; the production target is not achieved. Prefill XMX, chunked
 GDN, tuned attention and serving remain separate plan steps.
 
+## PR08: bounded XMX prefill
+
+On the qualified B70 device/compiler/driver domain above, `auto` now selects
+the prefill kernel for the eleven real F32-output families at M=128–6,656.
+Other shapes, output dtypes and domains retain the previous packed policy;
+small-M selections retain PR07. The cache version is
+`exl3-packed-fused-panel-v2`. `VT_XPU_EXL3_STRATEGY=prefill` explicitly selects
+XMX for large M; `panel` selects a sequential, bit-exact alternative. Both
+overrides retain the PR07 automatic policy below M=128. `reference`, `packed`
+and `fused` remain available. No XPU reconstruction operator is registered, so
+the generic CUDA-oriented M>144 reconstruction threshold does not control XPU.
+
+The kernel decodes FP16 weight panels of at most K=1,024 by N=4,096 and reuses
+them over up to 256 input rows. FP32 partial sums persist across K panels;
+the output Had128/scaling happens only after the full reduction. Eight
+subgroups of 16 cover a 32x64 output tile with FP16 `joint_matrix` inputs and
+FP32 accumulators. Two SLM stages consume 12,288 bytes per workgroup. An AOT
+compile of the same matrix kernel with the same precision flags, followed by
+`ocloc` disassembly for device 0xe223 (bmg-g31), shows `dpas.8x8`, SIMD16 and
+128 GRFs. This is compiler-output inspection, not a capture of the runtime JIT.
+
+One persistent 32 MiB allocation belongs to the device context and is shared
+by all its queues. Active weight/output regions use at most 12 MiB; neither
+the reservation nor active workspace grows with M, layer count or queue count.
+The execution mutex remains held until submitted work finishes, including on
+submission failure. Reservation and ordinary allocations share one budget
+lock. Insufficient workspace budget falls back to the packed native kernel.
+Ordinary activations, input Had scratch and KV are additional allocations;
+32 MiB must remain in the serving memory budget. No whole decoded model is
+materialized. Scheduler chunks below 128 do not use this optimization; larger
+chunks trade ordinary activation memory and TTFT against scheduling latency.
+
+Numerical qualification allows differences in reduction order. Packed/fused
+and the sequential panel alternative remain bit-exact. XMX F32 operator checks
+retain relative RMS <=3e-5 and peak error
+<=`2e-6 + 3e-4*max(abs(reference))`; F16 output also observes its existing
+rounding contract. All eleven full-size real families, including Head6, passed
+at M=128/512/2,048/6,656. Each large-M case checks eight rows and three 128-column
+panels against the independent CPU oracle at full K, and scans the entire GPU
+output for nonfinite values. Maximum sampled RMS was 2.50e-6 and maximum
+absolute error 1.52e-6. The focused unit covers all four bit widths, F16/F32,
+row/column/K tails, queue replacement and concurrent workspace use (125
+assertions). A fresh process with an 8 MiB device budget verifies packed
+fallback without workspace allocation (6 assertions). PR07's focused test
+passes 1,694 assertions after extending the strategy-cache cases.
+
+Full-stack internal activations are diagnostic for XMX: at 128 tokens a
+universal 1/128 RMS limit failed, with worst stage RMS 0.5353. Small initial
+projection differences are followed by growing drift through BF16 boundaries
+and the nonlinear stack; internal activation equality is not the quality gate.
+The exact panel variant separately matched every dumped activation across
+all 64 layers, prefill plus one decode continuation (17,034 assertions in the
+original exact comparison). PR06's independent CPU-prefix checks are unchanged.
+
+The replacement model-level gate uses the pinned checkpoint's chat template
+with thinking disabled. Six tasks require exact answers (arithmetic, Python,
+translation, record lookup, JSON and logic), and two short open continuations
+probe less concentrated distributions. Inputs contain 165–190 tokens. All
+eight answers matched the scalar reference; all six scored answers were
+correct. Full-vocabulary softmax comparisons at identical prefixes cover 35
+distributions, with predeclared limits KL(reference||candidate) <=0.01 nats
+and total variation <=0.02. Observed maxima were 0.001108 and 0.015836.
+After any greedy divergence the comparator excludes later differently
+conditioned rows. This small corpus is a regression gate, not evidence of
+general quality or long-context equivalence to the production checkpoint.
+
+Reproduce with fresh dump directories (the logits instrument appends):
+
+```sh
+cmake --build build-xpu --target test_xpu_exl3_prefill \
+  test_xpu_qwen_checkpoint b70_exl3_bench -j4
+build-xpu/tests/test_xpu_exl3_prefill
+VT_B70_LOW_MEMORY_TEST=1 VT_XPU_MEMORY_BUDGET_BYTES=8388608 \
+  VT_XPU_EXL3_STRATEGY=prefill build-xpu/tests/test_xpu_exl3_prefill \
+  --test-case='*insufficient*'
+mkdir /tmp/b70-quality-reference /tmp/b70-quality-candidate
+# panel preserves scalar accumulation and PR07 small-M routing.
+VT_B70_MODEL_DIR=/path/to/Qwen3.8-27B-EXL3-3.5bpw VT_B70_QUALITY=1 \
+  VT_XPU_EXL3_STRATEGY=panel VT_DUMP_LOGITS=/tmp/b70-quality-reference \
+  build-xpu/tests/test_xpu_qwen_checkpoint
+VT_B70_MODEL_DIR=/path/to/Qwen3.8-27B-EXL3-3.5bpw VT_B70_QUALITY=1 \
+  VT_DUMP_LOGITS=/tmp/b70-quality-candidate build-xpu/tests/test_xpu_qwen_checkpoint
+python3 tools/bench/b70_compare_probabilities.py \
+  /tmp/b70-quality-reference /tmp/b70-quality-candidate
+VT_B70_MODEL_DIR=/path/to/Qwen3.8-27B-EXL3-3.5bpw \
+  VT_B70_TIMING=1 VT_B70_PROMPT_TOKENS=512 build-xpu/tests/test_xpu_qwen_checkpoint
+```
+
+Repeated operator medians after JIT and at least 200 ms warmup, same B70 setup
+and unchanged 180 W cap as PR07:
+
+| M | Packed weighted time (ms) | XMX weighted time (ms) |
+|---:|---:|---:|
+| 128 | 15,833.82 | 1,789.06 |
+| 512 | 65,153.39 | 5,407.44 |
+| 2,048 | not remeasured | 21,838.93 |
+| 6,656 | not remeasured | 71,416.69 |
+
+These are sums of isolated family medians weighted by projection count, not
+engine timings. Every family improved at least 3.94x at M=128 and 7.78x at
+M=512; the predeclared 10% minimum improvement is met. Independent XMX M=128
+weighted runs measured 1,770.02 and 1,789.06 ms. The exact SIMD panel (four rows
+for narrow panels, eight otherwise) is a slower alternative when activation
+equality is required; a sixteen-row variant regressed and was discarded.
+
+Full-engine warmed client measurements (batch one, BF16 KV, greedy, no MTP,
+no prefix cache or graphs) include the first decode token in TTFT:
+
+| Path | Input tokens | TTFT (s) | Input tokens / TTFT | Decode (tok/s) |
+|---|---:|---:|---:|---:|
+| PR07 default | 128 | 16.390–16.432 | 7.790–7.810 | 1.291 |
+| Exact panel | 128 | 6.264–6.269 | 20.419–20.435 | 1.305 |
+| XMX | 128 | 3.016 | 42.444 | 1.306 |
+| PR08 default | 128 | 3.017–3.019 | 42.404–42.427 | 1.306 |
+| PR08 default | 512 | 9.420–9.431 | 54.291–54.352 | 1.285–1.286 |
+
+The final automatic operator run measured 1,785.59 weighted ms at M=128 and
+passed all eleven CPU comparisons. The final automatic quality run again
+passed all 64 assertions and the same 35 distribution checks. Both 128- and
+512-token timing tests pass 36 assertions and report no counted CPU fallback.
+The 512-token test
+and holds live GPU allocation at 14,669,092,992 bytes across both warm rounds,
+including the same 33,554,432-byte workspace. The short decode measurement
+uses one post-first-token interval per round and is diagnostic. PR08 improves
+128-token TTFT about 5.4x; it does not close the decode gap to 31.84 tok/s at
+4K or establish production-equivalent prefill. Chunked GDN (PR09), attention
+and the later serving optimizations remain necessary.
+
 ## Opt-in provider trace
 
 ```sh

@@ -50,6 +50,9 @@ struct Context {
   sycl::device device;
   sycl::context context;
   std::mutex mutex;
+  std::mutex exl3_mutex;
+  void* exl3_workspace = nullptr;
+  size_t exl3_workspace_bytes = 0;
   std::unordered_map<sycl::queue*, std::unique_ptr<sycl::queue>> queues;
   std::unordered_map<void*, size_t> allocations, pinned;
   size_t total, budget, allocated = 0, pinned_bytes = 0;
@@ -267,11 +270,42 @@ MemoryInfo GetMemoryInfo(int index) {
   auto& c = GetContext(index);
   std::lock_guard<std::mutex> lock(c.mutex);
   MemoryInfo info{c.total, c.budget, c.allocated, c.pinned_bytes, 0, false};
+  info.exl3_workspace_bytes = c.exl3_workspace_bytes;
   if (c.device.has(sycl::aspect::ext_intel_free_memory)) {
     info.free_bytes = c.device.get_info<sycl::ext::intel::info::device::free_memory>();
     info.free_known = true;
   }
   return info;
+}
+bool WithExl3Workspace(Queue& q, size_t bytes, const std::function<void(void*)>& launch) {
+  VT_CHECK(bytes <= 32 * 1024 * 1024, "XPU EXL3 workspace exceeds 32 MiB budget");
+  auto& native = NativeQueue(q);
+  auto& c = GetContext(q.device.index);
+  std::lock_guard<std::mutex> execution(c.exl3_mutex);
+  if (!c.exl3_workspace) {
+    std::lock_guard<std::mutex> lock(c.mutex);
+    // Reserve and account under the same lock as ordinary allocations: another
+    // queue must not consume this budget between the check and allocation.
+    if (bytes > c.budget - c.allocated) return false;
+    void* storage = sycl::aligned_alloc_device(64, bytes, c.device, c.context);
+    VT_CHECK(storage != nullptr, "XPU EXL3 workspace allocation failed");
+    try { c.allocations.emplace(storage, bytes); }
+    catch (...) { sycl::free(storage, c.context); throw; }
+    c.allocated += bytes;
+    c.exl3_workspace = storage;
+    c.exl3_workspace_bytes = bytes;
+  }
+  VT_CHECK(bytes <= c.exl3_workspace_bytes, "XPU EXL3 workspace cannot grow");
+  try {
+    launch(c.exl3_workspace);
+    native.wait_and_throw();
+  } catch (...) {
+    // Even when host-side submission throws, complete earlier kernels before
+    // releasing this workspace to another queue.
+    try { native.wait_and_throw(); } catch (...) {}
+    throw;
+  }
+  return true;
 }
 std::string DeviceDescription(int index) {
   const auto& d = DeviceAt(index);

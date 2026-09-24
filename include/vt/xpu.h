@@ -11,6 +11,7 @@ struct MemoryInfo {
   size_t pinned_bytes = 0;      // host USM; excluded from device usage
   size_t free_bytes = 0;        // live driver report, valid only if free_known
   bool free_known = false;
+  size_t exl3_workspace_bytes = 0;  // included in allocated_bytes, shared by all queues
 };
 int DeviceCount() noexcept;
 MemoryInfo GetMemoryInfo(int index = 0);

@@ -119,12 +119,15 @@ Strategy SelectedStrategy() {
     if (name == "reference") return Strategy::kReference;
     if (name == "packed") return Strategy::kPacked;
     if (name == "fused") return Strategy::kFused;
+    if (name == "prefill") return Strategy::kPrefill;
+    if (name == "panel") return Strategy::kPanel;
     VT_CHECK(name == "auto", "Invalid VT_XPU_EXL3_STRATEGY");
     return Strategy::kAuto;
   }();
   return strategy;
 }
 
+template<bool StridedOutput = false>
 void Had(Queue& q, Tensor& out, const Tensor& in, const Tensor* pre, const Tensor* post, float scale) {
   if (in.Numel() == 0) return;
   const View src(in), dst(out);
@@ -159,11 +162,21 @@ void Had(Queue& q, Tensor& out, const Tensor& in, const Tensor* pre, const Tenso
         // Half output rounds BEFORE multiplying svh, then again at the store.
         float value = Round(dst.dtype, v[j] * scale);
         if (post_values) value *= static_cast<float>(post_values[col + lane * 4 + j]);
-        Store(dst, base + lane * 4 + j, value);
+        const auto index = base + lane * 4 + j;
+        Store(dst, StridedOutput ? dst.offset(index) : index, value);
       }
     });
   });
 }
+}
+
+void Exl3OutputHadPanel(Queue& q, Tensor& out, const Tensor& raw, const Tensor& svh, int64_t column) {
+  auto panel = Tensor::Contiguous(static_cast<char*>(out.data) + column * SizeOf(out.dtype),
+      out.dtype, out.device, {raw.shape[0], raw.shape[1]});
+  panel.stride[0] = out.shape[1];
+  auto scales = Tensor::Contiguous(static_cast<char*>(svh.data) + column * sizeof(sycl::half),
+      svh.dtype, svh.device, {raw.shape[1]});
+  Had<true>(q, panel, raw, nullptr, &scales, kInvSqrt128);
 }
 
 void Exl3HadR128Kernel(Queue& q, Tensor& out, const Tensor& in, const Exl3HadArgs& args) {
@@ -194,9 +207,14 @@ void Exl3GemmKernel(Queue& q, Tensor& out, const Tensor& in, const Tensor& trell
   const auto* packed = static_cast<const unsigned char*>(trellis.data);
   const int bits = args.bits, cb = args.codebook;
   auto strategy = SelectedStrategy();
+  // The prefill override selects only large-M calls; the head gather and
+  // subsequent decode retain the measured PR07 policy.
+  if ((strategy == Strategy::kPrefill || strategy == Strategy::kPanel) && m < 128) strategy = Strategy::kAuto;
   if (strategy == Strategy::kAuto) strategy = AutomaticStrategy(q, bits, k, n, m, out.dtype);
   const bool specialized = strategy != Strategy::kReference && cb == 2 && bits >= 3 && bits <= 6 &&
       reinterpret_cast<uintptr_t>(packed) % alignof(uint32_t) == 0;
+  if (specialized && (strategy == Strategy::kPrefill || strategy == Strategy::kPanel) && !Overlap(out, in_had) &&
+      Exl3PrefillKernel(q, out, in_had, trellis, svh, bits, strategy == Strategy::kPrefill)) return;
   const bool fused = specialized && !Overlap(out, in_had) && strategy == Strategy::kFused;
   if (fused) {
     const auto* words = reinterpret_cast<const uint32_t*>(packed);
