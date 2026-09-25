@@ -15,6 +15,9 @@
 
 #include "vllm/model_executor/model_loader/gptq4_weight.h"
 #include "vllm/model_executor/models/qwen3_5_dense.h"
+#include "vllm/model_executor/models/qwen3_5_mtp.h"
+#include "vllm/model_executor/models/model_registry.h"
+#include "vllm/v1/kv_cache_interface.h"
 #include "vt/backend.h"
 #include "vt/dtype.h"
 #include "vt/unaligned.h"
@@ -321,6 +324,131 @@ TEST_CASE("GPTQ4 precision policy preserves ordinary dense defaults") {
   const auto gptq = vllm::ResolveQwen3_5DensePrecision(config, true);
   CHECK(gptq.activation == vt::DType::kF16);
   CHECK(gptq.gdn_recurrent_state == vt::DType::kF32);
+}
+
+TEST_CASE("GPTQ4 cache spec stores FP16 KV and convolution with FP32 recurrence") {
+  vllm::HfConfig config;
+  config.torch_dtype = "float16";
+  config.mamba_ssm_dtype = "float32";
+  config.raw = {{"quantization_config", {{"quant_method", "gptq"}}}};
+  config.num_key_value_heads = 4;
+  config.head_dim = 256;
+  config.linear_num_key_heads = 16;
+  config.linear_num_value_heads = 48;
+  config.linear_key_head_dim = 128;
+  config.linear_value_head_dim = 128;
+  config.linear_conv_kernel_dim = 4;
+  auto model = vllm::MakeQwen3_5DenseLoadedModel(vllm::Qwen3_5DenseWeights{});
+  const auto kv = vllm::ModelRegistry::MakeKVCache(*model, config, 16, 8);
+  REQUIRE(kv.kv_cache_groups.size() == 2);
+  const auto* attn = dynamic_cast<const vllm::v1::FullAttentionSpec*>(
+      kv.kv_cache_groups[0].kv_cache_spec.get());
+  const auto* mamba = dynamic_cast<const vllm::v1::MambaSpec*>(
+      kv.kv_cache_groups[1].kv_cache_spec.get());
+  REQUIRE(attn != nullptr);
+  REQUIRE(mamba != nullptr);
+  CHECK(attn->dtype == vt::DType::kF16);
+  REQUIRE(mamba->dtypes.size() == 2);
+  CHECK(mamba->dtypes[0] == vt::DType::kF16);
+  CHECK(mamba->dtypes[1] == vt::DType::kF32);
+  config.raw = nlohmann::json::object();
+  const auto ordinary = vllm::ModelRegistry::MakeKVCache(*model, config, 16, 8);
+  const auto* ordinary_mamba = dynamic_cast<const vllm::v1::MambaSpec*>(
+      ordinary.kv_cache_groups[1].kv_cache_spec.get());
+  REQUIRE(ordinary_mamba != nullptr);
+  CHECK(ordinary_mamba->dtypes[0] == vt::DType::kBF16);
+}
+
+TEST_CASE("GPTQ4 model boundaries keep F16 hidden tap and F32 gathered logits") {
+  const auto owned_half = [](std::vector<int64_t> shape,
+                             const std::vector<float>& values, bool nk = false) {
+    vllm::OwnedTensor weight;
+    weight.dtype = vt::DType::kF16;
+    weight.rank = static_cast<int>(shape.size());
+    weight.nk = nk;
+    for (int i = 0; i < weight.rank; ++i) weight.shape[i] = shape[i];
+    weight.bytes.resize(values.size() * sizeof(uint16_t));
+    for (size_t i = 0; i < values.size(); ++i) {
+      const uint16_t bits = vt::F32ToF16(values[i]);
+      std::memcpy(weight.bytes.data() + i * sizeof(bits), &bits, sizeof(bits));
+    }
+    return weight;
+  };
+  vllm::HfConfig config;
+  config.hidden_size = 4;
+  config.vocab_size = 6;
+  config.num_hidden_layers = 0;
+  config.rms_norm_eps = 1e-6;
+  vllm::Qwen3_5DenseWeights weights;
+  weights.gptq4_checkpoint = true;
+  weights.precision.activation = vt::DType::kF16;
+  weights.precision.gdn_conv_state = vt::DType::kF16;
+  const std::vector<float> embedding{
+      0.25f, 0.5f, -0.25f, 0.125f,
+      0.5f, -0.25f, 0.125f, 0.375f,
+      -0.375f, 0.25f, 0.5f, -0.125f,
+      0.125f, 0.375f, -0.5f, 0.25f,
+      0.375f, 0.125f, 0.25f, -0.5f,
+      -0.25f, 0.5f, 0.375f, 0.125f};
+  const std::vector<float> gamma{0.0f, 0.125f, -0.25f, 0.5f};
+  const std::vector<float> head{
+      0.5f, 0.25f, -0.125f, 0.375f,
+      -0.25f, 0.5f, 0.375f, -0.125f,
+      0.125f, -0.5f, 0.25f, 0.375f,
+      0.375f, 0.125f, -0.25f, 0.5f,
+      -0.125f, 0.375f, 0.5f, 0.25f,
+      0.25f, -0.125f, 0.375f, -0.5f};
+  weights.embed_tokens = owned_half({6, 4}, embedding);
+  weights.final_norm = owned_half({4}, gamma);
+  weights.lm_head = owned_half({6, 4}, head, true);
+  vt::Queue queue = vt::CreateQueue({vt::DeviceType::kXPU, 0});
+  const std::vector<int32_t> ids{1, 2, 3}, positions{0, 1, 2};
+  vllm::v1::CommonAttentionMetadata attn;
+  attn.num_reqs = 1;
+  attn.num_actual_tokens = 3;
+  attn.query_start_loc = {0, 3};
+  attn.seq_lens = {3};
+  attn.block_table_num_cols = 1;
+  attn.block_table_tensor = {0};
+  attn.slot_mapping = {0, 1, 2};
+  vllm::Qwen3_5MTPHiddenStates tap;
+  const auto logits = vllm::Qwen3_5DenseModel::ForwardDeviceTap(
+      ids, positions, attn, {}, {}, {}, weights, config, queue,
+      &tap, {0, 2});
+  REQUIRE(tap.tensor.dtype == vt::DType::kF16);
+  REQUIRE(tap.tensor.shape[0] == 3);
+  REQUIRE(tap.tensor.shape[1] == 4);
+  REQUIRE(logits.on_device());
+  REQUIRE(logits.device_tensor.dtype == vt::DType::kF32);
+  REQUIRE(logits.rows == 2);
+  std::vector<uint16_t> tap_bits(12);
+  std::vector<float> actual_logits(12);
+  auto& backend = vt::GetBackend(queue.device);
+  backend.Copy(queue, tap_bits.data(), tap.tensor.data, tap_bits.size() * 2);
+  backend.Copy(queue, actual_logits.data(), logits.device_tensor.data,
+               actual_logits.size() * sizeof(float));
+  backend.Synchronize(queue);
+  for (int t = 0; t < 3; ++t) {
+    const int token = ids[t];
+    float square = 0;
+    for (int j = 0; j < 4; ++j)
+      square += embedding[token * 4 + j] * embedding[token * 4 + j];
+    const float inv = 1.0f / std::sqrt(square / 4.0f + 1e-6f);
+    for (int j = 0; j < 4; ++j) {
+      const float expected = vt::F16ToF32(vt::F32ToF16(
+          embedding[token * 4 + j] * inv * (1.0f + gamma[j])));
+      const float actual = vt::F16ToF32(tap_bits[t * 4 + j]);
+      CHECK(std::abs(actual - expected) < 0.001f);
+    }
+  }
+  for (int row = 0; row < 2; ++row) for (int vocab = 0; vocab < 6; ++vocab) {
+    float expected = 0;
+    const int selected = row == 0 ? 0 : 2;
+    for (int j = 0; j < 4; ++j)
+      expected += vt::F16ToF32(tap_bits[selected * 4 + j]) * head[vocab * 4 + j];
+    CHECK(std::abs(actual_logits[row * 6 + vocab] - expected) < 0.001f);
+  }
+  vt::DestroyQueue(queue);
 }
 
 TEST_CASE("GPTQ4 attention QKV matches the captured Python post-load owner") {

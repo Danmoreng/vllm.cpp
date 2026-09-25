@@ -106,6 +106,9 @@ TEST_CASE("XPU F16 attention preamble and output gate preserve model dtype") {
   Close(query.floats(), ref_q, 0.003f, 1e-4f);
   Close(keys.floats(), ref_k, 0.003f, 1e-4f);
   Close(gate.floats(), ref_gate, 2e-6f);
+  Buffer widened(gpu.q, DType::kF32, {tokens, hq, dim});
+  vt::CastF32(gpu.q, widened.tensor, query.tensor);
+  Close(widened.floats(), query.floats(), 0.0f);
   Buffer attn(gpu.q, DType::kF16, {tokens, hq, dim});
   Buffer gated(gpu.q, DType::kF16, {tokens, hq, dim});
   attn.put(std::vector<float>(tokens * hq * dim, 0.25f));
