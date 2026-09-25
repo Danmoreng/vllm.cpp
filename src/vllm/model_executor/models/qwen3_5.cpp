@@ -12480,7 +12480,8 @@ ForwardLogits Qwen3_5DenseDecodeGraph::Step(
       lg = DenseForwardLayers(d, s.hidden->t(), s.positions, s.attn_meta,
                               s.gdn_meta, attn_kv, gdn_state, impl_->weights,
                               impl_->config, {}, nullptr, nullptr, aux_ids_arg,
-                              aux_out_arg, dbuf ? s.dev.get() : nullptr);
+                              aux_out_arg, /*return_hidden=*/false,
+                              dbuf ? s.dev.get() : nullptr);
       // R2 (the qwen3.cpp:1054-1061 port): advance cur_pos on-device
       // (plus_one) INSIDE the captured trace, at the END of the body — after
       // every cur_pos read in the layers' RAC/PA. cur_pos/update_idxs are
