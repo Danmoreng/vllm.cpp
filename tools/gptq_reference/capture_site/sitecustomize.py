@@ -202,7 +202,9 @@ if _ROOT:
             "request_id": request_id,
         }
         _write_routes(record)
-        capture_key = (category, m)
+        prompt_key = os.environ.get("GPTQ_CAPTURE_PROMPT_KEY") == "1"
+        prompt_length = int(context.get("prompt_length", 0))
+        capture_key = (category, m, prompt_length if prompt_key else 0)
         if m not in {1, 16, 256}:
             return
         with _LOCK:
@@ -210,7 +212,8 @@ if _ROOT:
                 return
             _CAPTURED.add(capture_key)
 
-        stem = f"{category}_m{m}"
+        stem = (f"{category}_p{prompt_length}_m{m}" if prompt_key
+                else f"{category}_m{m}")
         tensors = {"activation_fp16": activation, "output_reference": output}
         if category == "dense_ba":
             tensors["weight_fp16_nk"] = weight

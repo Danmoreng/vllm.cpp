@@ -220,8 +220,22 @@ int Run(const std::string& mode, const std::string& operation_path,
   };
 
   auto& native = vt::xpu::NativeQueue(queue);
-  for (int i = 0; i < 10; ++i) invoke();
+  constexpr size_t kWarmupCalls = 768;
+  auto warmup_begin = native.single_task<TimerAnchor>(TimerAnchor{});
+  for (size_t warmup_count = 0; warmup_count < kWarmupCalls;
+       ++warmup_count) {
+    invoke();
+    if ((warmup_count + 1) % 64 == 0)
+      vt::GetBackend(queue.device).Synchronize(queue);
+  }
+  auto warmup_end = native.single_task<TimerAnchor>(TimerAnchor{});
   vt::GetBackend(queue.device).Synchronize(queue);
+  const auto warmup_begin_ns = warmup_begin.get_profiling_info<
+      sycl::info::event_profiling::command_start>();
+  const auto warmup_end_ns = warmup_end.get_profiling_info<
+      sycl::info::event_profiling::command_end>();
+  const double warmup_gpu_ms =
+      static_cast<double>(warmup_end_ns - warmup_begin_ns) / 1.0e6;
   const auto after_warmup = vt::xpu::GetGptq4RuntimeStats(queue.device.index);
   const auto actual = device_output.Read();
   double max_error = 0.0, squared_error = 0.0;
@@ -262,6 +276,7 @@ int Run(const std::string& mode, const std::string& operation_path,
 
   Json report = {
       {"mode", mode}, {"M", m}, {"K", k}, {"N", n},
+      {"warmup_count", kWarmupCalls}, {"warmup_gpu_ms", warmup_gpu_ms},
       {"group_size", mode == "gptq4" ? group_size : 0},
       {"reference_tolerance", "rtol=0.01, atol=0.02"},
       {"max_abs_error", max_error},

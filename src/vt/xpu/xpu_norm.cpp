@@ -15,8 +15,41 @@ void RmsNormKernel(Queue& q, Tensor& out, const Tensor& x, const Tensor& weight,
     const View dst(target), src(x), w(weight), res(residual ? *residual : x);
     const auto width = x.shape[1]; const bool has_res = residual != nullptr;
     const auto eps = args.eps; const bool gemma = args.gemma;
-    // One work-item per row preserves the CPU's sequential FP32 variance sum.
-    // PR02 correctness reference; parallel reductions can be tuned separately.
+    // Wide decode rows must distribute the reduction over a work-group. A
+    // single work-item reading 5120 elements twice dominates B70 token time.
+    if (width >= 256) {
+      constexpr size_t kWorkGroup = 256;
+      const auto event = NativeQueue(q).parallel_for(
+          sycl::nd_range<1>(sycl::range<1>(x.shape[0] * kWorkGroup),
+                            sycl::range<1>(kWorkGroup)),
+          [=](sycl::nd_item<1> item) {
+        const auto row = item.get_group(0);
+        const auto lane = item.get_local_id(0);
+        float partial = 0.0f;
+        for (int64_t col = lane; col < width; col += kWorkGroup) {
+          float value = Load(src, row * src.stride[0] + col);
+          if (has_res) {
+            const auto off = row * res.stride[0] + col;
+            value = Round(res.dtype, value + Load(res, off));
+            Store(res, off, value);
+          }
+          partial += value * value;
+        }
+        const float sum = sycl::reduce_over_group(
+            item.get_group(), partial, sycl::plus<float>());
+        const float scale = 1.0f / sycl::sqrt(sum / static_cast<float>(width) + eps);
+        sycl::group_barrier(item.get_group());
+        for (int64_t col = lane; col < width; col += kWorkGroup) {
+          const float value = has_res ? Load(res, row * res.stride[0] + col)
+                                      : Load(src, row * src.stride[0] + col);
+          const float weight_value = gemma ? 1.0f + Load(w, col) : Load(w, col);
+          Store(dst, row * dst.stride[0] + col, value * scale * weight_value);
+        }
+      });
+      RecordProfileEvent(q, "rms_norm", event);
+      return;
+    }
+    // Keep the sequential reduction for narrow rows and its exact FP32 sum.
     const auto event = NativeQueue(q).parallel_for(sycl::range<1>(x.shape[0]), [=](sycl::id<1> item) {
       const auto row = item[0];
       float sum = 0;
