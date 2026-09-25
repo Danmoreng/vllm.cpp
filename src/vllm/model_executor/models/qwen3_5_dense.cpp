@@ -123,6 +123,15 @@ std::unique_ptr<LoadedModel> LoadQwen3_5DenseModel(
 
 void PrepareQwen3_5Dense(LoadedModel& model, const HfConfig& config,
                          vt::Queue& queue) {
+  auto& qwen = ModelAs<Qwen3_5DenseLoadedModel>(
+      model, "Qwen3_5ForConditionalGeneration");
+  if (qwen.weights().gptq4_checkpoint) {
+    VT_CHECK(queue.device.type == vt::DeviceType::kXPU,
+             "gptq4: packed resident requires XPU");
+    for (const Qwen3_5DenseLayerWeights& layer : qwen.weights().layers)
+      layer.gptq4.PrepareResident(queue);
+    return;
+  }
   // MODEL-FP8-BLOCK-LINEAR (#1189 M4). FIRST, before any resident is built: the
   // dense forward READS `Fp8BlockWeight`s now, so what is refused here is a
   // device with no block-scaled GEMM rather than the weight itself. The
@@ -140,7 +149,6 @@ void PrepareQwen3_5Dense(LoadedModel& model, const HfConfig& config,
   // PERF-27B-LMHEAD-FP4 (issue #213): build the packed lm_head's resident HERE —
   // on CUDA before the runner captures a decode graph, elsewhere before the first
   // forward pays the dequant. Inert on every BF16/FP8/GGUF/tied checkpoint.
-  auto& qwen = ModelAs<Qwen3_5DenseLoadedModel>(model, "Qwen3_5ForConditionalGeneration");
   Qwen3_5DenseModel::PrepareLmHeadResident(qwen.weights(), queue);
   // PERF-27B-GDN-FP8-QKVZ: build the merged FP8 GDN [qkv;z] operand here, at
   // model prepare — before the first forward, so it can never allocate or copy
@@ -153,6 +161,8 @@ ForwardLogits ForwardQwen3_5Dense(LoadedModel& model,
                                   const ModelForwardInput& input) {
   auto& qwen = ModelAs<Qwen3_5DenseLoadedModel>(model, "Qwen3_5ForConditionalGeneration");
   const Qwen3_5DenseWeights& weights = qwen.weights();
+  VT_CHECK(!weights.gptq4_checkpoint,
+           "gptq4: FP16 model execution is implemented in GPTQ-03");
 
   // ENG-ASYNC-SCHED W4: publish the async runner's device-resident input ids for
   // the duration of THIS forward, so the embed at the top of every route below

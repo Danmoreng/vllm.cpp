@@ -4068,6 +4068,9 @@ vllm_cpp_add_test(test_qwen3_5_lm_head_dtypes
 vllm_cpp_add_test(test_qwen3_5_dense_load_residency
   vllm/models/test_qwen3_5_dense_load_residency.cpp)
 
+vllm_cpp_add_test(test_gptq4_weight
+  vllm/models/test_gptq4_weight.cpp)
+
 # QUANT-QWEN38-27B-NVFP4-ARM W4 (#821, .agents/specs/qwen38-27b-quant-arms.md):
 # the compressed-tensors `mixed-precision` accounting + scheme-resolution gate
 # for `unsloth/Qwen3.8-27B-NVFP4`. Hermetic — it reads the two COMMITTED

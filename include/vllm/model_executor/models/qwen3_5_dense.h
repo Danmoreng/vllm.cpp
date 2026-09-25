@@ -34,6 +34,7 @@
 #include <functional>
 
 #include "vllm/model_executor/layers/quantization/fp8_block_quant.h"
+#include "vllm/model_executor/model_loader/gptq4_weight.h"
 #include "vllm/model_executor/models/qwen3_5_weights.h"  // OwnedTensor, Gdn/FullAttn weights, TensorResolver
 #include "vllm/transformers_utils/hf_config.h"
 #include "vt/device.h"
@@ -119,6 +120,37 @@ struct DenseGateUpGlobals {
   float alpha = 0.0F;
 };
 
+// Packed GPTQ text projections only. The unquantized norms, BA, convolution,
+// embedding and head remain separate dense owners. One merged owner is built
+// directly from each checkpoint projection group, so no split packed copy is
+// retained alongside it.
+struct DenseGptq4LayerWeights {
+  Gptq4Weight gdn_qkvz;
+  Gptq4Weight gdn_out;
+  Gptq4Weight attn_qkv;
+  Gptq4Weight attn_out;
+  Gptq4Weight mlp_gate_up;
+  Gptq4Weight mlp_down;
+
+  bool Empty() const { return mlp_down.k == 0; }
+  size_t ResidentBytes() const {
+    return gdn_qkvz.ResidentBytes() + gdn_out.ResidentBytes() +
+           attn_qkv.ResidentBytes() + attn_out.ResidentBytes() +
+           mlp_gate_up.ResidentBytes() + mlp_down.ResidentBytes();
+  }
+  void PrepareResident(vt::Queue& queue) const {
+    const auto stage = [&queue](const Gptq4Weight& weight) {
+      if (weight.k != 0) (void)PrepareGptq4Resident(weight, queue);
+    };
+    stage(gdn_qkvz);
+    stage(gdn_out);
+    stage(attn_qkv);
+    stage(attn_out);
+    stage(mlp_gate_up);
+    stage(mlp_down);
+  }
+};
+
 DenseGateUpGlobals MergeDenseGateUpGlobals(const Nvfp4Weight& gate,
                                            const Nvfp4Weight& up);
 
@@ -130,7 +162,24 @@ struct Qwen3_5DenseLayerWeights {
   GdnLayerWeights gdn;                    // valid iff is_linear_attention
   FullAttnLayerWeights attn;             // valid iff !is_linear_attention
   DenseMlpWeights mlp;                   // every layer has a dense MLP
+  DenseGptq4LayerWeights gptq4;         // packed GPTQ text projection owners
 };
+
+// Load the GPTQ projection portion of one text layer. This keeps the packed
+// owner and merge contract independently testable. FP16 execution follows in
+// GPTQ-03; the loader preserves the dense remainder as FP16 already.
+DenseGptq4LayerWeights LoadQwen3_5DenseGptq4Projections(
+    const TensorResolver& get,
+    const std::function<bool(const std::string&)>& has,
+    const HfConfig& config, int64_t layer_idx,
+    const std::string& backbone_prefix);
+
+// Validate and load all 400 text GPTQ projections without touching vision,
+// MTP, or the unquantized remainder. With a queue, each layer is uploaded and
+// its host staging buffers released before the next layer is read.
+std::vector<DenseGptq4LayerWeights> LoadQwen3_5DenseGptq4TextProjections(
+    const std::vector<SafetensorsFile>& shards, const HfConfig& config,
+    vt::Queue* load_queue = nullptr);
 
 // Whole dense-model text weights. The CHECKPOINT may store the head BF16, FP8
 // (per-channel scale) or ModelOpt NVFP4 — the 27B NVFP4 publishers disagree, and
@@ -138,9 +187,12 @@ struct Qwen3_5DenseLayerWeights {
 // materialized into `lm_head`, NVFP4 stays PACKED in `lm_head_fp4`
 // (PERF-27B-LMHEAD-FP4, issue #213); exactly one is populated.
 struct Qwen3_5DenseWeights {
-  OwnedTensor embed_tokens;  // bf16 [vocab, H]  (NOT transposed; embed lookup)
-  OwnedTensor final_norm;    // bf16 [H]
-  OwnedTensor lm_head;       // bf16 [H, vocab]  (dequantized -> Matmul-B layout)
+  // GPTQ owners use FP16 for the unquantized remainder. Execution is enabled
+  // by the scoped FP16 work in GPTQ-03; this flag prevents BF16 fallthrough.
+  bool gptq4_checkpoint = false;
+  OwnedTensor embed_tokens;  // BF16 normally, GPTQ F16 [vocab,H]
+  OwnedTensor final_norm;    // BF16 normally, GPTQ F16 [H]
+  OwnedTensor lm_head;       // BF16 [H,vocab] normally; GPTQ F16 raw [vocab,H]
   // NVFP4-resident output head [N=vocab, K=H], kept in the on-disk orientation the
   // fp4 GEMMs read. Mirrors Qwen3_5MoeWeights::lm_head_fp4 and vLLM's own decision
   // to leave the head quantized: get_quant_method accepts ParallelLMHead
@@ -161,6 +213,12 @@ struct Qwen3_5DenseWeights {
   // still passing (`Exl3Weight::Bits`). Empty on every other head storage.
   Exl3Weight lm_head_exl3;
   std::vector<Qwen3_5DenseLayerWeights> layers;
+
+  size_t Gptq4ResidentBytes() const {
+    size_t total = 0;
+    for (const auto& layer : layers) total += layer.gptq4.ResidentBytes();
+    return total;
+  }
 };
 
 // True iff the projection named `name` is a W4A4-quantized Linear in the 27B
