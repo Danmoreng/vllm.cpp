@@ -333,6 +333,10 @@ const char* OpNameImpl(OpId op) {
   switch (op) {
     case OpId::kMatmul:
       return "Matmul";
+    case OpId::kMatmulGptq4W4A16:
+      return "MatmulGptq4W4A16";
+    case OpId::kMatmulDenseF16:
+      return "MatmulDenseF16";
     case OpId::kRmsNorm:
       return "RmsNorm";
     case OpId::kResidualRmsNorm:

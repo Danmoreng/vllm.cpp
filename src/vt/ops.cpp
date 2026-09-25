@@ -217,6 +217,77 @@ void MatmulBT(Queue& q, Tensor& out, const Tensor& a, const Tensor& b) {
   reinterpret_cast<MatmulFn>(ResolveWeightOp(OpId::kMatmulBT, q, b))(q, out, a, b);
 }
 
+void MatmulGptq4W4A16(Queue& q, Tensor& out, const Tensor& a,
+                      const Tensor& qweight, const Tensor& scales,
+                      const Tensor& zero_points, int group_size,
+                      const Tensor* bias) {
+  VT_CHECK(q.device.type == DeviceType::kXPU,
+           "matmul_gptq4_w4a16: XPU provider required");
+  VT_CHECK(a.rank == 2 && out.rank == 2 && qweight.rank == 2 && scales.rank == 2,
+           "matmul_gptq4_w4a16: rank-2 activation, output, weight and scales required");
+  VT_CHECK(a.dtype == DType::kF16 && out.dtype == DType::kF16,
+           "matmul_gptq4_w4a16: activation and output must be F16");
+  VT_CHECK(qweight.dtype == DType::kI32 && scales.dtype == DType::kF16,
+           "matmul_gptq4_w4a16: qweight must be I32 storage and scales F16");
+  VT_CHECK(zero_points.dtype == DType::kI8 && zero_points.rank == 1 &&
+               zero_points.Numel() == 1,
+           "matmul_gptq4_w4a16: one effective I8 zero point is required");
+  VT_CHECK(group_size > 0 && a.shape[1] % group_size == 0 && a.shape[1] % 8 == 0,
+           "matmul_gptq4_w4a16: K must be divisible by group size and eight");
+  const int64_t m = a.shape[0], k = a.shape[1], n = out.shape[1];
+  VT_CHECK(m > 0 && k > 0 && n > 0 && qweight.shape[0] == n &&
+               qweight.shape[1] == k / 8 && scales.shape[0] == k / group_size &&
+               scales.shape[1] == n && out.shape[0] == m,
+           "matmul_gptq4_w4a16: incompatible M/K/N or packed auxiliary shapes");
+  VT_CHECK(a.IsContiguous() && out.IsContiguous() && qweight.IsContiguous() &&
+               scales.IsContiguous() && zero_points.IsContiguous(),
+           "matmul_gptq4_w4a16: all operands must be contiguous");
+  VT_CHECK(a.device == q.device && out.device == q.device &&
+               qweight.device == q.device && scales.device == q.device &&
+               zero_points.device == q.device,
+           "matmul_gptq4_w4a16: tensor and queue devices must match");
+  VT_CHECK(out.data != a.data && out.data != qweight.data && out.data != scales.data &&
+               out.data != zero_points.data,
+           "matmul_gptq4_w4a16: output must not alias an input");
+  if (bias != nullptr) {
+    VT_CHECK(bias->dtype == DType::kF16 && bias->rank == 1 && bias->shape[0] == n &&
+                 bias->IsContiguous() && bias->device == q.device,
+             "matmul_gptq4_w4a16: optional bias must be contiguous F16[N] on the queue device");
+    VT_CHECK(out.data != bias->data, "matmul_gptq4_w4a16: output must not alias bias");
+  }
+  GetTypedOp<MatmulGptq4W4A16Fn>(OpId::kMatmulGptq4W4A16, q.device.type)(
+      q, out, a, qweight, scales, zero_points, group_size, bias);
+}
+
+void MatmulDenseF16(Queue& q, Tensor& out, const Tensor& a,
+                    const Tensor& weight, const Tensor* bias) {
+  VT_CHECK(q.device.type == DeviceType::kXPU,
+           "matmul_dense_f16: XPU provider required");
+  VT_CHECK(a.rank == 2 && out.rank == 2 && weight.rank == 2,
+           "matmul_dense_f16: rank-2 activation, output and weight required");
+  VT_CHECK(a.dtype == DType::kF16 && out.dtype == DType::kF16 &&
+               weight.dtype == DType::kF16,
+           "matmul_dense_f16: activation, weight and output must be F16");
+  const int64_t m = a.shape[0], k = a.shape[1], n = weight.shape[0];
+  VT_CHECK(m > 0 && k > 0 && n > 0 && weight.shape[1] == k &&
+               out.shape[0] == m && out.shape[1] == n,
+           "matmul_dense_f16: incompatible M/K/N shapes");
+  VT_CHECK(a.IsContiguous() && out.IsContiguous() && weight.IsContiguous(),
+           "matmul_dense_f16: activation, weight and output must be contiguous");
+  VT_CHECK(a.device == q.device && out.device == q.device && weight.device == q.device,
+           "matmul_dense_f16: tensor and queue devices must match");
+  VT_CHECK(out.data != a.data && out.data != weight.data,
+           "matmul_dense_f16: output must not alias an input");
+  if (bias != nullptr) {
+    VT_CHECK(bias->dtype == DType::kF16 && bias->rank == 1 && bias->shape[0] == n &&
+                 bias->IsContiguous() && bias->device == q.device,
+             "matmul_dense_f16: optional bias must be contiguous F16[N] on the queue device");
+    VT_CHECK(out.data != bias->data, "matmul_dense_f16: output must not alias bias");
+  }
+  GetTypedOp<MatmulDenseF16Fn>(OpId::kMatmulDenseF16, q.device.type)(
+      q, out, a, weight, bias);
+}
+
 // vt::MatmulBTQuant — see ops.h. Validation mirrors MatmulBT except for the
 // weight, whose block layout replaces the elementwise stride contract.
 void MatmulBTQuant(Queue& q, Tensor& out, const Tensor& a, const Tensor& b) {

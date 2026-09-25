@@ -921,6 +921,9 @@ enum class OpId : uint8_t {
   kSandwichRmsNorm,
   kCompiledGeluErfMul,
   kCopy,
+  // GPTQ oneDNN operators are appended so existing op ids remain stable.
+  kMatmulGptq4W4A16,
+  kMatmulDenseF16,
   kCount
 };
 
@@ -2290,6 +2293,10 @@ struct MoeRouterTopKArgs {
 // these types. A kernel that does not support a validated dtype combination
 // must throw loudly, never silently truncate.
 using MatmulFn = void (*)(Queue&, Tensor&, const Tensor&, const Tensor&);
+using MatmulGptq4W4A16Fn = void (*)(Queue&, Tensor&, const Tensor&, const Tensor&,
+                                    const Tensor&, const Tensor&, int, const Tensor*);
+using MatmulDenseF16Fn =
+    void (*)(Queue&, Tensor&, const Tensor&, const Tensor&, const Tensor*);
 using MatmulNvfp4Fn =
     void (*)(Queue&, Tensor&, const Tensor&, const Tensor&, const Tensor&, float);
 using ScaledFp4QuantFn =
@@ -2844,6 +2851,20 @@ void DropinProbe(Queue& q, Tensor& out, const Tensor& in,
 // cuBLASLt algo — and so the K-reduction split — differs); token-exact gates
 // decide call-site adoption.
 void MatmulBT(Queue& q, Tensor& out, const Tensor& a, const Tensor& b);
+
+// out[M,N] = a[M,K] @ dequant(qweight[N,K/8])^T. The post-load GPTQ bytes
+// remain packed U4; scales are [K/group,N] FP16 and zero_points is one
+// effective I8 value (8 for the pinned symmetric checkpoint). No CPU fallback
+// or weight repack is provided.
+void MatmulGptq4W4A16(Queue& q, Tensor& out, const Tensor& a,
+                      const Tensor& qweight, const Tensor& scales,
+                      const Tensor& zero_points, int group_size,
+                      const Tensor* bias = nullptr);
+
+// out[M,N] = a[M,K] @ weight[N,K]^T using FP16 storage, matching the unquantized
+// GPTQ BA and dense lm_head operator boundary.
+void MatmulDenseF16(Queue& q, Tensor& out, const Tensor& a,
+                    const Tensor& weight, const Tensor* bias = nullptr);
 
 // --- Compute-in-quant GEMM (QUANT-GGUF-CIQ-GEMM) ----------------------------
 // out[M,N] = a[M,K] @ b^T where the WEIGHT `b` is [N,K] row-major kept in its
