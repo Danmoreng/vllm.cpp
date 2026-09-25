@@ -9,6 +9,7 @@
 #include "vllm/v1/worker/gpu/cudagraph_dispatch.h"
 #include "vllm/model_executor/models/model_registry.h"
 
+#include <cstdio>
 #include <cstdlib>
 #include <memory>
 #include <optional>
@@ -130,6 +131,12 @@ void PrepareQwen3_5Dense(LoadedModel& model, const HfConfig& config,
              "gptq4: packed resident requires XPU");
     for (const Qwen3_5DenseLayerWeights& layer : qwen.weights().layers)
       layer.gptq4.PrepareResident(queue);
+    std::fprintf(stderr,
+                 "[gptq4] target text path: XPU oneDNN W4A16, FP16 activations "
+                 "and BA, FP32 GDN recurrence, eager forward; %zu layers, "
+                 "%zu packed resident bytes\n",
+                 qwen.weights().layers.size(),
+                 qwen.weights().Gptq4ResidentBytes());
     return;
   }
   // MODEL-FP8-BLOCK-LINEAR (#1189 M4). FIRST, before any resident is built: the
@@ -161,8 +168,6 @@ ForwardLogits ForwardQwen3_5Dense(LoadedModel& model,
                                   const ModelForwardInput& input) {
   auto& qwen = ModelAs<Qwen3_5DenseLoadedModel>(model, "Qwen3_5ForConditionalGeneration");
   const Qwen3_5DenseWeights& weights = qwen.weights();
-  VT_CHECK(!weights.gptq4_checkpoint,
-           "gptq4: packed projection dispatch is implemented in GPTQ-04");
 
   // ENG-ASYNC-SCHED W4: publish the async runner's device-resident input ids for
   // the duration of THIS forward, so the embed at the top of every route below
@@ -195,6 +200,7 @@ ForwardLogits ForwardQwen3_5Dense(LoadedModel& model,
   // (Qwen3.5-GDN included) capture ambient while every other family keeps
   // the explicit opt-in — the same shape as the qwen3 driver's gate.
   const bool graph_cuda =
+      !weights.gptq4_checkpoint &&
       platforms::GetPlatform(input.queue.device.type).support_static_graph_mode() &&
       !platforms::GetPlatform(input.queue.device.type)
            .static_graph_requires_opt_in(input.config.architectures);

@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "vllm/model_executor/model_loader/gptq4_weight.h"
+#include "vllm/model_executor/models/dense_gptq4_linear.h"
 #include "vllm/model_executor/models/dense_weight_loaders.h"
 #include "vllm/model_executor/models/qwen3_5_dense.h"
 #include "vt/backend.h"
@@ -64,6 +65,27 @@ void RequireClose(const std::vector<uint8_t>& actual,
     CHECK(std::abs(ReadHalf(actual.data(), i) - expected[i]) <=
           0.02f + 0.01f * std::abs(expected[i]));
   }
+}
+
+vllm::Gptq4Weight ConstantPacked(int k, int n, uint32_t words,
+                                  float scale) {
+  vllm::Gptq4Weight weight;
+  weight.k = k;
+  weight.n = n;
+  weight.qweight = vllm::dense_loaders::MakeOwned(vt::DType::kI32,
+                                                   {n, k / 8});
+  weight.scales = vllm::dense_loaders::MakeOwned(vt::DType::kF16,
+                                                 {k / 128, n});
+  weight.zero_point = vllm::dense_loaders::MakeOwned(vt::DType::kI8, {1});
+  std::vector<uint32_t> packed(static_cast<size_t>(n * k / 8), words);
+  std::vector<uint16_t> scales(static_cast<size_t>(n * k / 128),
+                               vt::F32ToF16(scale));
+  std::memcpy(weight.qweight.bytes.data(), packed.data(),
+              weight.qweight.bytes.size());
+  std::memcpy(weight.scales.bytes.data(), scales.data(),
+              weight.scales.bytes.size());
+  weight.zero_point.bytes.data()[0] = 8;
+  return weight;
 }
 
 }  // namespace
@@ -222,6 +244,120 @@ TEST_CASE("XPU GPTQ dense F16 matmul with optional bias") {
   const auto stats = vt::xpu::GetGptq4RuntimeStats(q.device.index);
   CHECK(stats.engine_count == 1);
   CHECK(stats.primitive_count == 3);
+}
+
+TEST_CASE("XPU GPTQ typed linear seam selects packed and dense FP16 providers") {
+  QueueOwner owner;
+  auto& queue = owner.queue;
+  Buffer input(queue, vt::DType::kF16, {1, 128});
+  Buffer dense_weight(queue, vt::DType::kF16, {8, 128});
+  const std::vector<uint16_t> input_bits(128, vt::F32ToF16(0.5f));
+  const std::vector<uint16_t> weight_bits(8 * 128, vt::F32ToF16(0.125f));
+  input.Upload(input_bits.data(), input.bytes);
+  dense_weight.Upload(weight_bits.data(), dense_weight.bytes);
+
+  vllm::Gptq4Weight packed;
+  packed.k = 128;
+  packed.n = 8;
+  packed.qweight = vllm::dense_loaders::MakeOwned(vt::DType::kI32, {8, 16});
+  packed.scales = vllm::dense_loaders::MakeOwned(vt::DType::kF16, {1, 8});
+  packed.zero_point = vllm::dense_loaders::MakeOwned(vt::DType::kI8, {1});
+  const std::vector<uint32_t> words(8 * 16, 0x99999999u);
+  const std::vector<uint16_t> scale_bits(8, vt::F32ToF16(0.125f));
+  std::memcpy(packed.qweight.bytes.data(), words.data(), packed.qweight.bytes.size());
+  std::memcpy(packed.scales.bytes.data(), scale_bits.data(), packed.scales.bytes.size());
+  packed.zero_point.bytes.data()[0] = 8;
+
+  vllm::dense_attn::Dev dev{vt::GetBackend(queue.device), queue,
+                            vt::DType::kF16};
+  const auto before = vllm::dense_gptq4::GetDispatchCounts();
+  auto packed_out = vllm::dense_gptq4::Packed(
+      dev, input.tensor, packed, vllm::dense_gptq4::Projection::kMlpGateUp);
+  auto dense_out = vllm::dense_gptq4::Dense(
+      dev, input.tensor, dense_weight.tensor,
+      vllm::dense_gptq4::Projection::kGdnBa);
+  std::vector<uint16_t> actual_packed(8), actual_dense(8);
+  auto& backend = vt::GetBackend(queue.device);
+  backend.Copy(queue, actual_packed.data(), packed_out.t().data, 16);
+  backend.Copy(queue, actual_dense.data(), dense_out.t().data, 16);
+  backend.Synchronize(queue);
+  for (int i = 0; i < 8; ++i) {
+    CHECK(vt::F16ToF32(actual_packed[i]) == doctest::Approx(8.0f));
+    CHECK(vt::F16ToF32(actual_dense[i]) == doctest::Approx(8.0f));
+  }
+  const auto after = vllm::dense_gptq4::GetDispatchCounts();
+  using vllm::dense_gptq4::Projection;
+  CHECK(after.calls[static_cast<size_t>(Projection::kMlpGateUp)] ==
+        before.calls[static_cast<size_t>(Projection::kMlpGateUp)] + 1);
+  CHECK(after.calls[static_cast<size_t>(Projection::kGdnBa)] ==
+        before.calls[static_cast<size_t>(Projection::kGdnBa)] + 1);
+}
+
+TEST_CASE("XPU GPTQ merged SwiGLU uses packed gate-up and down projections") {
+  QueueOwner owner;
+  auto& queue = owner.queue;
+  Buffer input(queue, vt::DType::kF16, {1, 128});
+  const std::vector<uint16_t> input_bits(128, vt::F32ToF16(0.5f));
+  input.Upload(input_bits.data(), input.bytes);
+  auto gate_up = ConstantPacked(128, 256, 0x99999999u, 0.015625f);
+  auto down = ConstantPacked(128, 128, 0x99999999u, 0.015625f);
+  vllm::dense_attn::Dev dev{vt::GetBackend(queue.device), queue,
+                            vt::DType::kF16};
+  const auto before = vllm::dense_gptq4::GetDispatchCounts();
+  auto output = vllm::dense_gptq4::Mlp(dev, input.tensor, gate_up, down, 128);
+  std::vector<uint16_t> actual(128);
+  auto& backend = vt::GetBackend(queue.device);
+  backend.Copy(queue, actual.data(), output.t().data, actual.size() * 2);
+  backend.Synchronize(queue);
+  const float projection = 128 * 0.5f * 0.015625f;
+  const float activated = vt::F16ToF32(vt::F32ToF16(
+      projection * projection / (1.0f + std::exp(-projection))));
+  const float expected = 128 * activated * 0.015625f;
+  for (uint16_t bits : actual)
+    CHECK(std::abs(vt::F16ToF32(bits) - expected) < 0.01f);
+  const auto after = vllm::dense_gptq4::GetDispatchCounts();
+  using vllm::dense_gptq4::Projection;
+  for (Projection projection : {Projection::kMlpGateUp, Projection::kMlpDown}) {
+    const size_t i = static_cast<size_t>(projection);
+    CHECK(after.calls[i] == before.calls[i] + 1);
+  }
+}
+
+TEST_CASE("XPU GPTQ merged attention QKV preserves Q gate K V row order") {
+  QueueOwner owner;
+  auto& queue = owner.queue;
+  Buffer input(queue, vt::DType::kF16, {2, 128});
+  std::vector<uint16_t> input_bits(256);
+  std::fill(input_bits.begin(), input_bits.begin() + 128,
+            vt::F32ToF16(0.5f));
+  std::fill(input_bits.begin() + 128, input_bits.end(),
+            vt::F32ToF16(0.25f));
+  input.Upload(input_bits.data(), input.bytes);
+  auto qkv = ConstantPacked(128, 384, 0x99999999u, 0.125f);
+  auto* words = reinterpret_cast<uint32_t*>(qkv.qweight.bytes.data());
+  for (int row = 128; row < 256; ++row)
+    std::fill(words + row * 16, words + (row + 1) * 16, 0xaaaaaaaau);
+  for (int row = 256; row < 384; ++row)
+    std::fill(words + row * 16, words + (row + 1) * 16, 0xbbbbbbbbu);
+  vllm::dense_attn::Dev dev{vt::GetBackend(queue.device), queue,
+                            vt::DType::kF16};
+  const auto before = vllm::dense_gptq4::GetDispatchCounts();
+  auto output = vllm::dense_gptq4::AttentionQkv(
+      dev, input.tensor, qkv, 128, 128);
+  std::vector<uint16_t> actual(2 * 384);
+  auto& backend = vt::GetBackend(queue.device);
+  backend.Copy(queue, actual.data(), output.t().data, actual.size() * 2);
+  backend.Synchronize(queue);
+  for (int token = 0; token < 2; ++token)
+    for (int segment = 0; segment < 3; ++segment)
+      for (int col = 0; col < 128; ++col) {
+        const float expected = (token == 0 ? 8.0f : 4.0f) * (segment + 1);
+        CHECK(vt::F16ToF32(actual[token * 384 + segment * 128 + col]) ==
+              doctest::Approx(expected));
+      }
+  const auto after = vllm::dense_gptq4::GetDispatchCounts();
+  const size_t i = static_cast<size_t>(vllm::dense_gptq4::Projection::kAttnQkv);
+  CHECK(after.calls[i] == before.calls[i] + 1);
 }
 
 TEST_CASE("XPU GPTQ FP16 BF16 F32 RMSNorm and SwiGLU boundaries") {
