@@ -60,6 +60,61 @@ TEST_CASE("XPU attention preamble: Q/gate split, Q/K RMSNorm, partial RoPE at re
     }
 }
 
+TEST_CASE("XPU F16 attention preamble and output gate preserve model dtype") {
+  Queue cpu(vt::DeviceType::kCPU), gpu(vt::DeviceType::kXPU);
+  constexpr int tokens = 2, hq = 2, hk = 1, dim = 8, rot = 4;
+  const auto packed_values = Values(tokens * hq * 2 * dim, 11, 0.2f);
+  const auto key_values = Values(tokens * hk * dim, 12, 0.2f);
+  std::vector<float> ref_q, ref_k, ref_gate;
+  {
+    Buffer packed(cpu.q, DType::kF32, {tokens, hq * 2 * dim});
+    Buffer key(cpu.q, DType::kF16, {tokens, hk * dim});
+    Buffer query(cpu.q, DType::kF32, {tokens, hq, dim});
+    Buffer keys(cpu.q, DType::kF32, {tokens, hk, dim});
+    Buffer gate(cpu.q, DType::kF32, {tokens, hq, dim});
+    Buffer qw(cpu.q, DType::kF32, {dim}), kw(cpu.q, DType::kF32, {dim});
+    Buffer pos(cpu.q, DType::kI32, {tokens});
+    auto rounded = packed_values;
+    for (auto& value : rounded) value = vt::F16ToF32(vt::F32ToF16(value));
+    packed.put(rounded); key.put(key_values);
+    qw.put(std::vector<float>(dim, 1.0f)); kw.put(std::vector<float>(dim, 1.0f));
+    const int32_t positions[] = {1, 17}; pos.upload(positions);
+    vt::AttnGateSplit(cpu.q, query.tensor, gate.tensor, packed.tensor);
+    auto query_flat = FlatHeads(query.tensor), keys_flat = FlatHeads(keys.tensor);
+    auto key_flat = vt::Tensor::Contiguous(key.tensor.data, DType::kF16,
+                                           cpu.q.device, {tokens * hk, dim});
+    vt::RmsNorm(cpu.q, query_flat, query_flat, qw.tensor, {1e-6f, true});
+    vt::RmsNorm(cpu.q, keys_flat, key_flat, kw.tensor, {1e-6f, true});
+    vt::RopeNeox(cpu.q, query.tensor, keys.tensor, pos.tensor,
+                 {10000000.0f, rot});
+    ref_q = query.floats(); ref_k = keys.floats(); ref_gate = gate.floats();
+  }
+  Buffer packed(gpu.q, DType::kF16, {tokens, hq * 2 * dim});
+  Buffer key(gpu.q, DType::kF16, {tokens, hk * dim});
+  Buffer query(gpu.q, DType::kF16, {tokens, hq, dim});
+  Buffer keys(gpu.q, DType::kF16, {tokens, hk, dim});
+  Buffer gate(gpu.q, DType::kF32, {tokens, hq, dim});
+  Buffer qw(gpu.q, DType::kF32, {dim}), kw(gpu.q, DType::kF32, {dim});
+  Buffer pos(gpu.q, DType::kI32, {tokens}), cos_sin(gpu.q, DType::kF32, {tokens, rot});
+  packed.put(packed_values); key.put(key_values);
+  qw.put(std::vector<float>(dim, 1.0f)); kw.put(std::vector<float>(dim, 1.0f));
+  const int32_t positions[] = {1, 17}; pos.upload(positions);
+  vt::RopeCosSinCache(gpu.q, cos_sin.tensor, pos.tensor, {10000000.0f, rot});
+  vt::AttnQkNormRopeGate(gpu.q, query.tensor, keys.tensor, gate.tensor,
+                         packed.tensor, key.tensor, qw.tensor, kw.tensor,
+                         cos_sin.tensor, {1e-6f, true}, {10000000.0f, rot});
+  Close(query.floats(), ref_q, 0.003f, 1e-4f);
+  Close(keys.floats(), ref_k, 0.003f, 1e-4f);
+  Close(gate.floats(), ref_gate, 2e-6f);
+  Buffer attn(gpu.q, DType::kF16, {tokens, hq, dim});
+  Buffer gated(gpu.q, DType::kF16, {tokens, hq, dim});
+  attn.put(std::vector<float>(tokens * hq * dim, 0.25f));
+  vt::SigmoidGateBf16(gpu.q, gated.tensor, attn.tensor, gate.tensor);
+  const auto actual = gated.floats();
+  for (size_t i = 0; i < actual.size(); ++i)
+    CHECK(std::abs(actual[i] - 0.25f / (1.0f + std::exp(-ref_gate[i]))) < 0.0003f);
+}
+
 TEST_CASE("XPU cached RoPE: supplied positions, strided heads, optional K and both pair styles") {
   Queue cpu(vt::DeviceType::kCPU), gpu(vt::DeviceType::kXPU);
   constexpr int tokens = 4, hq = 24, hk = 4, dim = 256, rot = 64, count = 130;

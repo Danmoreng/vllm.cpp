@@ -27,6 +27,13 @@ namespace {
 // them at once with zero call-site edits.
 bool IsFloat(DType d) { return d == DType::kF32 || d == DType::kF16 || d == DType::kBF16; }
 bool IsOutFloat(DType d) { return d == DType::kF32 || d == DType::kBF16; }
+// FP16 output is qualified one operation/provider at a time. This helper is
+// intentionally used only by the reviewed XPU operations below; widening
+// IsOutFloat would advertise FP16 to unrelated backends and kernels.
+bool IsXpuF16Out(const Queue& q, DType d) {
+  return IsOutFloat(d) ||
+         (q.device.type == DeviceType::kXPU && d == DType::kF16);
+}
 // Retained model values are scoped to ordinary weights, never activations.
 void ValidateWeightValues(const Tensor& weight, const Tensor& other,
                           const Tensor& out, const Queue& q) {
@@ -1171,8 +1178,8 @@ void MarlinDenseGemm(Queue& q, Tensor& c, const Tensor& a, const Tensor& b_q_wei
 void MoeSiluMul(Queue& q, Tensor& out, const Tensor& gate, const Tensor& up) {
   VT_CHECK(gate.Numel() == out.Numel() && up.Numel() == out.Numel(),
            "moe_silu_mul: out/gate/up must have the same element count");
-  VT_CHECK(IsFloat(gate.dtype) && IsFloat(up.dtype) && IsOutFloat(out.dtype),
-           "moe_silu_mul: float gate/up, f32/bf16 out");
+  VT_CHECK(IsFloat(gate.dtype) && IsFloat(up.dtype) && IsXpuF16Out(q, out.dtype),
+           "moe_silu_mul: float gate/up, f32/bf16 out (f16 on XPU)");
   VT_CHECK(out.IsContiguous() && gate.IsContiguous() && up.IsContiguous(),
            "moe_silu_mul: contiguous tensors required");
   VT_CHECK(out.device == q.device && gate.device == q.device && up.device == q.device,
@@ -1194,16 +1201,17 @@ void RmsNorm(Queue& q, Tensor& out, const Tensor& x, const Tensor& weight,
   VT_CHECK(x.rank == 2 && out.rank == 2 && weight.rank == 1, "rmsnorm: x/out rank-2, w rank-1");
   VT_CHECK(x.shape[0] == out.shape[0] && x.shape[1] == out.shape[1], "rmsnorm: shape mismatch");
   VT_CHECK(weight.shape[0] == x.shape[1], "rmsnorm: weight size mismatch");
-  VT_CHECK(IsFloat(x.dtype) && IsFloat(weight.dtype) && IsOutFloat(out.dtype),
-           "rmsnorm: float in, f32/bf16 out");
+  VT_CHECK(IsFloat(x.dtype) && IsFloat(weight.dtype) &&
+               IsXpuF16Out(q, out.dtype),
+           "rmsnorm: float in, f32/bf16 out (f16 on XPU)");
   VT_CHECK(x.IsContiguous() && out.IsContiguous() && weight.IsContiguous(),
            "rmsnorm: contiguous required");
   if (residual != nullptr) {
-    VT_CHECK((residual->dtype == DType::kF32 || residual->dtype == DType::kBF16) &&
+    VT_CHECK(IsXpuF16Out(q, residual->dtype) &&
                  residual->rank == 2 &&
                  residual->shape[0] == x.shape[0] && residual->shape[1] == x.shape[1] &&
                  residual->IsContiguous() && residual->device == x.device,
-             "rmsnorm: residual must be f32/bf16 [T,H] contiguous on x's device");
+             "rmsnorm: residual must be f32/bf16 (f16 on XPU) [T,H] contiguous on x's device");
   }
   VT_CHECK(x.device == out.device && weight.device == x.device && x.device == q.device,
            "rmsnorm: device mismatch (x/out/weight/queue)");
@@ -1691,7 +1699,8 @@ void SiluAndMul(Queue& q, Tensor& out, const Tensor& x) {
   VT_CHECK(x.shape[1] % 2 == 0, "silu_and_mul: inner dim must be even");
   VT_CHECK(out.shape[0] == x.shape[0] && out.shape[1] == x.shape[1] / 2,
            "silu_and_mul: output shape mismatch");
-  VT_CHECK(IsFloat(x.dtype) && IsOutFloat(out.dtype), "silu_and_mul: float in, f32/bf16 out");
+  VT_CHECK(IsFloat(x.dtype) && IsXpuF16Out(q, out.dtype),
+           "silu_and_mul: float in, f32/bf16 out (f16 on XPU)");
   VT_CHECK(x.IsContiguous() && out.IsContiguous(), "silu_and_mul: contiguous required");
   VT_CHECK(x.device == out.device && x.device == q.device, "silu_and_mul: device mismatch");
   reinterpret_cast<SiluAndMulFn>(GetOp(OpId::kSiluAndMul, q.device.type))(q, out, x);
@@ -1811,8 +1820,8 @@ void Add(Queue& q, Tensor& out, const Tensor& a, const Tensor& b) {
     for (int i = 0; i < a.rank; ++i)
       VT_CHECK(b.shape[i] == a.shape[i], "add: b shape must match a");
   }
-  VT_CHECK(IsFloat(a.dtype) && IsFloat(b.dtype) && IsOutFloat(out.dtype),
-           "add: float in, f32/bf16 out");
+  VT_CHECK(IsFloat(a.dtype) && IsFloat(b.dtype) && IsXpuF16Out(q, out.dtype),
+           "add: float in, f32/bf16 out (f16 on XPU)");
   VT_CHECK(a.IsContiguous() && b.IsContiguous() && out.IsContiguous(),
            "add: contiguous required");
   VT_CHECK(a.device == out.device && b.device == a.device && a.device == q.device,
@@ -1835,7 +1844,10 @@ void Embedding(Queue& q, Tensor& out, const Tensor& table, const Tensor& ids) {
   // residency (Qwen3.8-Flash-Next: 28.8 GB of IQ4_NL against 102.4 GB of bf16).
   VT_CHECK(IsFloat(table.dtype) || IsBlockQuant(table.dtype),
            "embedding: table must be float or block-quantized");
-  VT_CHECK(IsOutFloat(out.dtype), "embedding: f32/bf16 out");
+  VT_CHECK(IsOutFloat(out.dtype) ||
+               (q.device.type == DeviceType::kXPU &&
+                table.dtype == DType::kF16 && out.dtype == DType::kF16),
+           "embedding: f32/bf16 out (f16 table and out on XPU)");
   // `ggml_row_size` asserts a row is a whole number of blocks; a ragged K has no
   // row stride at all, so it refuses here rather than mis-striding every row
   // after the first. (This is also the reason the shipped table is IQ4_NL:
@@ -1870,8 +1882,8 @@ void RopeNeox(Queue& q, Tensor& q_states, Tensor& k_states, const Tensor& positi
            "rope: positions[T] mismatch");
   VT_CHECK(positions.dtype == DType::kI32 || positions.dtype == DType::kI64,
            "rope: positions i32/i64");
-  VT_CHECK(IsOutFloat(q_states.dtype) && k_states.dtype == q_states.dtype,
-           "rope: q/k must be f32 or bf16, same dtype");
+  VT_CHECK(IsXpuF16Out(q, q_states.dtype) && k_states.dtype == q_states.dtype,
+           "rope: q/k must be f32/bf16 (f16 on XPU), same dtype");
   VT_CHECK(args.rotary_dim > 0 && args.rotary_dim % 2 == 0 &&
                args.rotary_dim <= q_states.shape[2],
            "rope: rotary_dim must be even and <= head_dim");
@@ -2039,10 +2051,10 @@ void AttnQkNormRopeGate(Queue& q, Tensor& q_out, Tensor& k_out, Tensor& gate_out
   // KV-cache write, but sigmoid(gate) must see the un-rounded f32 gate). All
   // kernel math is f32 either way; a bf16 store is the RN round of the same
   // value, so mixed out is bit-identical to f32-out + CastBf16 on q/k.
-  VT_CHECK(IsOutFloat(q_out.dtype) && k_out.dtype == q_out.dtype &&
+  VT_CHECK(IsXpuF16Out(q, q_out.dtype) && k_out.dtype == q_out.dtype &&
                (gate_out.dtype == q_out.dtype ||
-                (q_out.dtype == DType::kBF16 && gate_out.dtype == DType::kF32)),
-           "attn_qk_norm_rope_gate: q/k/gate out f32 or bf16 (gate f32 allowed with bf16 q/k)");
+                (q_out.dtype != DType::kF32 && gate_out.dtype == DType::kF32)),
+           "attn_qk_norm_rope_gate: q/k/gate out f32/bf16 (f16 on XPU); gate f32 allowed");
   VT_CHECK(IsFloat(qgate.dtype) && kf.dtype == qgate.dtype,
            "attn_qk_norm_rope_gate: qgate/kf float, same dtype");
   VT_CHECK(q_norm.dtype == DType::kF32 && k_norm.dtype == DType::kF32 &&
@@ -2121,8 +2133,8 @@ void CheckConvCommon(const Queue& q, const Tensor& out, const Tensor& x, const T
   // the row is exactly (K-1), so this admits the identical shapes as before.
   VT_CHECK(conv_state.shape[1] == c && conv_state.shape[2] >= k - 1,
            std::string(name) + ": conv_state must be [N,C,(K-1)+num_spec>=K-1]");
-  VT_CHECK(IsFloat(x.dtype) && IsFloat(weight.dtype) && IsOutFloat(out.dtype),
-           std::string(name) + ": float x/weight, f32/bf16 out");
+  VT_CHECK(IsFloat(x.dtype) && IsFloat(weight.dtype) && IsXpuF16Out(q, out.dtype),
+           std::string(name) + ": float x/weight, f32/bf16 out (f16 on XPU)");
   // bf16 conv_state is admitted wherever the BACKEND says its conv kernels can
   // address a compressed row in place (Backend::SupportsCompressedConvState) —
   // CUDA and Vulkan today. Asking the backend rather than naming a device is
@@ -2131,10 +2143,13 @@ void CheckConvCommon(const Queue& q, const Tensor& out, const Tensor& x, const T
   // is still exactly what CPU does.
   const Backend* conv_backend = TryGetBackend(q.device.type);
   VT_CHECK(conv_state.dtype == DType::kF32 ||
-               (conv_state.dtype == DType::kBF16 && conv_backend != nullptr &&
+               ((conv_state.dtype == DType::kBF16 ||
+                 (q.device.type == DeviceType::kXPU && conv_state.dtype == DType::kF16)) &&
+                conv_backend != nullptr &&
                 conv_backend->SupportsCompressedConvState()),
            std::string(name) +
-               ": conv_state must be f32, or bf16 on a backend whose conv kernels "
+               ": conv_state must be f32, bf16 on a supporting backend, or f16 on XPU; "
+               "conv kernels "
                "support a compressed state in place (in/out, in place; bf16 = "
                "vLLM default mamba_cache_dtype, read/written in f32 registers)");
   // out/weight/conv_state stay fully contiguous. x may be a padded-row
@@ -2182,8 +2197,8 @@ void CheckGdnCommon(const Queue& q, const Tensor& out, const Tensor& q_in, const
   VT_CHECK(state.shape[1] == hv && state.shape[2] == dv && state.shape[3] == dk,
            std::string(name) + ": state must be [N,Hv,Dv,Dk]");
   VT_CHECK(IsFloat(q_in.dtype) && IsFloat(k.dtype) && IsFloat(v.dtype) &&
-               IsOutFloat(out.dtype),
-           std::string(name) + ": float q/k/v, f32/bf16 out");
+               IsXpuF16Out(q, out.dtype),
+           std::string(name) + ": float q/k/v, f32/bf16 out (f16 on XPU)");
   VT_CHECK(g.dtype == DType::kF32 && beta.dtype == DType::kF32,
            std::string(name) + ": g/beta must be f32 (upstream keeps them f32)");
   if (allow_compressed_state) {
@@ -2484,7 +2499,8 @@ void L2Norm(Queue& q, Tensor& out, const Tensor& x, const L2NormArgs& args) {
   VT_CHECK(out.rank == x.rank, "l2norm: out rank must match x");
   for (int d = 0; d < x.rank; ++d)
     VT_CHECK(out.shape[d] == x.shape[d], "l2norm: out shape must match x");
-  VT_CHECK(IsFloat(x.dtype) && IsOutFloat(out.dtype), "l2norm: float in, f32/bf16 out");
+  VT_CHECK(IsFloat(x.dtype) && IsXpuF16Out(q, out.dtype),
+           "l2norm: float in, f32/bf16 out (f16 on XPU)");
   VT_CHECK(x.IsContiguous() && out.IsContiguous(), "l2norm: contiguous required");
   VT_CHECK(x.device == q.device && out.device == q.device,
            "l2norm: device mismatch (x/out/queue)");
@@ -2507,8 +2523,8 @@ void RmsNormGated(Queue& q, Tensor& out, const Tensor& x, const Tensor& gate,
   const int64_t d = x.shape[x.rank - 1];
   VT_CHECK(weight.shape[0] == d, "rmsnorm_gated: weight size mismatch");
   VT_CHECK(IsFloat(x.dtype) && IsFloat(gate.dtype) && IsFloat(weight.dtype) &&
-               IsOutFloat(out.dtype),
-           "rmsnorm_gated: float in, f32/bf16 out");
+               IsXpuF16Out(q, out.dtype),
+           "rmsnorm_gated: float in, f32/bf16 out (f16 on XPU)");
   // x/out/weight stay contiguous; the gate may carry a padded outer (token)
   // stride with all inner dims contiguous.
   VT_CHECK(x.IsContiguous() && weight.IsContiguous() && out.IsContiguous(),
@@ -5245,8 +5261,8 @@ void PagedAttention(Queue& q, Tensor& out, const Tensor& query, const Tensor& k_
     VT_CHECK(args.window_size->left >= 0 && args.window_size->right >= 0,
              "paged_attention: window_size left/right must both be >= 0");
   }
-  VT_CHECK(IsFloat(query.dtype) && IsOutFloat(out.dtype),
-           "paged_attention: float query, f32/bf16 out");
+  VT_CHECK(IsFloat(query.dtype) && IsXpuF16Out(q, out.dtype),
+           "paged_attention: float query, f32/bf16 out (f16 on XPU)");
   // The KV cache may be a DIFFERENT float dtype than the query (Phase-1 bf16 KV
   // cache: f32 query · bf16 cache — the kernel converts bf16 cache reads to f32
   // and accumulates in f32). Require only that K and V share one float dtype.
@@ -5631,12 +5647,12 @@ void AttnGateSplit(Queue& q, Tensor& q_out, Tensor& gate_out, const Tensor& qgat
   // is #2488's remaining half and is NOT admitted here, because a refusal that
   // widened ahead of its consumer would move the failure from this call to a
   // deeper one.
-  VT_CHECK(q_out.dtype == DType::kF32 || q_out.dtype == DType::kBF16,
-           "attn_gate_split: q_out must be f32 or bf16");
+  VT_CHECK(IsXpuF16Out(q, q_out.dtype),
+           "attn_gate_split: q_out must be f32/bf16 (f16 on XPU)");
   VT_CHECK(gate_out.dtype == DType::kF32,
            "attn_gate_split: gate_out must be f32 (vt::SigmoidGateBf16 takes an f32 gate)");
-  VT_CHECK(qgate.dtype == DType::kF32 || qgate.dtype == DType::kBF16,
-           "attn_gate_split: qgate must be f32 or bf16 (bf16 = VT_BF16_GEMM_OUT q_proj)");
+  VT_CHECK(IsXpuF16Out(q, qgate.dtype),
+           "attn_gate_split: qgate must be f32/bf16 (f16 on XPU)");
   VT_CHECK(q_out.IsContiguous() && gate_out.IsContiguous() && qgate.IsContiguous(),
            "attn_gate_split: contiguous required");
   VT_CHECK(q_out.device == q.device && gate_out.device == q.device && qgate.device == q.device,
@@ -5646,14 +5662,16 @@ void AttnGateSplit(Queue& q, Tensor& q_out, Tensor& gate_out, const Tensor& qgat
 }
 
 void SigmoidGateBf16(Queue& q, Tensor& out, const Tensor& attn, const Tensor& gate) {
-  VT_CHECK(out.dtype == DType::kBF16, "sigmoid_gate_bf16: out must be bf16");
+  VT_CHECK(out.dtype == DType::kBF16 ||
+               (q.device.type == DeviceType::kXPU && out.dtype == DType::kF16),
+           "sigmoid_gate_bf16: out must be bf16 (f16 on XPU)");
   // attn may be bf16 (the FA-2 prefill path outputs bf16 attention); it is
   // upcast to f32 inside the kernel (exact), so bf16-attn is bit-identical to
   // f32-attn holding the same bf16-representable values. The gate stays f32
   // (sigmoid input must not be rounded).
-  VT_CHECK((attn.dtype == DType::kF32 || attn.dtype == DType::kBF16) &&
+  VT_CHECK(IsXpuF16Out(q, attn.dtype) &&
                gate.dtype == DType::kF32,
-           "sigmoid_gate_bf16: attn must be f32/bf16, gate f32");
+           "sigmoid_gate_bf16: attn must be f32/bf16 (f16 on XPU), gate f32");
   VT_CHECK(out.Numel() == attn.Numel() && out.Numel() == gate.Numel(),
            "sigmoid_gate_bf16: out/attn/gate must have the same element count");
   VT_CHECK(out.IsContiguous() && attn.IsContiguous() && gate.IsContiguous(),
@@ -5675,10 +5693,10 @@ void GdnGBeta(Queue& q, Tensor& g_out, Tensor& beta_out, const Tensor& araw, con
   VT_CHECK(a_log.rank == 1 && a_log.shape[0] == hv && dt_bias.rank == 1 && dt_bias.shape[0] == hv,
            "gdn_g_beta: a_log/dt_bias must be [Hv]");
   VT_CHECK(g_out.dtype == DType::kF32 && beta_out.dtype == DType::kF32 &&
-               (araw.dtype == DType::kF32 || araw.dtype == DType::kBF16) &&
+               IsXpuF16Out(q, araw.dtype) &&
                braw.dtype == araw.dtype && a_log.dtype == DType::kF32 &&
                dt_bias.dtype == DType::kF32,
-           "gdn_g_beta: g/beta/a_log/dt_bias f32; a/b must share f32 or bf16");
+           "gdn_g_beta: g/beta/a_log/dt_bias f32; a/b share f32/bf16 (f16 on XPU)");
   VT_CHECK(g_out.IsContiguous() && beta_out.IsContiguous() &&
                araw.stride[1] == 1 && braw.stride[1] == 1 &&
                araw.stride[0] >= hv && braw.stride[0] >= hv &&
@@ -5703,10 +5721,10 @@ void GdnConvSplit(Queue& q, Tensor& q_out, Tensor& k_out, Tensor& v_out, const T
            "gdn_conv_split: conv_dim must be 2*key_dim + value_dim");
   // q/k/v out may be f32 OR bf16 (coupled GDN bf16 path); conv may be f32 OR bf16
   // (input-side bf16 GDN path, VT_GDN_IN_BF16) — the kernel upcasts via Load().
-  VT_CHECK((q_out.dtype == DType::kF32 || q_out.dtype == DType::kBF16) &&
+  VT_CHECK(IsXpuF16Out(q, q_out.dtype) &&
                k_out.dtype == q_out.dtype && v_out.dtype == q_out.dtype &&
-               (conv.dtype == DType::kF32 || conv.dtype == DType::kBF16),
-           "gdn_conv_split: q/k/v out f32 or bf16 (same dtype), conv f32 or bf16");
+               IsXpuF16Out(q, conv.dtype),
+           "gdn_conv_split: q/k/v share f32/bf16 (f16 on XPU), conv likewise");
   VT_CHECK(q_out.IsContiguous() && k_out.IsContiguous() && v_out.IsContiguous() &&
                conv.IsContiguous(),
            "gdn_conv_split: contiguous required");
@@ -5773,16 +5791,16 @@ void GdnPostConv(Queue& q, Tensor& q_out, Tensor& k_out, Tensor& v_out, Tensor& 
   // model-dtype bf16 and slicing it produces row-strided inner-contiguous
   // views; kernels upcast those loads while g/beta remain f32. conv may be f32
   // OR bf16 (input-side bf16 GDN path, VT_GDN_IN_BF16).
-  VT_CHECK((q_out.dtype == DType::kF32 || q_out.dtype == DType::kBF16) &&
+  VT_CHECK(IsXpuF16Out(q, q_out.dtype) &&
                k_out.dtype == q_out.dtype && v_out.dtype == q_out.dtype,
-           "gdn_post_conv: q_out/k_out/v_out must be f32 or bf16, same dtype");
-  VT_CHECK(conv.dtype == DType::kF32 || conv.dtype == DType::kBF16,
-           "gdn_post_conv: conv must be f32 or bf16");
+           "gdn_post_conv: q/k/v share f32/bf16 (f16 on XPU)");
+  VT_CHECK(IsXpuF16Out(q, conv.dtype),
+           "gdn_post_conv: conv must be f32/bf16 (f16 on XPU)");
   VT_CHECK(g_out.dtype == DType::kF32 && beta_out.dtype == DType::kF32 &&
-               (araw.dtype == DType::kF32 || araw.dtype == DType::kBF16) &&
+               IsXpuF16Out(q, araw.dtype) &&
                braw.dtype == araw.dtype && a_log.dtype == DType::kF32 &&
                dt_bias.dtype == DType::kF32,
-           "gdn_post_conv: g/beta/a_log/dt_bias f32; a/b must share f32 or bf16");
+           "gdn_post_conv: g/beta/a_log/dt_bias f32; a/b share f32/bf16 (f16 on XPU)");
   VT_CHECK(q_out.IsContiguous() && k_out.IsContiguous() && v_out.IsContiguous() &&
                g_out.IsContiguous() && beta_out.IsContiguous() && conv.IsContiguous() &&
                araw.stride[1] == 1 && braw.stride[1] == 1 &&

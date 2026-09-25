@@ -49,6 +49,61 @@ void AttnGateSplitKernel(Queue& q, Tensor& queries, Tensor& gates, const Tensor&
   });
   RecordProfileEvent(q, "attn_gate_split", event);
 }
+void AttnQkNormRopeGateKernel(Queue& q, Tensor& q_out, Tensor& k_out,
+                             Tensor& gate_out, const Tensor& qgate,
+                             const Tensor& kf, const Tensor& q_norm,
+                             const Tensor& k_norm, const Tensor& cos_sin,
+                             const RmsNormArgs& norm_args, const RopeArgs& rope_args) {
+  TraceXpuOp(OpId::kAttnQkNormRopeGate, q,
+             {&q_out, &k_out, &gate_out, &qgate, &kf, &q_norm, &k_norm, &cos_sin});
+  for (const Tensor* dst : {&q_out, &k_out, &gate_out})
+    for (const Tensor* src : {&qgate, &kf, &q_norm, &k_norm, &cos_sin})
+      VT_CHECK(!Overlap(*dst, *src), "XPU attention preamble requires separate outputs");
+  VT_CHECK(!Overlap(q_out, k_out) && !Overlap(q_out, gate_out) &&
+               !Overlap(k_out, gate_out),
+           "XPU attention preamble outputs must not overlap");
+  const View qo(q_out), ko(k_out), go(gate_out), qs(qgate), ks(kf),
+             qw(q_norm), kw(k_norm), cs(cos_sin);
+  const int64_t tokens = q_out.shape[0], hq = q_out.shape[1],
+                hk = k_out.shape[1], dim = q_out.shape[2];
+  const int64_t half = rope_args.rotary_dim / 2, rot = rope_args.rotary_dim;
+  const float eps = norm_args.eps;
+  const bool gemma = norm_args.gemma;
+  const auto event = NativeQueue(q).parallel_for(
+      sycl::range<1>(tokens * (hq + hk)), [=](sycl::id<1> item) {
+    const int64_t token = item[0] / (hq + hk), head = item[0] % (hq + hk);
+    const bool query = head < hq;
+    const int64_t local_head = query ? head : head - hq;
+    const View src = query ? qs : ks, weight = query ? qw : kw,
+               dst = query ? qo : ko;
+    const int64_t src_base = token * src.stride[0] +
+        local_head * (query ? 2 * dim : dim);
+    const int64_t out_base = (token * (query ? hq : hk) + local_head) * dim;
+    float sum = 0;
+    for (int64_t i = 0; i < dim; ++i) {
+      const float value = Load(src, src_base + i);
+      sum += value * value;
+    }
+    const float inv = 1.0f / sycl::sqrt(sum / static_cast<float>(dim) + eps);
+    for (int64_t i = 0; i < dim; ++i) {
+      const auto norm = [&](int64_t col) {
+        const float w = Load(weight, col);
+        return Load(src, src_base + col) * inv * (gemma ? 1.0f + w : w);
+      };
+      float value = norm(i);
+      if (i < rot) {
+        const int64_t pair = i < half ? i : i - half;
+        const float first = norm(pair), second = norm(pair + half);
+        const float c = Load(cs, token * rot + pair);
+        const float s = Load(cs, token * rot + half + pair);
+        value = i < half ? first * c - second * s : first * s + second * c;
+      }
+      Store(dst, out_base + i, value);
+      if (query) Store(go, out_base + i, Load(qs, src_base + dim + i));
+    }
+  });
+  RecordProfileEvent(q, "attn_qk_norm_rope_gate", event);
+}
 void RopeNeoxKernel(Queue& q, Tensor& queries, Tensor& keys, const Tensor& positions, const RopeArgs& args) {
   TraceXpuOp(OpId::kRopeNeox, q, {&queries, &keys, &positions});
   VT_CHECK(NativeQueue(q).get_device().has(sycl::aspect::fp64), "XPU legacy RoPE requires FP64 frequency math");
@@ -221,7 +276,8 @@ void PagedAttentionKernel(Queue& q, Tensor& out, const Tensor& query, const Tens
     // FP8 remains an explicit cache choice; its quantization has a separate
     // quality delta, so do not treat the BF16 qualification as an FP8 gate.
     const bool automatic = mode == "auto" && query.shape[1] == 24 && dim == 256 &&
-        key_cache.shape[2] == 4 && key_cache.dtype == DType::kBF16 &&
+        key_cache.shape[2] == 4 &&
+        (key_cache.dtype == DType::kBF16 || key_cache.dtype == DType::kF16) &&
         device.has(sycl::aspect::ext_intel_device_id) &&
         device.get_info<sycl::ext::intel::info::device::device_id>() == 57891 &&
         std::string_view(__VERSION__) == "Intel(R) oneAPI DPC++/C++ Compiler 2026.1.1 (2026.1.1.20260724)" &&

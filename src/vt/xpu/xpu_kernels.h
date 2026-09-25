@@ -45,6 +45,9 @@ void RmsNormGatedKernel(Queue&, Tensor&, const Tensor&, const Tensor&, const Ten
 void GdnStateGatherKernel(Queue&, Tensor&, const Tensor&, const Tensor&, const Tensor*);
 void GdnStateScatterKernel(Queue&, Tensor&, const Tensor&, const Tensor&);
 void AttnGateSplitKernel(Queue&, Tensor&, Tensor&, const Tensor&);
+void AttnQkNormRopeGateKernel(Queue&, Tensor&, Tensor&, Tensor&, const Tensor&,
+                             const Tensor&, const Tensor&, const Tensor&,
+                             const Tensor&, const RmsNormArgs&, const RopeArgs&);
 void RopeNeoxKernel(Queue&, Tensor&, Tensor&, const Tensor&, const RopeArgs&);
 void RopeCosSinCacheKernel(Queue&, Tensor&, const Tensor&, const RopeArgs&);
 void RopeFromCacheKernel(Queue&, Tensor&, Tensor*, const Tensor&, const Tensor&, const RopeArgs&);

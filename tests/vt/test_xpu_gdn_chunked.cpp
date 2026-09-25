@@ -47,10 +47,11 @@ void Accuracy(const std::vector<float>& actual, const std::vector<float>& expect
 }
 struct Result { std::vector<float> output, state; };
 Result Run(vt::Queue& queue, const std::vector<int32_t>& offsets, int heads, DType output_type,
-           bool initial, int split = 0, bool public_call = false, bool zero_decay = false) {
+           bool initial, int split = 0, bool public_call = false, bool zero_decay = false,
+           DType input_type = DType::kBF16) {
   const int tokens = offsets.back(), sequences = offsets.size() - 1, kh = heads / 3;
-  Buffer q(queue, DType::kBF16, {tokens, kh, D}), k(queue, DType::kBF16, {tokens, kh, D});
-  Buffer v(queue, DType::kBF16, {tokens, heads, D}), out(queue, output_type, {tokens, heads, D});
+  Buffer q(queue, input_type, {tokens, kh, D}), k(queue, input_type, {tokens, kh, D});
+  Buffer v(queue, input_type, {tokens, heads, D}), out(queue, output_type, {tokens, heads, D});
   Buffer g(queue, DType::kF32, {tokens, heads}), beta(queue, DType::kF32, {tokens, heads});
   Buffer state(queue, DType::kF32, {sequences, heads, D, D}), qsl(queue, DType::kI32, {sequences + 1});
   q.put(Normalized(tokens * kh * D, 1)); k.put(Normalized(tokens * kh * D, 2));
@@ -95,6 +96,39 @@ Result Run(vt::Queue& queue, const std::vector<int32_t>& offsets, int heads, DTy
   }
   return {out.floats(), state.floats()};
 }
+}
+
+TEST_CASE("XPU GDN chunk64: F16 XMX output and F32 state match sequential CPU") {
+  Queue cpu(vt::DeviceType::kCPU), gpu(vt::DeviceType::kXPU);
+  for (int length : {64, 65}) {
+    const auto ref = Run(cpu.q, {0, length}, 48, DType::kF32, true,
+                         0, false, false, DType::kF16);
+    const auto got = Run(gpu.q, {0, length}, 48, DType::kF16, true,
+                         0, false, false, DType::kF16);
+    Accuracy(got.output, ref.output, true);
+    Accuracy(got.state, ref.state);
+  }
+  CHECK(vt::GetReferenceTierHits() == 0);
+}
+
+TEST_CASE("XPU GDN short F16 prefill selects chunked kernel"
+          * doctest::skip(!std::getenv("VT_XPU_PROFILE"))) {
+  Queue cpu(vt::DeviceType::kCPU), gpu(vt::DeviceType::kXPU);
+  const auto ref = Run(cpu.q, {0, 64}, 48, DType::kF32, true,
+                       0, false, false, DType::kF16);
+  (void)vt::xpu::DrainProfileEvents();
+  const auto got = Run(gpu.q, {0, 64}, 48, DType::kF16, true,
+                       0, true, false, DType::kF16);
+  Accuracy(got.output, ref.output, true);
+  Accuracy(got.state, ref.state);
+  const auto records = vt::xpu::DrainProfileEvents();
+  size_t dots = 0, recurrence = 0;
+  for (const auto& record : records) {
+    dots += record.stage == "gdn_chunk_dots";
+    recurrence += record.stage == "gdn_prefill_recurrence";
+  }
+  CHECK(dots == 1);
+  CHECK(recurrence == 0);
 }
 
 TEST_CASE("XPU GDN chunk64: full output and F32 state against sequential CPU") {
