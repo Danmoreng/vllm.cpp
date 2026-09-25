@@ -44,6 +44,9 @@ bool PagedAttentionPrefillKernel(Queue& q, Tensor& out, const Tensor& query, con
   const auto* offsets = static_cast<const int32_t*>(query_start_loc.data);
   const float scale = args.scale, cap = args.logits_soft_cap, kscale = args.k_scale, vscale = args.v_scale;
   const bool causal = args.causal;
+  // An F16 query is represented exactly by its high half. The residual XMX
+  // product is identically zero and costs one extra matrix multiply per D tile.
+  const bool query_has_residual = query.dtype != DType::kF16;
   const int64_t left = args.window_size ? args.window_size->left : -1;
   const int64_t right = args.window_size ? args.window_size->right : -1;
   // One extra partial tile per sequence. The device maps this compact grid,
@@ -86,7 +89,8 @@ bool PagedAttentionPrefillKernel(Queue& q, Tensor& out, const Tensor& query, con
       for (int i = tid; i < Q * D; i += WG) {
         const float value = i / D < rows ? Load(qs, ((token + i / D) * heads + head) * D + i % D) : 0;
         const auto high = narrow(value);
-        query_tile[i] = high; query_low[i] = narrow(value - float(high));
+        query_tile[i] = high;
+        if (query_has_residual) query_low[i] = narrow(value - float(high));
       }
       if (tid < Q) { maxval[tid] = -std::numeric_limits<float>::infinity(); denom[tid] = 0; }
       mx::joint_matrix<sycl::sub_group, float, mx::use::accumulator, 16, 16> acc0, acc1;
@@ -111,8 +115,10 @@ bool PagedAttentionPrefillKernel(Queue& q, Tensor& out, const Tensor& query, con
             mx::joint_matrix_load(sg, a, query_tile.template get_multi_ptr<sycl::access::decorated::no>() + d, D);
             mx::joint_matrix_load(sg, b, kv.template get_multi_ptr<sycl::access::decorated::no>() + d * K + subgroup * 16, K);
             mx::joint_matrix_mad(sg, dot, a, b, dot);
-            mx::joint_matrix_load(sg, a, query_low.template get_multi_ptr<sycl::access::decorated::no>() + d, D);
-            mx::joint_matrix_mad(sg, dot, a, b, dot);
+            if (query_has_residual) {
+              mx::joint_matrix_load(sg, a, query_low.template get_multi_ptr<sycl::access::decorated::no>() + d, D);
+              mx::joint_matrix_mad(sg, dot, a, b, dot);
+            }
           }
           mx::joint_matrix_store(sg, dot, scores.template get_multi_ptr<sycl::access::decorated::no>() + subgroup * 16, K, mx::layout::row_major);
         }

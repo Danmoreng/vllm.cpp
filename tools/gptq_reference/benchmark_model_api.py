@@ -15,6 +15,7 @@ def main() -> int:
     parser.add_argument("--port", type=int, default=8082)
     parser.add_argument("--prompt-tokens", type=int, default=4096)
     parser.add_argument("--output-tokens", type=int, default=64)
+    parser.add_argument("--json-out", type=str)
     args = parser.parse_args()
     prompt = [100 + i % 11 for i in range(args.prompt_tokens)]
     payload = {
@@ -28,6 +29,7 @@ def main() -> int:
         "top_k": 1,
         "seed": 0,
         "stream": True,
+        "return_token_ids": True,
         "stream_options": {"include_usage": True},
     }
     request = Request(
@@ -37,6 +39,8 @@ def main() -> int:
         method="POST",
     )
     emitted: list[float] = []
+    generated_token_ids: list[int] = []
+    returned_prompt_ids = None
     usage = None
     started = time.monotonic()
     with urlopen(request, timeout=600) as response:
@@ -49,15 +53,21 @@ def main() -> int:
             event = json.loads(body)
             if event.get("usage") is not None:
                 usage = event["usage"]
-            if any(choice.get("text") or choice.get("finish_reason") is None
-                   for choice in event.get("choices", [])):
-                emitted.append(time.monotonic())
+            for choice in event.get("choices", []):
+                if choice.get("prompt_token_ids") is not None:
+                    returned_prompt_ids = choice["prompt_token_ids"]
+                token_ids = choice.get("token_ids") or []
+                generated_token_ids.extend(token_ids)
+                emitted.extend([time.monotonic()] * len(token_ids))
     finished = time.monotonic()
-    if len(emitted) < 2:
-        raise SystemExit(f"expected at least two streamed tokens, got {len(emitted)}")
+    if returned_prompt_ids != prompt:
+        raise SystemExit("reference did not use the requested prompt token IDs")
+    if len(emitted) != args.output_tokens:
+        raise SystemExit(f"expected {args.output_tokens} streamed tokens, got {len(emitted)}")
     report = {
         "prompt_tokens": args.prompt_tokens,
         "requested_output_tokens": args.output_tokens,
+        "generated_token_ids": generated_token_ids,
         "streamed_events": len(emitted),
         "usage": usage,
         "time_to_first_token_s": emitted[0] - started,
@@ -67,7 +77,11 @@ def main() -> int:
         "total_request_s": finished - started,
         "metric_scope": "API wall time including local HTTP, scheduling and sampling",
     }
-    print(json.dumps(report, indent=2, sort_keys=True))
+    serialized = json.dumps(report, indent=2, sort_keys=True) + "\n"
+    if args.json_out:
+        with open(args.json_out, "w", encoding="utf-8") as output:
+            output.write(serialized)
+    print(serialized, end="")
     return 0 if usage and usage.get("completion_tokens") == args.output_tokens else 1
 
 

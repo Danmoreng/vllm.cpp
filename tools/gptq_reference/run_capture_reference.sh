@@ -42,6 +42,7 @@ exec docker run --rm --pull=never --name b70-gptq-reference-capture \
   -e GPTQ_CAPTURE_DIR=/output \
   -e GPTQ_CAPTURE_CATEGORIES="${GPTQ_CAPTURE_CATEGORIES:-}" \
   -e GPTQ_CAPTURE_HEAD_OUTPUT_ONLY="${GPTQ_CAPTURE_HEAD_OUTPUT_ONLY:-}" \
+  -e GPTQ_CAPTURE_PROMPT_KEY="${GPTQ_CAPTURE_PROMPT_KEY:-}" \
   -e GPTQ_CAPTURE_CONTEXT_FILE=/output/current_prompt.json \
   -e HF_HUB_OFFLINE=1 \
   -e TRANSFORMERS_OFFLINE=1 \
@@ -59,7 +60,7 @@ exec docker run --rm --pull=never --name b70-gptq-reference-capture \
   --gpu-memory-utilization "${GPU_MEMORY_UTILIZATION:-0.93}" \
   --kv-cache-dtype "${REFERENCE_KV_CACHE_DTYPE:-auto}" \
   --max-num-seqs 1 \
-  --max-num-batched-tokens 512 \
+  --max-num-batched-tokens "${REFERENCE_MAX_NUM_BATCHED_TOKENS:-512}" \
   --no-enable-prefix-caching \
   --enforce-eager \
   --served-model-name B70-GPTQ-INT4-Reference

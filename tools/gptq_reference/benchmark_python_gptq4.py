@@ -178,8 +178,14 @@ def main() -> int:
             screen = error <= (0.02 + 0.01 * expected.abs())
             outside = int((~screen).sum().item())
 
-            for _ in range(10):
+            warmup_count = 768
+            warmup_begin = profiled_queue.marker()
+            for index in range(warmup_count):
                 invoke()
+                if (index + 1) % 64 == 0:
+                    torch.xpu.synchronize()
+            warmup_end = profiled_queue.marker()
+            warmup_gpu_ms = profiled_queue.interval_us(warmup_begin, warmup_end) / 1000
             torch.xpu.synchronize()
             host_us: list[float] = []
             gpu_us: list[float] = []
@@ -199,6 +205,8 @@ def main() -> int:
         "M": int(activation.shape[0]),
         "K": int(activation.shape[1]),
         "N": int(expected.shape[1]),
+        "warmup_count": warmup_count,
+        "warmup_gpu_ms": warmup_gpu_ms,
         "median_host_enqueue_us": median(host_us),
         "median_gpu_interval_us": median(gpu_us),
         "gpu_interval_timer": "SYCL single-task queue markers; includes host submission gaps",

@@ -85,11 +85,11 @@ The typed VT operations are `MatmulGptq4W4A16` and `MatmulDenseF16`:
   There is no Python call, weight repack, or CPU fallback. Primitives, streams,
   per-queue argument bindings, and scratchpads are reused by the adapter.
 
-This is the GPTQ-01 standalone operator adapter and probe. It does not yet wire
-the GPTQ checkpoint loader or the Qwen text model; those are later plan steps.
-The focused B70 test result for `test_xpu_gptq4` is **2 test cases, 1,232
-assertions, 0 failures**. Build the `test_xpu_gptq4` and `b70_gptq4_probe`
-targets in the configured XPU build. Run the focused test with:
+The adapter began as the GPTQ-01 standalone operator probe. The checkpoint
+loader and Qwen text model were added in later commits on this branch. The
+original focused B70 operator test result was **2 test cases, 1,232 assertions,
+0 failures**. Build the `test_xpu_gptq4` and `b70_gptq4_probe` targets in the
+configured XPU build. Run the focused test with:
 
 ```sh
 ctest --test-dir <xpu-build-dir> -R '^test_xpu_gptq4$' --output-on-failure
@@ -114,12 +114,28 @@ N=14336`) passed at `M=1` and `M=16` (`1.083` and `1.019`). These runs had
 stable primitive/engine caches and matched their captured outputs; the largest
 reported absolute difference was `0.0009765625` for attention K at `M=256`.
 
-**GPTQ-01 performance acceptance remains open.** The fused attention QKV at
-`M=256` exceeds the plan's 20% limit: the original acceptance sample was
-`391.562 us` native vs `306.146 us` Python (ratio `1.279`); repeated measurements
-after matching explicit USM and cached bindings were still about `1.49x` to
-`1.70x` slower, with exact output and stable caches. That gap is unexplained,
-so the plan's stop condition applies: do not begin GPTQ-02 loader/model wiring
-until this shape is resolved and the affected acceptance measurements are
-repeated. The broader timing table above predates the final USM/binding
-alignment; only the fused QKV `M=256` shape was retimed afterward.
+The original fused QKV `M=256` sample (`391.562 us` native vs `306.146 us`
+Python) did not satisfy the 20% limit. Ten warmup calls left the GPU at a
+different operating point across alternating runs. With 768 warmup calls on
+each side, identical output, and stable primitive caches, three alternating
+native/Python samples were `367.083/379.063`, `365.834/375.833`, and
+`371.042/377.917 us`. The native operator is within the 20% gate in these
+repeat runs. Both probes now report the measured warmup GPU duration.
+
+## Current model-level status (2026-09-26)
+
+The native 64-layer model graph and GPTQ checkpoint path run on the pinned B70.
+After the wide-row RMSNorm and F16 attention prefill changes, three 4096-token
+prefill runs measured `331.882/330.941/330.840 tokens/s`; their corresponding
+decode runs measured `12.59/12.55/12.52 tokens/s` for 63 forward steps. The
+native figures cover graph computation. The warmed Python reference API runs,
+which also include HTTP, scheduling, and sampling, measured approximately
+`2.79 s` to first token and `21.6 tokens/s` decode. The scopes differ, so the
+two prefill measurements are not directly interchangeable.
+
+The native graph's focused full-model check passed 2,483,514 assertions. The
+4096-token Python-oracle comparison **does not meet the planned quality gate**:
+full-vocabulary KL divergence was `0.00368401` (limit `0.01`), but total
+variation was `0.0248366` (limit `0.02`). The cause of that difference has not
+yet been localized. This branch should be reviewed as a measured implementation
+with an open model-quality issue, not as completed GPTQ-05 acceptance.

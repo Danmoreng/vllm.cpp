@@ -9,6 +9,7 @@
 #include <filesystem>
 #include <fstream>
 #include <chrono>
+#include <iostream>
 #include <map>
 #include <stdexcept>
 #include <string>
@@ -27,6 +28,7 @@
 #include "vt/fp8_kv.h"
 #include "vt/op_provider.h"
 #include "vt/unaligned.h"
+#include "vt/xpu.h"
 #include <nlohmann/json.hpp>
 
 namespace {
@@ -1302,8 +1304,29 @@ TEST_CASE("GPTQ4 real 64-layer text prefill and decode use the packed XPU path")
   // graphed run also warms both persistent decode slots before measurement.
   const bool bench_4k = std::getenv("VLLM_CPP_GPTQ4_4K_BENCH") != nullptr;
   if (std::getenv("VLLM_CPP_GPTQ4_SHORT_BENCH") != nullptr || bench_4k) {
-    const int prompt_tokens = bench_4k ? 4096 : 512;
+    int prompt_tokens = bench_4k ? 4096 : 512;
+    if (const char* override_tokens = std::getenv("VLLM_CPP_GPTQ4_BENCH_PROMPT_TOKENS")) {
+      prompt_tokens = std::stoi(override_tokens);
+      REQUIRE(prompt_tokens >= 64);
+      REQUIRE(prompt_tokens <= (bench_4k ? 4096 : 512));
+    }
     const int output_tokens = bench_4k ? 64 : 8;
+    std::vector<int32_t> decode_ids(output_tokens - 1);
+    const char* token_report = std::getenv("VLLM_CPP_GPTQ4_BENCH_TOKEN_IDS");
+    if (token_report != nullptr) {
+      std::ifstream input(token_report);
+      REQUIRE(input.good());
+      const auto report = nlohmann::json::parse(input);
+      REQUIRE(report.at("prompt_tokens").get<int>() == prompt_tokens);
+      REQUIRE(report.at("requested_output_tokens").get<int>() == output_tokens);
+      const auto& generated = report.at("generated_token_ids");
+      REQUIRE(generated.size() == static_cast<size_t>(output_tokens));
+      for (int step = 0; step < output_tokens - 1; ++step)
+        decode_ids[step] = generated.at(step).get<int32_t>();
+    } else {
+      for (int step = 0; step < output_tokens - 1; ++step)
+        decode_ids[step] = 300 + step;
+    }
     std::vector<int32_t> bench_ids(prompt_tokens), bench_positions(prompt_tokens);
     for (int token = 0; token < prompt_tokens; ++token) {
       bench_ids[token] = 100 + token % 11;
@@ -1319,15 +1342,83 @@ TEST_CASE("GPTQ4 real 64-layer text prefill and decode use the packed XPU path")
         bench_ids, bench_positions, bench_am, bench_gm, attn_kv, gdn_state,
         config, queue, bench_indices};
     bench_input.num_reqs = 1;
-    auto run_prefill = [&] {
+    std::vector<float> four_k_reference;
+    std::vector<uint16_t> four_k_reference_hidden;
+    const char* four_k_oracle_dir = std::getenv("VLLM_CPP_GPTQ4_4K_ORACLE_DIR");
+    if (four_k_oracle_dir != nullptr) {
+      const bool prompt_key =
+          std::getenv("VLLM_CPP_GPTQ4_4K_ORACLE_PROMPT_KEY") != nullptr;
+      const std::string stem = prompt_key
+          ? "dense_lm_head_p" + std::to_string(prompt_tokens) + "_m1"
+          : "dense_lm_head_m1";
+      const auto oracle = vllm::SafetensorsFile::Open(
+          std::string(four_k_oracle_dir) + "/" + stem + ".safetensors");
+      const auto& output = oracle.Get("output_reference");
+      const auto& hidden = oracle.Get("activation_fp16");
+      REQUIRE(output.dtype == "F16");
+      REQUIRE((output.shape == std::vector<int64_t>{1, config.vocab_size}));
+      REQUIRE(hidden.dtype == "F16");
+      REQUIRE((hidden.shape == std::vector<int64_t>{1, config.hidden_size}));
+      four_k_reference_hidden.resize(static_cast<size_t>(config.hidden_size));
+      std::memcpy(four_k_reference_hidden.data(), hidden.data, hidden.nbytes);
+      four_k_reference.resize(static_cast<size_t>(config.vocab_size));
+      for (size_t i = 0; i < four_k_reference.size(); ++i)
+        four_k_reference[i] = vt::F16ToF32(vt::LoadUnaligned<uint16_t>(
+            output.data + i * sizeof(uint16_t)));
+    }
+    auto run_prefill = [&](bool verify_oracle = false) {
+      vllm::Qwen3_5MTPHiddenStates hidden_tap;
+      bench_input.hidden_tap = verify_oracle && !four_k_reference.empty()
+                                   ? &hidden_tap : nullptr;
       const auto result = vllm::ModelRegistry::Forward(*model, bench_input);
+      bench_input.hidden_tap = nullptr;
       REQUIRE(result.on_device());
+      if (verify_oracle && !four_k_reference.empty()) {
+        REQUIRE(hidden_tap.tensor.dtype == vt::DType::kF16);
+        REQUIRE(hidden_tap.tensor.shape[0] == prompt_tokens);
+        std::vector<uint16_t> actual_hidden(four_k_reference_hidden.size());
+        backend.Copy(queue, actual_hidden.data(),
+                     static_cast<const char*>(hidden_tap.tensor.data) +
+                         static_cast<size_t>(prompt_tokens - 1) *
+                             config.hidden_size * sizeof(uint16_t),
+                     actual_hidden.size() * sizeof(uint16_t));
+        backend.Synchronize(queue);
+        float max_hidden_difference = 0.0f;
+        double squared_error = 0.0, squared_reference = 0.0;
+        for (size_t i = 0; i < actual_hidden.size(); ++i) {
+          const float actual = vt::F16ToF32(actual_hidden[i]);
+          const float reference = vt::F16ToF32(four_k_reference_hidden[i]);
+          const double difference = static_cast<double>(actual) - reference;
+          max_hidden_difference = std::max(
+              max_hidden_difference, static_cast<float>(std::abs(difference)));
+          squared_error += difference * difference;
+          squared_reference += static_cast<double>(reference) * reference;
+        }
+        MESSAGE("GPTQ4 Python FP16 4K hidden max|diff| "
+                << max_hidden_difference << ", rel RMS "
+                << std::sqrt(squared_error / squared_reference));
+        const auto actual = read_logits(result, 1);
+        compare_distribution(actual, 0, four_k_reference, "Python FP16 4K");
+      } else {
+        backend.Synchronize(queue);
+      }
+    };
+    const auto reset_state = [&] {
+      for (const auto& cache : attn_kv)
+        backend.Memset(queue, cache.data, 0,
+                       static_cast<size_t>(cache.num_blocks * 2 * cache.block_size *
+                                           cache.num_kv_heads * cache.head_size) *
+                           vt::SizeOf(cache.dtype));
+      for (const auto& state : gdn_state) {
+        backend.Memset(queue, state.ssm_state.data, 0, state.ssm_state.Bytes());
+        backend.Memset(queue, state.conv_state.data, 0, state.conv_state.Bytes());
+      }
       backend.Synchronize(queue);
     };
-    const auto run_decodes = [&] {
-      std::chrono::steady_clock::time_point first_end, last_end;
-      for (int step = 0; step < output_tokens; ++step) {
-        const std::vector<int32_t> token_id{300 + step};
+    const auto run_decodes = [&](std::chrono::steady_clock::time_point first_end) {
+      auto last_end = first_end;
+      for (int step = 0; step < output_tokens - 1; ++step) {
+        const std::vector<int32_t> token_id{decode_ids[step]};
         const std::vector<int32_t> position{prompt_tokens + step};
         auto decode_am = attention_meta(1, prompt_tokens + step);
         decode_am.block_table_num_cols = prompt_tokens / block_size + 1;
@@ -1345,33 +1436,53 @@ TEST_CASE("GPTQ4 real 64-layer text prefill and decode use the packed XPU path")
         const auto result = vllm::ModelRegistry::Forward(*model, step_input);
         REQUIRE(result.on_device());
         backend.Synchronize(queue);
-        const auto end = std::chrono::steady_clock::now();
-        if (step == 0) first_end = end;
-        last_end = end;
+        last_end = std::chrono::steady_clock::now();
       }
       return std::chrono::duration<double>(last_end - first_end).count();
     };
-    run_prefill();
-    if (std::getenv("VLLM_CPP_GPTQ4_GRAPH_TEST") != nullptr)
-      (void)run_decodes();
-    const auto prefill_start = std::chrono::steady_clock::now();
-    run_prefill();
-    const auto prefill_end = std::chrono::steady_clock::now();
-    const double prefill_seconds =
-        std::chrono::duration<double>(prefill_end - prefill_start).count();
-    const auto timed_replays_before = backend.GraphReplays();
-    const double decode_seconds = run_decodes();
-    const auto timed_replays = backend.GraphReplays() - timed_replays_before;
-    if (std::getenv("VLLM_CPP_GPTQ4_GRAPH_TEST") != nullptr)
-      CHECK(timed_replays >= output_tokens);
-    MESSAGE("GPTQ4 B1 timing: prompt " << prompt_tokens
-            << ", output " << output_tokens
-            << ", warm prefill 1, prefill compute " << prefill_seconds
-            << " s (" << prompt_tokens / prefill_seconds << " tokens/s), "
-            << "decode interval " << decode_seconds / (output_tokens - 1)
-            << " s/token (" << (output_tokens - 1) / decode_seconds
-            << " tokens/s); load/JIT excluded, FP16 KV, graph replays "
-            << timed_replays);
+    reset_state();
+    run_prefill(true);
+    if (std::getenv("VLLM_CPP_GPTQ4_4K_ORACLE_ONLY") != nullptr) return;
+    (void)run_decodes(std::chrono::steady_clock::now());
+    const bool profile = std::getenv("VLLM_CPP_GPTQ4_PROFILE") != nullptr;
+    const auto report_profile = [&](const char* phase) {
+      std::map<std::string, std::pair<size_t, double>> by_stage;
+      for (const auto& event : vt::xpu::DrainProfileEvents(queue.device.index)) {
+        auto& [count, milliseconds] = by_stage[event.stage];
+        ++count;
+        milliseconds += static_cast<double>(event.end_ns - event.start_ns) / 1.0e6;
+      }
+      nlohmann::json report = nlohmann::json::object();
+      for (const auto& [stage, values] : by_stage)
+        report[stage] = {{"count", values.first}, {"gpu_ms", values.second}};
+      std::cout << "GPTQ4_PROFILE_" << phase << ' ' << report.dump() << '\n';
+    };
+    if (profile) (void)vt::xpu::DrainProfileEvents(queue.device.index);
+    const int rounds = profile ? 1 : (bench_4k ? 3 : 1);
+    for (int round = 0; round < rounds; ++round) {
+      reset_state();
+      const auto prefill_start = std::chrono::steady_clock::now();
+      run_prefill();
+      const auto prefill_end = std::chrono::steady_clock::now();
+      const double prefill_seconds =
+          std::chrono::duration<double>(prefill_end - prefill_start).count();
+      if (profile) report_profile("PREFILL");
+      const auto timed_replays_before = backend.GraphReplays();
+      const double decode_seconds = run_decodes(
+          profile ? std::chrono::steady_clock::now() : prefill_end);
+      if (profile) report_profile("DECODE");
+      const auto timed_replays = backend.GraphReplays() - timed_replays_before;
+      if (std::getenv("VLLM_CPP_GPTQ4_GRAPH_TEST") != nullptr)
+        CHECK(timed_replays >= output_tokens - 1);
+      MESSAGE("GPTQ4 B1 timing round " << round << ": prompt " << prompt_tokens
+              << ", output " << output_tokens
+              << ", warm prefill 1, prefill compute " << prefill_seconds
+              << " s (" << prompt_tokens / prefill_seconds << " tokens/s), "
+              << "decode interval " << decode_seconds / (output_tokens - 1)
+              << " s/token (" << (output_tokens - 1) / decode_seconds
+              << " tokens/s); load/JIT excluded, FP16 KV, graph replays "
+              << timed_replays);
+    }
   }
 }
 
