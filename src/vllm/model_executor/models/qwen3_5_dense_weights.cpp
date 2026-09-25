@@ -11,6 +11,7 @@
 #include <limits>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include "vllm/model_executor/layers/quantization/compressed_tensors/nvfp4_emulation.h"
@@ -41,6 +42,71 @@ using dense_loaders::ReadF32Scalar;
 namespace {
 
 using TensorExists = std::function<bool(const std::string&)>;
+
+// GPTQ stores its unquantized text remainder as FP16. Keep those values in
+// their checkpoint dtype; the FP16 execution path is wired separately.
+OwnedTensor LoadGptqF16(const TensorResolver& get, const std::string& name,
+                        const std::vector<int64_t>& shape, bool nk = false) {
+  const StTensor& t = get(name);
+  VT_CHECK(t.dtype == "F16" && t.shape == shape,
+           "gptq4: expected F16 tensor with configured shape for " + name);
+  size_t numel = 1;
+  for (int64_t dim : shape) {
+    VT_CHECK(dim > 0 && numel <= std::numeric_limits<size_t>::max() /
+                                    static_cast<size_t>(dim),
+             "gptq4: invalid FP16 tensor shape for " + name);
+    numel *= static_cast<size_t>(dim);
+  }
+  VT_CHECK(numel <= std::numeric_limits<size_t>::max() / 2 &&
+               t.nbytes == numel * 2 && t.data != nullptr,
+           "gptq4: invalid FP16 byte span for " + name);
+  OwnedTensor out;
+  if (!BorrowStTensorBytes(out, t, vt::DType::kF16, shape)) {
+    out = MakeOwned(vt::DType::kF16, shape);
+    std::memcpy(out.bytes.data(), t.data, t.nbytes);
+    MaybeReleaseSourcePages(t.data, t.nbytes);
+  }
+  out.nk = nk;
+  return out;
+}
+
+OwnedTensor LoadGptqF16MergedNK(const TensorResolver& get,
+                                const std::string& first,
+                                const std::string& second, int64_t first_n,
+                                int64_t second_n, int64_t k) {
+  const StTensor& a = get(first);
+  const StTensor& b = get(second);
+  const std::vector<int64_t> first_shape{first_n, k};
+  const std::vector<int64_t> second_shape{second_n, k};
+  VT_CHECK(a.dtype == "F16" && b.dtype == "F16" &&
+               a.shape == first_shape && b.shape == second_shape &&
+               a.nbytes == static_cast<size_t>(first_n * k) * 2 &&
+               b.nbytes == static_cast<size_t>(second_n * k) * 2,
+           "gptq4: invalid merged FP16 BA geometry");
+  OwnedTensor out = MakeOwned(vt::DType::kF16, {first_n + second_n, k});
+  out.nk = true;
+  std::memcpy(out.bytes.data(), a.data, a.nbytes);
+  std::memcpy(out.bytes.data() + a.nbytes, b.data, b.nbytes);
+  MaybeReleaseSourcePages(a.data, a.nbytes);
+  MaybeReleaseSourcePages(b.data, b.nbytes);
+  return out;
+}
+
+OwnedTensor LoadGptqF16VectorAsF32(const TensorResolver& get,
+                                   const std::string& name, int64_t n) {
+  const StTensor& t = get(name);
+  VT_CHECK(t.dtype == "F16" && t.shape == std::vector<int64_t>{n} &&
+               t.nbytes == static_cast<size_t>(n) * 2,
+           "gptq4: invalid FP16 vector for " + name);
+  OwnedTensor out = MakeOwned(vt::DType::kF32, {n});
+  for (int64_t i = 0; i < n; ++i) {
+    const float value = vt::F16ToF32(
+        vt::LoadUnaligned<uint16_t>(t.data + i * 2));
+    std::memcpy(out.bytes.data() + i * 4, &value, 4);
+  }
+  MaybeReleaseSourcePages(t.data, t.nbytes);
+  return out;
+}
 
 // The GDN in-projections stay RAW in the on-disk torch Linear [out, in]
 // orientation (nk=true, via LoadMergedBf16RawNK), consumed by vt::MatmulBT —
@@ -790,6 +856,272 @@ DenseMlpWeights LoadDenseMlp(const TensorResolver& get, const TensorExists& has,
 
 }  // namespace
 
+DenseGptq4LayerWeights LoadQwen3_5DenseGptq4Projections(
+    const TensorResolver& get, const TensorExists& has,
+    const HfConfig& config, int64_t layer_idx,
+    const std::string& backbone_prefix) {
+  dense_loaders::CheckProbeCanAnswerNo(
+      has, "LoadQwen3_5DenseGptq4Projections");
+  VT_CHECK(layer_idx >= 0 &&
+               layer_idx < static_cast<int64_t>(config.layer_types.size()),
+           "gptq4: layer index is outside the text layer configuration");
+  const int64_t hidden = config.hidden_size;
+  const int64_t intermediate = config.intermediate_size;
+  const int64_t value_dim =
+      config.linear_num_value_heads * config.linear_value_head_dim;
+  VT_CHECK(hidden > 0 && intermediate > 0 &&
+               config.num_attention_heads > 0 &&
+               config.num_key_value_heads > 0 && config.head_dim > 0 &&
+               config.linear_num_key_heads > 0 &&
+               config.linear_key_head_dim > 0 &&
+               config.linear_num_value_heads > 0 &&
+               config.linear_value_head_dim > 0 &&
+               hidden <= (1 << 20) && intermediate <= (1 << 20) &&
+               config.num_attention_heads <= (1 << 20) &&
+               config.num_key_value_heads <= (1 << 20) &&
+               config.head_dim <= (1 << 20) &&
+               config.linear_num_key_heads <= (1 << 20) &&
+               config.linear_key_head_dim <= (1 << 20) &&
+               config.linear_num_value_heads <= (1 << 20) &&
+               config.linear_value_head_dim <= (1 << 20),
+           "gptq4: incomplete text projection geometry");
+
+  const std::string base = backbone_prefix + "layers." +
+                           std::to_string(layer_idx) + ".";
+  const auto check = [&has](const std::string& projection) {
+    VT_CHECK(has(projection + ".qweight"),
+             "gptq4: missing packed projection " + projection);
+    VT_CHECK(!has(projection + ".weight") &&
+                 !has(projection + ".weight_packed") &&
+                 !has(projection + ".trellis"),
+             "gptq4: conflicting weight representation for " + projection);
+  };
+  DenseGptq4LayerWeights result;
+  const std::string mlp = base + "mlp.";
+  const std::string gate = mlp + "gate_proj";
+  const std::string up = mlp + "up_proj";
+  const std::string down = mlp + "down_proj";
+  for (const auto& projection : {gate, up, down}) check(projection);
+  result.mlp_gate_up = LoadMergedGptq4Weight(
+      get, {gate, up}, hidden, {intermediate, intermediate});
+  result.mlp_down = LoadGptq4Weight(get, down, intermediate, hidden);
+
+  const std::string& layer_type =
+      config.layer_types[static_cast<size_t>(layer_idx)];
+  if (layer_type == "linear_attention") {
+    const std::string la = base + "linear_attn.";
+    const std::string qkv = la + "in_proj_qkv";
+    const std::string z = la + "in_proj_z";
+    const std::string out = la + "out_proj";
+    for (const auto& projection : {qkv, z, out}) check(projection);
+    const int64_t qkv_dim =
+        2 * config.linear_num_key_heads * config.linear_key_head_dim + value_dim;
+    result.gdn_qkvz = LoadMergedGptq4Weight(
+        get, {qkv, z}, hidden, {qkv_dim, value_dim});
+    result.gdn_out = LoadGptq4Weight(get, out, value_dim, hidden);
+  } else if (layer_type == "full_attention") {
+    const std::string sa = base + "self_attn.";
+    const std::string q = sa + "q_proj";
+    const std::string k = sa + "k_proj";
+    const std::string v = sa + "v_proj";
+    const std::string out = sa + "o_proj";
+    for (const auto& projection : {q, k, v, out}) check(projection);
+    const int64_t q_dim = 2 * config.num_attention_heads * config.head_dim;
+    const int64_t kv_dim = config.num_key_value_heads * config.head_dim;
+    result.attn_qkv = LoadMergedGptq4Weight(
+        get, {q, k, v}, hidden, {q_dim, kv_dim, kv_dim});
+    result.attn_out = LoadGptq4Weight(
+        get, out, config.num_attention_heads * config.head_dim, hidden);
+  } else {
+    VT_CHECK(false, "gptq4: unsupported text layer type " + layer_type);
+  }
+  return result;
+}
+
+std::vector<DenseGptq4LayerWeights> LoadQwen3_5DenseGptq4TextProjections(
+    const std::vector<SafetensorsFile>& shards, const HfConfig& config,
+    vt::Queue* load_queue) {
+  VT_CHECK(config.raw.contains("quantization_config") &&
+               config.raw["quantization_config"].is_object(),
+           "gptq4: missing quantization_config");
+  const auto& quant = config.raw["quantization_config"];
+  VT_CHECK(quant.value("quant_method", std::string()) == "gptq" &&
+               quant.value("format", std::string()) == "gptq" &&
+               quant.value("bits", 0) == 4 &&
+               quant.value("group_size", 0) == 128 &&
+               quant.value("sym", false) &&
+               !quant.value("desc_act", true) &&
+               quant.value("pack_dtype", std::string()) == "int32",
+           "gptq4: unsupported quantization configuration");
+  VT_CHECK(config.num_hidden_layers > 0 &&
+               static_cast<int64_t>(config.layer_types.size()) ==
+                   config.num_hidden_layers,
+           "gptq4: incomplete text layer inventory");
+  VT_CHECK(load_queue == nullptr ||
+               load_queue->device.type == vt::DeviceType::kXPU,
+           "gptq4: resident text projection loader requires XPU");
+
+  std::unordered_map<std::string, const SafetensorsFile*> where;
+  std::vector<std::string> all_names;
+  for (const SafetensorsFile& shard : shards) {
+    for (const std::string& name : shard.Names()) {
+      VT_CHECK(where.emplace(name, &shard).second,
+               "gptq4: duplicate tensor name " + name);
+      all_names.push_back(name);
+    }
+  }
+  const std::string backbone = ResolveQwen3_5BackbonePrefix(all_names);
+  const TensorResolver get = [&where](const std::string& name)
+      -> const StTensor& {
+    const auto it = where.find(name);
+    VT_CHECK(it != where.end(), "gptq4: missing tensor " + name);
+    return it->second->Get(name);
+  };
+  const TensorExists has = [&where](const std::string& name) {
+    return where.find(name) != where.end();
+  };
+  size_t expected_matrices = 0;
+  std::unordered_set<std::string> expected_layer_names;
+  const auto allow_projection = [&expected_layer_names](const std::string& proj) {
+    for (const char* suffix : {".qweight", ".scales", ".qzeros", ".g_idx"})
+      expected_layer_names.insert(proj + suffix);
+  };
+  for (size_t layer = 0; layer < config.layer_types.size(); ++layer) {
+    const auto& type = config.layer_types[layer];
+    VT_CHECK(type == "linear_attention" || type == "full_attention",
+             "gptq4: unsupported text layer type " + type);
+    expected_matrices += type == "linear_attention" ? 6 : 7;
+    const std::string base = backbone + "layers." + std::to_string(layer) + ".";
+    expected_layer_names.insert(base + "input_layernorm.weight");
+    expected_layer_names.insert(base + "post_attention_layernorm.weight");
+    for (const char* proj : {"gate_proj", "up_proj", "down_proj"})
+      allow_projection(base + "mlp." + proj);
+    if (type == "linear_attention") {
+      const std::string la = base + "linear_attn.";
+      for (const char* proj : {"in_proj_qkv", "in_proj_z", "out_proj"})
+        allow_projection(la + proj);
+      for (const char* dense : {"in_proj_b.weight", "in_proj_a.weight",
+                                "conv1d.weight", "A_log", "dt_bias",
+                                "norm.weight"})
+        expected_layer_names.insert(la + dense);
+    } else {
+      const std::string sa = base + "self_attn.";
+      for (const char* proj : {"q_proj", "k_proj", "v_proj", "o_proj"})
+        allow_projection(sa + proj);
+      expected_layer_names.insert(sa + "q_norm.weight");
+      expected_layer_names.insert(sa + "k_norm.weight");
+    }
+  }
+  size_t found_matrices = 0;
+  const std::string layer_prefix = backbone + "layers.";
+  for (const auto& name : all_names) {
+    if (name.rfind(layer_prefix, 0) == 0) {
+      VT_CHECK(expected_layer_names.count(name) != 0,
+               "gptq4: unexpected text layer tensor " + name);
+      if (name.size() >= 8 &&
+          name.compare(name.size() - 8, 8, ".qweight") == 0)
+        ++found_matrices;
+    }
+  }
+  VT_CHECK(found_matrices == expected_matrices,
+           "gptq4: text qweight inventory does not match layer topology");
+
+  std::vector<DenseGptq4LayerWeights> layers;
+  layers.reserve(static_cast<size_t>(config.num_hidden_layers));
+  for (int64_t layer = 0; layer < config.num_hidden_layers; ++layer) {
+    layers.push_back(LoadQwen3_5DenseGptq4Projections(
+        get, has, config, layer, backbone));
+    if (load_queue != nullptr) layers.back().PrepareResident(*load_queue);
+  }
+  return layers;
+}
+
+namespace {
+
+Qwen3_5DenseWeights LoadGptq4DenseText(
+    const std::vector<SafetensorsFile>& shards, const HfConfig& config,
+    const TensorResolver& get, const TensorExists& has,
+    const std::string& backbone, vt::Queue* load_queue) {
+  VT_CHECK(config.hidden_size > 0 && config.vocab_size > 0 &&
+               config.linear_num_key_heads > 0 &&
+               config.linear_key_head_dim > 0 &&
+               config.linear_num_value_heads > 0 &&
+               config.linear_value_head_dim > 0 &&
+               config.linear_conv_kernel_dim > 0 && config.head_dim > 0,
+           "gptq4: incomplete unquantized text geometry");
+  VT_CHECK(has("lm_head.weight") && !has("lm_head.qweight") &&
+               !has(backbone + "embed_tokens.qweight"),
+           "gptq4: expected separate unquantized FP16 head and embedding");
+  for (const auto& shard : shards) {
+    for (const auto& name : shard.Names()) {
+      const bool head = name.rfind("lm_head.", 0) == 0;
+      const bool embedding =
+          name.rfind(backbone + "embed_tokens.", 0) == 0;
+      const bool final_norm = name.rfind(backbone + "norm.", 0) == 0;
+      if (head || embedding || final_norm) {
+        const std::string expected = head ? "lm_head.weight"
+            : embedding ? backbone + "embed_tokens.weight"
+                        : backbone + "norm.weight";
+        VT_CHECK(name == expected,
+                 "gptq4: unexpected unquantized text tensor " + name);
+      }
+    }
+  }
+  Qwen3_5DenseWeights result;
+  result.gptq4_checkpoint = true;
+  auto packed = LoadQwen3_5DenseGptq4TextProjections(
+      shards, config,
+      load_queue != nullptr && load_queue->device.type == vt::DeviceType::kXPU
+          ? load_queue : nullptr);
+  const int64_t hidden = config.hidden_size;
+  const int64_t value_dim = config.linear_num_value_heads *
+                            config.linear_value_head_dim;
+  const int64_t conv_dim = 2 * config.linear_num_key_heads *
+                               config.linear_key_head_dim + value_dim;
+  result.embed_tokens = LoadGptqF16(
+      get, backbone + "embed_tokens.weight", {config.vocab_size, hidden});
+  result.final_norm = LoadGptqF16(get, backbone + "norm.weight", {hidden});
+  result.lm_head = LoadGptqF16(
+      get, "lm_head.weight", {config.vocab_size, hidden}, true);
+  result.layers.reserve(packed.size());
+  for (size_t i = 0; i < packed.size(); ++i) {
+    const std::string base = backbone + "layers." + std::to_string(i) + ".";
+    Qwen3_5DenseLayerWeights layer;
+    layer.gptq4 = std::move(packed[i]);
+    layer.input_layernorm = LoadGptqF16(
+        get, base + "input_layernorm.weight", {hidden});
+    layer.post_attention_layernorm = LoadGptqF16(
+        get, base + "post_attention_layernorm.weight", {hidden});
+    layer.is_linear_attention = config.layer_types[i] == "linear_attention";
+    if (layer.is_linear_attention) {
+      const std::string la = base + "linear_attn.";
+      layer.gdn.in_proj_ba = LoadGptqF16MergedNK(
+          get, la + "in_proj_b.weight", la + "in_proj_a.weight",
+          config.linear_num_value_heads, config.linear_num_value_heads,
+          hidden);
+      layer.gdn.conv1d_weight = LoadGptqF16(
+          get, la + "conv1d.weight",
+          {conv_dim, 1, config.linear_conv_kernel_dim});
+      layer.gdn.a_log = LoadGptqF16VectorAsF32(
+          get, la + "A_log", config.linear_num_value_heads);
+      layer.gdn.dt_bias = LoadGptqF16VectorAsF32(
+          get, la + "dt_bias", config.linear_num_value_heads);
+      layer.gdn.norm_weight = LoadGptqF16(
+          get, la + "norm.weight", {config.linear_value_head_dim});
+    } else {
+      const std::string sa = base + "self_attn.";
+      layer.attn.q_norm = LoadGptqF16(
+          get, sa + "q_norm.weight", {config.head_dim});
+      layer.attn.k_norm = LoadGptqF16(
+          get, sa + "k_norm.weight", {config.head_dim});
+    }
+    result.layers.push_back(std::move(layer));
+  }
+  return result;
+}
+
+}  // namespace
+
 // VT_MODELOPT_W4A4 (default 0): consume a projection's on-disk activation
 // divisor, setting `alpha` and so flipping `IsTrueW4A4()` to the fp4-ACTIVATION
 // GEMM (docs/ENVIRONMENT.md). ONE reader, so the spellings cannot drift --
@@ -1063,6 +1395,17 @@ Qwen3_5DenseWeights LoadQwen3_5Dense(const std::vector<SafetensorsFile>& shards,
                    config.num_hidden_layers,
            "qwen3_5 dense: layer_types size must equal num_hidden_layers");
 
+  // A GPTQ projection has no `.weight`. Route by its storage spelling before
+  // any BF16/FP8 loader attempts to resolve that absent tensor.
+  const bool declared_gptq = config.raw.contains("quantization_config") &&
+      config.raw["quantization_config"].is_object() &&
+      config.raw["quantization_config"].value(
+          "quant_method", std::string()) == "gptq";
+  if (declared_gptq ||
+      has(backbone + "layers.0.mlp.gate_proj.qweight")) {
+    return LoadGptq4DenseText(shards, config, get, has, backbone, load_queue);
+  }
+
   // MODEL-FP8-BLOCK-WEIGHT (#1189 M3): ONE read of the quantization config for
   // the whole checkpoint, validated here rather than per projection. It carries
   // the block geometry the rung needs and the `modules_to_not_convert` list the
@@ -1270,6 +1613,7 @@ bool IsPlainBf16Qwen3_5Dense(const Qwen3_5DenseWeights& weights) {
   // `dense_attn::ResidentWeight` on three separate members instead.
   if (!weights.lm_head_exl3.Empty()) return false;
   for (const Qwen3_5DenseLayerWeights& layer : weights.layers) {
+    if (!layer.gptq4.Empty()) return false;
     if (layer.mlp.IsExl3()) return false;
     if (!layer.is_linear_attention && layer.attn.IsExl3()) return false;
     // MODEL-QWEN35-GDN-EXL3 (#2495 item 4): the GDN tower, for exactly the
@@ -1396,6 +1740,17 @@ size_t ReleaseResidentQwen3_5DenseHostWeights(
     release(layer.mlp.up_proj);
     release(layer.mlp.gate_up_proj);
     release(layer.mlp.down_proj);
+    const auto release_gptq = [&release](Gptq4Weight& weight) {
+      release(weight.qweight);
+      release(weight.scales);
+      release(weight.zero_point);
+    };
+    release_gptq(layer.gptq4.gdn_qkvz);
+    release_gptq(layer.gptq4.gdn_out);
+    release_gptq(layer.gptq4.attn_qkv);
+    release_gptq(layer.gptq4.attn_out);
+    release_gptq(layer.gptq4.mlp_gate_up);
+    release_gptq(layer.gptq4.mlp_down);
   }
   return released;
 }

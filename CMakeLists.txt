@@ -773,6 +773,7 @@ add_library(vllm STATIC
   src/vllm/transformers_utils/hf_cache.cpp
   src/vllm/model_executor/model_loader/read_only_file_mapping.cpp
   src/vllm/model_executor/model_loader/safetensors_reader.cpp
+  src/vllm/model_executor/model_loader/gptq4_weight.cpp
   src/vllm/model_executor/model_loader/gguf_reader.cpp
   src/vllm/model_executor/model_loader/gguf_dequant.cpp
   src/vllm/model_executor/model_loader/gguf_keep_quant.cpp
