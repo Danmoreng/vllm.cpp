@@ -1036,6 +1036,24 @@ std::vector<DenseGptq4LayerWeights> LoadQwen3_5DenseGptq4TextProjections(
   return layers;
 }
 
+DenseExecutionPrecision ResolveQwen3_5DensePrecision(
+    const HfConfig& config, bool gptq4_checkpoint) {
+  DenseExecutionPrecision policy;
+  if (!gptq4_checkpoint) return policy;  // preserve every existing dense arm
+  VT_CHECK(config.torch_dtype == "float16",
+           "gptq4: expected declared text dtype float16, got '" +
+               config.torch_dtype + "' from " + config.dtype_source);
+  VT_CHECK(config.mamba_ssm_dtype == "float32" ||
+               config.mamba_ssm_dtype == "float",
+           "gptq4: expected FP32 recurrent state from mamba_ssm_dtype");
+  policy.activation = vt::DType::kF16;
+  policy.dense_weight = vt::DType::kF16;
+  policy.kv_auto = vt::DType::kF16;
+  policy.gdn_conv_state = vt::DType::kF16;
+  policy.gdn_recurrent_state = vt::DType::kF32;
+  return policy;
+}
+
 namespace {
 
 Qwen3_5DenseWeights LoadGptq4DenseText(
@@ -1069,6 +1087,7 @@ Qwen3_5DenseWeights LoadGptq4DenseText(
   }
   Qwen3_5DenseWeights result;
   result.gptq4_checkpoint = true;
+  result.precision = ResolveQwen3_5DensePrecision(config, true);
   auto packed = LoadQwen3_5DenseGptq4TextProjections(
       shards, config,
       load_queue != nullptr && load_queue->device.type == vt::DeviceType::kXPU
@@ -1507,6 +1526,7 @@ Qwen3_5DenseWeights LoadQwen3_5Dense(const std::vector<SafetensorsFile>& shards,
   }
 
   Qwen3_5DenseWeights w;
+  w.precision = ResolveQwen3_5DensePrecision(config, false);
   // MODEL-QWEN35-EXL3 (#2495 items 3 and 5). ONE whole-checkpoint question, and
   // it is asked of the TENSORS rather than of `quantization_config`: exllamav3
   // records the scheme per Linear, and an artifact that quantizes only part of

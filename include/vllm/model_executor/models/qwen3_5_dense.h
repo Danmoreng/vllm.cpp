@@ -151,6 +151,20 @@ struct DenseGptq4LayerWeights {
   }
 };
 
+// Resolved per loaded dense model. KV cache storage remains independently
+// selectable by the runner; `kv_auto` is only the checkpoint's auto default.
+struct DenseExecutionPrecision {
+  vt::DType activation = vt::DType::kBF16;
+  vt::DType dense_weight = vt::DType::kBF16;
+  vt::DType kv_auto = vt::DType::kBF16;
+  vt::DType gdn_conv_state = vt::DType::kBF16;
+  vt::DType gdn_recurrent_state = vt::DType::kF32;
+  vt::DType sampler = vt::DType::kF32;
+};
+
+DenseExecutionPrecision ResolveQwen3_5DensePrecision(const HfConfig& config,
+                                                     bool gptq4_checkpoint);
+
 DenseGateUpGlobals MergeDenseGateUpGlobals(const Nvfp4Weight& gate,
                                            const Nvfp4Weight& up);
 
@@ -187,6 +201,7 @@ std::vector<DenseGptq4LayerWeights> LoadQwen3_5DenseGptq4TextProjections(
 // materialized into `lm_head`, NVFP4 stays PACKED in `lm_head_fp4`
 // (PERF-27B-LMHEAD-FP4, issue #213); exactly one is populated.
 struct Qwen3_5DenseWeights {
+  DenseExecutionPrecision precision;
   // GPTQ owners use FP16 for the unquantized remainder. Execution is enabled
   // by the scoped FP16 work in GPTQ-03; this flag prevents BF16 fallthrough.
   bool gptq4_checkpoint = false;
