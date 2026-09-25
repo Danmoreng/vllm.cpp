@@ -1,5 +1,8 @@
 // Initial correctness backend: in-order queues, device USM, conservative frees.
 #include "xpu_common.h"
+#ifdef VLLM_CPP_XPU_GPTQ4
+#include "xpu_gptq4.h"
+#endif
 #include "vt/xpu.h"
 #include <sycl/ext/oneapi/matrix/matrix.hpp>
 #include <sycl/ext/oneapi/experimental/graph.hpp>
@@ -317,6 +320,9 @@ class XpuBackend final : public Backend {
       if (auto it = c.default_graphs.find(native); it != c.default_graphs.end()) default_graph = it->second;
     }
     queue(q).wait_and_throw();
+#ifdef VLLM_CPP_XPU_GPTQ4
+    ReleaseGptq4Queue(q);
+#endif
     if (default_graph) DestroyGraph(default_graph);
     auto& c = ctx();
     std::lock_guard<std::mutex> lock(c.mutex);
