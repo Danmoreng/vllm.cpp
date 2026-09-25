@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <cstring>
 #include <cstdlib>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -291,6 +292,117 @@ TEST_CASE("XPU GPTQ typed linear seam selects packed and dense FP16 providers") 
         before.calls[static_cast<size_t>(Projection::kMlpGateUp)] + 1);
   CHECK(after.calls[static_cast<size_t>(Projection::kGdnBa)] ==
         before.calls[static_cast<size_t>(Projection::kGdnBa)] + 1);
+}
+
+TEST_CASE("XPU GPTQ oneDNN matmul records and replays on a SYCL command graph") {
+  QueueOwner owner;
+  auto& queue = owner.queue;
+  auto& backend = vt::GetBackend(queue.device);
+  REQUIRE(backend.SupportsGraphCapture());
+  Buffer input(queue, vt::DType::kF16, {1, 128});
+  Buffer qweight(queue, vt::DType::kI32, {8, 16});
+  Buffer scales(queue, vt::DType::kF16, {1, 8});
+  Buffer zero_point(queue, vt::DType::kI8, {1});
+  Buffer output(queue, vt::DType::kF16, {1, 8});
+  const std::vector<uint32_t> words(8 * 16, 0x99999999u);
+  const std::vector<uint16_t> scale_bits(8, vt::F32ToF16(0.125f));
+  const int8_t zp = 8;
+  qweight.Upload(words.data(), words.size() * sizeof(words[0]));
+  scales.Upload(scale_bits.data(), scale_bits.size() * sizeof(scale_bits[0]));
+  zero_point.Upload(&zp, 1);
+  const auto run = [&] {
+    vt::MatmulGptq4W4A16(queue, output.tensor, input.tensor, qweight.tensor,
+                         scales.tensor, zero_point.tensor, 128);
+  };
+  const std::vector<uint16_t> half_input(128, vt::F32ToF16(0.5f));
+  input.Upload(half_input.data(), input.bytes);
+  run();
+  backend.Synchronize(queue);
+  RequireClose(output.Read(), std::vector<float>(8, 8.0f));
+  const auto before = vt::xpu::GetGptq4RuntimeStats(queue.device.index);
+  void* graph = nullptr;
+  backend.BeginCapture(queue);
+  try {
+    run();
+    graph = backend.EndCaptureGraph(queue);
+  } catch (const std::exception& error) {
+    try {
+      void* partial = backend.EndCaptureGraph(queue);
+      backend.DestroyGraph(partial);
+    } catch (...) {}
+    FAIL("pinned oneDNN GPTQ matmul cannot be captured: " << error.what());
+  }
+  const auto captured = vt::xpu::GetGptq4RuntimeStats(queue.device.index);
+  CHECK(captured.primitive_count == before.primitive_count);
+  CHECK(captured.scratchpad_allocation_count == before.scratchpad_allocation_count);
+  for (float activation : {1.0f, 0.25f}) {
+    const std::vector<uint16_t> bits(128, vt::F32ToF16(activation));
+    input.Upload(bits.data(), input.bytes);
+    backend.ReplayGraph(queue, graph);
+    RequireClose(output.Read(), std::vector<float>(8, 16.0f * activation));
+  }
+  backend.DestroyGraph(graph);
+}
+
+TEST_CASE("XPU GPTQ captured slots retain distinct bindings and shared scratchpad") {
+  QueueOwner owner;
+  auto& queue = owner.queue;
+  auto& backend = vt::GetBackend(queue.device);
+  REQUIRE(backend.SupportsGraphCapture());
+  Buffer qweight(queue, vt::DType::kI32, {8, 16});
+  Buffer scales(queue, vt::DType::kF16, {1, 8});
+  Buffer zero_point(queue, vt::DType::kI8, {1});
+  const std::vector<uint32_t> words(8 * 16, 0x99999999u);
+  const std::vector<uint16_t> scale_bits(8, vt::F32ToF16(0.125f));
+  const int8_t zp = 8;
+  qweight.Upload(words.data(), words.size() * sizeof(words[0]));
+  scales.Upload(scale_bits.data(), scale_bits.size() * sizeof(scale_bits[0]));
+  zero_point.Upload(&zp, 1);
+  std::array<std::unique_ptr<Buffer>, 2> input, output;
+  std::array<void*, 2> graphs{};
+  const auto run = [&](int slot) {
+    vt::MatmulGptq4W4A16(queue, output[slot]->tensor, input[slot]->tensor,
+                         qweight.tensor, scales.tensor, zero_point.tensor, 128);
+  };
+  for (int slot = 0; slot < 2; ++slot) {
+    input[slot] = std::make_unique<Buffer>(queue, vt::DType::kF16,
+                                           std::initializer_list<int64_t>{1, 128});
+    output[slot] = std::make_unique<Buffer>(queue, vt::DType::kF16,
+                                            std::initializer_list<int64_t>{1, 8});
+    const std::vector<uint16_t> bits(128, vt::F32ToF16(0.5f));
+    input[slot]->Upload(bits.data(), input[slot]->bytes);
+    run(slot);
+    backend.Synchronize(queue);
+  }
+  const auto warm = vt::xpu::GetGptq4RuntimeStats(queue.device.index);
+  for (int slot = 0; slot < 2; ++slot) {
+    backend.BeginCapture(queue);
+    run(slot);
+    graphs[slot] = backend.EndCaptureGraph(queue);
+  }
+  const auto captured = vt::xpu::GetGptq4RuntimeStats(queue.device.index);
+  CHECK(captured.primitive_count == warm.primitive_count);
+  CHECK(captured.scratchpad_allocation_count == warm.scratchpad_allocation_count);
+  for (int iteration = 0; iteration < 3; ++iteration) {
+    for (int slot = 0; slot < 2; ++slot) {
+      const float activation = 0.25f * (1 + slot + iteration);
+      const std::vector<uint16_t> bits(128, vt::F32ToF16(activation));
+      input[slot]->Upload(bits.data(), input[slot]->bytes);
+    }
+    backend.ReplayGraph(queue, graphs[0]);
+    backend.ReplayGraph(queue, graphs[1]);
+    for (int slot = 0; slot < 2; ++slot)
+      RequireClose(output[slot]->Read(),
+                   std::vector<float>(8, 4.0f * (1 + slot + iteration)));
+  }
+  backend.DestroyGraph(graphs[0]);
+  graphs[0] = nullptr;
+  backend.BeginCapture(queue);
+  run(0);
+  graphs[0] = backend.EndCaptureGraph(queue);
+  backend.ReplayGraph(queue, graphs[0]);
+  RequireClose(output[0]->Read(), std::vector<float>(8, 12.0f));
+  for (void* graph : graphs) backend.DestroyGraph(graph);
 }
 
 TEST_CASE("XPU GPTQ merged SwiGLU uses packed gate-up and down projections") {

@@ -40,6 +40,8 @@ exec docker run --rm --pull=never --name b70-gptq-reference-capture \
   --mount "type=bind,source=$capture_dir,target=/output" \
   -e PYTHONPATH=/capture \
   -e GPTQ_CAPTURE_DIR=/output \
+  -e GPTQ_CAPTURE_CATEGORIES="${GPTQ_CAPTURE_CATEGORIES:-}" \
+  -e GPTQ_CAPTURE_HEAD_OUTPUT_ONLY="${GPTQ_CAPTURE_HEAD_OUTPUT_ONLY:-}" \
   -e GPTQ_CAPTURE_CONTEXT_FILE=/output/current_prompt.json \
   -e HF_HUB_OFFLINE=1 \
   -e TRANSFORMERS_OFFLINE=1 \
@@ -55,7 +57,7 @@ exec docker run --rm --pull=never --name b70-gptq-reference-capture \
   --dtype float16 \
   --max-model-len "${REFERENCE_MAX_MODEL_LEN:-4096}" \
   --gpu-memory-utilization "${GPU_MEMORY_UTILIZATION:-0.93}" \
-  --kv-cache-dtype auto \
+  --kv-cache-dtype "${REFERENCE_KV_CACHE_DTYPE:-auto}" \
   --max-num-seqs 1 \
   --max-num-batched-tokens 512 \
   --no-enable-prefix-caching \

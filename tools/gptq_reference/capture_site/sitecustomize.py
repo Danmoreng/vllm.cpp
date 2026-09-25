@@ -27,10 +27,18 @@ if _ROOT:
     _CAPTURED: set[tuple[str, int]] = set()
     _ROUTED: set[tuple] = set()
     _PATCHED: set[str] = set()
+    _CATEGORIES = set(filter(None, os.environ.get("GPTQ_CAPTURE_CATEGORIES", "").split(",")))
+
+    def _wanted(category: str) -> bool:
+        if category in {"gdn_out", "gdn_norm", "gdn_metadata"}:
+            return category in _CATEGORIES
+        return not _CATEGORIES or category in _CATEGORIES
 
     def _category(prefix: str) -> str | None:
         if ".linear_attn.in_proj_qkvz" in prefix:
             return "gdn_qkvz"
+        if ".linear_attn.out_proj" in prefix:
+            return "gdn_out"
         if ".mlp.gate_up_proj" in prefix:
             return "mlp_gate_up"
         if ".mlp.down_proj" in prefix:
@@ -85,7 +93,7 @@ if _ROOT:
     def _capture_quantized(kernel, layer, x, bias, output) -> None:
         prefix = str(getattr(layer, "prefix", ""))
         category = _category(prefix)
-        if category not in {"gdn_qkvz", "mlp_gate_up", "mlp_down", "attention_qkv"}:
+        if category not in {"gdn_qkvz", "gdn_out", "mlp_gate_up", "mlp_down", "attention_qkv"} or not _wanted(category):
             return
         context = _context()
         request_id = context.get("request_id")
@@ -167,7 +175,7 @@ if _ROOT:
         weight = layer.weight
         if category is None and tuple(map(int, weight.shape)) == (248320, 5120):
             category = "dense_lm_head"
-        if category not in {"dense_ba", "dense_lm_head"}:
+        if category not in {"dense_ba", "dense_lm_head"} or not _wanted(category):
             return
         context = _context()
         request_id = context.get("request_id")
@@ -207,6 +215,8 @@ if _ROOT:
         if category == "dense_ba":
             tensors["weight_fp16_nk"] = weight
             weight_capture = "full dense weight saved as [N,K]"
+        elif os.environ.get("GPTQ_CAPTURE_HEAD_OUTPUT_ONLY") == "1":
+            weight_capture = "omitted for the bounded full-model comparison"
         else:
             # The ignored local evidence can hold the 2.54-GB dense checkpoint
             # tensor. Keeping all rows lets the native GPTQ-01 probe exercise
@@ -219,14 +229,95 @@ if _ROOT:
             "fixture_kind": "captured_reference_model_operation",
             "request_context": context,
             "weight_capture": weight_capture,
-            "weight_sha256": _sha256(tensors[next(k for k in tensors if k.startswith("weight"))]),
+            "weight_sha256": _sha256(weight) if category == "dense_ba" or
+                os.environ.get("GPTQ_CAPTURE_HEAD_OUTPUT_ONLY") != "1" else None,
             "activation_sha256": _sha256(activation),
             "output_sha256": _sha256(output),
             "scope": "Captured selected operation only; no full-model parity claim.",
         }
         _save_safetensors(tensors_path, tensors, metadata)
 
+    def _capture_gdn_norm(layer, x, z, output) -> None:
+        if z is None or not _wanted("gdn_norm"):
+            return
+        context = _context()
+        if not context.get("request_id") or x.numel() not in {48 * 128, 16 * 48 * 128}:
+            return
+        m = x.numel() // (48 * 128)
+        capture_key = ("gdn_norm", m)
+        with _LOCK:
+            if capture_key in _CAPTURED:
+                return
+            _CAPTURED.add(capture_key)
+        _save_safetensors(
+            _ROOT_PATH / f"gdn_norm_m{m}.safetensors",
+            {"core_fp16": x, "gate_fp16": z, "output_fp16": output,
+             "weight_fp16": layer.weight},
+            {"category": "gdn_norm", "request_context": context,
+             "eps": layer.eps, "activation": layer.activation,
+             "norm_before_gate": layer.norm_before_gate},
+        )
+
+    def _capture_gdn_metadata(layer) -> None:
+        if not _wanted("gdn_metadata"):
+            return
+        context = _context()
+        if not context.get("request_id") or not str(layer.prefix).endswith("layers.0.linear_attn"):
+            return
+        m = int(context.get("prompt_length", 0))
+        capture_key = ("gdn_metadata", m)
+        with _LOCK:
+            if capture_key in _CAPTURED:
+                return
+            _CAPTURED.add(capture_key)
+        from vllm.forward_context import get_forward_context
+        metadata = get_forward_context().attn_metadata[layer.prefix]
+        slots = metadata.non_spec_state_indices_tensor
+        slot = int(_cpu(slots).reshape(-1)[0])
+        state = layer.kv_cache[1][slot]
+        conv_state = layer.kv_cache[0][slot]
+        initial = metadata.has_initial_state
+        _write_json(
+            _ROOT_PATH / f"gdn_metadata_m{m}.json",
+            {"request_context": context,
+             "has_initial_state": None if initial is None else _cpu(initial).reshape(-1).tolist(),
+             "state_slot": slot, "state_shape": list(state.shape),
+             "state_abs_max_before": float(state.abs().max().item()),
+             "state_first_before": _cpu(state.reshape(-1)[:8]).tolist(),
+             "conv_abs_max_before": float(conv_state.abs().max().item()),
+             "conv_first_before": _cpu(conv_state.reshape(-1)[:8]).tolist()},
+        )
+
     def _install_patches() -> None:
+        gdn_module = sys.modules.get(
+            "vllm.model_executor.layers.mamba.gdn.qwen_gdn_linear_attn"
+        )
+        if _wanted("gdn_metadata") and gdn_module is not None and "gdn_metadata" not in _PATCHED:
+            gdn_class = getattr(gdn_module, "QwenGatedDeltaNetAttention", None)
+            if gdn_class is not None:
+                original = gdn_class.forward_xpu
+
+                def forward_xpu(self, hidden_states):
+                    _capture_gdn_metadata(self)
+                    return original(self, hidden_states)
+
+                gdn_class.forward_xpu = forward_xpu
+                _PATCHED.add("gdn_metadata")
+
+        layernorm_module = sys.modules.get("vllm.model_executor.layers.layernorm")
+        if _wanted("gdn_norm") and layernorm_module is not None and "gdn_norm" not in _PATCHED:
+            norm_class = getattr(layernorm_module, "RMSNormGated", None)
+            if norm_class is not None:
+                original = norm_class.forward_xpu
+
+                def forward_xpu(self, x, z=None):
+                    output = original(self, x, z)
+                    _capture_gdn_norm(self, x, z, output)
+                    return output
+
+                norm_class.forward_xpu = forward_xpu
+                _PATCHED.add("gdn_norm")
+
         xpu_module = sys.modules.get(
             "vllm.model_executor.kernels.linear.mixed_precision.xpu"
         )

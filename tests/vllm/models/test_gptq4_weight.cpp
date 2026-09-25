@@ -24,6 +24,8 @@
 #include "vllm/v1/attention/backends/gdn_attn.h"
 #include "vt/backend.h"
 #include "vt/dtype.h"
+#include "vt/fp8_kv.h"
+#include "vt/op_provider.h"
 #include "vt/unaligned.h"
 #include <nlohmann/json.hpp>
 
@@ -560,24 +562,27 @@ TEST_CASE("GPTQ4 two-layer XPU prefill dispatches every packed text projection")
   vt::Queue queue = vt::CreateQueue({vt::DeviceType::kXPU, 0});
   auto& backend = vt::GetBackend(queue.device);
   constexpr int T = 64, block_size = 128;
-  void* kv_data = vt::Alloc(queue.device, 2 * block_size * 64 * 2);
-  void* ssm_data = vt::Alloc(queue.device, 2 * 64 * 64 * 4);
-  void* conv_data = vt::Alloc(queue.device, 256 * 3 * 2);
-  backend.Memset(queue, kv_data, 0, 2 * block_size * 64 * 2);
-  backend.Memset(queue, ssm_data, 0, 2 * 64 * 64 * 4);
-  backend.Memset(queue, conv_data, 0, 256 * 3 * 2);
+  constexpr size_t kv_bytes = 2 * 2 * block_size * 64 * 2;
+  constexpr size_t ssm_bytes = 2 * 2 * 64 * 64 * 4;
+  constexpr size_t conv_bytes = 2 * 256 * 3 * 2;
+  void* kv_data = vt::Alloc(queue.device, kv_bytes);
+  void* ssm_data = vt::Alloc(queue.device, ssm_bytes);
+  void* conv_data = vt::Alloc(queue.device, conv_bytes);
+  backend.Memset(queue, kv_data, 0, kv_bytes);
+  backend.Memset(queue, ssm_data, 0, ssm_bytes);
+  backend.Memset(queue, conv_data, 0, conv_bytes);
   vllm::PagedKvCache kv;
   kv.data = kv_data;
   kv.dtype = vt::DType::kF16;
-  kv.num_blocks = 1;
+  kv.num_blocks = 2;
   kv.block_size = block_size;
   kv.num_kv_heads = 1;
   kv.head_size = 64;
   vllm::GdnStateCache state;
   state.ssm_state = vt::Tensor::Contiguous(
-      ssm_data, vt::DType::kF32, queue.device, {1, 2, 64, 64});
+      ssm_data, vt::DType::kF32, queue.device, {2, 2, 64, 64});
   state.conv_state = vt::Tensor::Contiguous(
-      conv_data, vt::DType::kF16, queue.device, {1, 256, 3});
+      conv_data, vt::DType::kF16, queue.device, {2, 256, 3});
 
   std::vector<int32_t> ids(T), positions(T);
   for (int i = 0; i < T; ++i) {
@@ -645,6 +650,161 @@ TEST_CASE("GPTQ4 two-layer XPU prefill dispatches every packed text projection")
   CHECK(calls(Projection::kAttnOut) == 1);
   CHECK(calls(Projection::kMlpGateUp) == 2);
   CHECK(calls(Projection::kMlpDown) == 2);
+  if (std::getenv("VLLM_CPP_GPTQ4_FP8_TEST") != nullptr) {
+    void* fp8_kv_data = vt::Alloc(queue.device, kv_bytes / 2);
+    void* fp8_ssm_data = vt::Alloc(queue.device, ssm_bytes);
+    void* fp8_conv_data = vt::Alloc(queue.device, conv_bytes);
+    backend.Memset(queue, fp8_kv_data, 0, kv_bytes / 2);
+    backend.Memset(queue, fp8_ssm_data, 0, ssm_bytes);
+    backend.Memset(queue, fp8_conv_data, 0, conv_bytes);
+    auto fp8_kv = kv;
+    fp8_kv.data = fp8_kv_data;
+    fp8_kv.dtype = vt::DType::kI8;
+    fp8_kv.fp8_kind = vt::Fp8KVCacheDataType::kFp8E4M3;
+    fp8_kv.k_scale = 1.0f;
+    fp8_kv.v_scale = 1.0f;
+    auto fp8_state = state;
+    fp8_state.ssm_state.data = fp8_ssm_data;
+    fp8_state.conv_state.data = fp8_conv_data;
+    std::vector<vllm::PagedKvCache> fp8_caches{fp8_kv};
+    std::vector<vllm::GdnStateCache> fp8_states{fp8_state};
+    vt::EnableOpProviderCallStats(true);
+    const auto before_store = vt::GetOpProviderStats(
+        vt::OpId::kReshapeAndCacheFp8, vt::DeviceType::kXPU).selections;
+    vllm::ModelForwardInput fp8_input{
+        ids, positions, am, gm, fp8_caches, fp8_states,
+        config, queue, logits_indices};
+    fp8_input.num_reqs = 1;
+    const auto fp8_logits = vllm::ModelRegistry::Forward(*model, fp8_input);
+    REQUIRE(fp8_logits.on_device());
+    std::vector<float> fp8_values(6);
+    backend.Copy(queue, fp8_values.data(), fp8_logits.device_tensor.data,
+                 fp8_values.size() * sizeof(float));
+    backend.Synchronize(queue);
+    const auto after_store = vt::GetOpProviderStats(
+        vt::OpId::kReshapeAndCacheFp8, vt::DeviceType::kXPU).selections;
+    vt::EnableOpProviderCallStats(false);
+    CHECK(after_store > before_store);
+    for (int token = 0; token < 6; ++token) {
+      CHECK(std::isfinite(fp8_values[token]));
+      CHECK(std::abs(fp8_values[token] - values[token]) < 0.05f);
+    }
+    vt::Free(queue.device, fp8_conv_data);
+    vt::Free(queue.device, fp8_ssm_data);
+    vt::Free(queue.device, fp8_kv_data);
+  }
+  if (std::getenv("VLLM_CPP_GPTQ4_GRAPH_TEST") != nullptr) {
+    std::vector<int32_t> second_ids(8), second_positions(8);
+    for (int token = 0; token < 8; ++token) {
+      second_ids[token] = 2 + token % 4;
+      second_positions[token] = token;
+    }
+    auto second_am = am;
+    second_am.num_actual_tokens = 8;
+    second_am.query_start_loc = {0, 8};
+    second_am.query_start_loc_cpu = second_am.query_start_loc;
+    second_am.seq_lens = {8};
+    second_am.seq_lens_cpu = second_am.seq_lens;
+    second_am.max_query_len = 8;
+    second_am.max_seq_len = 8;
+    second_am.block_table_tensor = {1};
+    second_am.slot_mapping.clear();
+    for (int token = 0; token < 8; ++token)
+      second_am.slot_mapping.push_back(block_size + token);
+    auto second_gm = gm;
+    second_gm.num_prefill_tokens = 8;
+    second_gm.num_actual_tokens = 8;
+    second_gm.non_spec_state_indices_tensor = std::vector<int32_t>{1};
+    second_gm.non_spec_query_start_loc = std::vector<int32_t>{0, 8};
+    second_gm.prefill_query_start_loc = std::vector<int32_t>{0, 8};
+    second_gm.prefill_state_indices = std::vector<int32_t>{1};
+    const auto second_conv = vllm::v1::ComputeCausalConv1dMetadata(
+        *second_gm.non_spec_query_start_loc);
+    second_gm.batch_ptr = second_conv.batch_ptr;
+    second_gm.token_chunk_offset_ptr = second_conv.token_chunk_offset_ptr;
+    const std::vector<int32_t> second_indices{7};
+    vllm::ModelForwardInput second_input{
+        second_ids, second_positions, second_am, second_gm, kv_caches,
+        gdn_caches, config, queue, second_indices};
+    second_input.num_reqs = 1;
+    REQUIRE(vllm::ModelRegistry::Forward(*model, second_input).on_device());
+    backend.Synchronize(queue);
+    const auto captures_before = backend.GraphsCaptured();
+    const auto replays_before = backend.GraphReplays();
+    void* reference_kv_data = vt::Alloc(queue.device, kv_bytes);
+    void* reference_ssm_data = vt::Alloc(queue.device, ssm_bytes);
+    void* reference_conv_data = vt::Alloc(queue.device, conv_bytes);
+    backend.Copy(queue, reference_kv_data, kv_data, kv_bytes);
+    backend.Copy(queue, reference_ssm_data, ssm_data, ssm_bytes);
+    backend.Copy(queue, reference_conv_data, conv_data, conv_bytes);
+    backend.Synchronize(queue);
+    auto reference_kv = kv;
+    reference_kv.data = reference_kv_data;
+    auto reference_state = state;
+    reference_state.ssm_state.data = reference_ssm_data;
+    reference_state.conv_state.data = reference_conv_data;
+    std::vector<vllm::PagedKvCache> reference_kv_caches{reference_kv};
+    std::vector<vllm::GdnStateCache> reference_gdn_caches{reference_state};
+    const auto decode_step = [&](int step, int state_slot, int position,
+                                 bool graph_route) {
+      const std::vector<int32_t> token_ids{2 + step % 4};
+      const std::vector<int32_t> token_positions{position};
+      auto decode_am = am;
+      decode_am.num_actual_tokens = 1;
+      decode_am.query_start_loc = {0, 1};
+      decode_am.query_start_loc_cpu = decode_am.query_start_loc;
+      decode_am.seq_lens = {position + 1};
+      decode_am.seq_lens_cpu = decode_am.seq_lens;
+      decode_am.max_query_len = 1;
+      decode_am.max_seq_len = position + 1;
+      decode_am.block_table_tensor = {state_slot};
+      decode_am.slot_mapping = {state_slot * block_size + position};
+      vllm::v1::GDNAttentionMetadata decode_gm;
+      decode_gm.num_decodes = 1;
+      decode_gm.num_decode_tokens = 1;
+      decode_gm.num_actual_tokens = 1;
+      decode_gm.non_spec_state_indices_tensor = std::vector<int32_t>{state_slot};
+      decode_gm.non_spec_query_start_loc = std::vector<int32_t>{0, 1};
+      const std::vector<int32_t> decode_indices{0};
+      vllm::ModelForwardInput step_input{
+          token_ids, token_positions, decode_am, decode_gm,
+          graph_route ? kv_caches : reference_kv_caches,
+          graph_route ? gdn_caches : reference_gdn_caches,
+          config, queue, decode_indices};
+      step_input.num_reqs = 1;
+      step_input.gdn_state_slots = 2;
+      step_input.pure_decode = graph_route;
+      step_input.uniform_query_len = graph_route ? 1 : 0;
+      const auto result = vllm::ModelRegistry::Forward(*model, step_input);
+      REQUIRE(result.on_device());
+      std::vector<float> values(6);
+      backend.Copy(queue, values.data(), result.device_tensor.data, values.size() * 4);
+      backend.Synchronize(queue);
+      for (float value : values) CHECK(std::isfinite(value));
+      return values;
+    };
+    const std::vector<int> graph_slots{0, 1, 1, 0, 0, 1, 1, 0};
+    std::vector<int> graph_positions;
+    int next_position[2] = {T, 8};
+    for (int slot : graph_slots)
+      graph_positions.push_back(next_position[slot]++);
+    std::vector<std::vector<float>> graphed;
+    for (size_t step = 0; step < graph_slots.size(); ++step)
+      graphed.push_back(decode_step(static_cast<int>(step), graph_slots[step],
+                                    graph_positions[step], true));
+    CHECK(backend.GraphsCaptured() >= captures_before + 2);
+    CHECK(backend.GraphReplays() > replays_before);
+    for (size_t step = 0; step < graph_slots.size(); ++step) {
+      const auto eager = decode_step(static_cast<int>(step), graph_slots[step],
+                                     graph_positions[step], false);
+      for (int token = 0; token < 6; ++token)
+        CHECK(std::abs(graphed[step][token] - eager[token]) < 0.01f);
+    }
+    model.reset();  // Drop captured pointers before their buffers and queue.
+    vt::Free(queue.device, reference_conv_data);
+    vt::Free(queue.device, reference_ssm_data);
+    vt::Free(queue.device, reference_kv_data);
+  }
   vt::Free(queue.device, conv_data);
   vt::Free(queue.device, ssm_data);
   vt::Free(queue.device, kv_data);
@@ -661,6 +821,9 @@ TEST_CASE("GPTQ4 real 64-layer text prefill and decode use the packed XPU path")
   auto& queue = owner.queue;
   XpuCacheAllocations allocations{queue};
   const auto config = vllm::LoadHfConfig(std::string(checkpoint) + "/config.json");
+  auto& backend = vt::GetBackend(queue.device);
+  const auto graph_captures_before = backend.GraphsCaptured();
+  const auto graph_replays_before = backend.GraphReplays();
   std::vector<vllm::SafetensorsFile> shards;
   for (int i = 1; i <= 5; ++i)
     shards.push_back(vllm::SafetensorsFile::Open(
@@ -689,10 +852,11 @@ TEST_CASE("GPTQ4 real 64-layer text prefill and decode use the packed XPU path")
       gdn_state.push_back(state);
     } else {
       vllm::PagedKvCache cache;
+      cache.num_blocks = std::getenv("VLLM_CPP_GPTQ4_4K_BENCH") != nullptr ? 40 : 6;
       cache.data = allocations.Zero(static_cast<size_t>(
-          4 * 2 * block_size * config.num_key_value_heads * config.head_dim) * 2);
+          cache.num_blocks * 2 * block_size * config.num_key_value_heads *
+          config.head_dim) * 2);
       cache.dtype = vt::DType::kF16;
-      cache.num_blocks = 4;
       cache.block_size = block_size;
       cache.num_kv_heads = config.num_key_value_heads;
       cache.head_size = config.head_dim;
@@ -754,7 +918,7 @@ TEST_CASE("GPTQ4 real 64-layer text prefill and decode use the packed XPU path")
   };
   const auto compare_distribution = [&](const std::vector<float>& batched,
                                         int row, const std::vector<float>& isolated,
-                                        const char* stage) {
+                                        const char* stage, bool gate = true) {
     const size_t vocab = static_cast<size_t>(config.vocab_size);
     REQUIRE(isolated.size() == vocab);
     REQUIRE(batched.size() >= static_cast<size_t>(row + 1) * vocab);
@@ -784,12 +948,32 @@ TEST_CASE("GPTQ4 real 64-layer text prefill and decode use the packed XPU path")
       tv += std::abs(p - q);
     }
     tv *= 0.5;
-    MESSAGE("GPTQ4 B2 " << std::string(stage) << " request " << row
+    MESSAGE("GPTQ4 " << std::string(stage) << " request " << row
             << " max|logit diff| " << max_logit_difference
             << ", KL " << kl << ", TV " << tv);
-    CHECK(kl <= 0.01);
-    CHECK(tv <= 0.02);
+    if (gate) {
+      CHECK(kl <= 0.01);
+      CHECK(tv <= 0.02);
+    }
   };
+  const std::vector<int32_t> oracle_pattern{33, 22, 15, 469, 2737, 48,
+                                            8948, 19, 5604, 15728, 13};
+  std::vector<int32_t> oracle_ids(16), oracle_positions(16);
+  for (int i = 0; i < 16; ++i) {
+    oracle_ids[i] = oracle_pattern[static_cast<size_t>(i) % oracle_pattern.size()];
+    oracle_positions[i] = i;
+  }
+  const std::vector<int32_t> oracle_indices{15};
+  if (std::getenv("VLLM_CPP_GPTQ4_ORACLE_ONLY") != nullptr) {
+    const auto oracle_am = attention_meta(16, 0);
+    const auto oracle_gm = gdn_meta(16, false);
+    vllm::ModelForwardInput oracle_input{
+        oracle_ids, oracle_positions, oracle_am, oracle_gm, attn_kv, gdn_state,
+        config, queue, oracle_indices};
+    oracle_input.num_reqs = 1;
+    (void)read_logits(vllm::ModelRegistry::Forward(*model, oracle_input), 1);
+    return;
+  }
   std::vector<int32_t> ids(prefill), positions(prefill);
   for (int i = 0; i < prefill; ++i) {
     ids[i] = 100 + i % 11;
@@ -814,11 +998,84 @@ TEST_CASE("GPTQ4 real 64-layer text prefill and decode use the packed XPU path")
       next_id, next_pos, decode_am, decode_gm, attn_kv, gdn_state,
       config, queue, decode_indices};
   decode_input.num_reqs = 1;
+  decode_input.gdn_state_slots = 2;
   decode_input.pure_decode = true;
   decode_input.uniform_query_len = 1;
   const auto decode_values = read_logits(
       vllm::ModelRegistry::Forward(*model, decode_input), 1);
   CHECK(prefill_values != decode_values);
+
+  // Unit-scale E4M3 control: identical FP16 model inputs and state geometry,
+  // with only the full-attention KV storage changed. This is not yet the
+  // Python FP8 quality oracle; compare its logical first-layer KV bytes exactly.
+  if (std::getenv("VLLM_CPP_GPTQ4_FP8_TEST") != nullptr) {
+    std::vector<vllm::PagedKvCache> fp8_kv;
+    std::vector<vllm::GdnStateCache> fp8_gdn;
+    for (const auto& cache : attn_kv) {
+      auto fp8_cache = cache;
+      fp8_cache.data = allocations.Zero(static_cast<size_t>(
+          cache.num_blocks * 2 * cache.block_size * cache.num_kv_heads *
+          cache.head_size));
+      fp8_cache.dtype = vt::DType::kI8;
+      fp8_cache.fp8_kind = vt::Fp8KVCacheDataType::kFp8E4M3;
+      fp8_cache.k_scale = 1.0f;
+      fp8_cache.v_scale = 1.0f;
+      fp8_kv.push_back(fp8_cache);
+    }
+    for (const auto& state : gdn_state) {
+      auto fp8_state = state;
+      fp8_state.ssm_state.data = allocations.Zero(state.ssm_state.Bytes());
+      fp8_state.conv_state.data = allocations.Zero(state.conv_state.Bytes());
+      fp8_gdn.push_back(fp8_state);
+    }
+    vt::EnableOpProviderCallStats(true);
+    const auto stores_before = vt::GetOpProviderStats(
+        vt::OpId::kReshapeAndCacheFp8, vt::DeviceType::kXPU).selections;
+    vllm::ModelForwardInput fp8_prefill{
+        ids, positions, prefill_am, prefill_gm, fp8_kv, fp8_gdn,
+        config, queue, prefill_indices};
+    fp8_prefill.num_reqs = 1;
+    const auto fp8_prefill_values = read_logits(
+        vllm::ModelRegistry::Forward(*model, fp8_prefill), 1);
+    vllm::ModelForwardInput fp8_decode{
+        next_id, next_pos, decode_am, decode_gm, fp8_kv, fp8_gdn,
+        config, queue, decode_indices};
+    fp8_decode.num_reqs = 1;
+    fp8_decode.gdn_state_slots = 2;
+    fp8_decode.pure_decode = true;
+    fp8_decode.uniform_query_len = 1;
+    const auto fp8_decode_values = read_logits(
+        vllm::ModelRegistry::Forward(*model, fp8_decode), 1);
+    const auto stores_after = vt::GetOpProviderStats(
+        vt::OpId::kReshapeAndCacheFp8, vt::DeviceType::kXPU).selections;
+    vt::EnableOpProviderCallStats(false);
+    CHECK(stores_after - stores_before == 2 * attn_kv.size());
+    compare_distribution(fp8_prefill_values, 0, prefill_values,
+                         "FP8-vs-FP16 prefill", false);
+    compare_distribution(fp8_decode_values, 0, decode_values,
+                         "FP8-vs-FP16 decode", false);
+    const auto& float_cache = attn_kv.front();
+    const auto& quant_cache = fp8_kv.front();
+    const size_t block_elements = static_cast<size_t>(
+        2 * block_size * config.num_key_value_heads * config.head_dim);
+    std::vector<uint16_t> float_bits(block_elements);
+    std::vector<uint8_t> quant_bits(block_elements);
+    backend.Copy(queue, float_bits.data(), float_cache.data,
+                 float_bits.size() * sizeof(uint16_t));
+    backend.Copy(queue, quant_bits.data(), quant_cache.data, quant_bits.size());
+    backend.Synchronize(queue);
+    const size_t plane_elements = block_elements / 2;
+    const size_t token_elements = static_cast<size_t>(
+        config.num_key_value_heads * config.head_dim);
+    for (int plane = 0; plane < 2; ++plane)
+      for (int token = 0; token <= prefill; ++token)
+        for (size_t col = 0; col < token_elements; ++col) {
+          const size_t offset = static_cast<size_t>(plane) * plane_elements +
+                                static_cast<size_t>(token) * token_elements + col;
+          CHECK(quant_bits[offset] == vt::F32ToF8E4M3(
+              vt::F16ToF32(float_bits[offset])));
+        }
+  }
 
   // Two fresh requests of different lengths must agree with the same requests
   // run in isolation, including their separate GDN state rows and KV blocks.
@@ -883,6 +1140,7 @@ TEST_CASE("GPTQ4 real 64-layer text prefill and decode use the packed XPU path")
       batch_next_ids, batch_next_positions, batch_decode_am, batch_decode_gm,
       attn_kv, gdn_state, config, queue, batch_decode_indices};
   batch_decode_input.num_reqs = 2;
+  batch_decode_input.gdn_state_slots = 2;
   batch_decode_input.pure_decode = true;
   batch_decode_input.uniform_query_len = 1;
   const auto batch_decode_values = read_logits(
@@ -921,12 +1179,101 @@ TEST_CASE("GPTQ4 real 64-layer text prefill and decode use the packed XPU path")
         solo_next_ids, solo_next_positions, solo_decode_am, solo_decode_gm,
         attn_kv, gdn_state, config, queue, solo_decode_indices};
     solo_decode_input.num_reqs = 1;
+    solo_decode_input.gdn_state_slots = 2;
     solo_decode_input.pure_decode = true;
     solo_decode_input.uniform_query_len = 1;
     const auto solo_decode_values = read_logits(
         vllm::ModelRegistry::Forward(*model, solo_decode_input), 1);
     compare_distribution(batch_decode_values, request, solo_decode_values,
                          "decode");
+  }
+  const char* oracle_dir = std::getenv("VLLM_CPP_GPTQ4_ORACLE_DIR");
+  if (oracle_dir != nullptr) {
+    const auto oracle = vllm::SafetensorsFile::Open(
+        std::string(oracle_dir) + "/dense_lm_head_m1.safetensors");
+    const auto& reference_hidden = oracle.Get("activation_fp16");
+    const auto& reference_output = oracle.Get("output_reference");
+    REQUIRE(reference_hidden.dtype == "F16");
+    REQUIRE((reference_hidden.shape == std::vector<int64_t>{1, config.hidden_size}));
+    REQUIRE(reference_output.dtype == "F16");
+    REQUIRE((reference_output.shape == std::vector<int64_t>{1, config.vocab_size}));
+    const auto oracle_am = attention_meta(16, 0);
+    const auto oracle_gm = gdn_meta(16, false);
+    vllm::Qwen3_5MTPHiddenStates hidden_tap;
+    vllm::ModelForwardInput oracle_input{
+        oracle_ids, oracle_positions, oracle_am, oracle_gm, attn_kv, gdn_state,
+        config, queue, oracle_indices};
+    oracle_input.num_reqs = 1;
+    oracle_input.hidden_tap = &hidden_tap;
+    const auto actual = read_logits(
+        vllm::ModelRegistry::Forward(*model, oracle_input), 1);
+    REQUIRE(hidden_tap.tensor.dtype == vt::DType::kF16);
+    std::vector<uint16_t> actual_hidden(static_cast<size_t>(config.hidden_size));
+    REQUIRE(hidden_tap.tensor.shape[0] == 16);
+    backend.Copy(queue, actual_hidden.data(),
+                 static_cast<const char*>(hidden_tap.tensor.data) +
+                     15 * config.hidden_size * sizeof(uint16_t),
+                 actual_hidden.size() * sizeof(uint16_t));
+    backend.Synchronize(queue);
+    float max_hidden_difference = 0.0f;
+    double hidden_squared_error = 0.0, hidden_squared_reference = 0.0;
+    for (size_t i = 0; i < actual_hidden.size(); ++i) {
+      const float ref = vt::F16ToF32(vt::LoadUnaligned<uint16_t>(
+          reference_hidden.data + i * sizeof(uint16_t)));
+      const float got = vt::F16ToF32(actual_hidden[i]);
+      const double difference = static_cast<double>(got) - ref;
+      max_hidden_difference = std::max(max_hidden_difference,
+                                       static_cast<float>(std::abs(difference)));
+      hidden_squared_error += difference * difference;
+      hidden_squared_reference += static_cast<double>(ref) * ref;
+    }
+    MESSAGE("GPTQ4 Python FP16 M16 hidden max|diff| " << max_hidden_difference
+            << ", rel RMS " << std::sqrt(hidden_squared_error / hidden_squared_reference));
+    std::vector<float> reference_logits(static_cast<size_t>(config.vocab_size));
+    for (size_t i = 0; i < reference_logits.size(); ++i)
+      reference_logits[i] = vt::F16ToF32(vt::LoadUnaligned<uint16_t>(
+          reference_output.data + i * sizeof(uint16_t)));
+    compare_distribution(actual, 0, reference_logits, "Python FP16 M16");
+  }
+  const char* fp8_oracle_dir = std::getenv("VLLM_CPP_GPTQ4_FP8_ORACLE_DIR");
+  if (fp8_oracle_dir != nullptr) {
+    const auto oracle = vllm::SafetensorsFile::Open(
+        std::string(fp8_oracle_dir) + "/dense_lm_head_m1.safetensors");
+    const auto& reference_output = oracle.Get("output_reference");
+    REQUIRE(reference_output.dtype == "F16");
+    REQUIRE((reference_output.shape == std::vector<int64_t>{1, config.vocab_size}));
+    std::vector<vllm::PagedKvCache> fp8_kv;
+    for (const auto& cache : attn_kv) {
+      auto fp8_cache = cache;
+      fp8_cache.data = allocations.Zero(static_cast<size_t>(
+          cache.num_blocks * 2 * cache.block_size * cache.num_kv_heads *
+          cache.head_size));
+      fp8_cache.dtype = vt::DType::kI8;
+      fp8_cache.fp8_kind = vt::Fp8KVCacheDataType::kFp8E4M3;
+      fp8_cache.k_scale = 1.0f;
+      fp8_cache.v_scale = 1.0f;
+      fp8_kv.push_back(fp8_cache);
+    }
+    std::vector<vllm::GdnStateCache> fp8_gdn;
+    for (const auto& state : gdn_state) {
+      auto fresh = state;
+      fresh.ssm_state.data = allocations.Zero(state.ssm_state.Bytes());
+      fresh.conv_state.data = allocations.Zero(state.conv_state.Bytes());
+      fp8_gdn.push_back(fresh);
+    }
+    const auto oracle_am = attention_meta(16, 0);
+    const auto oracle_gm = gdn_meta(16, false);
+    vllm::ModelForwardInput oracle_input{
+        oracle_ids, oracle_positions, oracle_am, oracle_gm, fp8_kv, fp8_gdn,
+        config, queue, oracle_indices};
+    oracle_input.num_reqs = 1;
+    const auto actual = read_logits(
+        vllm::ModelRegistry::Forward(*model, oracle_input), 1);
+    std::vector<float> reference_logits(static_cast<size_t>(config.vocab_size));
+    for (size_t i = 0; i < reference_logits.size(); ++i)
+      reference_logits[i] = vt::F16ToF32(vt::LoadUnaligned<uint16_t>(
+          reference_output.data + i * sizeof(uint16_t)));
+    compare_distribution(actual, 0, reference_logits, "Python FP8 M16");
   }
   const auto after = vllm::dense_gptq4::GetDispatchCounts();
   using vllm::dense_gptq4::Projection;
@@ -936,75 +1283,95 @@ TEST_CASE("GPTQ4 real 64-layer text prefill and decode use the packed XPU path")
   };
   const uint64_t gdn_layers = gdn_state.size();
   const uint64_t attn_layers = attn_kv.size();
-  CHECK(calls(Projection::kGdnQkvz) == 8 * gdn_layers);
-  CHECK(calls(Projection::kGdnBa) == 8 * gdn_layers);
-  CHECK(calls(Projection::kGdnOut) == 8 * gdn_layers);
-  CHECK(calls(Projection::kAttnQkv) == 8 * attn_layers);
-  CHECK(calls(Projection::kAttnOut) == 8 * attn_layers);
-  CHECK(calls(Projection::kMlpGateUp) == 512);
-  CHECK(calls(Projection::kMlpDown) == 512);
+  const uint64_t forwards =
+      8 + (std::getenv("VLLM_CPP_GPTQ4_FP8_TEST") != nullptr ? 2 : 0) +
+      (oracle_dir != nullptr ? 1 : 0) + (fp8_oracle_dir != nullptr ? 1 : 0);
+  CHECK(calls(Projection::kGdnQkvz) == forwards * gdn_layers);
+  CHECK(calls(Projection::kGdnBa) == forwards * gdn_layers);
+  CHECK(calls(Projection::kGdnOut) == forwards * gdn_layers);
+  CHECK(calls(Projection::kAttnQkv) == forwards * attn_layers);
+  CHECK(calls(Projection::kAttnOut) == forwards * attn_layers);
+  CHECK(calls(Projection::kMlpGateUp) == forwards * 64);
+  CHECK(calls(Projection::kMlpDown) == forwards * 64);
+  if (std::getenv("VLLM_CPP_GPTQ4_GRAPH_TEST") != nullptr) {
+    CHECK(backend.GraphsCaptured() > graph_captures_before);
+    CHECK(backend.GraphReplays() > graph_replays_before);
+  }
 
-  // Optional short timing screen. The first 256-token call warms its shape;
-  // the measured call resets the same state slot and excludes load/JIT.
-  if (std::getenv("VLLM_CPP_GPTQ4_SHORT_BENCH") != nullptr) {
-    constexpr int prompt_tokens = 256, output_tokens = 8;
+  // Optional L4 timing screen. The first call warms its shape; a
+  // graphed run also warms both persistent decode slots before measurement.
+  const bool bench_4k = std::getenv("VLLM_CPP_GPTQ4_4K_BENCH") != nullptr;
+  if (std::getenv("VLLM_CPP_GPTQ4_SHORT_BENCH") != nullptr || bench_4k) {
+    const int prompt_tokens = bench_4k ? 4096 : 512;
+    const int output_tokens = bench_4k ? 64 : 8;
     std::vector<int32_t> bench_ids(prompt_tokens), bench_positions(prompt_tokens);
     for (int token = 0; token < prompt_tokens; ++token) {
       bench_ids[token] = 100 + token % 11;
       bench_positions[token] = token;
     }
     auto bench_am = attention_meta(prompt_tokens, 0);
-    bench_am.block_table_num_cols = 2;
-    bench_am.block_table_tensor = {0, 1};
+    bench_am.block_table_num_cols = prompt_tokens / block_size;
+    for (int block = 0; block < bench_am.block_table_num_cols; ++block)
+      bench_am.block_table_tensor.push_back(block);
     const auto bench_gm = gdn_meta(prompt_tokens, false);
     const std::vector<int32_t> bench_indices{prompt_tokens - 1};
     vllm::ModelForwardInput bench_input{
         bench_ids, bench_positions, bench_am, bench_gm, attn_kv, gdn_state,
         config, queue, bench_indices};
     bench_input.num_reqs = 1;
-    auto& backend = vt::GetBackend(queue.device);
     auto run_prefill = [&] {
       const auto result = vllm::ModelRegistry::Forward(*model, bench_input);
       REQUIRE(result.on_device());
       backend.Synchronize(queue);
     };
+    const auto run_decodes = [&] {
+      std::chrono::steady_clock::time_point first_end, last_end;
+      for (int step = 0; step < output_tokens; ++step) {
+        const std::vector<int32_t> token_id{300 + step};
+        const std::vector<int32_t> position{prompt_tokens + step};
+        auto decode_am = attention_meta(1, prompt_tokens + step);
+        decode_am.block_table_num_cols = prompt_tokens / block_size + 1;
+        for (int block = 0; block < decode_am.block_table_num_cols; ++block)
+          decode_am.block_table_tensor.push_back(block);
+        const auto decode_gm = gdn_meta(1, true);
+        const std::vector<int32_t> decode_index{0};
+        vllm::ModelForwardInput step_input{
+            token_id, position, decode_am, decode_gm, attn_kv, gdn_state,
+            config, queue, decode_index};
+        step_input.num_reqs = 1;
+        step_input.gdn_state_slots = 2;
+        step_input.pure_decode = true;
+        step_input.uniform_query_len = 1;
+        const auto result = vllm::ModelRegistry::Forward(*model, step_input);
+        REQUIRE(result.on_device());
+        backend.Synchronize(queue);
+        const auto end = std::chrono::steady_clock::now();
+        if (step == 0) first_end = end;
+        last_end = end;
+      }
+      return std::chrono::duration<double>(last_end - first_end).count();
+    };
     run_prefill();
+    if (std::getenv("VLLM_CPP_GPTQ4_GRAPH_TEST") != nullptr)
+      (void)run_decodes();
     const auto prefill_start = std::chrono::steady_clock::now();
     run_prefill();
     const auto prefill_end = std::chrono::steady_clock::now();
     const double prefill_seconds =
         std::chrono::duration<double>(prefill_end - prefill_start).count();
-    std::chrono::steady_clock::time_point first_decode_end, last_decode_end;
-    for (int step = 0; step < output_tokens; ++step) {
-      const std::vector<int32_t> token_id{300 + step};
-      const std::vector<int32_t> position{prompt_tokens + step};
-      auto decode_am = attention_meta(1, prompt_tokens + step);
-      decode_am.block_table_num_cols = 3;
-      decode_am.block_table_tensor = {0, 1, 2};
-      const auto decode_gm = gdn_meta(1, true);
-      const std::vector<int32_t> decode_index{0};
-      vllm::ModelForwardInput step_input{
-          token_id, position, decode_am, decode_gm, attn_kv, gdn_state,
-          config, queue, decode_index};
-      step_input.num_reqs = 1;
-      step_input.pure_decode = true;
-      step_input.uniform_query_len = 1;
-      const auto result = vllm::ModelRegistry::Forward(*model, step_input);
-      REQUIRE(result.on_device());
-      backend.Synchronize(queue);
-      const auto end = std::chrono::steady_clock::now();
-      if (step == 0) first_decode_end = end;
-      last_decode_end = end;
-    }
-    const double decode_seconds =
-        std::chrono::duration<double>(last_decode_end - first_decode_end).count();
-    MESSAGE("GPTQ4 short B1 timing: prompt " << prompt_tokens
+    const auto timed_replays_before = backend.GraphReplays();
+    const double decode_seconds = run_decodes();
+    const auto timed_replays = backend.GraphReplays() - timed_replays_before;
+    if (std::getenv("VLLM_CPP_GPTQ4_GRAPH_TEST") != nullptr)
+      CHECK(timed_replays >= output_tokens);
+    MESSAGE("GPTQ4 B1 timing: prompt " << prompt_tokens
             << ", output " << output_tokens
             << ", warm prefill 1, prefill compute " << prefill_seconds
             << " s (" << prompt_tokens / prefill_seconds << " tokens/s), "
             << "decode interval " << decode_seconds / (output_tokens - 1)
             << " s/token (" << (output_tokens - 1) / decode_seconds
-            << " tokens/s); load/JIT excluded, eager FP16 KV");
+            << " tokens/s); load/JIT excluded, FP16 KV, graph replays "
+            << timed_replays);
   }
 }
 

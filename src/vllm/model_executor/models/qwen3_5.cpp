@@ -5334,8 +5334,21 @@ DBuf GdnBlockPagedMixedSpec(Dev d, const GdnLayerWeights& w, const HfConfig& cfg
 void DumpGdnStage(Dev d, const char* stage, const Tensor& t) {
   const char* dir = actdump::StreamDir();
   if (dir == nullptr) return;
+  const int64_t rows = t.shape[0];
+  const int64_t cols = t.Numel() / rows;
+  if (t.stride[0] != cols) {
+    DBuf compact(d, t.dtype, {rows, cols});
+    const size_t row_bytes = static_cast<size_t>(cols) * vt::SizeOf(t.dtype);
+    for (int64_t row = 0; row < rows; ++row)
+      d.b.Copy(d.q, static_cast<char*>(compact.ptr()) + row * row_bytes,
+               static_cast<const char*>(t.data) +
+                   row * t.stride[0] * vt::SizeOf(t.dtype), row_bytes);
+    ActDumpTensor(d, "VT_DUMP_ACT", dir,
+                  (std::string("gdn_") + stage).c_str(), compact.t(), rows, cols);
+    return;
+  }
   ActDumpTensor(d, "VT_DUMP_ACT", dir, (std::string("gdn_") + stage).c_str(),
-                      t, 1, t.Numel());
+                t, rows, cols);
 }
 
 DBuf GdnBlockPaged(Dev d, const GdnLayerWeights& w, const HfConfig& cfg,
@@ -5459,6 +5472,7 @@ DBuf GdnBlockPaged(Dev d, const GdnLayerWeights& w, const HfConfig& cfg,
     Tensor all = qkvz.packed_owner->t();
     qkvz.mixed = all.Slice(1, 0, conv_dim);
     qkvz.z = all.Slice(1, conv_dim, conv_dim + value_dim);
+    DumpGdnStage(d, "qkvz_z", qkvz.z);
   } else {
     qkvz = ProjectGdnQkvz(d, w, h, conv_dim, value_dim, indt, outdt,
                            h_fp8, Hv);
@@ -5474,6 +5488,7 @@ DBuf GdnBlockPaged(Dev d, const GdnLayerWeights& w, const HfConfig& cfg,
     ba.packed_owner.emplace(dense_gptq4::Dense(
         d, h, ba_weight, dense_gptq4::Projection::kGdnBa));
     Tensor both = ba.packed_owner->t();
+    DumpGdnStage(d, "ba", both);
     ba.b = both.Slice(1, 0, Hv);
     ba.a = both.Slice(1, Hv, 2 * Hv);
   } else {
@@ -6182,10 +6197,14 @@ DBuf FullAttnBlockPaged(Dev d, const FullAttnLayerWeights& w, const HfConfig& cf
   // `reshape_and_cache_flash` takes key/value (`cache_kernels.cu:314-401`).
   Tensor kw = kn3;
   Tensor vw = v3;
+  const bool fp8_kv = dense_attn::IsFp8KvCache(kv);
   if (kv.dtype == DType::kF16) {
     VT_CHECK(kw.dtype == DType::kF16 && vw.dtype == DType::kF16,
              "gptq4: F16 KV cache requires F16 attention K and V projections");
   }
+  if (fp8_kv && gptq != nullptr)
+    VT_CHECK(kw.dtype == DType::kF16 && vw.dtype == DType::kF16,
+             "gptq4: FP8 KV cache must quantize the FP16 model's K and V");
   std::optional<DBuf> kf32, vf32;
   if (kv.dtype == DType::kF32) {
     if (kw.dtype != DType::kF32) {
@@ -6200,7 +6219,7 @@ DBuf FullAttnBlockPaged(Dev d, const FullAttnLayerWeights& w, const HfConfig& cf
     }
   }
   std::optional<DBuf> kbf, vbf;
-  if (kv.dtype == DType::kBF16 || dense_attn::IsFp8KvCache(kv)) {
+  if (kv.dtype == DType::kBF16 || (fp8_kv && gptq == nullptr)) {
     // K may already be bf16 (an FA2 preamble emits bf16 k directly —
     // the RN round of the same f32 value this CastBf16 would produce); only
     // down-cast when the preamble/fallback produced f32 K.
@@ -9827,8 +9846,10 @@ static void CheckDensePagedForward(const std::vector<int32_t>& token_ids,
            "qwen3_5 dense paged forward: gdn_state count must equal GDN layers");
   if (weights.gptq4_checkpoint) {
     for (const auto& cache : attn_kv)
-      VT_CHECK(cache.dtype == DType::kF16 || cache.dtype == DType::kF32,
-               "gptq4: full-attention KV cache must preserve FP16 or explicit FP32 storage");
+      VT_CHECK(cache.dtype == DType::kF16 || cache.dtype == DType::kF32 ||
+                   (dense_attn::IsFp8KvCache(cache) &&
+                    cache.fp8_kind == vt::Fp8KVCacheDataType::kFp8E4M3),
+               "gptq4: full-attention KV cache must use FP16, explicit FP32, or E4M3 FP8 storage");
     for (const auto& cache : gdn_state)
       VT_CHECK(cache.conv_state.dtype == weights.precision.gdn_conv_state &&
                    cache.ssm_state.dtype == weights.precision.gdn_recurrent_state,

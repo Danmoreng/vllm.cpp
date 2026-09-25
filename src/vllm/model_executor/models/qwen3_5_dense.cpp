@@ -199,8 +199,12 @@ ForwardLogits ForwardQwen3_5Dense(LoadedModel& model,
   // #2812/#1625 gate: the ARCH-SCOPED overload, so the evidence families
   // (Qwen3.5-GDN included) capture ambient while every other family keeps
   // the explicit opt-in — the same shape as the qwen3 driver's gate.
+  // GPTQ oneDNN command-graph support is qualified separately from the eager
+  // path. Keep eager as the default until the full target/state gates pass.
+  const char* gptq_graph = std::getenv("VT_GPTQ4_GRAPH");
   const bool graph_cuda =
-      !weights.gptq4_checkpoint &&
+      (!weights.gptq4_checkpoint ||
+       (gptq_graph != nullptr && gptq_graph[0] == '1' && gptq_graph[1] == '\0')) &&
       platforms::GetPlatform(input.queue.device.type).support_static_graph_mode() &&
       !platforms::GetPlatform(input.queue.device.type)
            .static_graph_requires_opt_in(input.config.architectures);
