@@ -257,6 +257,8 @@ TEST_CASE("GPTQ4 text inventory loads only the declared packed projections") {
   config.linear_num_value_heads = 1;
   config.linear_value_head_dim = 128;
   config.linear_conv_kernel_dim = 4;
+  config.torch_dtype = "float16";
+  config.mamba_ssm_dtype = "float32";
   config.layer_types = {"linear_attention"};
   config.raw = {{"quantization_config",
                  {{"quant_method", "gptq"}, {"format", "gptq"},
@@ -272,6 +274,11 @@ TEST_CASE("GPTQ4 text inventory loads only the declared packed projections") {
   CHECK(layers[0].ResidentBytes() == 0);
   const auto full = vllm::LoadQwen3_5Dense(shards, config);
   REQUIRE(full.gptq4_checkpoint);
+  CHECK(full.precision.activation == vt::DType::kF16);
+  CHECK(full.precision.dense_weight == vt::DType::kF16);
+  CHECK(full.precision.kv_auto == vt::DType::kF16);
+  CHECK(full.precision.gdn_conv_state == vt::DType::kF16);
+  CHECK(full.precision.gdn_recurrent_state == vt::DType::kF32);
   REQUIRE(full.layers.size() == 1);
   CHECK(full.layers[0].gptq4.gdn_qkvz.n == 512);
   CHECK(full.layers[0].gdn.in_proj_ba.dtype == vt::DType::kF16);
@@ -297,6 +304,23 @@ TEST_CASE("GPTQ4 text inventory loads only the declared packed projections") {
   CHECK_THROWS_AS(vllm::LoadQwen3_5DenseGptq4TextProjections(shards, config),
                   std::runtime_error);
   std::remove(path.c_str());
+}
+
+TEST_CASE("GPTQ4 precision policy preserves ordinary dense defaults") {
+  vllm::HfConfig config;
+  config.torch_dtype = "bfloat16";
+  const auto ordinary = vllm::ResolveQwen3_5DensePrecision(config, false);
+  CHECK(ordinary.activation == vt::DType::kBF16);
+  CHECK(ordinary.dense_weight == vt::DType::kBF16);
+  CHECK(ordinary.kv_auto == vt::DType::kBF16);
+  CHECK(ordinary.sampler == vt::DType::kF32);
+  CHECK_THROWS_AS(vllm::ResolveQwen3_5DensePrecision(config, true),
+                  std::runtime_error);
+  config.torch_dtype = "float16";
+  config.mamba_ssm_dtype = "float32";
+  const auto gptq = vllm::ResolveQwen3_5DensePrecision(config, true);
+  CHECK(gptq.activation == vt::DType::kF16);
+  CHECK(gptq.gdn_recurrent_state == vt::DType::kF32);
 }
 
 TEST_CASE("GPTQ4 attention QKV matches the captured Python post-load owner") {
@@ -449,6 +473,9 @@ TEST_CASE("GPTQ4 pinned checkpoint loads the complete text weight graph") {
   }
   const auto model = vllm::LoadQwen3_5Dense(shards, config);
   REQUIRE(model.gptq4_checkpoint);
+  CHECK(config.torch_dtype == "float16");
+  CHECK(config.dtype_source == "text.dtype");
+  CHECK(model.precision.activation == vt::DType::kF16);
   REQUIRE(model.layers.size() == 64);
   CHECK(model.embed_tokens.dtype == vt::DType::kF16);
   CHECK(model.embed_tokens.shape[0] == config.vocab_size);
