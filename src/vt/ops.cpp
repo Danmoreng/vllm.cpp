@@ -5587,7 +5587,9 @@ void CastF16(Queue& q, Tensor& out, const Tensor& in) {
 
 void CastF32(Queue& q, Tensor& out, const Tensor& in) {
   VT_CHECK(out.dtype == DType::kF32, "cast_f32: out must be f32");
-  VT_CHECK(in.dtype == DType::kBF16, "cast_f32: in must be bf16");
+  VT_CHECK(in.dtype == DType::kBF16 ||
+               (q.device.type == DeviceType::kXPU && in.dtype == DType::kF16),
+           "cast_f32: in must be bf16 (f16 on XPU)");
   VT_CHECK(out.Numel() == in.Numel(), "cast_f32: out/in must have the same element count");
   int64_t inner = 1;
   bool inner_contiguous = true;

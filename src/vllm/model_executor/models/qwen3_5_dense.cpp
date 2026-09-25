@@ -162,7 +162,7 @@ ForwardLogits ForwardQwen3_5Dense(LoadedModel& model,
   auto& qwen = ModelAs<Qwen3_5DenseLoadedModel>(model, "Qwen3_5ForConditionalGeneration");
   const Qwen3_5DenseWeights& weights = qwen.weights();
   VT_CHECK(!weights.gptq4_checkpoint,
-           "gptq4: FP16 model execution is implemented in GPTQ-03");
+           "gptq4: packed projection dispatch is implemented in GPTQ-04");
 
   // ENG-ASYNC-SCHED W4: publish the async runner's device-resident input ids for
   // the duration of THIS forward, so the embed at the top of every route below
