@@ -40,6 +40,7 @@ struct Registrar {
     XPU_OP(kGdnStateGather, GdnStateGatherFn, GdnStateGatherKernel);
     XPU_OP(kGdnStateScatter, GdnStateScatterFn, GdnStateScatterKernel);
     XPU_OP(kAttnGateSplit, AttnGateSplitFn, AttnGateSplitKernel);
+    XPU_OP(kAttnQkNormRopeGate, AttnQkNormRopeGateFn, AttnQkNormRopeGateKernel);
     XPU_OP(kRopeNeox, RopeFn, RopeNeoxKernel);
     XPU_OP(kRopeCosSinCache, RopeCosSinCacheFn, RopeCosSinCacheKernel);
     XPU_OP(kRopeFromCache, RopeFromCacheFn, RopeFromCacheKernel);

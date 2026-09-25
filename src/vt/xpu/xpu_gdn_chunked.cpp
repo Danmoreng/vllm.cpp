@@ -9,16 +9,17 @@ constexpr size_t WorkspaceBytes = 16 * 1024 * 1024;
 using BF = sycl::ext::oneapi::bfloat16;
 
 // One chunk for one sequence at a time, irrespective of total sequence length.
-// K/Q are BF16 XMX operands. The inverse, W/U, deltas, old state and all state
-// arithmetic stay F32, unlike the donor's optional BF16 intermediate stores.
+// K/Q retain their input precision as XMX operands. The inverse, W/U, deltas,
+// old state and all state arithmetic stay F32.
+template <typename Input>
 struct ChunkScratch {
-  BF *q, *k, *kt;
+  Input *q, *k, *kt;
   float *g, *exp_g, *tail_decay, *lower, *qk, *inverse, *w, *u, *delta, *state_t;
   ChunkScratch(void* storage, int heads) {
     auto* cursor = static_cast<char*>(storage);
-    auto bf = [&](size_t count) { auto* p = reinterpret_cast<BF*>(cursor); cursor += count * sizeof(BF); return p; };
+    auto fp16 = [&](size_t count) { auto* p = reinterpret_cast<Input*>(cursor); cursor += count * sizeof(Input); return p; };
     auto fp = [&](size_t count) { auto* p = reinterpret_cast<float*>(cursor); cursor += count * sizeof(float); return p; };
-    q = bf(heads * C * D); k = bf(heads * C * D); kt = bf(heads * D * C);
+    q = fp16(heads * C * D); k = fp16(heads * C * D); kt = fp16(heads * D * C);
     g = fp(heads * C); exp_g = fp(heads * C); tail_decay = fp(heads * C);
     lower = fp(heads * C * C); qk = fp(heads * C * C); inverse = fp(heads * C * C);
     w = fp(heads * C * D); u = fp(heads * C * D); delta = fp(heads * C * D);
@@ -29,7 +30,8 @@ struct ChunkScratch {
 static_assert(MaxHeads * (3 * C * D * sizeof(BF) +
     (3 * C + 3 * C * C + 3 * C * D + D * D) * sizeof(float)) <= WorkspaceBytes);
 
-void Prepare(Queue& queue, ChunkScratch s, View qi, View ki, View gates, const float* state,
+template <typename Input>
+void Prepare(Queue& queue, ChunkScratch<Input> s, View qi, View ki, View gates, const float* state,
              const int32_t* offsets, int sequence, int base, int heads, int key_heads) {
   auto& q = NativeQueue(queue);
   // VT has already normalized q/k and transformed g/beta. Only a chunk-local
@@ -54,8 +56,8 @@ void Prepare(Queue& queue, ChunkScratch s, View qi, View ki, View gates, const f
       const int row = inner / D, d = inner % D, token = offsets[sequence] + base + row;
       const bool valid = token < offsets[sequence + 1];
       const int kh = h / (heads / key_heads);
-      const BF qv(valid ? Load(qi, (token * key_heads + kh) * D + d) : 0.0f);
-      const BF kv(valid ? Load(ki, (token * key_heads + kh) * D + d) : 0.0f);
+      const Input qv(valid ? Load(qi, (token * key_heads + kh) * D + d) : 0.0f);
+      const Input kv(valid ? Load(ki, (token * key_heads + kh) * D + d) : 0.0f);
       s.q[h * C * D + inner] = qv; s.k[h * C * D + inner] = kv;
       s.kt[(h * D + d) * C + row] = kv;
     }
@@ -63,20 +65,21 @@ void Prepare(Queue& queue, ChunkScratch s, View qi, View ki, View gates, const f
   RecordProfileEvent(queue, "gdn_chunk_inputs", inputs_event);
 }
 
-// Compute K K^T using native BF16 XMX, F32 accumulation. Each SG16
-// owns a 16x16 tile; no state operand is converted to BF16 for this operation.
-void Dots(Queue& queue, ChunkScratch s, int heads) {
+// Compute K K^T using native BF16/F16 XMX, F32 accumulation. Each SG16
+// owns a 16x16 tile; no state operand is narrowed for this operation.
+template <typename Input>
+void Dots(Queue& queue, ChunkScratch<Input> s, int heads) {
   namespace mx = sycl::ext::oneapi::experimental::matrix;
   const auto event = NativeQueue(queue).parallel_for(sycl::nd_range<1>(heads * 16 * 16, 16),
       [=](sycl::nd_item<1> item) [[sycl::reqd_sub_group_size(16)]] {
     auto sg = item.get_sub_group();
     const int tile = item.get_group(0);
     const int h = (tile / 16) % heads, row = (tile % 16) / 4 * 16, col = tile % 4 * 16;
-    const BF* a = s.k + (h * C + row) * D;
-    const BF* b = s.kt + h * D * C + col;
+    const Input* a = s.k + (h * C + row) * D;
+    const Input* b = s.kt + h * D * C + col;
     float* out = s.lower + (h * C + row) * C + col;
-    mx::joint_matrix<sycl::sub_group, BF, mx::use::a, 16, 16, mx::layout::row_major> ja;
-    mx::joint_matrix<sycl::sub_group, BF, mx::use::b, 16, 16, mx::layout::row_major> jb;
+    mx::joint_matrix<sycl::sub_group, Input, mx::use::a, 16, 16, mx::layout::row_major> ja;
+    mx::joint_matrix<sycl::sub_group, Input, mx::use::b, 16, 16, mx::layout::row_major> jb;
     mx::joint_matrix<sycl::sub_group, float, mx::use::accumulator, 16, 16> acc;
     mx::joint_matrix_fill(sg, acc, 0.0f);
     for (int d = 0; d < D; d += 16) {
@@ -92,7 +95,8 @@ void Dots(Queue& queue, ChunkScratch s, int heads) {
   RecordProfileEvent(queue, "gdn_chunk_dots", event);
 }
 
-void System(Queue& queue, ChunkScratch s, View beta, const int32_t* offsets,
+template <typename Input>
+void System(Queue& queue, ChunkScratch<Input> s, View beta, const int32_t* offsets,
             int sequence, int base, int heads, float scale) {
   auto& q = NativeQueue(queue);
   const auto system_event = q.parallel_for(sycl::range<1>(heads * C * C), [=](sycl::id<1> item) {
@@ -103,7 +107,7 @@ void System(Queue& queue, ChunkScratch s, View beta, const int32_t* offsets,
     s.lower[index] = valid && row > col ? s.lower[index] * Load(beta, token * heads + h) * decay : 0;
     // VT's recurrence rounds q*scale in F32 before the dot. Factoring scale
     // out of both dots is algebraically equivalent but adds a rounding change.
-    // Keep this small dot SIMD/F32 rather than narrowing scaled q to BF16.
+    // Keep this small dot SIMD/F32 rather than narrowing scaled q.
     float dot = 0;
     if (valid && row >= col) for (int d = 0; d < D; ++d)
       dot += static_cast<float>(s.k[(h * C + col) * D + d]) *
@@ -129,7 +133,8 @@ void System(Queue& queue, ChunkScratch s, View beta, const int32_t* offsets,
   RecordProfileEvent(queue, "gdn_chunk_inverse", inverse_event);
 }
 
-void ComputeWU(Queue& queue, ChunkScratch s, View vi, View beta, const int32_t* offsets,
+template <typename Input>
+void ComputeWU(Queue& queue, ChunkScratch<Input> s, View vi, View beta, const int32_t* offsets,
                int sequence, int base, int heads) {
   const auto event = NativeQueue(queue).parallel_for(sycl::range<1>(heads * C * D), [=](sycl::id<1> item) {
     const int index = item[0], h = index / (C * D), row = (index / D) % C, d = index % D;
@@ -146,7 +151,8 @@ void ComputeWU(Queue& queue, ChunkScratch s, View vi, View beta, const int32_t* 
   RecordProfileEvent(queue, "gdn_chunk_wu", event);
 }
 
-void OutputState(Queue& queue, ChunkScratch s, View output, float* state, const int32_t* offsets,
+template <typename Input>
+void OutputState(Queue& queue, ChunkScratch<Input> s, View output, float* state, const int32_t* offsets,
                  int sequence, int base, int heads, float scale) {
   auto& q = NativeQueue(queue);
   const auto delta_event = q.parallel_for(sycl::range<1>(heads * C * D), [=](sycl::id<1> item) {
@@ -182,6 +188,29 @@ void OutputState(Queue& queue, ChunkScratch s, View output, float* state, const 
 }
 }
 
+template <typename Input>
+bool RunChunked(Queue& queue, Tensor& out, const Tensor& qi, const Tensor& ki,
+                const Tensor& vi, const Tensor& g, const Tensor& beta, Tensor& state,
+                const Tensor& qsl, const GdnArgs& args, int heads, int key_heads,
+                int sequences, int tokens) {
+  return WithGdnWorkspace(queue, WorkspaceBytes, [&](void* storage) {
+    ChunkScratch<Input> scratch(storage, heads);
+    WithOutput(queue, out, {&qi, &ki, &vi, &g, &beta}, [&](Tensor& target) {
+      const auto* offsets = static_cast<const int32_t*>(qsl.data);
+      for (int sequence = 0; sequence < sequences; ++sequence)
+        for (int base = 0; base < tokens; base += C) {
+          Prepare(queue, scratch, View(qi), View(ki), View(g), static_cast<float*>(state.data),
+                  offsets, sequence, base, heads, key_heads);
+          Dots(queue, scratch, heads);
+          System(queue, scratch, View(beta), offsets, sequence, base, heads, args.scale);
+          ComputeWU(queue, scratch, View(vi), View(beta), offsets, sequence, base, heads);
+          OutputState(queue, scratch, View(target), static_cast<float*>(state.data), offsets,
+                      sequence, base, heads, args.scale);
+        }
+    });
+  });
+}
+
 bool GdnChunkedPrefillKernel(Queue& queue, Tensor& out, const Tensor& qi, const Tensor& ki,
                             const Tensor& vi, const Tensor& g, const Tensor& beta, Tensor& state,
                             const Tensor& qsl, const GdnArgs& args) {
@@ -189,7 +218,8 @@ bool GdnChunkedPrefillKernel(Queue& queue, Tensor& out, const Tensor& qi, const 
   const int heads = state.shape[1], sequences = state.shape[0], key_heads = qi.shape[1], tokens = qi.shape[0];
   if (state.shape[2] != D || state.shape[3] != D || heads < 1 || heads > MaxHeads ||
       sequences < 1 || sequences > 4 || tokens < 1 || tokens > 6656 ||
-      qi.dtype != DType::kBF16 || ki.dtype != DType::kBF16 || vi.dtype != DType::kBF16 ||
+      (qi.dtype != DType::kBF16 && qi.dtype != DType::kF16) ||
+      ki.dtype != qi.dtype || vi.dtype != qi.dtype ||
       !device.has(sycl::aspect::ext_intel_device_id) ||
       device.get_info<sycl::ext::intel::info::device::device_id>() != 57891 ||
       !device.has(sycl::aspect::ext_intel_matrix)) return false;
@@ -202,18 +232,10 @@ bool GdnChunkedPrefillKernel(Queue& queue, Tensor& out, const Tensor& qi, const 
     for (int i = 0; i < sequences; ++i) if (offsets[i] < 0 || offsets[i] > offsets[i + 1]) return false;
     return true;
   }, "XPU chunked GDN invalid sequence offsets", {&qsl});
-  return WithGdnWorkspace(queue, WorkspaceBytes, [&](void* storage) {
-    ChunkScratch scratch(storage, heads);
-    WithOutput(queue, out, {&qi, &ki, &vi, &g, &beta}, [&](Tensor& target) {
-      for (int sequence = 0; sequence < sequences; ++sequence) for (int base = 0; base < tokens; base += C) {
-        Prepare(queue, scratch, View(qi), View(ki), View(g), static_cast<float*>(state.data),
-                offsets, sequence, base, heads, key_heads);
-        Dots(queue, scratch, heads);
-        System(queue, scratch, View(beta), offsets, sequence, base, heads, args.scale);
-        ComputeWU(queue, scratch, View(vi), View(beta), offsets, sequence, base, heads);
-        OutputState(queue, scratch, View(target), static_cast<float*>(state.data), offsets, sequence, base, heads, args.scale);
-      }
-    });
-  });
+  if (qi.dtype == DType::kF16)
+    return RunChunked<sycl::half>(queue, out, qi, ki, vi, g, beta, state, qsl,
+                                  args, heads, key_heads, sequences, tokens);
+  return RunChunked<BF>(queue, out, qi, ki, vi, g, beta, state, qsl,
+                        args, heads, key_heads, sequences, tokens);
 }
 }  // namespace vt::xpu

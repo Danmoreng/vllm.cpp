@@ -39,11 +39,13 @@ struct Fixture {
   Buffer query, out, cache, table, lens, offsets;
   vt::Tensor kc, vc;
   vt::PagedAttentionArgs args;
-  Fixture(vt::Queue& q, int nreq, int chunk, int length, bool fp8, bool unequal = false, int block = 16)
+  Fixture(vt::Queue& q, int nreq, int chunk, int length, bool fp8, bool unequal = false,
+          int block = 16, DType query_type = DType::kF32,
+          DType output_type = DType::kF32, DType cache_type = DType::kBF16)
       : queue(q), requests(nreq), tokens(nreq * chunk), context(length), page(block),
         blocks(nreq * ((length + block - 1) / block)), columns((length + block - 1) / block),
-        query(q, DType::kF32, {tokens, 24, 256}), out(q, DType::kF32, {tokens, 24, 256}),
-        cache(q, fp8 ? DType::kI8 : DType::kBF16, {blocks, 2 * page, 4, 256}),
+        query(q, query_type, {tokens, 24, 256}), out(q, output_type, {tokens, 24, 256}),
+        cache(q, fp8 ? DType::kI8 : cache_type, {blocks, 2 * page, 4, 256}),
         table(q, DType::kI32, {requests, 2 * columns + 1}),
         lens(q, DType::kI32, {requests}), offsets(q, DType::kI32, {requests + 1}) {
     std::vector<int32_t> lens_data(requests), qsl{0}, bt_data(requests * (2 * columns + 1), -1);
@@ -56,7 +58,9 @@ struct Fixture {
     auto queries = Random(query.tensor.Numel(), 83175);
     query.put(queries); query.tensor.shape[0] = out.tensor.shape[0] = tokens;
     auto data = Random(cache.tensor.Numel(), 991); // same BF16-rounded source for both cache formats
-    for (auto& v : data) v = vt::BF16ToF32(vt::F32ToBF16(v));
+    for (auto& v : data)
+      v = cache_type == DType::kF16 ? vt::F16ToF32(vt::F32ToF16(v))
+                                    : vt::BF16ToF32(vt::F32ToBF16(v));
     args.scale = 1.0f / 16;
     if (fp8) {
       args.kv_cache_dtype = vt::Fp8KVCacheDataType::kFp8E4M3;
@@ -146,6 +150,26 @@ TEST_CASE("XPU XMX attention prefill: tails, batch4, appended 32k context and ma
     }
   }
   CHECK(vt::GetReferenceTierHits() == 0);
+}
+TEST_CASE("XPU short F16 attention prefill selects XMX path"
+          * doctest::skip(!std::getenv("VT_XPU_PROFILE"))) {
+  Queue cpu(vt::DeviceType::kCPU), gpu(vt::DeviceType::kXPU);
+  Fixture ref(cpu.q, 1, 64, 67, false, false, 16,
+              DType::kF16, DType::kF32, DType::kF16);
+  Fixture got(gpu.q, 1, 64, 67, false, false, 16,
+              DType::kF16, DType::kF16, DType::kF16);
+  ref.run("reference");
+  (void)vt::xpu::DrainProfileEvents();
+  got.run("auto");
+  Accuracy(got.result(), ref.result(), false, true);
+  const auto records = vt::xpu::DrainProfileEvents();
+  size_t prefill = 0, fallback = 0;
+  for (const auto& record : records) {
+    prefill += record.stage == "attention_prefill";
+    fallback += record.stage == "attention_reference";
+  }
+  CHECK(prefill == 1);
+  CHECK(fallback == 0);
 }
 TEST_CASE("XPU XMX attention prefill: FP16 overflow eligibility fallback") {
   Queue cpu(vt::DeviceType::kCPU), gpu(vt::DeviceType::kXPU);
