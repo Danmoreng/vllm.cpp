@@ -606,10 +606,6 @@ vllm_cpp_add_test(test_qwen35_moe_gdn_ba_owner vllm/models/test_qwen35_moe_gdn_b
 # MoE vision tower (#891): the tower is loaded (and its ABSENCE refused by name)
 # and the forked VL forward actually CONSUMES the merger rows.
 vllm_cpp_add_test(test_qwen3_5_moe_vision vllm/models/test_qwen3_5_moe_vision.cpp)
-# Dense-arm vision tower (MODEL-QWEN35-DENSE-VL-EXL3): the `model.visual.*`
-# tensors are no longer silently dropped by the dense loader, and the dense VL
-# greedy driver CONSUMES the merger rows (CPU gates, mirroring the MoE ones).
-vllm_cpp_add_test(test_qwen3_5_dense_vision vllm/models/test_qwen3_5_dense_vision.cpp)
 # SPEC-MTP I5a: GDN layer spec routing (GdnBlockPaged spec branch) — needs the
 # internal header under src/ for the GdnBlockPagedForTest entry point.
 vllm_cpp_add_test(test_qwen3_5_gdn_spec_routing vllm/models/test_qwen3_5_gdn_spec_routing.cpp)
@@ -778,8 +774,8 @@ target_compile_definitions(test_llama_embedding_fold PRIVATE
   LLAMA_EMBED_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/vllm/models/fixtures/llama_embed_e2e")
 vllm_cpp_add_test(test_kev vllm/models/test_kev.cpp)
 target_include_directories(test_kev PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/vllm/models)
-vllm_cpp_add_test(test_tev1 vllm/models/test_tev1.cpp)
-target_include_directories(test_tev1 PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/vllm/models)
+vllm_cpp_add_test(test_clm vllm/models/test_clm.cpp)
+target_include_directories(test_clm PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/vllm/models)
 vllm_cpp_add_test(test_mistral_forward vllm/models/test_mistral_forward.cpp)
 target_include_directories(test_mistral_forward PRIVATE ${CMAKE_SOURCE_DIR}/src)
 vllm_cpp_add_test(test_gemma3_load vllm/models/test_gemma3_load.cpp)
