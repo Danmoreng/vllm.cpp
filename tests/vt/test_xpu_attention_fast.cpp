@@ -363,3 +363,30 @@ TEST_CASE("XPU FP8 KV auto selects fast prefill and decode"
     saw_split |= event.stage == "attention_split_partial";
   CHECK(saw_split);
 }
+
+TEST_CASE("XPU FP8 split span candidate"
+          * doctest::skip(!std::getenv("VT_B70_ATTENTION_SPLIT_CANDIDATE"))) {
+  Queue gpu(vt::DeviceType::kXPU);
+  for (int length : {64, 129, 513, 4097}) {
+    Fixture f(gpu.q, 1, 1, length, true, false, 64,
+              DType::kF16, DType::kF16, DType::kF16);
+    std::vector<float> reference;
+    for (const char* span : {"256", "128", "64", "32"}) {
+      setenv("VT_XPU_ATTN_SPLIT_SPAN", span, 1);
+      f.run("split");
+      std::vector<double> ms;
+      for (int i = 0; i < 15; ++i) {
+        const auto start = std::chrono::steady_clock::now();
+        f.run("split");
+        ms.push_back(std::chrono::duration<double, std::milli>(
+            std::chrono::steady_clock::now() - start).count());
+      }
+      std::sort(ms.begin(), ms.end());
+      std::cout << nlohmann::json{{"length", length}, {"span", span},
+                                  {"median_ms", ms[7]},
+                                  {"samples_ms", ms}}.dump() << std::endl;
+      if (reference.empty()) reference = f.result();
+      else Accuracy(f.result(), reference, false, true);
+    }
+  }
+}
