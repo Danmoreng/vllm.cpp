@@ -2,6 +2,7 @@
 #include "xpu_kernels.h"
 #include <cstdio>
 #include <cstdlib>
+#include <algorithm>
 #include <string_view>
 
 namespace vt::xpu {
@@ -160,6 +161,67 @@ void Recurrence(Queue& q, Tensor& out, const Tensor& qi, const Tensor& ki, const
     const auto* offsets = qsl ? static_cast<const int32_t*>(qsl->data) : nullptr;
     const auto* ids = indices ? static_cast<const int32_t*>(indices->data) : nullptr;
     auto* cache = static_cast<float*>(state.data);
+    enum class DecodeMode { kAuto, kReference, kSubgroup };
+    static const DecodeMode decode_mode = [] {
+      const char* value = std::getenv("VT_XPU_GDN_DECODE");
+      const std::string_view name = value ? value : "auto";
+      VT_CHECK(name == "auto" || name == "reference" || name == "subgroup", "Invalid VT_XPU_GDN_DECODE");
+      return name == "reference" ? DecodeMode::kReference :
+             name == "subgroup" ? DecodeMode::kSubgroup : DecodeMode::kAuto;
+    }();
+    const bool shape_ok = decode && dk == 128 && dv == 128 &&
+        qi.dtype == DType::kF16 && ki.dtype == DType::kF16 && vi.dtype == DType::kF16;
+    bool subgroup = false;
+    if (shape_ok && decode_mode != DecodeMode::kReference) {
+      const auto sizes = NativeQueue(q).get_device().get_info<sycl::info::device::sub_group_sizes>();
+      subgroup = std::find(sizes.begin(), sizes.end(), 16) != sizes.end();
+    }
+    VT_CHECK(!decode || decode_mode != DecodeMode::kSubgroup || subgroup,
+             "VT_XPU_GDN_DECODE=subgroup requires F16 Dk=Dv=128 and SG16");
+    if (subgroup) {
+      // One subgroup owns a complete value row; each lane retains eight K
+      // positions until both reductions finish, then writes state once.
+      constexpr int lanes = 16, tile = 8, workgroup = 128;
+      const auto count = rows * hv * dv;
+      const auto global = ((count * lanes + workgroup - 1) / workgroup) * workgroup;
+      const auto event = NativeQueue(q).parallel_for(
+          sycl::nd_range<1>(sycl::range<1>(global), sycl::range<1>(workgroup)),
+          [=](sycl::nd_item<1> item) [[sycl::reqd_sub_group_size(16)]] {
+        const int64_t index = item.get_global_linear_id() / lanes;
+        if (index >= count) return;
+        const int lane = item.get_local_linear_id() % lanes;
+        const int64_t row = index / (hv * dv), head = (index / dv) % hv, value = index % dv;
+        const int64_t slot = ids ? ids[row] : row;
+        if (slot < 0) {
+          if (lane == 0) Store(dst, index, 0.0f);
+          return;
+        }
+        const int64_t token = row, kh = head / (hv / hk);
+        const int64_t kbase = (token * hk + kh) * dk;
+        auto* s = cache + ((slot * hv + head) * dv + value) * dk;
+        const float decay = sycl::exp(Load(gs, token * hv + head));
+        float local_state[tile], local_key[tile], prediction = 0.0f;
+        for (int j = 0; j < tile; ++j) {
+          const int col = lane + lanes * j;
+          local_state[j] = s[col] * decay;
+          local_key[j] = Load(ks, kbase + col);
+          prediction += local_state[j] * local_key[j];
+        }
+        prediction = sycl::reduce_over_group(item.get_sub_group(), prediction, sycl::plus<float>());
+        const float delta = (Load(vs, index) - prediction) * Load(bs, token * hv + head);
+        float output = 0.0f;
+        for (int j = 0; j < tile; ++j) {
+          const int col = lane + lanes * j;
+          local_state[j] += delta * local_key[j];
+          output += local_state[j] * (Load(qs, kbase + col) * scale);
+          s[col] = local_state[j];
+        }
+        output = sycl::reduce_over_group(item.get_sub_group(), output, sycl::plus<float>());
+        if (lane == 0) Store(dst, index, output);
+      });
+      RecordProfileEvent(q, "gdn_decode_recurrence_subgroup", event);
+      return;
+    }
     // One work-item owns one value row of S. Tokens remain sequential; no
     // extra q/k normalization or gate transformation occurs inside recurrence.
     const auto event = NativeQueue(q).parallel_for(sycl::range<1>(rows * hv * dv), [=](sycl::id<1> item) {
@@ -242,6 +304,49 @@ void RmsNormGatedKernel(Queue& q, Tensor& out, const Tensor& x, const Tensor& ga
   const auto eps = args.eps; const bool sigmoid = args.sigmoid_gate;
   WithOutput(q, out, {&x, &gate, &weight}, [&](Tensor& target) {
     const View src(x), dst(target), z(gate), w(weight);
+    enum class NormMode { kAuto, kReference, kSubgroup };
+    static const NormMode norm_mode = [] {
+      const char* value = std::getenv("VT_XPU_GDN_GATED_NORM");
+      const std::string_view name = value ? value : "auto";
+      VT_CHECK(name == "auto" || name == "reference" || name == "subgroup",
+               "Invalid VT_XPU_GDN_GATED_NORM");
+      return name == "reference" ? NormMode::kReference :
+             name == "subgroup" ? NormMode::kSubgroup : NormMode::kAuto;
+    }();
+    bool subgroup = false;
+    if (width == 128 && norm_mode != NormMode::kReference) {
+      const auto sizes = NativeQueue(q).get_device().get_info<sycl::info::device::sub_group_sizes>();
+      subgroup = std::find(sizes.begin(), sizes.end(), 16) != sizes.end();
+    }
+    VT_CHECK(norm_mode != NormMode::kSubgroup || subgroup,
+             "VT_XPU_GDN_GATED_NORM=subgroup requires width 128 and SG16");
+    if (subgroup) {
+      constexpr int lanes = 16, tile = 8, workgroup = 128;
+      const auto global = ((rows * lanes + workgroup - 1) / workgroup) * workgroup;
+      const auto event = NativeQueue(q).parallel_for(
+          sycl::nd_range<1>(sycl::range<1>(global), sycl::range<1>(workgroup)),
+          [=](sycl::nd_item<1> item) [[sycl::reqd_sub_group_size(16)]] {
+        const int64_t row = item.get_global_linear_id() / lanes;
+        if (row >= rows) return;
+        const int lane = item.get_local_linear_id() % lanes;
+        float values[tile], sum = 0.0f;
+        for (int j = 0; j < tile; ++j) {
+          values[j] = Load(src, row * width + lane + lanes * j);
+          sum += values[j] * values[j];
+        }
+        sum = sycl::reduce_over_group(item.get_sub_group(), sum, sycl::plus<float>());
+        const float inv = 1.0f / sycl::sqrt(sum / static_cast<float>(width) + eps);
+        const auto gbase = (row / group) * z.stride[0] + (row % group) * width;
+        for (int j = 0; j < tile; ++j) {
+          const int col = lane + lanes * j;
+          const float value = Load(z, gbase + col);
+          const float act = sigmoid ? 1.0f / (1.0f + sycl::exp(-value)) : Silu(value);
+          Store(dst, row * width + col, values[j] * inv * Load(w, col) * act);
+        }
+      });
+      RecordProfileEvent(q, "gdn_gated_norm_subgroup", event);
+      return;
+    }
     const auto event = NativeQueue(q).parallel_for(sycl::range<1>(rows), [=](sycl::id<1> item) {
       const auto row = item[0];
       float sum = 0;

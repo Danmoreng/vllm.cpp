@@ -181,6 +181,33 @@ TEST_CASE("XPU GDN recurrence: varlen, Hv/Hk=3, complete output and F32 state") 
   }
 }
 
+TEST_CASE("XPU GDN SG16 gated norm: F16, strided gate and in-place output") {
+  Queue cpu(vt::DeviceType::kCPU), gpu(vt::DeviceType::kXPU);
+  constexpr int tokens = 2, heads = 48, width = 128;
+  for (bool sigmoid : {false, true}) {
+    CAPTURE(sigmoid);
+    std::vector<float> expected;
+    for (auto* q : {&cpu.q, &gpu.q}) {
+      const auto type = q == &cpu.q ? DType::kF32 : DType::kF16;
+      Buffer x(*q, type, {tokens, heads, width});
+      Buffer gate(*q, type, {tokens, heads + 1, width});
+      Buffer weight(*q, type, {width}), out(*q, type, {tokens, heads, width});
+      auto put_rounded = [&](Buffer& buffer, std::vector<float> values) {
+        if (q == &cpu.q) for (auto& value : values) value = vt::F16ToF32(vt::F32ToF16(value));
+        buffer.put(values);
+      };
+      put_rounded(x, Values(tokens * heads * width, 3));
+      put_rounded(gate, Values(tokens * (heads + 1) * width, 7));
+      put_rounded(weight, Values(width, 9, 0.02f));
+      gate.tensor.shape[1] = heads;
+      auto& target = q == &cpu.q ? out.tensor : x.tensor;
+      vt::RmsNormGated(*q, target, x.tensor, gate.tensor, weight.tensor, {1e-6f, sigmoid});
+      if (q == &cpu.q) expected = out.floats();
+      else Close(x.floats(), expected, 0.003f, 0.0002f);
+    }
+  }
+}
+
 TEST_CASE("XPU GDN full prefill equals split prefill plus decode, including every state value") {
   Queue gpu(vt::DeviceType::kXPU);
   for (int length : {1, 2, 3, 4, 63, 64, 65}) {
@@ -242,6 +269,93 @@ TEST_CASE("XPU GDN state gather/scatter and decode: permutation, null slot, pres
   }
   CHECK(vt::GetReferenceTierHits() == 0);
   CHECK(vt::xpu::GetMemoryInfo().allocated_bytes == 0);
+}
+
+TEST_CASE("XPU GDN SG16 decode: nonzero F32 state, repeated permuted and null slots") {
+  Queue cpu(vt::DeviceType::kCPU), gpu(vt::DeviceType::kXPU);
+  constexpr int batch = 3, slots = 4, hk = 2, hv = 6, dk = 128, dv = 128;
+  std::vector<std::vector<float>> expected_outputs;
+  std::vector<float> expected_state;
+  for (auto* q : {&cpu.q, &gpu.q}) {
+    const auto type = q == &cpu.q ? DType::kF32 : DType::kF16;
+    Buffer qi(*q, type, {batch, hk, dk}), ki(*q, type, {batch, hk, dk});
+    Buffer vi(*q, type, {batch, hv, dv}), out(*q, type, {batch, hv, dv});
+    Buffer g(*q, DType::kF32, {batch, hv}), beta(*q, DType::kF32, {batch, hv});
+    Buffer state(*q, DType::kF32, {slots, hv, dv, dk}), ids(*q, DType::kI32, {batch});
+    state.put(Values(slots * hv * dv * dk, 5, 0.002f));
+    std::vector<std::vector<float>> outputs;
+    for (int step = 0; step < 3; ++step) {
+      auto put_rounded = [&](Buffer& buffer, std::vector<float> values) {
+        if (q == &cpu.q) for (auto& value : values) value = vt::F16ToF32(vt::F32ToF16(value));
+        buffer.put(values);
+      };
+      put_rounded(qi, Normalized(batch * hk * dk, dk, step));
+      put_rounded(ki, Normalized(batch * hk * dk, dk, step + 7));
+      put_rounded(vi, Values(batch * hv * dv, step + 13, 0.01f));
+      g.put(std::vector<float>(batch * hv, -0.13f));
+      beta.put(std::vector<float>(batch * hv, 0.61f));
+      const int32_t indices[batch] = {step % 2 == 0 ? 2 : 0, -1, step % 2 == 0 ? 0 : 2};
+      ids.upload(indices);
+      vt::GdnDecode(*q, out.tensor, qi.tensor, ki.tensor, vi.tensor, g.tensor,
+                    beta.tensor, state.tensor, {1.0f / std::sqrt(float(dk))}, &ids.tensor);
+      outputs.push_back(out.floats());
+    }
+    if (q == &cpu.q) { expected_outputs = outputs; expected_state = state.floats(); }
+    else {
+      for (int step = 0; step < 3; ++step) {
+        CAPTURE(step);
+        Close(outputs[step], expected_outputs[step], 0.002f, 0.001f);
+        for (int col = 0; col < hv * dv; ++col)
+          CHECK(outputs[step][hv * dv + col] == 0.0f);
+      }
+      Close(state.floats(), expected_state, 3e-5f, 3e-6f);
+    }
+  }
+}
+
+TEST_CASE("XPU GDN SG16 decode continues irregular prefill chunks and preserves final state") {
+  Queue cpu(vt::DeviceType::kCPU), gpu(vt::DeviceType::kXPU);
+  constexpr int tokens = 6, hk = 2, hv = 6, dk = 128, dv = 128;
+  std::vector<float> expected_output, expected_state;
+  for (auto* q : {&cpu.q, &gpu.q}) {
+    const auto type = q == &cpu.q ? DType::kF32 : DType::kF16;
+    Buffer qi(*q, type, {tokens, hk, dk}), ki(*q, type, {tokens, hk, dk});
+    Buffer vi(*q, type, {tokens, hv, dv}), out(*q, type, {tokens, hv, dv});
+    Buffer g(*q, DType::kF32, {tokens, hv}), beta(*q, DType::kF32, {tokens, hv});
+    Buffer state(*q, DType::kF32, {2, hv, dv, dk}), qsl(*q, DType::kI32, {3});
+    Buffer ids(*q, DType::kI32, {1});
+    const int32_t slot[] = {0}; ids.upload(slot);
+    auto put_rounded = [&](Buffer& buffer, std::vector<float> values) {
+      if (q == &cpu.q) for (auto& value : values) value = vt::F16ToF32(vt::F32ToF16(value));
+      buffer.put(values);
+    };
+    put_rounded(qi, Normalized(tokens * hk * dk, dk, 2));
+    put_rounded(ki, Normalized(tokens * hk * dk, dk, 5));
+    put_rounded(vi, Values(tokens * hv * dv, 7));
+    g.put(std::vector<float>(tokens * hv, -0.13f));
+    beta.put(std::vector<float>(tokens * hv, 0.61f));
+    state.put(Values(2 * hv * dv * dk, 11, 0.002f));
+    const vt::GdnArgs args{1.0f / std::sqrt(float(dk))};
+    for (const auto [first, length] : {std::pair{0, 2}, std::pair{2, 1}}) {
+      const int32_t offsets[] = {0, length, length};
+      qsl.upload(offsets);
+      auto output = Rows(out.tensor, first, length);
+      vt::GdnPrefill(*q, output, Rows(qi.tensor, first, length), Rows(ki.tensor, first, length),
+                     Rows(vi.tensor, first, length), Rows(g.tensor, first, length),
+                     Rows(beta.tensor, first, length), state.tensor, qsl.tensor, args);
+    }
+    for (int token = 3; token < tokens; ++token) {
+      auto output = Rows(out.tensor, token, 1);
+      vt::GdnDecode(*q, output, Rows(qi.tensor, token, 1), Rows(ki.tensor, token, 1),
+                    Rows(vi.tensor, token, 1), Rows(g.tensor, token, 1),
+                    Rows(beta.tensor, token, 1), state.tensor, args, &ids.tensor);
+    }
+    if (q == &cpu.q) { expected_output = out.floats(); expected_state = state.floats(); }
+    else {
+      Close(out.floats(), expected_output, 0.002f, 0.001f);
+      Close(state.floats(), expected_state, 3e-5f, 3e-6f);
+    }
+  }
 }
 
 TEST_CASE("XPU compressed conv: direct BF16 cache equals the F32 working-copy path") {
