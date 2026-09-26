@@ -105,6 +105,7 @@ bool GraphProfileEnabled() {
   return enabled;
 }
 thread_local const char* current_profile_matrix = nullptr;
+thread_local int64_t current_profile_layer = -1;
 struct ProfileAnchorKernel { void operator()() const {} };
 struct Workspace {
   std::mutex mutex;
@@ -117,6 +118,8 @@ struct PendingProfileEvent {
   std::string matrix;
   uint64_t queue_id;
   sycl::event event;
+  std::optional<sycl::event> begin;
+  uint64_t host_submit_ns = 0;
 };
 struct Context {
   sycl::device device;
@@ -160,7 +163,8 @@ void AppendProfileEvent(Context& c, Queue& q, const char* stage,
   constexpr size_t kMaxProfileEvents = 1000000;
   VT_CHECK(c.profile_events.size() < kMaxProfileEvents,
            "XPU profile event limit exceeded; narrow or drain the diagnostic window");
-  c.profile_events.push_back({stage, matrix ? matrix : "", q.id, event});
+  c.profile_events.push_back({stage, matrix ? matrix : "", q.id, event,
+                              std::nullopt, 0});
 }
 uint64_t SteadyNs() {
   return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
@@ -544,6 +548,9 @@ sycl::queue& NativeQueue(Queue& q) {
 ProfileMatrixScope::ProfileMatrixScope(const char* matrix) noexcept
     : previous_(current_profile_matrix) { current_profile_matrix = matrix; }
 ProfileMatrixScope::~ProfileMatrixScope() noexcept { current_profile_matrix = previous_; }
+ProfileLayerScope::ProfileLayerScope(int64_t layer) noexcept
+    : previous_(current_profile_layer) { current_profile_layer = layer; }
+ProfileLayerScope::~ProfileLayerScope() noexcept { current_profile_layer = previous_; }
 void RecordProfileEvent(Queue& q, const char* stage, const sycl::event& event) {
   if (!ProfileQueuesEnabled()) return;
   auto& c = GetContext(q.device.index);
@@ -552,6 +559,28 @@ void RecordProfileEvent(Queue& q, const char* stage, const sycl::event& event) {
   VT_CHECK(c.queues.count(native) != 0, "XPU profiling requires a live queue");
   if (c.recordings.count(native)) return;  // Graph nodes need separate profiling.
   AppendProfileEvent(c, q, stage, current_profile_matrix, event);
+}
+bool ProfileQueueEventsEnabled() { return ProfileQueuesEnabled(); }
+void RecordProfileSpan(Queue& q, const char* stage, const sycl::event& begin,
+                       const sycl::event& end, uint64_t host_submit_ns,
+                       const std::string& detail) {
+  if (!ProfileQueuesEnabled()) return;
+  auto& c = GetContext(q.device.index);
+  std::lock_guard<std::mutex> lock(c.mutex);
+  auto* native = static_cast<sycl::queue*>(q.handle);
+  VT_CHECK(c.queues.count(native) != 0, "XPU profiling requires a live queue");
+  if (c.recordings.count(native)) return;
+  AppendProfileEvent(c, q, stage, current_profile_matrix, end);
+  auto& pending = c.profile_events.back();
+  pending.begin = begin;
+  pending.host_submit_ns = host_submit_ns;
+  if (current_profile_layer >= 0)
+    pending.matrix = "layer=" + std::to_string(current_profile_layer) +
+                     (pending.matrix.empty() ? "" : " " + pending.matrix);
+  if (!detail.empty()) {
+    if (!pending.matrix.empty()) pending.matrix += ' ';
+    pending.matrix += detail;
+  }
 }
 ProfileClockAnchor CaptureProfileClockAnchor(int index) {
   VT_CHECK(ProfileQueuesEnabled(), "XPU profile clock anchor requires VT_XPU_PROFILE=1");
@@ -583,11 +612,19 @@ std::vector<ProfileRecord> DrainProfileEvents(int index) {
   std::vector<ProfileRecord> records;
   records.reserve(pending.size());
   for (auto& item : pending) {
+    if (item.begin) item.begin->wait_and_throw();
     item.event.wait_and_throw();
+    const auto start = item.begin
+        ? item.begin->get_profiling_info<sycl::info::event_profiling::command_end>()
+        : item.event.get_profiling_info<sycl::info::event_profiling::command_start>();
+    const auto end = item.begin
+        ? item.event.get_profiling_info<sycl::info::event_profiling::command_start>()
+        : item.event.get_profiling_info<sycl::info::event_profiling::command_end>();
+    const auto submit = item.begin
+        ? item.begin->get_profiling_info<sycl::info::event_profiling::command_submit>()
+        : item.event.get_profiling_info<sycl::info::event_profiling::command_submit>();
     records.push_back({item.stage, std::move(item.matrix), item.queue_id,
-        item.event.get_profiling_info<sycl::info::event_profiling::command_submit>(),
-        item.event.get_profiling_info<sycl::info::event_profiling::command_start>(),
-        item.event.get_profiling_info<sycl::info::event_profiling::command_end>()});
+        submit, start, end, item.begin.has_value(), item.host_submit_ns});
   }
   return records;
 }

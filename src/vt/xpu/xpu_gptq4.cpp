@@ -3,6 +3,7 @@
 #include <oneapi/dnnl/dnnl.hpp>
 #include <oneapi/dnnl/dnnl_sycl.hpp>
 
+#include <chrono>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -47,7 +48,10 @@ struct PrimitiveEntry {
   std::mutex bindings_mutex;
   std::unordered_map<uint64_t, std::unique_ptr<ExecutionBinding>> bindings;
   size_t scratchpad_bytes = 0;
+  std::string implementation;
 };
+
+struct OneDnnProfileAnchor { void operator()() const {} };
 
 struct ExecutionBinding {
   std::mutex mutex;
@@ -142,6 +146,7 @@ std::shared_ptr<PrimitiveEntry> GetPrimitive(DeviceRuntime& runtime,
                                      entry->dst, attr);
   entry->scratchpad = pd.scratchpad_desc();
   entry->scratchpad_bytes = entry->scratchpad.get_size();
+  entry->implementation = pd.impl_info_str();
   entry->primitive = std::make_unique<dnnl::matmul>(pd);
   runtime.primitives.emplace(key, entry);
   ++runtime.stats.primitive_count;
@@ -204,8 +209,32 @@ void Execute(Queue& queue, Tensor& out, const Tensor& activation,
     auto* scratch = Scratchpad(runtime, queue, entry->scratchpad_bytes);
     bind(DNNL_ARG_SCRATCHPAD, entry->scratchpad, scratch);
   }
+  // oneDNN 3.13's SYCL execute returns void. Two device markers on the same
+  // in-order queue bracket all commands it submits to this stream. Keep this
+  // diagnostic out of ordinary throughput runs.
+  const bool profile = ProfileQueueEventsEnabled();
+  std::optional<sycl::event> profile_begin;
+  if (profile)
+    profile_begin = NativeQueue(queue).single_task(OneDnnProfileAnchor{});
+  const auto host_begin = std::chrono::steady_clock::now();
   dnnl::sycl_interop::execute(*entry->primitive, Stream(runtime, queue),
                               binding.args);
+  const auto host_end = std::chrono::steady_clock::now();
+  if (profile) {
+    const auto profile_end =
+        NativeQueue(queue).single_task(OneDnnProfileAnchor{});
+    const auto host_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+        host_end - host_begin).count();
+    const std::string detail =
+        "M=" + std::to_string(key.m) + " K=" + std::to_string(key.k) +
+        " N=" + std::to_string(key.n) + " impl=" + entry->implementation +
+        " scratch=" + std::to_string(entry->scratchpad_bytes);
+    RecordProfileSpan(queue,
+                      kind == Kind::kGptq4 ? "onednn_gptq4_stream"
+                                           : "onednn_dense_f16_stream",
+                      *profile_begin, profile_end,
+                      static_cast<uint64_t>(host_ns), detail);
+  }
 }
 
 void MatmulGptq4Kernel(Queue& queue, Tensor& out, const Tensor& activation,

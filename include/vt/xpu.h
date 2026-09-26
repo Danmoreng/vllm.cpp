@@ -33,6 +33,10 @@ struct ProfileRecord {
   // On the pinned Level Zero stack, submit and device start can straddle
   // different clock calibrations. Do not infer a delay from their raw difference.
   uint64_t submit_ns = 0, start_ns = 0, end_ns = 0;
+  // A stream span brackets a library call with two commands on the same
+  // in-order queue; it can include gaps between its internal kernels.
+  bool stream_span = false;
+  uint64_t host_submit_ns = 0;
 };
 // Brackets one profiled device command between two steady-clock reads. Device
 // and host clocks have different epochs on the pinned stack; use the bracket
@@ -50,4 +54,24 @@ ProfileClockAnchor CaptureProfileClockAnchor(int index = 0);
 std::vector<ProfileRecord> DrainProfileEvents(int index = 0);
 std::vector<HostProfileRecord> DrainHostProfileRecords(int index = 0);
 size_t PendingProfileEventCount(int index = 0);
+// Host-only labels copied into XPU profile records during a synchronous
+// submission. Nested projection labels preserve their caller's layer label.
+class ProfileLayerScope {
+ public:
+  explicit ProfileLayerScope(int64_t layer) noexcept;
+  ~ProfileLayerScope() noexcept;
+  ProfileLayerScope(const ProfileLayerScope&) = delete;
+  ProfileLayerScope& operator=(const ProfileLayerScope&) = delete;
+ private:
+  int64_t previous_;
+};
+class ProfileMatrixScope {
+ public:
+  explicit ProfileMatrixScope(const char* matrix) noexcept;
+  ~ProfileMatrixScope() noexcept;
+  ProfileMatrixScope(const ProfileMatrixScope&) = delete;
+  ProfileMatrixScope& operator=(const ProfileMatrixScope&) = delete;
+ private:
+  const char* previous_;
+};
 }  // namespace vt::xpu

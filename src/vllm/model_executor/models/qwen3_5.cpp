@@ -21,6 +21,9 @@
 #include "vllm/model_executor/models/kv_cache_route.h"  // KV-FP8 W3 store/read route
 #include "vllm/model_executor/models/dense_exl3_linear.h"  // MODEL-QWEN35-EXL3 (#2495): the EXL3 linear seam
 #include "vllm/model_executor/models/dense_gptq4_linear.h"
+#ifdef VLLM_CPP_XPU
+#include "vt/xpu.h"
+#endif
 #include "vllm/model_executor/models/dense_fp8_block_gemm.h"  // MODEL-FP8-BLOCK-LINEAR (#1189 M4)
 #include "vllm/model_executor/models/dense_device_glue.h"
 #include "vllm/model_executor/models/device_pool.h"  // DevicePool/Pool/AuxPool/ActivePool (shared)
@@ -60,6 +63,7 @@
 #include "vllm/model_executor/models/dense_fp8_gemm.h"   // dense_fp8:: FP8 W8A8 seam (#940)
 #include "vllm/model_executor/models/dense_nvfp4_gemm.h"  // dense_nvfp4::MarlinDenseEnabled
 #include "vllm/model_executor/model_loader/nvfp4_dequant.h"
+#include "vllm/v1/attention/metadata_validation.h"
 #include "vt/backend.h"
 #include "vt/breakable_graph.h"  // ENG-CUDAGRAPH-BREAK W4: the shared capture seam
 #include "vt/persistent_step_input.h"  // ENG-CUDAGRAPH-BREAK W4: the persistent step inputs
@@ -4870,6 +4874,7 @@ StepDevInputs BuildStepDevInputs(Dev d, const std::vector<int32_t>& positions,
                                  const GDNAttentionMetadata& gm,
                                  int64_t gdn_state_slots) {
   const int64_t T = static_cast<int64_t>(positions.size());
+  v1::ValidateAttentionUploadMetadata(am, T);
   const bool indexed_state_io = IndexedGdnStateIoEnabled(d.q.device);
   VT_CHECK(gm.num_actual_tokens == T,
            "qwen3_5: GDN metadata token count must match step input");
@@ -8260,6 +8265,9 @@ void RunDenseLayerPaged(Dev d, const Qwen3_5DenseLayerWeights& layer,
                         const PagedKvCache* attn_kv,
                         const GdnStateCache* gdn_state, int64_t T,
                         int64_t layer_index) {
+#ifdef VLLM_CPP_XPU
+  const vt::xpu::ProfileLayerScope profile_layer(layer_index);
+#endif
   const int64_t H = cfg.hidden_size;
   const float eps = static_cast<float>(cfg.rms_norm_eps);
 
@@ -8426,6 +8434,7 @@ StepDevInputs BuildFullAttnStepDevInputs(Dev d,
                                          const std::vector<int32_t>& positions,
                                          const CommonAttentionMetadata& am) {
   const int64_t T = static_cast<int64_t>(positions.size());
+  v1::ValidateAttentionUploadMetadata(am, T);
   ValidateFullAttnStepMetadata(T, am);
   return StepDevInputs{
       DBuf(d, DType::kI32, {T}, positions.data()),
@@ -9845,6 +9854,10 @@ static void CheckDensePagedForward(const std::vector<int32_t>& token_ids,
   VT_CHECK(static_cast<int64_t>(gdn_state.size()) == n_gdn,
            "qwen3_5 dense paged forward: gdn_state count must equal GDN layers");
   if (weights.gptq4_checkpoint) {
+    if (!attn_kv.empty())
+      v1::ValidateAttentionPageSlots(attn_meta, positions,
+                                     attn_kv.front().block_size,
+                                     attn_kv.front().num_blocks);
     for (const auto& cache : attn_kv)
       VT_CHECK(cache.dtype == DType::kF16 || cache.dtype == DType::kF32 ||
                    (dense_attn::IsFp8KvCache(cache) &&

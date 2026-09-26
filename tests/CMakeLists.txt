@@ -2267,6 +2267,7 @@ set_tests_properties(test_runner_logit_dump_scratch_make PROPERTIES
 set_tests_properties(test_runner_logit_dump PROPERTIES
   FIXTURES_REQUIRED logit_dump_scratch)
 vllm_cpp_add_test(test_common_attn_metadata vllm/v1/attention/test_common_attn_metadata.cpp)
+vllm_cpp_add_test(test_attention_metadata_validation vllm/v1/attention/test_attention_metadata_validation.cpp)
 vllm_cpp_add_test(test_attn_backend_registry vllm/v1/attention/test_attn_backend_registry.cpp)
 vllm_cpp_add_test(test_attn_validate_configuration
   vllm/v1/attention/test_attn_validate_configuration.cpp)
@@ -4070,6 +4071,18 @@ vllm_cpp_add_test(test_qwen3_5_dense_load_residency
 
 vllm_cpp_add_test(test_gptq4_weight
   vllm/models/test_gptq4_weight.cpp)
+if(VLLM_CPP_XPU AND VLLM_CPP_XPU_GPTQ4)
+  execute_process(COMMAND git -c safe.directory=${CMAKE_SOURCE_DIR} rev-parse HEAD
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+    OUTPUT_VARIABLE GPTQ4_BENCH_BASE_COMMIT OUTPUT_STRIP_TRAILING_WHITESPACE)
+  add_executable(bench_gptq4_model vllm/models/bench_gptq4_model.cpp)
+  target_include_directories(bench_gptq4_model PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/vllm/models ${CMAKE_SOURCE_DIR}/src)
+  target_link_libraries(bench_gptq4_model PRIVATE vllm::vllm)
+  target_compile_definitions(bench_gptq4_model PRIVATE
+    VLLM_CPP_BENCH_BASE_COMMIT="${GPTQ4_BENCH_BASE_COMMIT}")
+  vllm_cpp_set_warnings(bench_gptq4_model)
+endif()
 
 # QUANT-QWEN38-27B-NVFP4-ARM W4 (#821, .agents/specs/qwen38-27b-quant-arms.md):
 # the compressed-tensors `mixed-precision` accounting + scheme-resolution gate

@@ -3,25 +3,23 @@
 #include "vt/backend.h"
 #include "vt/tensor.h"
 #include "vt/ops.h"
+#include "vt/xpu.h"
 #include <algorithm>
 #include <initializer_list>
 #include <functional>
+#include <string>
 
 namespace vt::xpu {
 // All kernels use the queue's owning context. No ambient/default SYCL queue.
 sycl::queue& NativeQueue(Queue& q);
 void RecordProfileEvent(Queue& q, const char* stage, const sycl::event& event);
-// Carries the host-only weight label across EXL3 helper calls during submission.
-// RecordProfileEvent copies it before the caller's label can go out of scope.
-class ProfileMatrixScope {
- public:
-  explicit ProfileMatrixScope(const char* matrix) noexcept;
-  ~ProfileMatrixScope() noexcept;
-  ProfileMatrixScope(const ProfileMatrixScope&) = delete;
-  ProfileMatrixScope& operator=(const ProfileMatrixScope&) = delete;
- private:
-  const char* previous_;
-};
+bool ProfileQueueEventsEnabled();
+// Bracket all commands submitted by a library call on this in-order queue.
+// The resulting duration is a stream span, including submission gaps, rather
+// than the duration of one kernel or of the two marker commands.
+void RecordProfileSpan(Queue& q, const char* stage, const sycl::event& begin,
+                       const sycl::event& end, uint64_t host_submit_ns,
+                       const std::string& detail);
 // One persistent, serialized EXL3 workspace per device context. The callback's
 // GPU work is completed before another queue can reuse it. False means budget
 // was insufficient; callers can retain their native non-panel path.

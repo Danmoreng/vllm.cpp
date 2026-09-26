@@ -33,6 +33,30 @@ bool DenseDecodeGraphEnabled() {
   return value == nullptr || value[0] != '0';
 }
 
+bool Gptq4RouteTraceEnabled() {
+  const char* value = std::getenv("VLLM_CPP_GPTQ4_TRACE_ROUTE");
+  return value != nullptr && value[0] == '1' && value[1] == '\0';
+}
+
+void TraceGptq4Route(const ModelForwardInput& input, const char* selected,
+                     const char* reason, bool dense_graph, bool uniform_decode,
+                     bool gptq_opt_in, bool platform_graph, bool platform_opt_in,
+                     int max_graph_batch) {
+  std::fprintf(stderr,
+               "{\"event\":\"gptq4_route\",\"selected\":\"%s\","
+               "\"reason\":\"%s\",\"tokens\":%zu,\"requests\":%d,"
+               "\"pure_decode\":%d,\"uniform_query_len\":%lld,"
+               "\"dense_graph_enabled\":%d,\"uniform_decode\":%d,"
+               "\"gptq_graph_opt_in\":%d,\"platform_graph\":%d,"
+               "\"platform_requires_opt_in\":%d,\"max_graph_batch\":%d}\n",
+               selected, reason, input.token_ids.size(), input.num_reqs,
+               input.pure_decode ? 1 : 0,
+               static_cast<long long>(input.uniform_query_len),
+               dense_graph ? 1 : 0, uniform_decode ? 1 : 0,
+               gptq_opt_in ? 1 : 0, platform_graph ? 1 : 0,
+               platform_opt_in ? 1 : 0, max_graph_batch);
+}
+
 class Qwen3_5DenseLoadedModel final : public LoadedModel {
  public:
   Qwen3_5DenseLoadedModel(const ModelRegistration& registration,
@@ -183,6 +207,12 @@ ForwardLogits ForwardQwen3_5Dense(LoadedModel& model,
   // moved into *input.hidden_tap. Null (every spec-off run) falls through to the
   // unchanged path below, so the forward is byte-identical when spec is off.
   if (input.hidden_tap != nullptr) {
+    if (weights.gptq4_checkpoint && Gptq4RouteTraceEnabled())
+      std::fprintf(stderr,
+                   "{\"event\":\"gptq4_route\",\"selected\":\"eager\","
+                   "\"reason\":\"hidden_tap\",\"tokens\":%zu,"
+                   "\"requests\":%d}\n",
+                   input.token_ids.size(), input.num_reqs);
     return Qwen3_5DenseModel::ForwardDeviceTap(
         input.token_ids, input.positions, input.attn_meta, input.gdn_meta,
         input.attn_kv, input.gdn_state, weights, input.config, input.queue,
@@ -202,13 +232,14 @@ ForwardLogits ForwardQwen3_5Dense(LoadedModel& model,
   // GPTQ oneDNN command-graph support is qualified separately from the eager
   // path. Keep eager as the default until the full target/state gates pass.
   const char* gptq_graph = std::getenv("VT_GPTQ4_GRAPH");
+  const bool gptq_opt_in = gptq_graph != nullptr &&
+                           gptq_graph[0] == '1' && gptq_graph[1] == '\0';
+  const auto& platform = platforms::GetPlatform(input.queue.device.type);
   const bool graph_cuda =
-      (!weights.gptq4_checkpoint ||
-       (gptq_graph != nullptr && gptq_graph[0] == '1' && gptq_graph[1] == '\0')) &&
-      platforms::GetPlatform(input.queue.device.type).support_static_graph_mode() &&
-      !platforms::GetPlatform(input.queue.device.type)
-           .static_graph_requires_opt_in(input.config.architectures);
-  const int kMaxDecodeGraphBatch = platforms::GetPlatform(input.queue.device.type).max_static_graph_batch_size();
+      (!weights.gptq4_checkpoint || gptq_opt_in) &&
+      platform.support_static_graph_mode() &&
+      !platform.static_graph_requires_opt_in(input.config.architectures);
+  const int kMaxDecodeGraphBatch = platform.max_static_graph_batch_size();
 
   // SPEC-DSPARK W8 (#442): mirror vLLM's UNIFORM-decode predicate instead of
   // "query_len == 1". Upstream's captured decode length is
@@ -267,8 +298,25 @@ ForwardLogits ForwardQwen3_5Dense(LoadedModel& model,
                  static_cast<long long>(input.uniform_query_len),
                  input.gather_logits ? 1 : 0, input.logits_indices.size(),
                  uniform_decode ? "graph" : "eager");
-  if (DenseDecodeGraphEnabled() && uniform_decode && graph_cuda &&
-      input.num_reqs <= kMaxDecodeGraphBatch) {
+  const bool dense_graph = DenseDecodeGraphEnabled();
+  const bool use_graph = dense_graph && uniform_decode && graph_cuda &&
+                         input.num_reqs <= kMaxDecodeGraphBatch;
+  if (weights.gptq4_checkpoint && Gptq4RouteTraceEnabled()) {
+    const bool platform_graph = platform.support_static_graph_mode();
+    const bool platform_opt_in =
+        platform.static_graph_requires_opt_in(input.config.architectures);
+    const char* reason = use_graph ? "eligible"
+        : !dense_graph ? "dense_graph_disabled"
+        : !uniform_decode ? "not_uniform_decode"
+        : !gptq_opt_in ? "gptq_graph_opt_in_missing"
+        : !platform_graph ? "platform_graph_disabled"
+        : platform_opt_in ? "platform_requires_opt_in"
+        : "batch_exceeds_graph_limit";
+    TraceGptq4Route(input, use_graph ? "graph" : "eager", reason,
+                    dense_graph, uniform_decode, gptq_opt_in, platform_graph,
+                    platform_opt_in, kMaxDecodeGraphBatch);
+  }
+  if (use_graph) {
     if (!qwen.decode_graph()) {
       qwen.decode_graph() = std::make_unique<Qwen3_5DenseDecodeGraph>(
           weights, input.config, input.queue, input.gdn_state_slots);
