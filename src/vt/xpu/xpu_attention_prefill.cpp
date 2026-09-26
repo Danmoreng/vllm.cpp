@@ -24,9 +24,9 @@ template<class Fn> struct PrefillGrf256 {
 // VT pages may be strided unbind views; no donor block-size/layout assumption.
 // Q16/Q32 with K32, eight SG16s; F32 running softmax and output.
 // 256 GRFs avoid the spill traffic of the 128-GRF compilation on B70.
-// F32 queries/probabilities use FP16 high+residual XMX operands, avoiding the
-// extra single-FP16 rounding at both sites. K/V share one staging buffer.
-template<int Q, bool QueryResidual>
+// F32 queries use FP16 high+residual XMX operands. F16 Q32 uses one FP16
+// probability operand after the FP32 softmax; K/V share one staging buffer.
+template<int Q, bool QueryResidual, bool ProbabilityResidual = true>
 bool PagedAttentionPrefillImpl(Queue& q, Tensor& out, const Tensor& query, const Tensor& key_cache,
                                const Tensor& value_cache, const Tensor& block_table,
                                const Tensor& seq_lens, const Tensor& query_start_loc,
@@ -37,7 +37,7 @@ bool PagedAttentionPrefillImpl(Queue& q, Tensor& out, const Tensor& query, const
   static_assert(Q == 16 || (Q == 32 && !QueryResidual));
   constexpr size_t local_bytes =
       (Q * D + K * D + Q * K + (QueryResidual ? Q * D : 1) +
-       Q * K) * sizeof(sycl::half) +
+       (ProbabilityResidual ? Q * K : 1)) * sizeof(sycl::half) +
       (Q * K + 3 * Q) * sizeof(float);
   const auto device = NativeQueue(q).get_device();
   const int64_t tokens = query.shape[0], heads = query.shape[1], ratio = heads / key_cache.shape[2];
@@ -67,7 +67,7 @@ bool PagedAttentionPrefillImpl(Queue& q, Tensor& out, const Tensor& query, const
     // The F16 instantiation keeps only a one-element placeholder for the
     // unused residual accessor; its 8-KiB tile is absent from local memory.
     sycl::local_accessor<sycl::half> query_low(QueryResidual ? Q * D : 1, h);
-    sycl::local_accessor<sycl::half> prob_low(Q * K, h);
+    sycl::local_accessor<sycl::half> prob_low(ProbabilityResidual ? Q * K : 1, h);
     sycl::local_accessor<float> scores(Q * K, h), maxval(Q, h), denom(Q, h), oldscale(Q, h);
     h.parallel_for(sycl::nd_range<1>(tiles * heads * WG, WG),
         PrefillGrf256{[=](sycl::nd_item<1> item) {
@@ -157,8 +157,10 @@ bool PagedAttentionPrefillImpl(Queue& q, Tensor& out, const Tensor& query, const
           const float sum = sycl::reduce_over_group(sg, e0 + e1, sycl::plus<float>());
           prob[row * K + lane] = sycl::half(e0);
           prob[row * K + lane + 16] = sycl::half(e1);
-          prob_low[row * K + lane] = sycl::half(e0 - float(sycl::half(e0)));
-          prob_low[row * K + lane + 16] = sycl::half(e1 - float(sycl::half(e1)));
+          if constexpr (ProbabilityResidual) {
+            prob_low[row * K + lane] = sycl::half(e0 - float(sycl::half(e0)));
+            prob_low[row * K + lane + 16] = sycl::half(e1 - float(sycl::half(e1)));
+          }
           if (lane == 0) {
             denom[row] = denom[row] * old + sum;
             maxval[row] = maximum;
@@ -190,10 +192,12 @@ bool PagedAttentionPrefillImpl(Queue& q, Tensor& out, const Tensor& query, const
             mx::joint_matrix_mad(sg, acc0[row_block], a, b, acc0[row_block]);
             mx::joint_matrix_load(sg, b, kv.template get_multi_ptr<sycl::access::decorated::no>() + k * D + subgroup * 32 + 16, D);
             mx::joint_matrix_mad(sg, acc1[row_block], a, b, acc1[row_block]);
-            mx::joint_matrix_load(sg, a, prob_low.template get_multi_ptr<sycl::access::decorated::no>() + row_block * 16 * K + k, K);
-            mx::joint_matrix_mad(sg, acc1[row_block], a, b, acc1[row_block]);
-            mx::joint_matrix_load(sg, b, kv.template get_multi_ptr<sycl::access::decorated::no>() + k * D + subgroup * 32, D);
-            mx::joint_matrix_mad(sg, acc0[row_block], a, b, acc0[row_block]);
+            if constexpr (ProbabilityResidual) {
+              mx::joint_matrix_load(sg, a, prob_low.template get_multi_ptr<sycl::access::decorated::no>() + row_block * 16 * K + k, K);
+              mx::joint_matrix_mad(sg, acc1[row_block], a, b, acc1[row_block]);
+              mx::joint_matrix_load(sg, b, kv.template get_multi_ptr<sycl::access::decorated::no>() + k * D + subgroup * 32, D);
+              mx::joint_matrix_mad(sg, acc0[row_block], a, b, acc0[row_block]);
+            }
           }
         }
         item.barrier(sycl::access::fence_space::local_space);
@@ -229,9 +233,16 @@ bool PagedAttentionPrefillKernel(Queue& q, Tensor& out, const Tensor& query, con
   const std::string_view tile = setting ? setting : "auto";
   VT_CHECK(tile == "auto" || tile == "q16" || tile == "q32", "Invalid VT_XPU_ATTN_PREFILL_TILE");
   if (query.dtype == DType::kF16) {
-    if (tile == "auto" || tile == "q32")
+    if (tile == "auto" || tile == "q32") {
+      const char* probability = std::getenv("VT_XPU_ATTN_PROBABILITY");
+      const std::string_view mode = probability ? probability : "single";
+      VT_CHECK(mode == "residual" || mode == "single", "Invalid VT_XPU_ATTN_PROBABILITY");
+      if (mode == "single")
+        return PagedAttentionPrefillImpl<32, false, false>(q, out, query, key_cache,
+            value_cache, block_table, seq_lens, query_start_loc, args);
       return PagedAttentionPrefillImpl<32, false>(q, out, query, key_cache,
           value_cache, block_table, seq_lens, query_start_loc, args);
+    }
     return PagedAttentionPrefillImpl<16, false>(q, out, query, key_cache,
         value_cache, block_table, seq_lens, query_start_loc, args);
   }
