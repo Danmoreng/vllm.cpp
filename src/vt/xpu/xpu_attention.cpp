@@ -340,11 +340,13 @@ void PagedAttentionKernel(Queue& q, Tensor& out, const Tensor& query, const Tens
     VT_CHECK(mode == "auto" || mode == "reference" || mode == "split" || mode == "prefill", "Invalid VT_XPU_ATTENTION");
     const auto device = NativeQueue(q).get_device();
     // Qualified against the pinned checkpoint's answer and probability corpus.
-    // FP8 remains an explicit cache choice; its quantization has a separate
-    // quality delta, so do not treat the BF16 qualification as an FP8 gate.
+    // E4M3 cache storage is chosen by the caller; auto may use the fast
+    // attention kernels without changing that choice or its scales.
     const bool automatic = mode == "auto" && query.shape[1] == 24 && dim == 256 &&
         key_cache.shape[2] == 4 &&
-        (key_cache.dtype == DType::kBF16 || key_cache.dtype == DType::kF16) &&
+        (key_cache.dtype == DType::kBF16 || key_cache.dtype == DType::kF16 ||
+         (key_cache.dtype == DType::kI8 &&
+          args.kv_cache_dtype == Fp8KVCacheDataType::kFp8E4M3)) &&
         device.has(sycl::aspect::ext_intel_device_id) &&
         device.get_info<sycl::ext::intel::info::device::device_id>() == 57891 &&
         std::string_view(__VERSION__) == "Intel(R) oneAPI DPC++/C++ Compiler 2026.1.1 (2026.1.1.20260724)" &&
