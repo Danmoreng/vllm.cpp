@@ -32,7 +32,11 @@ struct QueueOwner {
   }
 };
 
-int Run(const std::string& shard_path, const std::string& activation_path) {
+int Run(const std::string& shard_path, const std::string& activation_path,
+        const std::string& route) {
+  if (route != "reference_matmul_bt" && route != "onednn_f16_cast")
+    throw std::runtime_error("route must be reference_matmul_bt or onednn_f16_cast");
+  const bool onednn = route == "onednn_f16_cast";
   const auto shard = vllm::SafetensorsFile::Open(shard_path);
   const auto operation = vllm::SafetensorsFile::Open(activation_path);
   const auto& weight = shard.Get("lm_head.weight");
@@ -55,14 +59,26 @@ int Run(const std::string& shard_path, const std::string& activation_path) {
   vt::Tensor device_output = vt::Tensor::Contiguous(
       owner.Allocate(static_cast<size_t>(n) * sizeof(float)),
       vt::DType::kF32, queue.device, {1, n});
+  vt::Tensor device_output_f16;
+  if (onednn)
+    device_output_f16 = vt::Tensor::Contiguous(
+        owner.Allocate(static_cast<size_t>(n) * sizeof(uint16_t)),
+        vt::DType::kF16, queue.device, {1, n});
   backend.Copy(queue, device_weight.data, weight.data, weight.nbytes);
   backend.Copy(queue, device_activation.data, activation.data,
                activation.nbytes);
   backend.Synchronize(queue);
 
-  const auto invoke = [&] { vt::MatmulBT(queue, device_output,
-                                        device_activation, device_weight); };
-  constexpr int warmup_calls = 128;
+  const auto invoke = [&] {
+    if (onednn) {
+      vt::MatmulDenseF16(queue, device_output_f16,
+                         device_activation, device_weight);
+      vt::CastF32(queue, device_output, device_output_f16);
+    } else {
+      vt::MatmulBT(queue, device_output, device_activation, device_weight);
+    }
+  };
+  constexpr int warmup_calls = 8;
   for (int index = 0; index < warmup_calls; ++index) invoke();
   backend.Synchronize(queue);
   std::vector<float> output(static_cast<size_t>(n));
@@ -92,9 +108,10 @@ int Run(const std::string& shard_path, const std::string& activation_path) {
   }
   std::sort(synchronized_ms.begin(), synchronized_ms.end());
   std::cout << nlohmann::json({
-      {"operation", "dense_lm_head_matmul_bt"},
+      {"operation", route},
       {"M", 1}, {"K", k}, {"N", n},
       {"weight_dtype", "f16"}, {"output_dtype", "f32"},
+      {"temporary_f16_output_bytes", onednn ? static_cast<size_t>(n) * 2 : 0},
       {"warmup_calls", warmup_calls},
       {"median_synchronized_ms", synchronized_ms[synchronized_ms.size() / 2]},
       {"min_synchronized_ms", synchronized_ms.front()},
@@ -109,12 +126,13 @@ int Run(const std::string& shard_path, const std::string& activation_path) {
 }  // namespace
 
 int main(int argc, char** argv) {
-  if (argc != 3) {
-    std::cerr << "usage: b70_gptq4_head_probe SHARD ACTIVITY_CAPTURE\n";
+  if (argc != 4) {
+    std::cerr << "usage: b70_gptq4_head_probe SHARD ACTIVITY_CAPTURE "
+                 "{reference_matmul_bt|onednn_f16_cast}\n";
     return 2;
   }
   try {
-    return Run(argv[1], argv[2]);
+    return Run(argv[1], argv[2], argv[3]);
   } catch (const std::exception& error) {
     std::cerr << "b70_gptq4_head_probe: " << error.what() << '\n';
     return 1;
