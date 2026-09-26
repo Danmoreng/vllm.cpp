@@ -52,6 +52,9 @@ struct HostProfileRecord {
 };
 ProfileClockAnchor CaptureProfileClockAnchor(int index = 0);
 std::vector<ProfileRecord> DrainProfileEvents(int index = 0);
+// VT_XPU_HOST_PROFILE=1 records eager waits/allocation calls without enabling
+// SYCL event profiling. Nested spans (for example metadata readback and its
+// staged D2H copy) overlap and must not be summed as disjoint time.
 std::vector<HostProfileRecord> DrainHostProfileRecords(int index = 0);
 size_t PendingProfileEventCount(int index = 0);
 // Host-only labels copied into XPU profile records during a synchronous

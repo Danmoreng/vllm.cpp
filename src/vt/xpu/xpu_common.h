@@ -14,6 +14,10 @@ namespace vt::xpu {
 sycl::queue& NativeQueue(Queue& q);
 void RecordProfileEvent(Queue& q, const char* stage, const sycl::event& event);
 bool ProfileQueueEventsEnabled();
+bool HostProfileSpansEnabled();
+uint64_t HostProfileClockNs();
+void RecordHostProfileSpan(Queue& q, const char* stage,
+                           uint64_t start_ns, uint64_t end_ns);
 // Bracket all commands submitted by a library call on this in-order queue.
 // The resulting duration is a stream span, including submission gaps, rather
 // than the duration of one kernel or of the two marker commands.
@@ -110,8 +114,12 @@ void CheckDeviceMetadata(Queue& q, Check check, const char* message,
   NativeQueue(q).single_task([=] { *result = check() ? 1 : 0; });
   int valid = 0;
   auto& backend = GetBackend(q.device);
+  const auto wait_start = HostProfileSpansEnabled() ? HostProfileClockNs() : 0;
   backend.Copy(q, &valid, result, sizeof(valid));
   backend.Synchronize(q);
+  if (wait_start)
+    RecordHostProfileSpan(q, "metadata_d2h_wait", wait_start,
+                          HostProfileClockNs());
   VT_CHECK(valid, message);
 }
 // The correctness path snapshots only when the output could clobber an input.
