@@ -167,8 +167,9 @@ TEST_CASE("XPU GDN profile: chunk stages and decode recurrence"
     CHECK(record.end_ns >= record.start_ns);
   }
   const char* inverse_mode = std::getenv("VT_XPU_GDN_INVERSE");
-  const char* inverse_stage = inverse_mode && std::string_view(inverse_mode) == "reference"
-      ? "gdn_chunk_inverse" : "gdn_chunk_inverse_slm";
+  const std::string_view mode = inverse_mode ? inverse_mode : "blocked";
+  const char* inverse_stage = mode == "reference" ? "gdn_chunk_inverse"
+      : mode == "blocked" ? "gdn_chunk_inverse_blocked" : "gdn_chunk_inverse_slm";
   for (const char* stage : {"gdn_chunk_gates", "gdn_chunk_inputs", "gdn_chunk_dots_qk",
                             "gdn_chunk_system", inverse_stage, "gdn_chunk_wu_tile4",
                             "gdn_chunk_delta_cross_tile4", "gdn_chunk_output_tile4", "gdn_chunk_state_tile4",

@@ -163,13 +163,66 @@ void System(Queue& queue, ChunkScratch<Input> s, View beta, const int32_t* offse
     }
   });
   RecordProfileEvent(queue, "gdn_chunk_system", system_event);
-  static const bool local_inverse = [] {
+  enum class InverseMode { kReference, kSlm, kBlocked };
+  static const InverseMode inverse_mode = [] {
     const char* value = std::getenv("VT_XPU_GDN_INVERSE");
-    const std::string_view mode = value ? value : "slm";
-    VT_CHECK(mode == "slm" || mode == "reference", "Invalid VT_XPU_GDN_INVERSE");
-    return mode == "slm";
+    const std::string_view mode = value ? value : "blocked";
+    VT_CHECK(mode == "slm" || mode == "reference" || mode == "blocked",
+             "Invalid VT_XPU_GDN_INVERSE");
+    return mode == "blocked" ? InverseMode::kBlocked
+        : mode == "slm" ? InverseMode::kSlm : InverseMode::kReference;
   }();
-  if (local_inverse) {
+  if (inverse_mode == InverseMode::kBlocked) {
+    constexpr int block = 16, wg = 128;
+    const auto inverse_event = q.submit([&](sycl::handler& handler) {
+      sycl::local_accessor<float> lower(C * C, handler), inverse(C * C, handler);
+      sycl::local_accessor<float> product(block * C, handler);
+      handler.parallel_for(sycl::nd_range<1>(heads * wg, wg), [=](sycl::nd_item<1> item) {
+        const int h = item.get_group(0), tid = item.get_local_id(0);
+        for (int i = tid; i < C * C; i += wg) {
+          lower[i] = s.lower[h * C * C + i];
+          inverse[i] = 0.0f;
+        }
+        item.barrier(sycl::access::fence_space::local_space);
+        for (int base = 0; base < C; base += block) {
+          if (tid < block) {
+            const int col = base + tid;
+            for (int row = base; row < base + block; ++row) {
+              float value = row == col ? 1.0f : 0.0f;
+              if (row > col) {
+                value = -lower[row * C + col];
+                for (int j = col + 1; j < row; ++j)
+                  value -= lower[row * C + j] * inverse[j * C + col];
+              }
+              inverse[row * C + col] = value;
+            }
+          }
+          item.barrier(sycl::access::fence_space::local_space);
+          for (int i = tid; i < block * base; i += wg) {
+            const int row = i / base, col = i % base;
+            float value = 0.0f;
+            for (int j = 0; j < base; ++j)
+              value += lower[(base + row) * C + j] * inverse[j * C + col];
+            product[row * C + col] = value;
+          }
+          item.barrier(sycl::access::fence_space::local_space);
+          for (int i = tid; i < block * base; i += wg) {
+            const int row = i / base, col = i % base;
+            float value = 0.0f;
+            for (int j = 0; j <= row; ++j)
+              value -= inverse[(base + row) * C + base + j] * product[j * C + col];
+            inverse[(base + row) * C + col] = value;
+          }
+          item.barrier(sycl::access::fence_space::local_space);
+        }
+        for (int i = tid; i < C * C; i += wg)
+          s.inverse[h * C * C + i] = inverse[i];
+      });
+    });
+    RecordProfileEvent(queue, "gdn_chunk_inverse_blocked", inverse_event);
+    return;
+  }
+  if (inverse_mode == InverseMode::kSlm) {
     const auto inverse_event = q.submit([&](sycl::handler& handler) {
       sycl::local_accessor<float> tile(C * C, handler);
       handler.parallel_for(sycl::nd_range<1>(heads * C, C), [=](sycl::nd_item<1> item) {
