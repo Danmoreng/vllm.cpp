@@ -165,15 +165,15 @@ TEST_CASE("XPU short F16 attention prefill selects XMX path"
   const auto records = vt::xpu::DrainProfileEvents();
   size_t prefill = 0, fallback = 0;
   for (const auto& record : records) {
-    prefill += record.stage == "attention_prefill_q32";
+    prefill += record.stage == "attention_prefill_q64";
     fallback += record.stage == "attention_reference";
   }
   CHECK(prefill == 1);
   CHECK(fallback == 0);
 }
-TEST_CASE("XPU Q32 F16 attention prefill: page boundaries, continuation and masks") {
+TEST_CASE("XPU Q32/Q64 F16 attention prefill: page boundaries, continuation and masks") {
   Queue cpu(vt::DeviceType::kCPU), gpu(vt::DeviceType::kXPU);
-  for (int chunk : {127, 128, 129, 255, 256, 257, 512}) {
+  for (int chunk : {31, 32, 33, 63, 64, 65, 127, 128, 129, 255, 256, 257, 512}) {
     CAPTURE(chunk);
     const int page = chunk == 129 || chunk == 257 ? 3 : 16;
     const int context = chunk + 17;
@@ -188,6 +188,9 @@ TEST_CASE("XPU Q32 F16 attention prefill: page boundaries, continuation and mask
       Accuracy(got.result(), ref.result(), false, true);
     }
     setenv("VT_XPU_ATTN_PREFILL_TILE", "q32", 1);
+    got.run("prefill");
+    Accuracy(got.result(), ref.result(), false, true);
+    setenv("VT_XPU_ATTN_PREFILL_TILE", "q64", 1);
     got.run("prefill");
     Accuracy(got.result(), ref.result(), false, true);
     if (chunk == 127 || chunk == 257) {
@@ -210,7 +213,7 @@ TEST_CASE("XPU Q32 F16 attention prefill: page boundaries, continuation and mask
   }
   unsetenv("VT_XPU_ATTN_PREFILL_TILE");
 }
-TEST_CASE("XPU Q32 F16 attention prefill: ragged batch and aliased output") {
+TEST_CASE("XPU Q32/Q64 F16 attention prefill: ragged batch and aliased output") {
   Queue gpu(vt::DeviceType::kXPU);
   Fixture ref(gpu.q, 4, 63, 129, false, true, 3,
               DType::kF16, DType::kF16, DType::kF16);
@@ -218,6 +221,9 @@ TEST_CASE("XPU Q32 F16 attention prefill: ragged batch and aliased output") {
               DType::kF16, DType::kF16, DType::kF16);
   ref.run("reference");
   setenv("VT_XPU_ATTN_PREFILL_TILE", "q32", 1);
+  got.run("prefill");
+  Accuracy(got.result(), ref.result(), false, true);
+  setenv("VT_XPU_ATTN_PREFILL_TILE", "q64", 1);
   got.run("prefill");
   Accuracy(got.result(), ref.result(), false, true);
   ref.args.causal = got.args.causal = false;
@@ -231,6 +237,7 @@ TEST_CASE("XPU Q32 F16 attention prefill: ragged batch and aliased output") {
   Fixture alias_ref(gpu.q, 1, 33, 49, false, false, 16,
                     DType::kF16, DType::kF16, DType::kF16);
   alias_ref.run("reference");
+  setenv("VT_XPU_ATTN_PREFILL_TILE", "q32", 1);
   setenv("VT_XPU_ATTENTION", "prefill", 1);
   vt::PagedAttention(gpu.q, aliased.query.tensor, aliased.query.tensor,
                      aliased.kc, aliased.vc, aliased.table.tensor,
@@ -238,7 +245,7 @@ TEST_CASE("XPU Q32 F16 attention prefill: ragged batch and aliased output") {
   Accuracy(aliased.query.floats(), alias_ref.result(), false, true);
   unsetenv("VT_XPU_ATTN_PREFILL_TILE");
 }
-TEST_CASE("XPU Q32 F16 attention prefill: BF16 and E4M3 cache") {
+TEST_CASE("XPU Q32/Q64 F16 attention prefill: BF16 and E4M3 cache") {
   Queue gpu(vt::DeviceType::kXPU);
   for (bool fp8 : {false, true}) {
     CAPTURE(fp8);
@@ -248,6 +255,9 @@ TEST_CASE("XPU Q32 F16 attention prefill: BF16 and E4M3 cache") {
                 DType::kF16, DType::kF16, DType::kBF16);
     ref.run("reference");
     setenv("VT_XPU_ATTN_PREFILL_TILE", "q32", 1);
+    got.run("prefill");
+    Accuracy(got.result(), ref.result(), false, true);
+    setenv("VT_XPU_ATTN_PREFILL_TILE", "q64", 1);
     got.run("prefill");
     Accuracy(got.result(), ref.result(), false, true);
   }
