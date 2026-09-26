@@ -96,6 +96,8 @@
 #include "vllm/model_executor/models/cua_s1_inference.h"  // CuaS1ScoreInference (MODEL-CUA-S1-FORMS)
 #include "vllm/model_executor/models/laya_inference.h"  // LayaInference (MODEL-LAYA)
 #include "vllm/model_executor/models/kev_inference.h"  // KevInference (MODEL-KEV)
+#include "vllm/model_executor/models/clm_inference.h"  // ClmInference (MODEL-CLM)
+#include "vllm/model_executor/models/gliner25_decide_inference.h"  // Gliner25DecideInference (MODEL-GLINER25-DECIDE)
 #include "vllm/model_executor/models/xor_inference.h"  // XorInference (MODEL-XOR)
 #include "vllm/multimodal/minimax_h3_video.h"
 #include "vllm/multimodal/parakeet_transcription.h"
@@ -1484,6 +1486,134 @@ int VllmServerMain(int argc, char** argv) {
               vllm::XorDecisionResult result =
                   vllm::XorInference(model, tokenizer, state, qtype,
                                      instructions, options);
+              oai::ApiServer::DecisionResult out;
+              out.scores = std::move(result.scores);
+              out.prompt_tokens = result.prompt_tokens;
+              return out;
+            });
+        std::cerr << "server: listening on http://" << args.host << ":"
+                  << args.port << "\n";
+        vllm::platform::ConsoleShutdown shutdown_on_signal(
+            [&]() { decision_server.stop(); });
+        if (!decision_server.listen(args.host, args.port)) {
+          std::cerr << "server: failed to bind " << args.host << ":"
+                    << args.port << "\n";
+          return 1;
+        }
+        return 0;
+      }
+
+      // ── CLM DECISION TASK DISPATCH (MODEL-CLM):
+      bool clm_model = false;
+      if (!archs.empty()) {
+        try {
+          clm_model =
+              vllm::ModelRegistry::Resolve(std::span<const std::string>(archs))
+                  .architecture == "ClmModel";
+        } catch (const std::exception&) {
+          clm_model = false;
+        }
+      }
+      if (clm_model) {
+        std::cerr << "server: clm decision model (" << archs[0]
+                  << "); serving /v1/systemone\n";
+        vllm::entrypoints::EngineParams decision_params;
+        decision_params.block_size = args.block_size;
+        decision_params.num_blocks = args.num_blocks;
+        decision_params.gpu_memory_utilization = args.gpu_memory_utilization;
+        decision_params.kv_cache_memory_bytes = args.kv_cache_memory_bytes;
+        decision_params.max_model_len = args.max_model_len;
+        decision_params.max_num_seqs = args.max_num_seqs;
+        decision_params.max_num_batched_tokens = args.max_num_batched_tokens;
+        decision_params.enable_prefix_caching = args.enable_prefix_caching;
+        decision_params.offload_config = parsed_offload_config;
+        decision_params.weight_residency = parsed_weight_residency;
+        auto loaded_decision = std::shared_ptr<vllm::entrypoints::LoadedEngine>(
+            vllm::entrypoints::LoadedEngine::FromModelDir(args.model_dir,
+                                                          decision_params));
+        namespace oai = vllm::entrypoints::openai;
+        oai::OpenAIServingModels decision_models(served_model_name);
+        oai::ApiServer decision_server(decision_models, vllm::Version());
+        auto decision_mutex = std::make_shared<std::mutex>();
+        decision_server.set_decision(
+            [loaded_decision, decision_mutex](
+                const std::string& state,
+                const std::string& qtype,
+                const std::string& instructions,
+                const std::vector<std::string>& options)
+                -> oai::ApiServer::DecisionResult {
+              std::lock_guard<std::mutex> lock(*decision_mutex);
+              const vllm::LoadedModel& model =
+                  loaded_decision->loaded_model();
+              const vllm::tok::Tokenizer& tokenizer =
+                  loaded_decision->tokenizer();
+              vllm::ClmDecisionResult result =
+                  vllm::ClmInference(model, tokenizer, state, qtype,
+                                     instructions, options);
+              oai::ApiServer::DecisionResult out;
+              out.scores = std::move(result.scores);
+              out.prompt_tokens = result.prompt_tokens;
+              return out;
+            });
+        std::cerr << "server: listening on http://" << args.host << ":"
+                  << args.port << "\n";
+        vllm::platform::ConsoleShutdown shutdown_on_signal(
+            [&]() { decision_server.stop(); });
+        if (!decision_server.listen(args.host, args.port)) {
+          std::cerr << "server: failed to bind " << args.host << ":"
+                    << args.port << "\n";
+          return 1;
+        }
+        return 0;
+      }
+
+      // ── GLINER25-DECIDE DECISION TASK DISPATCH (MODEL-GLINER25-DECIDE):
+      bool gliner25_decide_model = false;
+      if (!archs.empty()) {
+        try {
+          gliner25_decide_model =
+              vllm::ModelRegistry::Resolve(std::span<const std::string>(archs))
+                  .architecture == "SpanExtractor";
+        } catch (const std::exception&) {
+          gliner25_decide_model = false;
+        }
+      }
+      if (gliner25_decide_model) {
+        std::cerr << "server: GLiNER2.5-Decide decision model ("
+                  << archs[0] << "); serving /v1/systemone\n";
+        vllm::entrypoints::EngineParams decision_params;
+        decision_params.block_size = args.block_size;
+        decision_params.num_blocks = args.num_blocks;
+        decision_params.gpu_memory_utilization = args.gpu_memory_utilization;
+        decision_params.kv_cache_memory_bytes = args.kv_cache_memory_bytes;
+        decision_params.max_model_len = args.max_model_len;
+        decision_params.max_num_seqs = args.max_num_seqs;
+        decision_params.max_num_batched_tokens = args.max_num_batched_tokens;
+        decision_params.enable_prefix_caching = args.enable_prefix_caching;
+        decision_params.offload_config = parsed_offload_config;
+        decision_params.weight_residency = parsed_weight_residency;
+        auto loaded_decision = std::shared_ptr<vllm::entrypoints::LoadedEngine>(
+            vllm::entrypoints::LoadedEngine::FromModelDir(args.model_dir,
+                                                          decision_params));
+        namespace oai = vllm::entrypoints::openai;
+        oai::OpenAIServingModels decision_models(served_model_name);
+        oai::ApiServer decision_server(decision_models, vllm::Version());
+        auto decision_mutex = std::make_shared<std::mutex>();
+        decision_server.set_decision(
+            [loaded_decision, decision_mutex](
+                const std::string& state,
+                const std::string& qtype,
+                const std::string& instructions,
+                const std::vector<std::string>& options)
+                -> oai::ApiServer::DecisionResult {
+              std::lock_guard<std::mutex> lock(*decision_mutex);
+              const vllm::LoadedModel& model =
+                  loaded_decision->loaded_model();
+              const vllm::tok::Tokenizer& tokenizer =
+                  loaded_decision->tokenizer();
+              vllm::Gliner25DecideResult result =
+                  vllm::Gliner25DecideInference(model, tokenizer, state,
+                                                 qtype, instructions, options);
               oai::ApiServer::DecisionResult out;
               out.scores = std::move(result.scores);
               out.prompt_tokens = result.prompt_tokens;
