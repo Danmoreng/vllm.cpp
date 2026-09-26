@@ -9,6 +9,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include <nlohmann/json.hpp>
@@ -84,12 +85,27 @@ nlohmann::json SummarizeHostSpans(
   return stages;
 }
 
+nlohmann::json StageTrace(const std::vector<vt::xpu::ProfileRecord>& records) {
+  nlohmann::json events = nlohmann::json::array();
+  for (const auto& record : records)
+    events.push_back({{"stage", record.stage}, {"matrix", record.matrix},
+        {"stream_span", record.stream_span}, {"submit_ns", record.submit_ns},
+        {"start_ns", record.start_ns}, {"end_ns", record.end_ns}});
+  return events;
+}
+
 int Run(const std::string& checkpoint, int prompt_tokens, int output_tokens,
         int rounds) {
   if (prompt_tokens < 64 || prompt_tokens > 4096 || output_tokens < 2 ||
       output_tokens > 64 || rounds < 1 || rounds > 20)
     throw std::invalid_argument("expected 64<=prompt<=4096, 2<=output<=64, 1<=rounds<=20");
-  constexpr int block_size = 128;
+  const std::string_view kv_dtype = Env("VT_B70_BENCH_KV_DTYPE", "f16");
+  if (kv_dtype != "f16" && kv_dtype != "fp8_e4m3")
+    throw std::invalid_argument("VT_B70_BENCH_KV_DTYPE must be f16 or fp8_e4m3");
+  const bool fp8_kv = kv_dtype == "fp8_e4m3";
+  const int block_size = std::stoi(Env("VT_B70_BENCH_BLOCK_SIZE", "128"));
+  if (block_size != 64 && block_size != 128)
+    throw std::invalid_argument("VT_B70_BENCH_BLOCK_SIZE must be 64 or 128");
   Resources resources;
   auto& queue = resources.queue;
   auto& backend = vt::GetBackend(queue.device);
@@ -127,8 +143,13 @@ int Run(const std::string& checkpoint, int prompt_tokens, int output_tokens,
       cache.num_blocks = blocks;
       cache.data = resources.Zero(static_cast<size_t>(
           blocks * 2 * block_size * config.num_key_value_heads *
-          config.head_dim) * 2);
-      cache.dtype = vt::DType::kF16;
+          config.head_dim) * (fp8_kv ? 1 : 2));
+      cache.dtype = fp8_kv ? vt::DType::kI8 : vt::DType::kF16;
+      if (fp8_kv) {
+        cache.fp8_kind = vt::Fp8KVCacheDataType::kFp8E4M3;
+        cache.k_scale = 1.0f;
+        cache.v_scale = 1.0f;
+      }
       cache.block_size = block_size;
       cache.num_kv_heads = config.num_key_value_heads;
       cache.head_size = config.head_dim;
@@ -159,7 +180,8 @@ int Run(const std::string& checkpoint, int prompt_tokens, int output_tokens,
     for (const auto& cache : attn_kv)
       backend.Memset(queue, cache.data, 0,
                      static_cast<size_t>(cache.num_blocks * 2 * block_size *
-                                         cache.num_kv_heads * cache.head_size) * 2);
+                                         cache.num_kv_heads * cache.head_size) *
+                         vt::SizeOf(cache.dtype));
     for (const auto& state : gdn_state) {
       backend.Memset(queue, state.ssm_state.data, 0, state.ssm_state.Bytes());
       backend.Memset(queue, state.conv_state.data, 0, state.conv_state.Bytes());
@@ -201,7 +223,10 @@ int Run(const std::string& checkpoint, int prompt_tokens, int output_tokens,
   decode();
   const bool graph_profile = std::string(Env("VT_XPU_GRAPH_PROFILE")) == "1";
   const bool host_profile = std::string(Env("VT_XPU_HOST_PROFILE")) == "1";
-  if (graph_profile || host_profile) {
+  const bool stage_profile = std::string(Env("VT_B70_BENCH_STAGE_PROFILE")) == "1";
+  if (stage_profile && std::string(Env("VT_XPU_PROFILE")) != "1")
+    throw std::invalid_argument("VT_B70_BENCH_STAGE_PROFILE requires VT_XPU_PROFILE=1");
+  if (graph_profile || host_profile || stage_profile) {
     (void)vt::xpu::DrainProfileEvents(queue.device.index);
     (void)vt::xpu::DrainHostProfileRecords(queue.device.index);
   }
@@ -217,7 +242,7 @@ int Run(const std::string& checkpoint, int prompt_tokens, int output_tokens,
                                    ? dnnl::version()->hash : ""},
         {"checkpoint_revision_declared", Env("VLLM_CPP_GPTQ4_CHECKPOINT_REVISION")},
         {"checkpoint", checkpoint},
-        {"model_dtype", "f16"}, {"kv_dtype", "f16"},
+        {"model_dtype", "f16"}, {"kv_dtype", kv_dtype},
         {"weights", "gptq4-g128 with dense BA/head"},
         {"prompt_tokens", prompt_tokens}, {"output_tokens", output_tokens},
         {"prompt_ids_fnv1a64", TokenHash(prompt_ids)},
@@ -241,6 +266,9 @@ int Run(const std::string& checkpoint, int prompt_tokens, int output_tokens,
     const auto start = Clock::now();
     prefill();
     const auto prefill_end = Clock::now();
+    if (stage_profile)
+      Emit({{"event", "gptq4_stage_trace"}, {"phase", "prefill"}, {"round", round},
+            {"events", StageTrace(vt::xpu::DrainProfileEvents(queue.device.index))}});
     nlohmann::json prefill_host_spans = nullptr;
     if (host_profile && !graph_profile)
       prefill_host_spans = SummarizeHostSpans(
@@ -248,6 +276,9 @@ int Run(const std::string& checkpoint, int prompt_tokens, int output_tokens,
     const auto decode_start = Clock::now();
     decode();
     const auto decode_end = Clock::now();
+    if (stage_profile)
+      Emit({{"event", "gptq4_stage_trace"}, {"phase", "decode"}, {"round", round},
+            {"events", StageTrace(vt::xpu::DrainProfileEvents(queue.device.index))}});
     const auto stats = vt::xpu::GetGptq4RuntimeStats(queue.device.index);
     const auto memory = vt::xpu::GetMemoryInfo(queue.device.index);
     const uint64_t replays = backend.GraphReplays() - replays_before;

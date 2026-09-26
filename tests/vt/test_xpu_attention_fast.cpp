@@ -335,3 +335,31 @@ TEST_CASE("XPU attention prefill: timing" * doctest::skip(!std::getenv("VT_B70_A
     }
   }
 }
+
+TEST_CASE("XPU FP8 KV auto selects fast prefill and decode"
+          * doctest::skip(!std::getenv("VT_XPU_PROFILE"))) {
+  Queue gpu(vt::DeviceType::kXPU);
+  Fixture prefill(gpu.q, 1, 64, 67, true, false, 64,
+                  DType::kF16, DType::kF16, DType::kF16);
+  prefill.run("prefill");
+  const auto prefill_expected = prefill.result();
+  (void)vt::xpu::DrainProfileEvents();
+  prefill.run("auto");
+  Accuracy(prefill.result(), prefill_expected, false, true);
+  bool saw_prefill = false;
+  for (const auto& event : vt::xpu::DrainProfileEvents())
+    saw_prefill |= event.stage == "attention_prefill_q64";
+  CHECK(saw_prefill);
+
+  Fixture decode(gpu.q, 1, 1, 513, true, false, 64,
+                 DType::kF16, DType::kF16, DType::kF16);
+  decode.run("split");
+  const auto decode_expected = decode.result();
+  (void)vt::xpu::DrainProfileEvents();
+  decode.run("auto");
+  Accuracy(decode.result(), decode_expected);
+  bool saw_split = false;
+  for (const auto& event : vt::xpu::DrainProfileEvents())
+    saw_split |= event.stage == "attention_split_partial";
+  CHECK(saw_split);
+}
