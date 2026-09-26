@@ -104,6 +104,13 @@ bool GraphProfileEnabled() {
   VT_CHECK(!enabled || ProfileQueuesEnabled(), "XPU graph profiling requires VT_XPU_PROFILE=1");
   return enabled;
 }
+bool HostProfileEnabled() {
+  static const bool enabled = [] {
+    const char* value = std::getenv("VT_XPU_HOST_PROFILE");
+    return value && std::strcmp(value, "1") == 0;
+  }();
+  return enabled;
+}
 thread_local const char* current_profile_matrix = nullptr;
 thread_local int64_t current_profile_layer = -1;
 struct ProfileAnchorKernel { void operator()() const {} };
@@ -170,11 +177,12 @@ uint64_t SteadyNs() {
   return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
       std::chrono::steady_clock::now().time_since_epoch()).count());
 }
-void AppendHostProfileRecord(Context& c, Queue& q, const char* stage, uint64_t start, uint64_t end) {
+void AppendHostProfileRecord(Context& c, uint64_t queue_id, const char* stage,
+                             uint64_t start, uint64_t end) {
   constexpr size_t kMaxHostProfileRecords = 100000;
   VT_CHECK(c.host_profile_records.size() < kMaxHostProfileRecords,
            "XPU host profile record limit exceeded; narrow or drain the diagnostic window");
-  c.host_profile_records.push_back({stage, q.id, start, end});
+  c.host_profile_records.push_back({stage, queue_id, start, end});
 }
 Context& GetContext(int index) {
   // Stable per-device storage; construction is lazy and failures reach the caller.
@@ -212,8 +220,11 @@ class XpuBackend final : public Backend {
     std::lock_guard<std::mutex> lock(c.mutex);
     VT_CHECK(c.recordings.empty(), "XPU graph capture requires preallocated device buffers");
     VT_CHECK(bytes <= c.budget - c.allocated - c.graph_bytes, "XPU device allocation exceeds memory budget");
+    const auto alloc_start = HostProfileEnabled() ? SteadyNs() : 0;
     void* p = sycl::aligned_alloc_device(64, bytes, c.device, c.context);
     VT_CHECK(p != nullptr, "XPU device USM allocation failed");
+    if (alloc_start)
+      AppendHostProfileRecord(c, 0, "alloc_device", alloc_start, SteadyNs());
     try { c.allocations.emplace(p, bytes); } catch (...) { sycl::free(p, c.context); throw; }
     c.allocated += bytes;
     c.peak_allocated = std::max(c.peak_allocated, c.allocated);
@@ -226,7 +237,10 @@ class XpuBackend final : public Backend {
     VT_CHECK(c.recordings.empty(), "XPU graph capture cannot free device buffers");
     const auto it = c.allocations.find(p);
     VT_CHECK(it != c.allocations.end(), "XPU free: pointer not owned by this device");
+    const auto drain_start = HostProfileEnabled() ? SteadyNs() : 0;
     c.Drain();
+    if (drain_start)
+      AppendHostProfileRecord(c, 0, "free_device_drain", drain_start, SteadyNs());
     sycl::free(p, c.context);
     c.allocated -= it->second;
     c.allocations.erase(it);
@@ -236,8 +250,11 @@ class XpuBackend final : public Backend {
     bytes = std::max(bytes, size_t{1});
     std::lock_guard<std::mutex> lock(c.mutex);
     VT_CHECK(c.recordings.empty(), "XPU graph capture requires preallocated pinned buffers");
+    const auto alloc_start = HostProfileEnabled() ? SteadyNs() : 0;
     void* p = sycl::aligned_alloc_host(64, bytes, c.context);
     VT_CHECK(p != nullptr, "XPU pinned host USM allocation failed");
+    if (alloc_start)
+      AppendHostProfileRecord(c, 0, "alloc_pinned", alloc_start, SteadyNs());
     try { c.pinned.emplace(p, bytes); } catch (...) { sycl::free(p, c.context); throw; }
     c.pinned_bytes += bytes;
     return p;
@@ -249,7 +266,10 @@ class XpuBackend final : public Backend {
     VT_CHECK(c.recordings.empty(), "XPU graph capture cannot free pinned buffers");
     const auto it = c.pinned.find(p);
     VT_CHECK(it != c.pinned.end(), "XPU pinned free: pointer not owned by this device");
+    const auto drain_start = HostProfileEnabled() ? SteadyNs() : 0;
     c.Drain();
+    if (drain_start)
+      AppendHostProfileRecord(c, 0, "free_pinned_drain", drain_start, SteadyNs());
     sycl::free(p, c.context);
     c.pinned_bytes -= it->second;
     c.pinned.erase(it);
@@ -272,7 +292,10 @@ class XpuBackend final : public Backend {
       VT_CHECK(!c.recordings.count(&native), "XPU graph capture requires persistent USM copy endpoints");
     }
     if (host_src && host_dst) {
+      const auto wait_start = HostProfileEnabled() ? SteadyNs() : 0;
       native.wait_and_throw();
+      if (wait_start)
+        RecordHostProfileSpan(q, "copy_host_wait", wait_start, SteadyNs());
       std::memcpy(dst, src, bytes);
       return;
     }
@@ -286,9 +309,15 @@ class XpuBackend final : public Backend {
         const size_t count = std::min(chunk, bytes - offset);
         if (host_src) {
           std::memcpy(staging, static_cast<const char*>(src) + offset, count);
+          const auto wait_start = HostProfileEnabled() ? SteadyNs() : 0;
           native.memcpy(static_cast<char*>(dst) + offset, staging, count).wait_and_throw();
+          if (wait_start)
+            RecordHostProfileSpan(q, "staged_h2d_wait", wait_start, SteadyNs());
         } else {
+          const auto wait_start = HostProfileEnabled() ? SteadyNs() : 0;
           native.memcpy(staging, static_cast<const char*>(src) + offset, count).wait_and_throw();
+          if (wait_start)
+            RecordHostProfileSpan(q, "staged_d2h_wait", wait_start, SteadyNs());
           std::memcpy(static_cast<char*>(dst) + offset, staging, count);
         }
       }
@@ -411,42 +440,43 @@ class XpuBackend final : public Backend {
     VT_CHECK(!c.recordings.count(&native), "XPU graph replay cannot be nested in a capture");
     auto& graph = *it->second;
     const bool graph_profile = GraphProfileEnabled();
+    const bool host_profile = graph_profile || HostProfileEnabled();
     Workspace* scratch[] = {&c.exl3, &c.gdn, &c.attention, &c.sampling};
     if (graph.validation) {
       // All check kernels share one small D2H. They read the freshly staged
       // metadata on this queue; invalid indices fail before compute can write
       // KV or recurrent state. Never reuse capture-time validation results.
-      const auto validation_start = graph_profile ? SteadyNs() : 0;
+      const auto validation_start = host_profile ? SteadyNs() : 0;
       const auto validation_event = native.submit([&](sycl::handler& h) {
         if (graph.last) h.depends_on(*graph.last);
         h.ext_oneapi_graph(*graph.validation);
       });
-      if (graph_profile) {
+      if (graph_profile)
         AppendProfileEvent(c, q, "graph_validation", nullptr, validation_event);
-        AppendHostProfileRecord(c, q, "graph_validation_submit", validation_start, SteadyNs());
-      }
-      const auto d2h_start = graph_profile ? SteadyNs() : 0;
+      if (host_profile)
+        AppendHostProfileRecord(c, q.id, "graph_validation_submit", validation_start, SteadyNs());
+      const auto d2h_start = host_profile ? SteadyNs() : 0;
       native.memcpy(graph.checks->host, graph.checks->device,
                     graph.checks->messages.size() * sizeof(int)).wait_and_throw();
-      if (graph_profile) AppendHostProfileRecord(c, q, "graph_validation_d2h_wait", d2h_start, SteadyNs());
-      const auto scan_start = graph_profile ? SteadyNs() : 0;
+      if (host_profile) AppendHostProfileRecord(c, q.id, "graph_validation_d2h_wait", d2h_start, SteadyNs());
+      const auto scan_start = host_profile ? SteadyNs() : 0;
       for (size_t i = 0; i < graph.checks->messages.size(); ++i)
         VT_CHECK(graph.checks->host[i] != 0, graph.checks->messages[i]);
-      if (graph_profile) AppendHostProfileRecord(c, q, "graph_validation_scan", scan_start, SteadyNs());
+      if (host_profile) AppendHostProfileRecord(c, q.id, "graph_validation_scan", scan_start, SteadyNs());
     }
     // Replays of the same executable serialize even when callers switch queues;
     // distinct executables may overlap when their buffers are independent.
-    const auto compute_submit_start = graph_profile ? SteadyNs() : 0;
+    const auto compute_submit_start = host_profile ? SteadyNs() : 0;
     graph.last = native.submit([&](sycl::handler& h) {
       if (graph.last) h.depends_on(*graph.last);
       for (unsigned i = 0; i < 4; ++i)
         if ((graph.workspace_mask & (1u << i)) && scratch[i]->last) h.depends_on(*scratch[i]->last);
       h.ext_oneapi_graph(graph.executable);
     });
-    if (graph_profile) {
+    if (graph_profile)
       AppendProfileEvent(c, q, "graph_compute", nullptr, *graph.last);
-      AppendHostProfileRecord(c, q, "graph_compute_submit", compute_submit_start, SteadyNs());
-    }
+    if (host_profile)
+      AppendHostProfileRecord(c, q.id, "graph_compute_submit", compute_submit_start, SteadyNs());
     for (unsigned i = 0; i < 4; ++i) if (graph.workspace_mask & (1u << i)) scratch[i]->last = graph.last;
     ++c.replays;
   }
@@ -561,6 +591,15 @@ void RecordProfileEvent(Queue& q, const char* stage, const sycl::event& event) {
   AppendProfileEvent(c, q, stage, current_profile_matrix, event);
 }
 bool ProfileQueueEventsEnabled() { return ProfileQueuesEnabled(); }
+bool HostProfileSpansEnabled() { return HostProfileEnabled(); }
+uint64_t HostProfileClockNs() { return SteadyNs(); }
+void RecordHostProfileSpan(Queue& q, const char* stage,
+                           uint64_t start_ns, uint64_t end_ns) {
+  if (!HostProfileEnabled()) return;
+  auto& c = GetContext(q.device.index);
+  std::lock_guard<std::mutex> lock(c.mutex);
+  AppendHostProfileRecord(c, q.id, stage, start_ns, end_ns);
+}
 void RecordProfileSpan(Queue& q, const char* stage, const sycl::event& begin,
                        const sycl::event& end, uint64_t host_submit_ns,
                        const std::string& detail) {
@@ -629,7 +668,7 @@ std::vector<ProfileRecord> DrainProfileEvents(int index) {
   return records;
 }
 std::vector<HostProfileRecord> DrainHostProfileRecords(int index) {
-  if (!GraphProfileEnabled()) return {};
+  if (!GraphProfileEnabled() && !HostProfileEnabled()) return {};
   auto& c = GetContext(index);
   std::vector<HostProfileRecord> records;
   {
@@ -689,7 +728,9 @@ MemoryInfo GetMemoryInfo(int index) {
   return info;
 }
 namespace {
-bool WithWorkspace(Queue& q, Workspace& workspace, unsigned mask, size_t bytes, const std::function<void(void*)>& launch) {
+bool WithWorkspace(Queue& q, Workspace& workspace, unsigned mask,
+                   const char* wait_stage, size_t bytes,
+                   const std::function<void(void*)>& launch) {
   auto& native = NativeQueue(q);
   auto& c = GetContext(q.device.index);
   std::lock_guard<std::mutex> execution(workspace.mutex);
@@ -720,7 +761,13 @@ bool WithWorkspace(Queue& q, Workspace& workspace, unsigned mask, size_t bytes, 
   if (!capturing && workspace.last) native.ext_oneapi_submit_barrier({*workspace.last});
   try {
     launch(workspace.data);
-    if (!capturing) { native.wait_and_throw(); workspace.last.reset(); }
+    if (!capturing) {
+      const auto wait_start = HostProfileEnabled() ? SteadyNs() : 0;
+      native.wait_and_throw();
+      if (wait_start)
+        RecordHostProfileSpan(q, wait_stage, wait_start, SteadyNs());
+      workspace.last.reset();
+    }
   } catch (...) {
     // Even when host-side submission throws, complete earlier kernels before
     // releasing this workspace to another queue.
@@ -732,19 +779,23 @@ bool WithWorkspace(Queue& q, Workspace& workspace, unsigned mask, size_t bytes, 
 }
 bool WithExl3Workspace(Queue& q, size_t bytes, const std::function<void(void*)>& launch) {
   VT_CHECK(bytes > 0 && bytes <= 32 * 1024 * 1024, "XPU EXL3 workspace exceeds 32 MiB budget");
-  return WithWorkspace(q, GetContext(q.device.index).exl3, 1, bytes, launch);
+  return WithWorkspace(q, GetContext(q.device.index).exl3, 1,
+                       "workspace_wait_exl3", bytes, launch);
 }
 bool WithGdnWorkspace(Queue& q, size_t bytes, const std::function<void(void*)>& launch) {
   VT_CHECK(bytes > 0 && bytes <= 16 * 1024 * 1024, "XPU GDN workspace exceeds 16 MiB budget");
-  return WithWorkspace(q, GetContext(q.device.index).gdn, 2, bytes, launch);
+  return WithWorkspace(q, GetContext(q.device.index).gdn, 2,
+                       "workspace_wait_gdn", bytes, launch);
 }
 bool WithAttentionWorkspace(Queue& q, size_t bytes, const std::function<void(void*)>& launch) {
   VT_CHECK(bytes > 0 && bytes <= 16 * 1024 * 1024, "XPU attention workspace exceeds 16 MiB budget");
-  return WithWorkspace(q, GetContext(q.device.index).attention, 4, bytes, launch);
+  return WithWorkspace(q, GetContext(q.device.index).attention, 4,
+                       "workspace_wait_attention", bytes, launch);
 }
 bool WithSamplingWorkspace(Queue& q, size_t bytes, const std::function<void(void*)>& launch) {
   VT_CHECK(bytes > 0 && bytes <= 16 * 1024 * 1024, "XPU sampling workspace exceeds 16 MiB budget");
-  return WithWorkspace(q, GetContext(q.device.index).sampling, 8, bytes, launch);
+  return WithWorkspace(q, GetContext(q.device.index).sampling, 8,
+                       "workspace_wait_sampling", bytes, launch);
 }
 std::string DeviceDescription(int index) {
   const auto& d = DeviceAt(index);

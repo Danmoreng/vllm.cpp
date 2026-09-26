@@ -1379,7 +1379,9 @@ TEST_CASE("GPTQ4 real 64-layer text prefill and decode use the packed XPU path")
       }
       backend.Synchronize(queue);
     };
-    const auto run_decodes = [&](std::chrono::steady_clock::time_point first_end) {
+    const auto run_decodes = [&](
+        std::chrono::steady_clock::time_point first_end, bool force_eager,
+        std::vector<std::vector<float>>* captured_logits) {
       auto last_end = first_end;
       for (int step = 0; step < output_tokens - 1; ++step) {
         const std::vector<int32_t> token_id{decode_ids[step]};
@@ -1392,11 +1394,14 @@ TEST_CASE("GPTQ4 real 64-layer text prefill and decode use the packed XPU path")
             config, queue, decode_index};
         step_input.num_reqs = 1;
         step_input.gdn_state_slots = 2;
-        step_input.pure_decode = true;
-        step_input.uniform_query_len = 1;
+        step_input.pure_decode = !force_eager;
+        step_input.uniform_query_len = force_eager ? 0 : 1;
         const auto result = vllm::ModelRegistry::Forward(*model, step_input);
         REQUIRE(result.on_device());
-        backend.Synchronize(queue);
+        if (captured_logits != nullptr)
+          captured_logits->push_back(read_logits(result, 1));
+        else
+          backend.Synchronize(queue);
         last_end = std::chrono::steady_clock::now();
       }
       return std::chrono::duration<double>(last_end - first_end).count();
@@ -1404,7 +1409,23 @@ TEST_CASE("GPTQ4 real 64-layer text prefill and decode use the packed XPU path")
     reset_state();
     run_prefill(true);
     if (std::getenv("VLLM_CPP_GPTQ4_4K_ORACLE_ONLY") != nullptr) return;
-    (void)run_decodes(std::chrono::steady_clock::now());
+    (void)run_decodes(std::chrono::steady_clock::now(), false, nullptr);
+    if (std::getenv("VLLM_CPP_GPTQ4_GRAPH_TEST") != nullptr && !bench_4k) {
+      std::vector<std::vector<float>> eager_logits, graph_logits;
+      reset_state();
+      run_prefill();
+      (void)run_decodes(std::chrono::steady_clock::now(), true, &eager_logits);
+      reset_state();
+      run_prefill();
+      const auto graph_replays_before_compare = backend.GraphReplays();
+      (void)run_decodes(std::chrono::steady_clock::now(), false, &graph_logits);
+      CHECK(backend.GraphReplays() - graph_replays_before_compare >=
+            output_tokens - 1);
+      REQUIRE(eager_logits.size() == graph_logits.size());
+      for (size_t step = 0; step < eager_logits.size(); ++step)
+        compare_distribution(graph_logits[step], 0, eager_logits[step],
+                             "graph/eager decode");
+    }
     const bool profile = std::getenv("VLLM_CPP_GPTQ4_PROFILE") != nullptr;
     const auto report_profile = [&](const char* phase) {
       std::map<std::string, std::pair<size_t, double>> by_stage;
@@ -1455,7 +1476,8 @@ TEST_CASE("GPTQ4 real 64-layer text prefill and decode use the packed XPU path")
       if (profile) report_profile("PREFILL");
       const auto timed_replays_before = backend.GraphReplays();
       const double decode_seconds = run_decodes(
-          profile ? std::chrono::steady_clock::now() : prefill_end);
+          profile ? std::chrono::steady_clock::now() : prefill_end,
+          false, nullptr);
       if (profile) report_profile("DECODE");
       const auto timed_replays = backend.GraphReplays() - timed_replays_before;
       if (std::getenv("VLLM_CPP_GPTQ4_GRAPH_TEST") != nullptr)

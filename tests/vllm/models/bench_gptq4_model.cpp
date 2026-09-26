@@ -71,6 +71,19 @@ void Emit(const nlohmann::json& record) {
   std::cout.flush();
 }
 
+nlohmann::json SummarizeHostSpans(
+    const std::vector<vt::xpu::HostProfileRecord>& records) {
+  nlohmann::json stages = nlohmann::json::object();
+  for (const auto& event : records) {
+    auto& stage = stages[event.stage];
+    if (stage.is_null()) stage = {{"count", 0}, {"host_ms", 0.0}};
+    stage["count"] = stage["count"].get<int>() + 1;
+    stage["host_ms"] = stage["host_ms"].get<double>() +
+        static_cast<double>(event.end_steady_ns - event.start_steady_ns) / 1.0e6;
+  }
+  return stages;
+}
+
 int Run(const std::string& checkpoint, int prompt_tokens, int output_tokens,
         int rounds) {
   if (prompt_tokens < 64 || prompt_tokens > 4096 || output_tokens < 2 ||
@@ -187,7 +200,8 @@ int Run(const std::string& checkpoint, int prompt_tokens, int output_tokens,
   prefill();
   decode();
   const bool graph_profile = std::string(Env("VT_XPU_GRAPH_PROFILE")) == "1";
-  if (graph_profile) {
+  const bool host_profile = std::string(Env("VT_XPU_HOST_PROFILE")) == "1";
+  if (graph_profile || host_profile) {
     (void)vt::xpu::DrainProfileEvents(queue.device.index);
     (void)vt::xpu::DrainHostProfileRecords(queue.device.index);
   }
@@ -214,6 +228,7 @@ int Run(const std::string& checkpoint, int prompt_tokens, int output_tokens,
         {"attention_mode", Env("VT_XPU_ATTENTION", "auto")},
         {"graph_opt_in", std::string(Env("VT_GPTQ4_GRAPH")) == "1"},
         {"graph_profile", graph_profile},
+        {"host_profile", host_profile},
         {"measurement_scope", "synchronized full-model forward; load, JIT and warm block excluded"},
         {"warm_primitive_count", warm_stats.primitive_count},
         {"warm_scratch_allocations", warm_stats.scratchpad_allocation_count},
@@ -226,13 +241,18 @@ int Run(const std::string& checkpoint, int prompt_tokens, int output_tokens,
     const auto start = Clock::now();
     prefill();
     const auto prefill_end = Clock::now();
+    nlohmann::json prefill_host_spans = nullptr;
+    if (host_profile && !graph_profile)
+      prefill_host_spans = SummarizeHostSpans(
+          vt::xpu::DrainHostProfileRecords(queue.device.index));
+    const auto decode_start = Clock::now();
     decode();
     const auto decode_end = Clock::now();
     const auto stats = vt::xpu::GetGptq4RuntimeStats(queue.device.index);
     const auto memory = vt::xpu::GetMemoryInfo(queue.device.index);
     const uint64_t replays = backend.GraphReplays() - replays_before;
     const double prefill_seconds = Seconds(start, prefill_end);
-    const double decode_seconds = Seconds(prefill_end, decode_end);
+    const double decode_seconds = Seconds(decode_start, decode_end);
     nlohmann::json graph_timeline = nullptr;
     if (graph_profile) {
       graph_timeline = nlohmann::json::object();
@@ -253,6 +273,10 @@ int Run(const std::string& checkpoint, int prompt_tokens, int output_tokens,
             static_cast<double>(event.end_steady_ns - event.start_steady_ns) / 1.0e6;
       }
     }
+    nlohmann::json decode_host_spans = nullptr;
+    if (host_profile && !graph_profile)
+      decode_host_spans = SummarizeHostSpans(
+          vt::xpu::DrainHostProfileRecords(queue.device.index));
     Emit({{"event", "gptq4_benchmark_round"}, {"round", round},
           {"prefill_seconds", prefill_seconds},
           {"prefill_tokens_per_second", prompt_tokens / prefill_seconds},
@@ -273,6 +297,10 @@ int Run(const std::string& checkpoint, int prompt_tokens, int output_tokens,
       Emit({{"event", "gptq4_graph_timeline"}, {"round", round},
             {"stages", graph_timeline},
             {"scope", "graph replay events and host waits; not an operator breakdown"}});
+    if (host_profile && !graph_profile)
+      Emit({{"event", "gptq4_host_spans"}, {"round", round},
+            {"prefill", prefill_host_spans}, {"decode", decode_host_spans},
+            {"scope", "nested host spans may overlap; do not sum as disjoint time"}});
   }
   return 0;
 }
