@@ -22,9 +22,9 @@ template<class Fn> struct PrefillGrf256 {
 }
 // Native adaptation of the donor's tiled QK -> online softmax -> PV schedule.
 // VT pages may be strided unbind views; no donor block-size/layout assumption.
-// Q16/Q32 with K32, eight SG16s; F32 running softmax and output.
+// Q16/Q32/Q64 with K32, eight SG16s; F32 running softmax and output.
 // 256 GRFs avoid the spill traffic of the 128-GRF compilation on B70.
-// F32 queries use FP16 high+residual XMX operands. F16 Q32 uses one FP16
+// F32 queries use FP16 high+residual XMX operands. F16 Q32/Q64 use one FP16
 // probability operand after the FP32 softmax; K/V share one staging buffer.
 template<int Q, bool QueryResidual, bool ProbabilityResidual = true>
 bool PagedAttentionPrefillImpl(Queue& q, Tensor& out, const Tensor& query, const Tensor& key_cache,
@@ -34,7 +34,7 @@ bool PagedAttentionPrefillImpl(Queue& q, Tensor& out, const Tensor& query, const
   namespace mx = sycl::ext::oneapi::experimental::matrix;
   namespace imx = sycl::ext::intel::experimental::matrix;
   constexpr int K = 32, D = 256, WG = 128;
-  static_assert(Q == 16 || (Q == 32 && !QueryResidual));
+  static_assert(Q == 16 || ((Q == 32 || Q == 64) && !QueryResidual));
   constexpr size_t local_bytes =
       (Q * D + K * D + Q * K + (QueryResidual ? Q * D : 1) +
        (ProbabilityResidual ? Q * K : 1)) * sizeof(sycl::half) +
@@ -218,7 +218,8 @@ bool PagedAttentionPrefillImpl(Queue& q, Tensor& out, const Tensor& query, const
       }
     }});
   });
-  RecordProfileEvent(q, Q == 32 ? "attention_prefill_q32" : "attention_prefill", event);
+  RecordProfileEvent(q, Q == 64 ? "attention_prefill_q64" :
+      Q == 32 ? "attention_prefill_q32" : "attention_prefill", event);
   int invalid = 0;
   GetBackend(q.device).Copy(q, &invalid, unsafe, sizeof(int));
   // If FP16 could not represent an operand, the caller re-runs its generic
@@ -231,12 +232,20 @@ bool PagedAttentionPrefillKernel(Queue& q, Tensor& out, const Tensor& query, con
                                  const PagedAttentionArgs& args) {
   const char* setting = std::getenv("VT_XPU_ATTN_PREFILL_TILE");
   const std::string_view tile = setting ? setting : "auto";
-  VT_CHECK(tile == "auto" || tile == "q16" || tile == "q32", "Invalid VT_XPU_ATTN_PREFILL_TILE");
+  VT_CHECK(tile == "auto" || tile == "q16" || tile == "q32" || tile == "q64",
+           "Invalid VT_XPU_ATTN_PREFILL_TILE");
   if (query.dtype == DType::kF16) {
-    if (tile == "auto" || tile == "q32") {
+    if (tile == "auto" || tile == "q32" || tile == "q64") {
       const char* probability = std::getenv("VT_XPU_ATTN_PROBABILITY");
       const std::string_view mode = probability ? probability : "single";
       VT_CHECK(mode == "residual" || mode == "single", "Invalid VT_XPU_ATTN_PROBABILITY");
+      // Q32 keeps short prompts on XMX; Q64 needs 64 packed tokens and is the
+      // measured long-prefill winner on B70. The residual reference stays Q32.
+      if (tile == "q64" || (tile == "auto" && query.shape[0] >= 64 && mode == "single")) {
+        VT_CHECK(mode == "single", "Q64 requires single FP16 probability operand");
+        return PagedAttentionPrefillImpl<64, false, false>(q, out, query, key_cache,
+            value_cache, block_table, seq_lens, query_start_loc, args);
+      }
       if (mode == "single")
         return PagedAttentionPrefillImpl<32, false, false>(q, out, query, key_cache,
             value_cache, block_table, seq_lens, query_start_loc, args);
