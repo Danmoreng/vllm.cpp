@@ -1490,6 +1490,10 @@ TEST_CASE("GPTQ4 real 64-layer text prefill and decode use the packed XPU path")
               << " s/token (" << (output_tokens - 1) / decode_seconds
               << " tokens/s); load/JIT excluded, FP16 KV, graph replays "
               << timed_replays);
+      const auto memory = vt::xpu::GetMemoryInfo(queue.device.index);
+      MESSAGE("GPTQ4 B1 memory: backend peak " << memory.peak_allocated_bytes
+              << " bytes, budget " << memory.budget_bytes
+              << " bytes, GDN workspace " << memory.gdn_workspace_bytes << " bytes");
     }
   }
 }

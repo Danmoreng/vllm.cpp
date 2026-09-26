@@ -124,7 +124,7 @@ TEST_CASE("XPU GDN short F16 prefill selects chunked kernel"
   const auto records = vt::xpu::DrainProfileEvents();
   size_t dots = 0, recurrence = 0;
   for (const auto& record : records) {
-    dots += record.stage == "gdn_chunk_dots";
+    dots += record.stage == "gdn_chunk_dots_qk";
     recurrence += record.stage == "gdn_prefill_recurrence";
   }
   CHECK(dots == 1);
@@ -165,9 +165,9 @@ TEST_CASE("XPU GDN profile: chunk stages and decode recurrence"
     CHECK(record.start_ns > 0);
     CHECK(record.end_ns >= record.start_ns);
   }
-  for (const char* stage : {"gdn_chunk_gates", "gdn_chunk_inputs", "gdn_chunk_dots",
-                            "gdn_chunk_system", "gdn_chunk_inverse", "gdn_chunk_wu",
-                            "gdn_chunk_delta", "gdn_chunk_output", "gdn_chunk_state",
+  for (const char* stage : {"gdn_chunk_gates", "gdn_chunk_inputs", "gdn_chunk_dots_qk",
+                            "gdn_chunk_system", "gdn_chunk_inverse", "gdn_chunk_wu_tile4",
+                            "gdn_chunk_delta_cross_tile4", "gdn_chunk_output_tile4", "gdn_chunk_state_tile4",
                             "gdn_decode_recurrence"}) CHECK(counts[stage] == 1);
   CHECK(records.size() == 10);
 }
