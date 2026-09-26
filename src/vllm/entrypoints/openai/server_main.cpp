@@ -96,7 +96,7 @@
 #include "vllm/model_executor/models/cua_s1_inference.h"  // CuaS1ScoreInference (MODEL-CUA-S1-FORMS)
 #include "vllm/model_executor/models/laya_inference.h"  // LayaInference (MODEL-LAYA)
 #include "vllm/model_executor/models/kev_inference.h"  // KevInference (MODEL-KEV)
-#include "vllm/model_executor/models/gliner25_decide_inference.h"  // Gliner25DecideInference (MODEL-GLINER25-DECIDE)
+#include "vllm/model_executor/models/xor_inference.h"  // XorInference (MODEL-XOR)
 #include "vllm/multimodal/minimax_h3_video.h"
 #include "vllm/multimodal/parakeet_transcription.h"
 #include "vllm/multimodal/video_engine.h"
@@ -1437,20 +1437,20 @@ int VllmServerMain(int argc, char** argv) {
         return 0;
       }
 
-      // ── GLINER25-DECIDE DECISION TASK DISPATCH (MODEL-GLINER25-DECIDE):
-      bool gliner25_decide_model = false;
+      // ── XOR DECISION TASK DISPATCH (MODEL-XOR):
+      bool xor_model = false;
       if (!archs.empty()) {
         try {
-          gliner25_decide_model =
+          xor_model =
               vllm::ModelRegistry::Resolve(std::span<const std::string>(archs))
-                  .architecture == "SpanExtractor";
+                  .architecture == "XorModel";
         } catch (const std::exception&) {
-          gliner25_decide_model = false;
+          xor_model = false;
         }
       }
-      if (gliner25_decide_model) {
-        std::cerr << "server: GLiNER2.5-Decide decision model ("
-                  << archs[0] << "); serving /v1/systemone\n";
+      if (xor_model) {
+        std::cerr << "server: xor decision model (" << archs[0]
+                  << "); serving /v1/systemone\n";
         vllm::entrypoints::EngineParams decision_params;
         decision_params.block_size = args.block_size;
         decision_params.num_blocks = args.num_blocks;
@@ -1481,9 +1481,9 @@ int VllmServerMain(int argc, char** argv) {
                   loaded_decision->loaded_model();
               const vllm::tok::Tokenizer& tokenizer =
                   loaded_decision->tokenizer();
-              vllm::Gliner25DecideResult result =
-                  vllm::Gliner25DecideInference(model, tokenizer, state,
-                                                 qtype, instructions, options);
+              vllm::XorDecisionResult result =
+                  vllm::XorInference(model, tokenizer, state, qtype,
+                                     instructions, options);
               oai::ApiServer::DecisionResult out;
               out.scores = std::move(result.scores);
               out.prompt_tokens = result.prompt_tokens;
