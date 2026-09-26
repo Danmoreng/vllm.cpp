@@ -22,13 +22,14 @@ enum class Projection : size_t {
   kAttnOut,
   kMlpGateUp,
   kMlpDown,
+  kLmHead,
   kCount,
 };
 
 inline constexpr size_t kProjectionCount = static_cast<size_t>(Projection::kCount);
 inline constexpr std::array<const char*, kProjectionCount> kProjectionNames{
     "gdn_qkvz", "gdn_ba", "gdn_out", "attn_qkv", "attn_out",
-    "mlp_gate_up", "mlp_down"};
+    "mlp_gate_up", "mlp_down", "lm_head"};
 
 struct DispatchCounts {
   std::array<uint64_t, kProjectionCount> calls{};

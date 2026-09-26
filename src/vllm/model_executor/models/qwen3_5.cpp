@@ -1812,8 +1812,8 @@ DBuf MatmulBf16D(Dev d, const Tensor& x, const OwnedTensor& w) {
 }
 
 // A tied BF16 lm_head follows torch Linear's model-dtype output, then the
-// engine exposes f32 logits to the sampler. Explicit 27B heads retain the
-// existing f32-output MatmulF32D path.
+// engine exposes f32 logits to the sampler. Other explicit heads choose their
+// own route in DenseLogitsF32D below.
 DBuf MatmulBf16LogitsF32D(Dev d, const Tensor& x, const OwnedTensor& w) {
   DBuf bf16 = MatmulBf16D(d, x, w);
   DBuf f32(d, DType::kF32, {bf16.t().shape[0], bf16.t().shape[1]});
@@ -3348,10 +3348,27 @@ DBuf DenseLogitsF32D(Dev d, const Tensor& x, const Qwen3_5DenseWeights& weights)
   // (`logits_processor.py:111-115`) guards its `.to(f32)` weight-cast fallback,
   // a mechanism we do not use.
   //
-  // Elementwise bf16/f16 heads are untouched below, so no safetensors default
-  // and no recorded device measurement on those arms moves.
+  // The GPTQ/XPU FP16 head uses oneDNN's FP16-output GEMM, then widens to the
+  // sampler's FP32 logits. Keep the generic MatmulBT route selectable for a
+  // same-binary comparison; other FP16 heads and BF16 heads retain their route.
   if (vt::IsBlockQuant(lm_head.dtype)) return MatmulF32D(d, x, lm_head);
-  if (lm_head.dtype == DType::kF16) return MatmulF32D(d, x, lm_head);
+  if (lm_head.dtype == DType::kF16) {
+    if (weights.gptq4_checkpoint && d.q.device.type == vt::DeviceType::kXPU) {
+      const char* route = std::getenv("VT_GPTQ4_LM_HEAD_ROUTE");
+      VT_CHECK(route == nullptr || std::strcmp(route, "onednn_f16_cast") == 0 ||
+                   std::strcmp(route, "reference_matmul_bt") == 0,
+               "gptq4: VT_GPTQ4_LM_HEAD_ROUTE must be onednn_f16_cast or reference_matmul_bt");
+      if (route == nullptr || std::strcmp(route, "onednn_f16_cast") == 0) {
+        Tensor resident = ResidentWeight(d, lm_head);
+        DBuf half = dense_gptq4::Dense(d, x, resident,
+                                       dense_gptq4::Projection::kLmHead);
+        DBuf logits(d, DType::kF32, {x.shape[0], resident.shape[0]});
+        vt::CastF32(d.q, logits.t(), half.t());
+        return logits;
+      }
+    }
+    return MatmulF32D(d, x, lm_head);
+  }
   return lm_head.nk ? MatmulBf16LogitsF32D(d, x, lm_head)
                     : MatmulF32D(d, x, lm_head);
 }

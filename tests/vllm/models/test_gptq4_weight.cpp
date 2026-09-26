@@ -473,9 +473,17 @@ TEST_CASE("GPTQ4 model boundaries keep F16 hidden tap and F32 gathered logits") 
   attn.block_table_tensor = {0};
   attn.slot_mapping = {0, 1, 2};
   vllm::Qwen3_5MTPHiddenStates tap;
+  const auto head_before = vllm::dense_gptq4::GetDispatchCounts();
   const auto logits = vllm::Qwen3_5DenseModel::ForwardDeviceTap(
       ids, positions, attn, {}, {}, {}, weights, config, queue,
       &tap, {0, 2});
+  const auto head_after = vllm::dense_gptq4::GetDispatchCounts();
+  const auto head_index = static_cast<size_t>(vllm::dense_gptq4::Projection::kLmHead);
+  const char* head_route = std::getenv("VT_GPTQ4_LM_HEAD_ROUTE");
+  const bool reference_head = head_route != nullptr &&
+                              std::strcmp(head_route, "reference_matmul_bt") == 0;
+  CHECK(head_after.calls[head_index] - head_before.calls[head_index] ==
+        (reference_head ? 0u : 1u));
   REQUIRE(tap.tensor.dtype == vt::DType::kF16);
   REQUIRE(tap.tensor.shape[0] == 3);
   REQUIRE(tap.tensor.shape[1] == 4);
@@ -1262,6 +1270,10 @@ TEST_CASE("GPTQ4 real 64-layer text prefill and decode use the packed XPU path")
   CHECK(calls(Projection::kAttnOut) == forwards * attn_layers);
   CHECK(calls(Projection::kMlpGateUp) == forwards * 64);
   CHECK(calls(Projection::kMlpDown) == forwards * 64);
+  const char* head_route = std::getenv("VT_GPTQ4_LM_HEAD_ROUTE");
+  const bool reference_head = head_route != nullptr &&
+                              std::strcmp(head_route, "reference_matmul_bt") == 0;
+  CHECK(calls(Projection::kLmHead) == (reference_head ? 0u : forwards));
   if (std::getenv("VLLM_CPP_GPTQ4_GRAPH_TEST") != nullptr) {
     CHECK(backend.GraphsCaptured() > graph_captures_before);
     CHECK(backend.GraphReplays() > graph_replays_before);
