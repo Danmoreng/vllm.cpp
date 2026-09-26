@@ -15,6 +15,7 @@
 #include "vllm/model_executor/models/qwen3_5_dense.h"
 #include "vt/backend.h"
 #include "vt/ops.h"
+#include "vt/xpu.h"
 #include "vt/xpu/xpu_common.h"
 #include "vt/xpu/xpu_gptq4.h"
 
@@ -247,6 +248,48 @@ TEST_CASE("XPU GPTQ dense F16 matmul with optional bias") {
   CHECK(stats.primitive_count == 3);
 }
 
+TEST_CASE("XPU GPTQ oneDNN profile brackets packed and dense stream spans"
+          * doctest::skip(!std::getenv("VT_XPU_PROFILE"))) {
+  QueueOwner owner;
+  auto& q = owner.queue;
+  Buffer activation(q, vt::DType::kF16, {1, 128});
+  Buffer qweight(q, vt::DType::kI32, {8, 16});
+  Buffer scales(q, vt::DType::kF16, {1, 8});
+  Buffer zero(q, vt::DType::kI8, {1});
+  Buffer dense_weight(q, vt::DType::kF16, {8, 128});
+  Buffer packed_out(q, vt::DType::kF16, {1, 8});
+  Buffer dense_out(q, vt::DType::kF16, {1, 8});
+  activation.Upload(std::vector<uint16_t>(128, vt::F32ToF16(1)).data(),
+                    activation.bytes);
+  qweight.Upload(std::vector<uint32_t>(8 * 16, 0x88888888u).data(),
+                 qweight.bytes);
+  scales.Upload(std::vector<uint16_t>(8, vt::F32ToF16(1)).data(), scales.bytes);
+  const int8_t zero_point = 8;
+  zero.Upload(&zero_point, zero.bytes);
+  dense_weight.Upload(std::vector<uint16_t>(8 * 128, vt::F32ToF16(1)).data(),
+                      dense_weight.bytes);
+  (void)vt::xpu::DrainProfileEvents(q.device.index);
+  vt::MatmulGptq4W4A16(q, packed_out.tensor, activation.tensor, qweight.tensor,
+                       scales.tensor, zero.tensor, 128);
+  vt::MatmulDenseF16(q, dense_out.tensor, activation.tensor,
+                     dense_weight.tensor);
+  vt::GetBackend(q.device).Synchronize(q);
+  const auto records = vt::xpu::DrainProfileEvents(q.device.index);
+  std::vector<vt::xpu::ProfileRecord> spans;
+  for (const auto& record : records)
+    if (record.stream_span) spans.push_back(record);
+  REQUIRE(spans.size() == 2);
+  CHECK(spans[0].stage == "onednn_gptq4_stream");
+  CHECK(spans[1].stage == "onednn_dense_f16_stream");
+  for (const auto& span : spans) {
+    CHECK(span.matrix.find("M=1 K=128 N=8") != std::string::npos);
+    CHECK(span.matrix.find("impl=") != std::string::npos);
+    CHECK(span.host_submit_ns > 0);
+    CHECK(span.end_ns > span.start_ns);
+    CHECK(span.queue_id == q.id);
+  }
+}
+
 TEST_CASE("XPU GPTQ typed linear seam selects packed and dense FP16 providers") {
   QueueOwner owner;
   auto& queue = owner.queue;
@@ -272,6 +315,9 @@ TEST_CASE("XPU GPTQ typed linear seam selects packed and dense FP16 providers") 
   vllm::dense_attn::Dev dev{vt::GetBackend(queue.device), queue,
                             vt::DType::kF16};
   const auto before = vllm::dense_gptq4::GetDispatchCounts();
+  const bool profile = std::getenv("VT_XPU_PROFILE") != nullptr;
+  if (profile) (void)vt::xpu::DrainProfileEvents(queue.device.index);
+  const vt::xpu::ProfileLayerScope profile_layer(7);
   auto packed_out = vllm::dense_gptq4::Packed(
       dev, input.tensor, packed, vllm::dense_gptq4::Projection::kMlpGateUp);
   auto dense_out = vllm::dense_gptq4::Dense(
@@ -292,6 +338,16 @@ TEST_CASE("XPU GPTQ typed linear seam selects packed and dense FP16 providers") 
         before.calls[static_cast<size_t>(Projection::kMlpGateUp)] + 1);
   CHECK(after.calls[static_cast<size_t>(Projection::kGdnBa)] ==
         before.calls[static_cast<size_t>(Projection::kGdnBa)] + 1);
+  if (profile) {
+    std::vector<vt::xpu::ProfileRecord> spans;
+    for (const auto& record : vt::xpu::DrainProfileEvents(queue.device.index))
+      if (record.stream_span) spans.push_back(record);
+    REQUIRE(spans.size() == 2);
+    CHECK(spans[0].matrix.find("layer=7 mlp_gate_up M=1 K=128 N=8") !=
+          std::string::npos);
+    CHECK(spans[1].matrix.find("layer=7 gdn_ba M=1 K=128 N=8") !=
+          std::string::npos);
+  }
 }
 
 TEST_CASE("XPU GPTQ oneDNN matmul records and replays on a SYCL command graph") {

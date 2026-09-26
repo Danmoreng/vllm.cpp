@@ -8,6 +8,9 @@
 #include "vllm/model_executor/model_loader/gptq4_weight.h"
 #include "vllm/model_executor/models/dense_device_glue.h"
 #include "vt/ops.h"
+#ifdef VLLM_CPP_XPU
+#include "vt/xpu.h"
+#endif
 
 namespace vllm::dense_gptq4 {
 
@@ -23,6 +26,9 @@ enum class Projection : size_t {
 };
 
 inline constexpr size_t kProjectionCount = static_cast<size_t>(Projection::kCount);
+inline constexpr std::array<const char*, kProjectionCount> kProjectionNames{
+    "gdn_qkvz", "gdn_ba", "gdn_out", "attn_qkv", "attn_out",
+    "mlp_gate_up", "mlp_down"};
 
 struct DispatchCounts {
   std::array<uint64_t, kProjectionCount> calls{};
@@ -49,6 +55,10 @@ inline dense_attn::DBuf Packed(dense_attn::Dev d, const vt::Tensor& input,
            "gptq4: packed projection requires contiguous XPU FP16 [M,K] and matching owner");
   const Gptq4ResidentViews resident = PrepareGptq4Resident(weight, d.q);
   dense_attn::DBuf output(d, vt::DType::kF16, {input.shape[0], weight.n});
+#ifdef VLLM_CPP_XPU
+  const vt::xpu::ProfileMatrixScope profile_projection(
+      kProjectionNames[static_cast<size_t>(projection)]);
+#endif
   vt::MatmulGptq4W4A16(d.q, output.t(), input, resident.qweight,
                        resident.scales, resident.zero_point, weight.group_size);
   Counters()[static_cast<size_t>(projection)].fetch_add(1, std::memory_order_relaxed);
@@ -65,6 +75,10 @@ inline dense_attn::DBuf Dense(dense_attn::Dev d, const vt::Tensor& input,
                weight.shape[1] == input.shape[1] && weight.shape[0] > 0,
            "gptq4: dense projection requires contiguous XPU FP16 [M,K] x [N,K]");
   dense_attn::DBuf output(d, vt::DType::kF16, {input.shape[0], weight.shape[0]});
+#ifdef VLLM_CPP_XPU
+  const vt::xpu::ProfileMatrixScope profile_projection(
+      kProjectionNames[static_cast<size_t>(projection)]);
+#endif
   vt::MatmulDenseF16(d.q, output.t(), input, weight);
   Counters()[static_cast<size_t>(projection)].fetch_add(1, std::memory_order_relaxed);
   return output;

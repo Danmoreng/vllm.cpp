@@ -1,5 +1,6 @@
 #include "xpu_common.h"
 #include "xpu_kernels.h"
+#include <cstdio>
 #include <cstdlib>
 #include <string_view>
 
@@ -206,8 +207,25 @@ void GdnPrefillKernel(Queue& q, Tensor& out, const Tensor& qi, const Tensor& ki,
         device.get_info<sycl::info::device::driver_version>() == "1.17.39758+10" &&
         device.get_platform().get_info<sycl::info::platform::version>() == "1.17";
   }
-  if (chunked && GdnChunkedPrefillEnabled() && qi.shape[0] >= 64 &&
-      GdnChunkedPrefillKernel(q, out, qi, ki, vi, g, beta, state, qsl, args)) return;
+  const bool supported = GdnChunkedPrefillEnabled();
+  const bool eligible = chunked && supported && qi.shape[0] >= 64;
+  const bool selected = eligible &&
+      GdnChunkedPrefillKernel(q, out, qi, ki, vi, g, beta, state, qsl, args);
+  if (const char* trace = std::getenv("VT_XPU_TRACE_FAST_PATH");
+      trace != nullptr && trace[0] == '1' && trace[1] == '\0') {
+    const char* reason = selected ? "eligible" :
+        !chunked ? "mode_or_stack_gate" : !supported ? "kernel_disabled" :
+        qi.shape[0] < 64 ? "short_query" : "kernel_declined";
+    const char* mode_name = mode == Mode::kAuto ? "auto" :
+                            mode == Mode::kChunked ? "chunked" : "reference";
+    std::fprintf(stderr,
+                 "{\"event\":\"xpu_fast_path\",\"operator\":\"gdn_prefill\","
+                 "\"selected\":\"%s\",\"reason\":\"%s\","
+                 "\"mode\":\"%s\",\"tokens\":%lld}\n",
+                 selected ? "chunked" : "reference", reason, mode_name,
+                 static_cast<long long>(qi.shape[0]));
+  }
+  if (selected) return;
   Recurrence(q, out, qi, ki, vi, g, beta, state, &qsl, nullptr, args.scale);
 }
 void GdnDecodeKernel(Queue& q, Tensor& out, const Tensor& qi, const Tensor& ki, const Tensor& vi,

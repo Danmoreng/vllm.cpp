@@ -1,6 +1,7 @@
 #include "xpu_common.h"
 #include "xpu_kernels.h"
 #include "xpu_fp8.h"
+#include <cstdio>
 #include <limits>
 #include <cstdlib>
 #include <string_view>
@@ -283,10 +284,30 @@ void PagedAttentionKernel(Queue& q, Tensor& out, const Tensor& query, const Tens
         std::string_view(__VERSION__) == "Intel(R) oneAPI DPC++/C++ Compiler 2026.1.1 (2026.1.1.20260724)" &&
         device.get_info<sycl::info::device::driver_version>() == "1.17.39758+10" &&
         device.get_platform().get_info<sycl::info::platform::version>() == "1.17";
-    if ((automatic || mode == "split" || mode == "prefill") && PagedAttentionSplitKernel(q, target, query, key_cache, value_cache,
-                                                      block_table, seq_lens, query_start_loc, args)) return;
-    if ((automatic || mode == "prefill") && PagedAttentionPrefillKernel(q, target, query, key_cache, value_cache,
-                                                         block_table, seq_lens, query_start_loc, args)) return;
+    const bool try_split = automatic || mode == "split" || mode == "prefill";
+    const bool split = try_split && PagedAttentionSplitKernel(
+        q, target, query, key_cache, value_cache,
+        block_table, seq_lens, query_start_loc, args);
+    const bool try_prefill = !split && (automatic || mode == "prefill");
+    const bool prefill = try_prefill && PagedAttentionPrefillKernel(
+        q, target, query, key_cache, value_cache,
+        block_table, seq_lens, query_start_loc, args);
+    if (const char* trace = std::getenv("VT_XPU_TRACE_FAST_PATH");
+        trace != nullptr && trace[0] == '1' && trace[1] == '\0') {
+      const char* reason = split || prefill ? "eligible" :
+          mode == "reference" ? "mode_reference" :
+          mode == "auto" && !automatic ? "stack_gate_or_shape" :
+          "kernel_declined";
+      std::fprintf(stderr,
+                   "{\"event\":\"xpu_fast_path\",\"operator\":\"paged_attention\","
+                   "\"selected\":\"%s\",\"reason\":\"%s\","
+                   "\"mode\":\"%.*s\",\"auto_eligible\":%s,"
+                   "\"tokens\":%lld}\n",
+                   split ? "split" : prefill ? "prefill" : "reference", reason,
+                   static_cast<int>(mode.size()), mode.data(),
+                   automatic ? "true" : "false", static_cast<long long>(tokens));
+    }
+    if (split || prefill) return;
     const View qs(query), kc(key_cache), vc(value_cache), dst(target);
     const auto event = NativeQueue(q).submit([&](sycl::handler& h) {
       sycl::local_accessor<float, 1> partial(sycl::range<1>(lanes), h);

@@ -31,6 +31,8 @@
 #include "vt/xpu.h"
 #include <nlohmann/json.hpp>
 
+#include "gptq4_model_bench_metadata.h"
+
 namespace {
 
 struct Fixture {
@@ -868,44 +870,9 @@ TEST_CASE("GPTQ4 real 64-layer text prefill and decode use the packed XPU path")
   REQUIRE(attn_kv.size() + gdn_state.size() == 64);
 
   const auto attention_meta = [](int query_len, int context) {
-    vllm::v1::CommonAttentionMetadata meta;
-    meta.num_reqs = 1;
-    meta.num_actual_tokens = query_len;
-    meta.query_start_loc = {0, query_len};
-    meta.query_start_loc_cpu = meta.query_start_loc;
-    meta.seq_lens = {context + query_len};
-    meta.seq_lens_cpu = meta.seq_lens;
-    meta.max_query_len = query_len;
-    meta.max_seq_len = context + query_len;
-    meta.block_table_num_cols = 1;
-    meta.block_table_tensor = {0};
-    for (int i = 0; i < query_len; ++i)
-      meta.slot_mapping.push_back(context + i);
-    meta.causal = true;
-    return meta;
+    return gptq4_model_bench::AttentionMetadata(query_len, context, block_size);
   };
-  const auto gdn_meta = [](int query_len, bool initial) {
-    vllm::v1::GDNAttentionMetadata meta;
-    meta.num_actual_tokens = query_len;
-    meta.non_spec_state_indices_tensor = std::vector<int32_t>{0};
-    meta.non_spec_query_start_loc = std::vector<int32_t>{0, query_len};
-    if (initial) {
-      meta.num_decodes = 1;
-      meta.num_decode_tokens = query_len;
-    } else {
-      meta.num_prefills = 1;
-      meta.num_prefill_tokens = query_len;
-      meta.has_initial_state = std::vector<uint8_t>{0};
-      meta.prefill_query_start_loc = std::vector<int32_t>{0, query_len};
-      meta.prefill_state_indices = std::vector<int32_t>{0};
-      meta.prefill_has_initial_state = std::vector<uint8_t>{0};
-      const auto conv = vllm::v1::ComputeCausalConv1dMetadata(
-          *meta.non_spec_query_start_loc);
-      meta.batch_ptr = conv.batch_ptr;
-      meta.token_chunk_offset_ptr = conv.token_chunk_offset_ptr;
-    }
-    return meta;
-  };
+  const auto gdn_meta = gptq4_model_bench::GdnMetadata;
   const auto read_logits = [&](const vllm::ForwardLogits& logits,
                                 int expected_rows) {
     REQUIRE(logits.on_device());
@@ -1333,9 +1300,6 @@ TEST_CASE("GPTQ4 real 64-layer text prefill and decode use the packed XPU path")
       bench_positions[token] = token;
     }
     auto bench_am = attention_meta(prompt_tokens, 0);
-    bench_am.block_table_num_cols = prompt_tokens / block_size;
-    for (int block = 0; block < bench_am.block_table_num_cols; ++block)
-      bench_am.block_table_tensor.push_back(block);
     const auto bench_gm = gdn_meta(prompt_tokens, false);
     const std::vector<int32_t> bench_indices{prompt_tokens - 1};
     vllm::ModelForwardInput bench_input{
@@ -1421,9 +1385,6 @@ TEST_CASE("GPTQ4 real 64-layer text prefill and decode use the packed XPU path")
         const std::vector<int32_t> token_id{decode_ids[step]};
         const std::vector<int32_t> position{prompt_tokens + step};
         auto decode_am = attention_meta(1, prompt_tokens + step);
-        decode_am.block_table_num_cols = prompt_tokens / block_size + 1;
-        for (int block = 0; block < decode_am.block_table_num_cols; ++block)
-          decode_am.block_table_tensor.push_back(block);
         const auto decode_gm = gdn_meta(1, true);
         const std::vector<int32_t> decode_index{0};
         vllm::ModelForwardInput step_input{
@@ -1447,7 +1408,24 @@ TEST_CASE("GPTQ4 real 64-layer text prefill and decode use the packed XPU path")
     const bool profile = std::getenv("VLLM_CPP_GPTQ4_PROFILE") != nullptr;
     const auto report_profile = [&](const char* phase) {
       std::map<std::string, std::pair<size_t, double>> by_stage;
+      struct StreamTotals { size_t count = 0; double span_ms = 0, host_ms = 0; };
+      std::map<std::string, StreamTotals> by_operator;
+      StreamTotals onednn_total;
       for (const auto& event : vt::xpu::DrainProfileEvents(queue.device.index)) {
+        if (event.stream_span) {
+          const double span_ms =
+              static_cast<double>(event.end_ns - event.start_ns) / 1.0e6;
+          const double host_ms =
+              static_cast<double>(event.host_submit_ns) / 1.0e6;
+          auto& operator_total = by_operator[event.matrix];
+          ++operator_total.count;
+          operator_total.span_ms += span_ms;
+          operator_total.host_ms += host_ms;
+          ++onednn_total.count;
+          onednn_total.span_ms += span_ms;
+          onednn_total.host_ms += host_ms;
+          continue;
+        }
         auto& [count, milliseconds] = by_stage[event.stage];
         ++count;
         milliseconds += static_cast<double>(event.end_ns - event.start_ns) / 1.0e6;
@@ -1455,6 +1433,14 @@ TEST_CASE("GPTQ4 real 64-layer text prefill and decode use the packed XPU path")
       nlohmann::json report = nlohmann::json::object();
       for (const auto& [stage, values] : by_stage)
         report[stage] = {{"count", values.first}, {"gpu_ms", values.second}};
+      report["onednn_stream_total"] = {
+          {"count", onednn_total.count}, {"span_ms", onednn_total.span_ms},
+          {"host_submit_ms", onednn_total.host_ms}};
+      auto& operators = report["onednn_by_operator"] = nlohmann::json::object();
+      for (const auto& [label, values] : by_operator)
+        operators[label] = {{"count", values.count},
+                            {"span_ms", values.span_ms},
+                            {"host_submit_ms", values.host_ms}};
       std::cout << "GPTQ4_PROFILE_" << phase << ' ' << report.dump() << '\n';
     };
     if (profile) (void)vt::xpu::DrainProfileEvents(queue.device.index);
