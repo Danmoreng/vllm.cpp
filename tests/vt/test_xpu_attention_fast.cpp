@@ -165,11 +165,93 @@ TEST_CASE("XPU short F16 attention prefill selects XMX path"
   const auto records = vt::xpu::DrainProfileEvents();
   size_t prefill = 0, fallback = 0;
   for (const auto& record : records) {
-    prefill += record.stage == "attention_prefill";
+    prefill += record.stage == "attention_prefill_q32";
     fallback += record.stage == "attention_reference";
   }
   CHECK(prefill == 1);
   CHECK(fallback == 0);
+}
+TEST_CASE("XPU Q32 F16 attention prefill: page boundaries, continuation and masks") {
+  Queue cpu(vt::DeviceType::kCPU), gpu(vt::DeviceType::kXPU);
+  for (int chunk : {127, 128, 129, 255, 256, 257, 512}) {
+    CAPTURE(chunk);
+    const int page = chunk == 129 || chunk == 257 ? 3 : 16;
+    const int context = chunk + 17;
+    Fixture ref(gpu.q, 1, chunk, context, false, false, page,
+                DType::kF16, DType::kF16, DType::kF16);
+    Fixture got(gpu.q, 1, chunk, context, false, false, page,
+                DType::kF16, DType::kF16, DType::kF16);
+    ref.run("reference");
+    if (chunk == 127) {
+      setenv("VT_XPU_ATTN_PREFILL_TILE", "q16", 1);
+      got.run("prefill");
+      Accuracy(got.result(), ref.result(), false, true);
+    }
+    setenv("VT_XPU_ATTN_PREFILL_TILE", "q32", 1);
+    got.run("prefill");
+    Accuracy(got.result(), ref.result(), false, true);
+    if (chunk == 127 || chunk == 257) {
+      ref.args.causal = got.args.causal = false;
+      ref.args.window_size = got.args.window_size = vt::AttentionWindow{37, 5};
+      ref.args.logits_soft_cap = got.args.logits_soft_cap = 0.7f;
+      ref.run("reference"); got.run("prefill");
+      Accuracy(got.result(), ref.result(), false, true);
+    }
+    if (chunk == 127) {
+      Fixture independent(cpu.q, 1, chunk, context, false, false, page,
+                          DType::kF16, DType::kF32, DType::kF16);
+      independent.run("reference");
+      ref.args.causal = true;
+      ref.args.window_size.reset();
+      ref.args.logits_soft_cap = 0;
+      ref.run("reference");
+      Accuracy(ref.result(), independent.result(), false, true);
+    }
+  }
+  unsetenv("VT_XPU_ATTN_PREFILL_TILE");
+}
+TEST_CASE("XPU Q32 F16 attention prefill: ragged batch and aliased output") {
+  Queue gpu(vt::DeviceType::kXPU);
+  Fixture ref(gpu.q, 4, 63, 129, false, true, 3,
+              DType::kF16, DType::kF16, DType::kF16);
+  Fixture got(gpu.q, 4, 63, 129, false, true, 3,
+              DType::kF16, DType::kF16, DType::kF16);
+  ref.run("reference");
+  setenv("VT_XPU_ATTN_PREFILL_TILE", "q32", 1);
+  got.run("prefill");
+  Accuracy(got.result(), ref.result(), false, true);
+  ref.args.causal = got.args.causal = false;
+  ref.args.window_size = got.args.window_size = vt::AttentionWindow{33, 7};
+  ref.args.logits_soft_cap = got.args.logits_soft_cap = 0.7f;
+  ref.run("reference"); got.run("prefill");
+  Accuracy(got.result(), ref.result(), false, true);
+
+  Fixture aliased(gpu.q, 1, 33, 49, false, false, 16,
+                  DType::kF16, DType::kF16, DType::kF16);
+  Fixture alias_ref(gpu.q, 1, 33, 49, false, false, 16,
+                    DType::kF16, DType::kF16, DType::kF16);
+  alias_ref.run("reference");
+  setenv("VT_XPU_ATTENTION", "prefill", 1);
+  vt::PagedAttention(gpu.q, aliased.query.tensor, aliased.query.tensor,
+                     aliased.kc, aliased.vc, aliased.table.tensor,
+                     aliased.lens.tensor, aliased.offsets.tensor, aliased.args);
+  Accuracy(aliased.query.floats(), alias_ref.result(), false, true);
+  unsetenv("VT_XPU_ATTN_PREFILL_TILE");
+}
+TEST_CASE("XPU Q32 F16 attention prefill: BF16 and E4M3 cache") {
+  Queue gpu(vt::DeviceType::kXPU);
+  for (bool fp8 : {false, true}) {
+    CAPTURE(fp8);
+    Fixture ref(gpu.q, 1, 129, 146, fp8, false, 16,
+                DType::kF16, DType::kF16, DType::kBF16);
+    Fixture got(gpu.q, 1, 129, 146, fp8, false, 16,
+                DType::kF16, DType::kF16, DType::kBF16);
+    ref.run("reference");
+    setenv("VT_XPU_ATTN_PREFILL_TILE", "q32", 1);
+    got.run("prefill");
+    Accuracy(got.result(), ref.result(), false, true);
+  }
+  unsetenv("VT_XPU_ATTN_PREFILL_TILE");
 }
 TEST_CASE("XPU XMX attention prefill: FP16 overflow eligibility fallback") {
   Queue cpu(vt::DeviceType::kCPU), gpu(vt::DeviceType::kXPU);
