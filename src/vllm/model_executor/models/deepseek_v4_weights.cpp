@@ -80,6 +80,8 @@
 #include "vt/dtype.h"
 #include "vt/unaligned.h"  // LoadUnaligned — safetensors offsets carry no alignment
 
+#include "vllm/model_executor/layers/quantization/exl3_checkpoint.h"
+
 namespace vllm {
 namespace {
 
@@ -225,14 +227,12 @@ namespace {
 
 constexpr const char* kExl3Row = "MODEL-DSV4-EXL3";
 
+// `QuantConfig` remains a DSV4-local convenience wrapper around the shared
+// `Exl3QuantConfig` — it is used by the carried-FP8 recipe resolver and the
+// EXL3 loader below, all of which are DSV4-specific code. The shared
+// `IsExl3Checkpoint` lives in `exl3_checkpoint.h`.
 const nlohmann::json* QuantConfig(const HfConfig& config) {
-  return Field(config.raw, "quantization_config");
-}
-
-bool IsExl3Checkpoint(const HfConfig& config) {
-  const nlohmann::json* qc = QuantConfig(config);
-  if (qc == nullptr || !qc->is_object()) return false;
-  return RawString(*qc, "quant_method", "") == "exl3";
+  return Exl3QuantConfig(config);
 }
 
 // Process-cached read of `VT_DSV4_EXL3_HOST_BUDGET` (default ON; a '0'-leading
@@ -1014,11 +1014,10 @@ DeepseekV4Weights LoadDeepseekV4Exl3(const std::vector<SafetensorsFile>& shards,
                "'; only 'rank-sliced-deepseek-v4-v1' is implemented (" + kExl3Row +
                " W1b). A new schema needs its own row.");
   const std::string codebook = RawString(qc, "codebook", "");
-  VT_CHECK(codebook == "mcg",
+  VT_CHECK(codebook == "mcg" || codebook == "mul1",
            std::string("deepseek-v4 exl3 loader: unsupported EXL3 codebook '") +
-               codebook +
-               "'; only 'mcg' (cb=1, codebook.cuh:67-75) is decoded. The mul1 (cb=2) "
-               "and cb=0 codebooks are owed to " + kExl3Row + " W2.");
+               codebook + "'; only 'mcg' (cb=1) and 'mul1' (cb=2) are decoded (" +
+               kExl3Row + " / QUANT-EXL3-GENERALISE W2).");
   const double bits_raw = RawDouble(qc, "bits", 0.0);
   const int bits = static_cast<int>(bits_raw);
   VT_CHECK(bits >= 1 && bits <= 8 && static_cast<double>(bits) == bits_raw,
