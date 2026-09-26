@@ -96,7 +96,7 @@
 #include "vllm/model_executor/models/cua_s1_inference.h"  // CuaS1ScoreInference (MODEL-CUA-S1-FORMS)
 #include "vllm/model_executor/models/laya_inference.h"  // LayaInference (MODEL-LAYA)
 #include "vllm/model_executor/models/kev_inference.h"  // KevInference (MODEL-KEV)
-#include "vllm/model_executor/models/clm_inference.h"  // ClmInference (MODEL-CLM)
+#include "vllm/model_executor/models/gliner25_decide_inference.h"  // Gliner25DecideInference (MODEL-GLINER25-DECIDE)
 #include "vllm/multimodal/minimax_h3_video.h"
 #include "vllm/multimodal/parakeet_transcription.h"
 #include "vllm/multimodal/video_engine.h"
@@ -1437,26 +1437,20 @@ int VllmServerMain(int argc, char** argv) {
         return 0;
       }
 
-      // ── CLM DECISION TASK DISPATCH (MODEL-CLM): a model dir whose
-      // architectures resolve to "ClmModel" serves /v1/systemone through the
-      // decision callback (ClmInference — the same path the C ABI will drive)
-      // and registers NO generate, embedding, or NER routes. This check runs
-      // BEFORE the pooling_model check because ClmModel IS a pooling model
-      // (is_pooling_model = true), but it needs the decision server, not the
-      // embedding server.
-      bool clm_model = false;
+      // ── GLINER25-DECIDE DECISION TASK DISPATCH (MODEL-GLINER25-DECIDE):
+      bool gliner25_decide_model = false;
       if (!archs.empty()) {
         try {
-          clm_model =
+          gliner25_decide_model =
               vllm::ModelRegistry::Resolve(std::span<const std::string>(archs))
-                  .architecture == "ClmModel";
+                  .architecture == "SpanExtractor";
         } catch (const std::exception&) {
-          clm_model = false;
+          gliner25_decide_model = false;
         }
       }
-      if (clm_model) {
-        std::cerr << "server: clm decision model (" << archs[0]
-                  << "); serving /v1/systemone\n";
+      if (gliner25_decide_model) {
+        std::cerr << "server: GLiNER2.5-Decide decision model ("
+                  << archs[0] << "); serving /v1/systemone\n";
         vllm::entrypoints::EngineParams decision_params;
         decision_params.block_size = args.block_size;
         decision_params.num_blocks = args.num_blocks;
@@ -1487,9 +1481,9 @@ int VllmServerMain(int argc, char** argv) {
                   loaded_decision->loaded_model();
               const vllm::tok::Tokenizer& tokenizer =
                   loaded_decision->tokenizer();
-              vllm::ClmDecisionResult result =
-                  vllm::ClmInference(model, tokenizer, state, qtype,
-                                     instructions, options);
+              vllm::Gliner25DecideResult result =
+                  vllm::Gliner25DecideInference(model, tokenizer, state,
+                                                 qtype, instructions, options);
               oai::ApiServer::DecisionResult out;
               out.scores = std::move(result.scores);
               out.prompt_tokens = result.prompt_tokens;
