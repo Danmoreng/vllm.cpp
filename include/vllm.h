@@ -358,7 +358,18 @@ extern "C" {
  * entities with character offsets. The entry point is additive: a
  * non-GLiNER2 engine is refused by name, and every existing struct and call is
  * byte-identical. */
-#define VLLM_ABI_VERSION 27
+/* v28 — vllm_systemone / vllm_score: SystemOne decision API and cua-s1 score
+ * API through the ONE surface. A kev/laya engine (architecture "KevModel" or
+ * "LayaModel") runs the decision forward and returns a JSON response string;
+ * a cua-s1 engine (architecture "CuaS1Forms") runs the score forward. Both are
+ * additive: non-matching architectures are refused by name, and every existing
+ * struct and call is byte-identical. */
+/* v29 — vllm_decide: unifies vllm_systemone and vllm_score into one
+ * category-level entry point. The engine architecture determines the pipeline:
+ * KevModel/LayaModel runs the decision forward, CuaS1Forms runs the score
+ * forward. Non-matching architectures are refused by name. Every existing
+ * struct and call is byte-identical. */
+#define VLLM_ABI_VERSION 29
 
 /* ── Export macro ─────────────────────────────────────────────────────────────
  * Marks the symbols that make up the stable ABI. Default visibility now; Task 3
@@ -1164,6 +1175,26 @@ VLLM_API vllm_status vllm_gliner_ner(vllm_engine* engine, const char* text,
 
 /* Free the owned members of a NER result and zero the struct. NULL is a no-op. */
 VLLM_API void vllm_ner_result_free(vllm_ner_result* out);
+
+
+/* ── Decision + Score (ABI v29, MODEL-KEV / MODEL-LAYA / MODEL-CUA-S1-FORMS) ──
+ *
+ * vllm_decide runs the decision or scoring pipeline depending on the engine
+ * architecture. A kev engine ("KevModel") or laya engine ("LayaModel") runs
+ * the decision forward and returns the /v1/systemone JSON response. A cua-s1
+ * engine ("CuaS1Forms") runs the score forward and returns the /v1/score JSON
+ * response. Other architectures are refused by name.
+ *
+ * request_json is the raw body of the POST /v1/systemone or POST /v1/score
+ * request. On success *out_json is a heap-allocated NUL-terminated string
+ * (caller frees with vllm_decide_free). On any non-OK status *out_json is NULL
+ * and vllm_last_error() carries detail. */
+VLLM_API vllm_status vllm_decide(vllm_engine* engine,
+                                  const char* request_json,
+                                  char** out_json);
+
+/* Free a string returned by vllm_decide. NULL is a no-op. */
+VLLM_API void vllm_decide_free(char* json);
 
 
 /* ── Video+audio generation (ABI v12, MiniMax-H3) ────────────────────────────

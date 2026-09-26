@@ -132,15 +132,21 @@ std::vector<ModelRegistration>& RegistryStorage() {
 // first CONFIG-architecture match, which is order-independent, so this sort never
 // changes which model resolves — only the cosmetic supported-list order.
 const std::vector<ModelRegistration>& OrderedRegistry() {
-  [[maybe_unused]] static const bool sorted = [] {
-    std::vector<ModelRegistration>& storage = RegistryStorage();
+  // Re-sort if new entries have been appended since the last sort. C++ does
+  // not order static init across TUs, so a registrar that calls
+  // RegistrationFor() (e.g. tev1_registry.cpp's Tev1Factory) can trigger the
+  // first sort before all registrars have run. Tracking the sorted size and
+  // re-sorting when it grows handles this without a full sort on every call.
+  static size_t sorted_size = 0;
+  std::vector<ModelRegistration>& storage = RegistryStorage();
+  if (storage.size() != sorted_size) {
     std::stable_sort(storage.begin(), storage.end(),
                      [](const ModelRegistration& a, const ModelRegistration& b) {
                        return a.architecture < b.architecture;
                      });
-    return true;
-  }();
-  return RegistryStorage();
+    sorted_size = storage.size();
+  }
+  return storage;
 }
 
 }  // namespace

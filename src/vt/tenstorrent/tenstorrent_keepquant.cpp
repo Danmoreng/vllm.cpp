@@ -1104,62 +1104,112 @@ void MatmulBTQuantGroupedKernel(Queue&, Tensor& out, const Tensor& act,
   // inside EnsureKeepQuantWords, as on the dense arm.
   const ttnn::Tensor words = EnsureKeepQuantWords(weight, enc, E * N, nb, device);
 
-  // Activation staging: direct host→device from_span upload, bypassing
-  // EnsureDevice2D's slot staging (which corrupts under trace capture —
-  // ISSUE-LOCAL-01M2NSDATJQ1YNW1PA9ZBMAAM5). The eager step stages via
-  // from_span and caches in GroupedActShadow; capture serves the cache and
-  // refuses on miss (the warm-first contract, same as EnsureKeepQuantWords).
-  // f32 master → bf16 typecast + TILE; bf16 master → TILE (from_span always
-  // produces ROW_MAJOR, so the layout conversion is unconditional).
-  // The shadow is ONLY read during capture. Eager mode always stages fresh
-  // from_span, so a recycled activation pointer never serves stale bytes; the
-  // store below only warms the shadow for a later capture.
+  // Activation serving (W3, capture-warmup redesign): device-resident
+  // in-region. The engine's producers commit their outputs device-side in
+  // every phase (the projections; MoeSiluMul's CommitDevice2D), so the
+  // activation's CURRENT device shadow IS the value this pass computed —
+  // serve it through the SAME op chain in the eager and the captured pass,
+  // so the in-region typecast/layout programs the serve runs are warmed by
+  // the eager step and hit the program cache under capture.
+  //
+  // This REPLACES the #3042 pointer-keyed GroupedActShadows staging: that
+  // cache was keyed by the HOST activation pointer, and the engine's warmup
+  // and capture steps allocate their activation scratch at DIFFERENT pool
+  // addresses, so the capture lookup structurally missed (the "activation
+  // staging miss during trace capture" refusal,
+  // ISSUE-LOCAL-01M3918KQ580Z3NHVRNXVF15FZ). Serving the resident shadow
+  // instead reads the address THIS pass's producer wrote — correct by
+  // construction in both passes. The serve is value-identical to the host
+  // staging it replaces: EnsureHost's download and the serve read the same
+  // device bytes, the f32->bf16 typecast is the same RNE both places, and
+  // the layout conversion moves no bits. A shadow-less arrival keeps the
+  // from_span host staging (the op-level tests' hand-built activations), and
+  // under capture that arm refuses by name — the producer must commit
+  // device-side before the captured region (the GDN serve doctrine).
   ttnn::Tensor dev_a;
-  bool act_cached = false;
-  if (tt_capture_active()) {
-    std::lock_guard<std::mutex> g(GroupedActMutex());
-    auto it = GroupedActShadows().find(reinterpret_cast<uintptr_t>(act.data));
-    VT_CHECK(it != GroupedActShadows().end() &&
-                 it->second.rows == static_cast<uint32_t>(Pa) &&
-                 it->second.cols == static_cast<uint32_t>(K) &&
-                 it->second.dtype == act.dtype,
-             "tenstorrent grouped-quant: activation staging miss during "
-             "trace capture — stage the activation eagerly first");
-    dev_a = it->second.device;
-    act_cached = true;
-  }
-  if (!act_cached) {
-    EnsureHost(act);
-    if (act.dtype == DType::kF32) {
-      ttnn::Tensor dev_f32 = ttnn::Tensor::from_span(
-          ttsl::Span<const float>(
-              act.Ptr<float>(),
-              static_cast<size_t>(Pa) * static_cast<size_t>(K)),
-          SpecOf(tt::tt_metal::Shape({static_cast<uint32_t>(Pa),
-                                       static_cast<uint32_t>(K)}),
-                 ttnn::DataType::FLOAT32, ttnn::Layout::ROW_MAJOR),
-          &device);
-      dev_a = ttnn::to_layout(
-          ttnn::typecast(std::move(dev_f32), ttnn::DataType::BFLOAT16),
-          ttnn::Layout::TILE);
+  {
+    ttnn::Tensor raw;
+    const uint32_t ua = static_cast<uint32_t>(Pa);
+    const uint32_t uk = static_cast<uint32_t>(K);
+    if (ServeDeviceShadowRaw(act, ua, uk, raw) ||
+        ServeDeviceWindow(act, ua, uk, raw)) {
+      // The volume-equal shadow may carry its producer's NATIVE logical
+      // geometry — the GDN chain commits the gated-norm output at the
+      // head-row form [T*Hv, Dv] over the same flat bytes the projection
+      // consumes as [T, Hv*Dv] (the host staging this replaces reinterpreted
+      // them implicitly through the host round-trip). Reinterpret at the
+      // consumer's geometry: same numel, and for the TILE forms the same
+      // tile count, so CaptureSafeReshape is the metadata view both passes
+      // share (W4 makes its two branches one free reshape).
+      const auto ls = raw.logical_shape();
+      if (ls.rank() != 2 || ls[0] != ua || ls[1] != uk)
+        raw = CaptureSafeReshape(std::move(raw), ttnn::Shape({ua, uk}));
+      if (raw.dtype() == ttnn::DataType::FLOAT32)
+        raw = ttnn::typecast(std::move(raw), ttnn::DataType::BFLOAT16);
+      if (raw.layout() != ttnn::Layout::TILE)
+        raw = ttnn::to_layout(std::move(raw), ttnn::Layout::TILE);
+      dev_a = std::move(raw);
     } else {
-      ttnn::Tensor dev_bf16 = ttnn::Tensor::from_span(
-          ttsl::Span<const bfloat16>(
-              act.Ptr<bfloat16>(),
-              static_cast<size_t>(Pa) * static_cast<size_t>(K)),
-          SpecOf(tt::tt_metal::Shape({static_cast<uint32_t>(Pa),
-                                       static_cast<uint32_t>(K)}),
-                 ttnn::DataType::BFLOAT16, ttnn::Layout::ROW_MAJOR),
-          &device);
-      dev_a = ttnn::to_layout(std::move(dev_bf16), ttnn::Layout::TILE);
+      // The HOST-STAGED fallback (narrowed W3): an activation this kernel
+      // itself staged from host bytes earlier in the SAME buffer is served
+      // from the staged-tensor cache — pointer identity holds by
+      // construction for that pattern (one buffer, staged eagerly then
+      // captured, no pool recycling in between: the op-level capture
+      // tests). The engine's pool-recycled activations structurally miss
+      // here and reach the refusal below, which is the design.
+      if (tt_capture_active()) {
+        std::lock_guard<std::mutex> g(GroupedActMutex());
+        auto it = GroupedActShadows().find(reinterpret_cast<uintptr_t>(act.data));
+        VT_CHECK(it != GroupedActShadows().end() &&
+                     it->second.rows == ua && it->second.cols == uk &&
+                     it->second.dtype == act.dtype,
+                 "tenstorrent grouped-quant: activation arrived without a "
+                 "servable device shadow during trace capture — the producer "
+                 "must commit device-side before the captured region");
+        raw = it->second.device;
+        const auto ls = raw.logical_shape();
+        if (ls.rank() != 2 || ls[0] != ua || ls[1] != uk)
+          raw = CaptureSafeReshape(std::move(raw), ttnn::Shape({ua, uk}));
+        if (raw.dtype() == ttnn::DataType::FLOAT32)
+          raw = ttnn::typecast(std::move(raw), ttnn::DataType::BFLOAT16);
+        if (raw.layout() != ttnn::Layout::TILE)
+          raw = ttnn::to_layout(std::move(raw), ttnn::Layout::TILE);
+        dev_a = std::move(raw);
+      } else {
+      EnsureHost(act);
+      if (act.dtype == DType::kF32) {
+        ttnn::Tensor dev_f32 = ttnn::Tensor::from_span(
+            ttsl::Span<const float>(
+                act.Ptr<float>(),
+                static_cast<size_t>(Pa) * static_cast<size_t>(K)),
+            SpecOf(tt::tt_metal::Shape({ua, uk}),
+                   ttnn::DataType::FLOAT32, ttnn::Layout::ROW_MAJOR),
+            &device);
+        dev_a = ttnn::to_layout(
+            ttnn::typecast(std::move(dev_f32), ttnn::DataType::BFLOAT16),
+            ttnn::Layout::TILE);
+      } else {
+        ttnn::Tensor dev_bf16 = ttnn::Tensor::from_span(
+            ttsl::Span<const bfloat16>(
+                act.Ptr<bfloat16>(),
+                static_cast<size_t>(Pa) * static_cast<size_t>(K)),
+            SpecOf(tt::tt_metal::Shape({ua, uk}),
+                   ttnn::DataType::BFLOAT16, ttnn::Layout::ROW_MAJOR),
+            &device);
+        dev_a = ttnn::to_layout(std::move(dev_bf16), ttnn::Layout::TILE);
+      }
+      // Register the staged tensor under THIS buffer's host pointer so a
+      // later capture of the same host-staged buffer can serve it (the
+      // narrowed warm-first contract above).
+      std::lock_guard<std::mutex> g(GroupedActMutex());
+      GroupedActShadow& sh =
+          GroupedActShadows()[reinterpret_cast<uintptr_t>(act.data)];
+      sh.device = dev_a;
+      sh.rows = ua;
+      sh.cols = uk;
+      sh.dtype = act.dtype;
+      }
     }
-    std::lock_guard<std::mutex> g(GroupedActMutex());
-    GroupedActShadow& s =
-        GroupedActShadows()[reinterpret_cast<uintptr_t>(act.data)];
-    s.device = dev_a;
-    s.rows = static_cast<uint32_t>(Pa);
-    s.cols = static_cast<uint32_t>(K);
-    s.dtype = act.dtype;
   }
   ttnn::Tensor a_rows;
   if (E > 1 && Pa > 1)
@@ -1764,7 +1814,66 @@ void MatmulBTQuantInt8DotKernel(Queue& q, Tensor& out, const Tensor& a,
   // (0,0). from_span FLOAT32 ROW_MAJOR is the same direct staging the words
   // shadow uses; capture-time arrival refuses by name (the words-shadow
   // discipline — no captured consumer exists for an f32 activation today).
+  // W4 (capture-warmup redesign): the activation serves device-resident
+  // in-region FIRST — the same treatment the grouped kernel got in W3. The
+  // engine's producers commit their outputs device-side in every phase, and
+  // the 27B decode reaches this kernel inside the captured region (the
+  // APEX anchor leg fatalled on the refusal below before this serve
+  // existed). The serve lands the MASTER'S OWN dtype ("an f32 master
+  // stages as f32") through the shadow's — an f32 shadow over a bf16
+  // buffer typecasts with the same RNE the host round-trip applied. The
+  // program reads dev_a's
+  // raw bytes, so the serve normalizes to ROW_MAJOR at [M, K]: a TILE shadow
+  // converts through the recorded to_layout ahead of the launch (the comment
+  // above already named that conversion as the design), and the volume-equal
+  // native geometry (the GDN head-row commits) reinterprets through
+  // CaptureSafeReshape — same numel, and both passes run the identical chain
+  // so the programs the serve records are warmed by the eager step.
   ttnn::Tensor dev_a;
+  bool act_served = false;
+  {
+    ttnn::Tensor raw;
+    const uint32_t um = static_cast<uint32_t>(M);
+    const uint32_t uk = static_cast<uint32_t>(K);
+    if (ServeDeviceShadowRaw(a, um, uk, raw) ||
+        ServeDeviceWindow(a, um, uk, raw)) {
+      // The master's own dtype, reached through the shadow's: the norm
+      // chain commits an F32 shadow over a bf16-declared buffer (rms_norm
+      // computes f32), and the host staging this replaces rounded that
+      // shadow to the master's dtype through the host round-trip — the
+      // device typecast is the same RNE (the SigmoidGateBf16 doctrine),
+      // so the serve is value-identical either way.
+      const ttnn::DataType want =
+          a.dtype == DType::kF32 ? ttnn::DataType::FLOAT32
+                                : ttnn::DataType::BFLOAT16;
+      const auto ls = raw.logical_shape();
+      if (ls.rank() != 2 || ls[0] != um || ls[1] != uk)
+        raw = CaptureSafeReshape(std::move(raw), ttnn::Shape({um, uk}));
+      if (raw.dtype() != want)
+        raw = ttnn::typecast(std::move(raw), want);
+      if (raw.layout() != ttnn::Layout::ROW_MAJOR)
+        raw = ttnn::to_layout(std::move(raw), ttnn::Layout::ROW_MAJOR);
+      dev_a = std::move(raw);
+      act_served = true;
+    }
+  }
+  if (!act_served) {
+    if (std::getenv("VT_TT_TRACE_DEBUG") != nullptr) {
+      std::lock_guard<std::mutex> g(SlotMutex());
+      BufferSlot* s = FindSlot(a.data);
+      std::fprintf(stderr,
+                   "[TT-I8DOT] act-serve miss ptr=%p M=%lld K=%lld dtype=%d "
+                   "slot=%d devcur=%d hostcur=%d hasdev=%d devr=%u devc=%u "
+                   "devdt=%d cap=%d\n",
+                   a.data, (long long)M, (long long)K, (int)a.dtype,
+                   s != nullptr, s ? (int)s->device_current : -1,
+                   s ? (int)s->host_current : -1, s && s->device.has_value(),
+                   s ? s->dev_rows : 0u, s ? s->dev_cols : 0u,
+                   s && s->device.has_value()
+                       ? static_cast<int>(s->device->dtype())
+                       : -1,
+                   (int)tt_capture_active());
+    }
   if (a.dtype == DType::kF32) {
     VT_CHECK(!tt_capture_active(),
              "tenstorrent kMatmulBTQuant int8-dot: f32 activation staging "
@@ -1790,6 +1899,7 @@ void MatmulBTQuantInt8DotKernel(Queue& q, Tensor& out, const Tensor& a,
                                      static_cast<uint32_t>(K)}),
                ttnn::DataType::BFLOAT16, ttnn::Layout::ROW_MAJOR),
         &device);
+  }
   }
 
   // The out pages must be 16-B multiples: Blackhole moves DRAM writes in

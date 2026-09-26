@@ -1764,8 +1764,24 @@ void L2NormKernel(Queue&, Tensor& out, const Tensor& x, const L2NormArgs& args) 
   });
 }
 
+// Round to bf16 and widen back. Upstream stores bf16 and reloads it as an
+// operand; our CPU arm has no bf16 arithmetic, so every site below is
+// round-then-widen, which is what Triton does too (f32 accumulate, bf16 store).
+inline float Bf16(float v) { return BF16ToF32(F32ToBF16(v)); }
+
 // §5 RMSNormGated (norm_before_gate=True, group_size=None):
 // out = x * rsqrt(mean(x^2) + eps) * w * act(gate); act = silu or sigmoid.
+// The chain is vLLM's, end to end in f32 with ONE bf16 round at the store:
+// the CUDA production kernel (layernorm_guard.py layer_norm_fwd_kernel loads
+// x/w/gate as f32, `y = x_hat * w`, `y *= silu(z)`, one tl.store downcast)
+// and RMSNormGated.forward_static (layernorm.py, all-f32, one .to(orig_dtype))
+// — the same chain the CUDA arm RmsNormGatedRowFastKernel and the fused
+// RmsNormGatedQuantFp8Kernel below already carry. The HF-transformers
+// fallback Qwen3_5RMSNormGated (modeling_qwen3_5.py:218) rounds the norm to
+// bf16 BEFORE the weight multiply and the product again before the gate;
+// it is deliberately NOT mirrored here — vLLM is the reference, and the
+// extra roundings saturated the qwen4_exp by-name fixture's prompt
+// separation to zero movement (ISSUE-LOCAL-01M3BXW82K17KT9TYN9H6H99VP).
 void RmsNormGatedKernel(Queue&, Tensor& out, const Tensor& x, const Tensor& gate,
                         const Tensor& w, const RmsNormGatedArgs& args) {
   const int64_t d = x.shape[x.rank - 1];
@@ -1978,11 +1994,6 @@ struct GdnChunkScratch {
 // every reduction is inside one work item, and the cross-chunk state recurrence
 // stays sequential within it (R4/T6).
 constexpr int64_t kGdnChunk = 64;  // FLA_CHUNK_SIZE (utils.py:31), == cuda_gdn.cu:169 kChunk
-
-// Round to bf16 and widen back. Upstream stores bf16 and reloads it as an
-// operand; our CPU arm has no bf16 arithmetic, so every site below is
-// round-then-widen, which is what Triton does too (f32 accumulate, bf16 store).
-inline float Bf16(float v) { return BF16ToF32(F32ToBF16(v)); }
 
 // One (sequence, value-head) work item: the chunk loop, carrying `h` forward.
 // `h` is the [Dv,Dk] f32 state block, updated in place (chunk_delta_h.py:353-355
