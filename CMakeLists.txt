@@ -1064,6 +1064,7 @@ add_library(vllm STATIC
   src/vllm/model_executor/models/gliner25_decide_head.cpp
   src/vllm/model_executor/models/gliner25_decide_registry.cpp
   src/vllm/model_executor/models/xor_registry.cpp
+  src/vllm/model_executor/models/tev1_registry.cpp
   src/vllm/model_executor/models/llama_weights.cpp
   src/vllm/model_executor/models/mistral_registry.cpp
   src/vllm/model_executor/models/mistral_weights.cpp

@@ -159,8 +159,9 @@ the client read as a URL.
 
 ### System-1 decisions with `/v1/systemone`
 
-A server running a System-1 decision model such as Laya, or a NER model such
-as GLiNER2.5, registers `/v1/systemone` and its sibling endpoints
+A server running a System-1 decision model such as Laya, kev, CLM,
+GLiNER2.5-Decide, or xor, or a NER model such as GLiNER2.5, registers
+`/v1/systemone` and its sibling endpoints
 `/v1/systemone/permute` and `/v1/systemone/separate`. A server running
 neither answers 404 at the route table. The request carries `state`, the text
 to reason over, and `questions`, an object mapping question ids to question
@@ -197,6 +198,11 @@ orders and reports per-order probabilities and their spread. Its body wraps a
 full systemone request under `request` and names the target question under
 `question`. `/v1/systemone/separate` runs each question in its own forward
 pass and sums the token counts.
+
+Tev1 is the exception among decision models: it is an autoregressive
+model served through `/v1/chat/completions` (not `/v1/systemone`) with
+`temperature=0`, `max_tokens=8`, and `enable_thinking=false`. See the
+[Tev1 recipe page](models/tev1.md) for the prompt format.
 
 ### Option scoring with `/v1/score`
 
