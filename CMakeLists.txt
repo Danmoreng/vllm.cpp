@@ -64,8 +64,14 @@ endif()
 option(VLLM_CPP_BUILD_TESTS "Build tests" ON)
 option(VLLM_CPP_XPU "Build the native SYCL/Level Zero XPU backend (requires icpx)" OFF)
 option(VLLM_CPP_XPU_GPTQ4 "Enable the pinned oneDNN XPU GPTQ W4A16 and dense F16 operators" OFF)
+option(VLLM_CPP_XPU_XE2_PREFILL "Build the experimental B70 FP8 Xe2 prefill policy" OFF)
+option(VLLM_CPP_XPU_XE2_PREFILL_PREFETCH "Keep explicit prefetch in the Xe2 FP8 policy" OFF)
+set(VLLM_CPP_SYCL_TLA_DIR "" CACHE PATH "Pinned SYCL-TLA checkout for the Xe2 prefill experiment")
 if(VLLM_CPP_XPU_GPTQ4 AND NOT VLLM_CPP_XPU)
   message(FATAL_ERROR "VLLM_CPP_XPU_GPTQ4 requires VLLM_CPP_XPU=ON")
+endif()
+if(VLLM_CPP_XPU_XE2_PREFILL AND NOT VLLM_CPP_XPU)
+  message(FATAL_ERROR "VLLM_CPP_XPU_XE2_PREFILL requires VLLM_CPP_XPU=ON")
 endif()
 option(VLLM_CPP_BUILD_EXAMPLES "Build examples" ON)
 # The OpenAI HTTP server (M3.1 Task 4) is gated so the core build stays lean when
@@ -1729,6 +1735,36 @@ if(VLLM_CPP_XPU)
     src/vt/xpu/xpu_gdn.cpp src/vt/xpu/xpu_attention.cpp src/vt/xpu/xpu_exl3_prefill.cpp
     src/vt/xpu/xpu_gdn_chunked.cpp src/vt/xpu/xpu_attention_split.cpp
     src/vt/xpu/xpu_attention_prefill.cpp)
+  if(VLLM_CPP_XPU_XE2_PREFILL)
+    if(NOT EXISTS "${VLLM_CPP_SYCL_TLA_DIR}/include/cutlass/cutlass.h")
+      message(FATAL_ERROR "VLLM_CPP_SYCL_TLA_DIR must name the pinned SYCL-TLA checkout")
+    endif()
+    execute_process(COMMAND git -c "safe.directory=${VLLM_CPP_SYCL_TLA_DIR}"
+      -C "${VLLM_CPP_SYCL_TLA_DIR}" rev-parse HEAD
+      OUTPUT_VARIABLE _vt_sycl_tla_commit OUTPUT_STRIP_TRAILING_WHITESPACE
+      ERROR_QUIET)
+    if(NOT _vt_sycl_tla_commit STREQUAL "87f6850680a580654b9ea2c80dbc01aeb36ad231")
+      message(FATAL_ERROR "Xe2 prefill requires SYCL-TLA 87f6850680a580654b9ea2c80dbc01aeb36ad231")
+    endif()
+    add_library(vllm_xpu_xe2_prefill OBJECT src/vt/xpu/xpu_attention_xe2.cpp)
+    set_target_properties(vllm_xpu_xe2_prefill PROPERTIES POSITION_INDEPENDENT_CODE ON)
+    target_include_directories(vllm_xpu_xe2_prefill PRIVATE include src)
+    target_include_directories(vllm_xpu_xe2_prefill SYSTEM PRIVATE
+      third_party/b70_xe2_prefill
+      "${VLLM_CPP_SYCL_TLA_DIR}/include"
+      "${VLLM_CPP_SYCL_TLA_DIR}/tools/util/include"
+      "${VLLM_CPP_SYCL_TLA_DIR}/applications")
+    target_compile_definitions(vllm_xpu_xe2_prefill PRIVATE
+      CUTLASS_ENABLE_HEADERS_ONLY CUTLASS_ENABLE_SYCL SYCL_INTEL_TARGET CUTLASS_VERSIONS_GENERATED)
+    if(NOT VLLM_CPP_XPU_XE2_PREFILL_PREFETCH)
+      target_compile_definitions(vllm_xpu_xe2_prefill PRIVATE VT_XE2_PREFILL_NO_PREFETCH)
+    endif()
+    target_compile_options(vllm_xpu_xe2_prefill PRIVATE -fsycl)
+    target_compile_definitions(vllm_xpu PRIVATE VLLM_CPP_XPU_XE2_PREFILL)
+    target_sources(vllm PRIVATE $<TARGET_OBJECTS:vllm_xpu_xe2_prefill>)
+    target_link_options(vllm PUBLIC -flink-huge-device-code -Xspirv-translator
+      "-spirv-ext=+SPV_INTEL_split_barrier,+SPV_INTEL_2d_block_io,+SPV_INTEL_subgroup_matrix_multiply_accumulate")
+  endif()
   if(VLLM_CPP_XPU_GPTQ4)
     find_package(dnnl 3.13.0 EXACT CONFIG REQUIRED)
     target_sources(vllm_xpu PRIVATE src/vt/xpu/xpu_gptq4.cpp)

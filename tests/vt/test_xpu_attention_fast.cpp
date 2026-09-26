@@ -3,8 +3,10 @@
 #include "vt/fp8_kv.h"
 #include <chrono>
 #include <cstdlib>
+#include <fstream>
 #include <iostream>
 #include <numeric>
+#include <string_view>
 #include <nlohmann/json.hpp>
 
 namespace {
@@ -388,5 +390,257 @@ TEST_CASE("XPU FP8 split span candidate"
       if (reference.empty()) reference = f.result();
       else Accuracy(f.result(), reference, false, true);
     }
+  }
+}
+
+
+// Focused measurement scaffold for the d35295682f FP8 prefill review.
+// This is deliberately separate from the existing F32/page16 timing matrix.
+// No model, generic path, tolerance or production dispatch is changed.
+TEST_CASE("XPU FP8 prefill: focused F16 P64 baseline"
+          * doctest::skip(!std::getenv("VT_B70_FP8_PREFILL_FOCUS"))) {
+  const std::string length_text = std::getenv("VT_B70_FP8_PREFILL_FOCUS");
+  REQUIRE((length_text == "512" || length_text == "4096"));
+  const int length = length_text == "512" ? 512 : 4096;
+  // Run in an isolated test process. Set these before creating the queue.
+  const char* tile = std::getenv("VT_XPU_ATTN_PREFILL_TILE");
+  const char* probability = std::getenv("VT_XPU_ATTN_PROBABILITY");
+  REQUIRE(tile != nullptr);
+  REQUIRE(probability != nullptr);
+  REQUIRE(std::string(tile) == "q64");
+  REQUIRE(std::string(probability) == "single");
+  const char* profile_setting = std::getenv("VT_XPU_PROFILE");
+  const bool profiling = profile_setting && std::string(profile_setting) == "1";
+  Queue gpu(vt::DeviceType::kXPU);
+  Fixture f(gpu.q, 1, length, length, true, false, 64,
+            DType::kF16, DType::kF16, DType::kF16);
+
+  // Dense table columns, reversed physical pages. Buffer::upload copies the
+  // allocation size, so keep a full-sized host buffer despite the smaller view.
+  std::vector<int32_t> table_data(f.table.bytes / sizeof(int32_t), -1);
+  for (int i = 0; i < f.columns; ++i) table_data[i] = f.blocks - 1 - i;
+  f.table.upload(table_data.data());
+  f.table.tensor.stride[0] = f.columns;
+  f.table.tensor.stride[1] = 1;
+  // Match the current model benchmark's unit scales. Re-encode once, outside
+  // timing, rather than changing the interpretation of already encoded bytes.
+  f.args.k_scale = f.args.v_scale = 1.0f;
+  auto values = Random(f.cache.tensor.Numel(), 991);
+  std::vector<uint8_t> encoded(values.size());
+  for (size_t i = 0; i < values.size(); ++i)
+    encoded[i] = vt::StoreKvFp8E4M3(vt::F16ToF32(vt::F32ToF16(values[i])), 1.0f);
+  f.cache.upload(encoded.data());
+  std::cout << "DEVICE " << vt::xpu::DeviceDescription() << std::endl;
+
+  // One generic GPU reference, not repeated generic-reference warmups.
+  f.run("reference");
+  const auto reference = f.result();
+  (void)vt::xpu::DrainProfileEvents();
+  f.run("prefill"); // initial dispatch/JIT, outside samples
+  Accuracy(f.result(), reference, false, true); // same-cache strict matrix gate
+  auto events = vt::xpu::DrainProfileEvents();
+  if (profiling) {
+    int count = 0;
+    for (const auto& event : events) count += event.stage == "attention_prefill_q64";
+    REQUIRE(count == 1); // never silently benchmark a generic fallback
+  }
+  const auto warm_start = std::chrono::steady_clock::now();
+  int warmups = 1;
+  // Bounded screen, not a claim of clocks/thermal stabilization.
+  while (warmups < 32 && std::chrono::steady_clock::now() - warm_start <
+                             std::chrono::milliseconds(100)) {
+    f.run("prefill");
+    ++warmups;
+    (void)vt::xpu::DrainProfileEvents();
+  }
+  std::vector<double> wall_ms, kernel_ms;
+  for (int sample = 0; sample < 5; ++sample) {
+    const auto start = std::chrono::steady_clock::now();
+    f.run("prefill");
+    wall_ms.push_back(std::chrono::duration<double, std::milli>(
+        std::chrono::steady_clock::now() - start).count());
+    events = vt::xpu::DrainProfileEvents(); // outside the wall-clock sample
+    if (profiling) {
+      int count = 0;
+      double elapsed = 0;
+      for (const auto& event : events) if (event.stage == "attention_prefill_q64") {
+        REQUIRE(event.end_ns >= event.start_ns);
+        elapsed += double(event.end_ns - event.start_ns) / 1.0e6;
+        ++count;
+      }
+      REQUIRE(count == 1);
+      kernel_ms.push_back(elapsed);
+    }
+  }
+  auto sorted = wall_ms;
+  std::sort(sorted.begin(), sorted.end());
+  std::cout << nlohmann::json{
+      {"event", "fp8_prefill_focus"}, {"context", length}, {"queries", length},
+      {"query_dtype", "float16"}, {"output_dtype", "float16"},
+      {"kv_dtype", "fp8_e4m3"}, {"page_size", 64},
+      {"table_column_stride", f.table.tensor.stride[1]},
+      {"k_page_stride_elements", f.kc.stride[0]},
+      {"k_token_stride_elements", f.kc.stride[1]},
+      {"k_head_stride_elements", f.kc.stride[2]},
+      {"v_page_stride_elements", f.vc.stride[0]},
+      {"k_scale", f.args.k_scale}, {"v_scale", f.args.v_scale},
+      {"tile", tile}, {"probability", probability}, {"mode", "prefill"},
+      {"profiling", profiling}, {"dispatch_verified", profiling},
+      {"scope", "one operator; wall includes synchronization/status, kernel is event time"},
+      {"warmups", warmups}, {"wall_samples_ms", wall_ms},
+      {"wall_median_ms", sorted[2]}, {"kernel_samples_ms", kernel_ms},
+      {"cache_bytes", f.cache.bytes}}.dump() << std::endl;
+  Accuracy(f.result(), reference, false, true);
+  CHECK(vt::GetReferenceTierHits() == 0); // generic reference above is a GPU kernel
+}
+
+TEST_CASE("XPU FP8 prefill: captured 4096-token Python operator replay"
+          * doctest::skip(!std::getenv("VT_B70_FP8_PREFILL_REPLAY_DIR"))) {
+  const std::string directory = std::getenv("VT_B70_FP8_PREFILL_REPLAY_DIR");
+  auto read = [&](const std::string& name, size_t size) {
+    std::ifstream file(directory + "/" + name, std::ios::binary);
+    REQUIRE(file.good());
+    std::vector<unsigned char> bytes(size);
+    file.read(reinterpret_cast<char*>(bytes.data()), bytes.size());
+    REQUIRE(file.gcount() == static_cast<std::streamsize>(size));
+    REQUIRE(file.peek() == std::char_traits<char>::eof());
+    return bytes;
+  };
+  const auto metadata_bytes = [&] {
+    std::ifstream file(directory + "/metadata.json", std::ios::binary);
+    REQUIRE(file.good());
+    return nlohmann::json::parse(file);
+  }();
+  const int tokens = metadata_bytes.at("q_original_shape").at(0).get<int>();
+  const int heads = metadata_bytes.at("q_original_shape").at(1).get<int>();
+  const int dim = metadata_bytes.at("q_original_shape").at(2).get<int>();
+  const int source_pages = metadata_bytes.at("files").at("k").at("shape").at(0).get<int>();
+  const int source_page = metadata_bytes.at("files").at("k").at("shape").at(1).get<int>();
+  const bool xe2 = std::getenv("VT_XPU_XE2_PREFILL") &&
+                   std::string_view(std::getenv("VT_XPU_XE2_PREFILL")) == "1";
+  const int page = xe2 ? 64 : source_page;
+  const int pages = (tokens + page - 1) / page;
+  const int physical_pages = xe2 ? pages + 7 : pages;
+  const int kv_heads = metadata_bytes.at("files").at("k").at("shape").at(2).get<int>();
+  REQUIRE(tokens == 4096);
+  REQUIRE(heads == 24);
+  REQUIRE(dim == 256);
+  REQUIRE(kv_heads == 4);
+  REQUIRE(source_pages * source_page >= tokens);
+  REQUIRE(metadata_bytes.at("seqused_k").get<int>() == tokens);
+  REQUIRE(metadata_bytes.at("causal").get<bool>());
+  REQUIRE(metadata_bytes.at("softcap").get<int>() == 0);
+  REQUIRE(metadata_bytes.at("window_size") == nlohmann::json::array({-1, -1}));
+  REQUIRE(metadata_bytes.at("k_original_stride").at(1).get<int>() == 2 * kv_heads * dim);
+  REQUIRE(metadata_bytes.at("k_original_stride").at(2).get<int>() == 2 * dim);
+  REQUIRE(metadata_bytes.at("v_original_stride") == metadata_bytes.at("k_original_stride"));
+  for (const char* name : {"k_descale", "v_descale"})
+    for (const auto& row : metadata_bytes.at(name))
+      for (const auto& scale : row) REQUIRE(scale.get<float>() == 1.0f);
+
+  const size_t q_bytes = size_t(tokens) * heads * dim * sizeof(uint16_t);
+  const size_t source_kv_bytes = size_t(source_pages) * source_page * kv_heads * dim;
+  const size_t kv_bytes = size_t(physical_pages) * page * kv_heads * dim;
+  const auto q_host = read("q.bin", q_bytes);
+  const auto k_host = read("k.bin", source_kv_bytes);
+  const auto v_host = read("v.bin", source_kv_bytes);
+  const auto expected_host = read("output.bin", q_bytes);
+  // VT's public paged-attention contract requires head-contiguous K/V views.
+  // Repack the same FP8 values into VT's [K page, V page] allocation layout.
+  // This checks arithmetic on identical values; it does not make the memory
+  // transaction pattern identical to Python's LBNHC layout.
+  std::vector<unsigned char> kv_host(kv_bytes * 2);
+  const size_t page_bytes = size_t(page) * kv_heads * dim;
+  const size_t token_bytes = size_t(kv_heads) * dim;
+  for (int token = 0; token < tokens; ++token) {
+    const int physical = xe2 ? physical_pages - 1 - token / page : token / page;
+    const size_t source_offset = size_t(token / source_page) * source_page * token_bytes +
+                                 size_t(token % source_page) * token_bytes;
+    const size_t dest_offset = size_t(physical) * 2 * page_bytes +
+                               size_t(token % page) * token_bytes;
+    std::memcpy(kv_host.data() + dest_offset, k_host.data() + source_offset, token_bytes);
+    std::memcpy(kv_host.data() + dest_offset + page_bytes,
+                v_host.data() + source_offset, token_bytes);
+  }
+
+  Queue gpu(vt::DeviceType::kXPU);
+  Buffer query(gpu.q, DType::kF16, {tokens, heads, dim});
+  Buffer output(gpu.q, DType::kF16, {tokens, heads, dim});
+  Buffer cache(gpu.q, DType::kI8, {physical_pages, 2 * page, kv_heads, dim});
+  Buffer table(gpu.q, DType::kI32, {1, pages});
+  Buffer lengths(gpu.q, DType::kI32, {1});
+  Buffer offsets(gpu.q, DType::kI32, {2});
+  query.upload(q_host.data());
+  cache.upload(kv_host.data());
+  std::vector<int32_t> page_ids(pages);
+  std::iota(page_ids.begin(), page_ids.end(), 0);
+  if (xe2) for (int& id : page_ids) id = physical_pages - 1 - id;
+  table.upload(page_ids.data());
+  const int32_t length_data[] = {tokens}, offset_data[] = {0, tokens};
+  lengths.upload(length_data);
+  offsets.upload(offset_data);
+  auto kc = vt::Tensor::Contiguous(cache.tensor.data, DType::kI8, gpu.q.device,
+                                    {physical_pages, page, kv_heads, dim});
+  kc.stride[0] *= 2;
+  auto vc = kc;
+  vc.data = static_cast<char*>(kc.data) + page * kv_heads * dim;
+  vt::PagedAttentionArgs args;
+  args.kv_cache_dtype = vt::Fp8KVCacheDataType::kFp8E4M3;
+  args.k_scale = args.v_scale = 1.0f;
+  args.scale = metadata_bytes.at("softmax_scale").get<float>();
+  args.max_seq_len = tokens;
+  args.causal = true;
+  auto run = [&](const char* mode) {
+    setenv("VT_XPU_ATTENTION", mode, 1);
+    vt::PagedAttention(gpu.q, output.tensor, query.tensor, kc, vc,
+                       table.tensor, lengths.tensor, offsets.tensor, args);
+    vt::GetBackend(gpu.q.device).Synchronize(gpu.q);
+  };
+  std::vector<float> expected(q_bytes / 2);
+  for (size_t i = 0; i < expected.size(); ++i) {
+    uint16_t bits;
+    std::memcpy(&bits, expected_host.data() + 2 * i, 2);
+    expected[i] = vt::F16ToF32(bits);
+  }
+  run("prefill");
+  if (const char* path = std::getenv("VT_B70_FP8_PREFILL_OUTPUT_DUMP")) {
+    const auto bytes = output.download();
+    std::ofstream dump(path, std::ios::binary);
+    REQUIRE(dump.good());
+    dump.write(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+    REQUIRE(dump.good());
+  }
+  Accuracy(output.floats(), expected, false, true);
+  const auto events = vt::xpu::DrainProfileEvents();
+  if (std::getenv("VT_XPU_PROFILE")) {
+    int selected = 0;
+    for (const auto& event : events)
+      selected += event.stage == (xe2 ? "attention_prefill_xe2" : "attention_prefill_q64");
+    REQUIRE(selected == 1);
+  }
+  std::vector<double> wall_ms;
+  for (int sample = 0; sample < 5; ++sample) {
+    const auto start = std::chrono::steady_clock::now();
+    run("prefill");
+    wall_ms.push_back(std::chrono::duration<double, std::milli>(
+        std::chrono::steady_clock::now() - start).count());
+  }
+  auto sorted = wall_ms;
+  std::sort(sorted.begin(), sorted.end());
+  std::cout << nlohmann::json{{"event", "fp8_prefill_python_replay"},
+      {"tokens", tokens}, {"page", page}, {"pages", pages},
+      {"physical_pages", physical_pages},
+      {"kv_row_stride", kc.stride[1]}, {"wall_samples_ms", wall_ms},
+      {"wall_median_ms", sorted[2]}}.dump() << std::endl;
+  Accuracy(output.floats(), expected, false, true);
+  if (xe2 && std::getenv("VT_XPU_PROFILE")) {
+    (void)vt::xpu::DrainProfileEvents();
+    args.k_scale = 0.1f;
+    args.v_scale = 0.3f;
+    run("prefill");
+    int fallback = 0;
+    for (const auto& event : vt::xpu::DrainProfileEvents())
+      fallback += event.stage == "attention_prefill_q64";
+    CHECK(fallback == 1);  // Nonunit scales retain the existing GPU implementation.
   }
 }
