@@ -2,6 +2,7 @@
 #include <chrono>
 #include <cstdint>
 #include <cstdlib>
+#include <fstream>
 #include <iomanip>
 #include <iostream>
 #include <map>
@@ -167,6 +168,27 @@ int Run(const std::string& checkpoint, int prompt_tokens, int output_tokens,
   }
   for (int step = 0; step < output_tokens - 1; ++step)
     decode_ids[step] = 300 + step;
+  if (const char* first = std::getenv("VT_B70_BENCH_DECODE_FIRST_TOKEN"))
+    decode_ids[0] = std::stoi(first);
+  const std::string quality_dir = Env("VT_B70_BENCH_QUALITY_DIR");
+  const auto capture_logits = [&](const vllm::ForwardLogits& logits,
+                                  const char* phase) {
+    if (quality_dir.empty()) return;
+    if (!logits.on_device() || logits.rows != 1 ||
+        logits.vocab != config.vocab_size ||
+        logits.device_tensor.dtype != vt::DType::kF32)
+      throw std::runtime_error("quality capture requires one F32 device logits row");
+    std::vector<float> values(static_cast<size_t>(logits.vocab));
+    backend.Copy(queue, values.data(), logits.device_tensor.data,
+                 values.size() * sizeof(float));
+    backend.Synchronize(queue);
+    const std::string path = quality_dir + "/p" +
+        std::to_string(prompt_tokens) + "_" + phase + ".f32";
+    std::ofstream file(path, std::ios::binary);
+    if (!file.write(reinterpret_cast<const char*>(values.data()),
+                    static_cast<std::streamsize>(values.size() * sizeof(float))))
+      throw std::runtime_error("cannot write quality logits: " + path);
+  };
   const auto prompt_meta = gptq4_model_bench::AttentionMetadata(
       prompt_tokens, 0, block_size);
   const auto prompt_gdn = gptq4_model_bench::GdnMetadata(prompt_tokens, false);
@@ -188,14 +210,15 @@ int Run(const std::string& checkpoint, int prompt_tokens, int output_tokens,
     }
     backend.Synchronize(queue);
   };
-  const auto prefill = [&] {
+  const auto prefill = [&](bool capture = false) {
     const auto result = vllm::ModelRegistry::Forward(*model, prompt_input);
     if (!result.on_device() || result.rows != 1 ||
         result.vocab != config.vocab_size)
       throw std::runtime_error("invalid prefill output");
     backend.Synchronize(queue);
+    if (capture) capture_logits(result, "prefill");
   };
-  const auto decode = [&] {
+  const auto decode = [&](bool capture = false) {
     for (int step = 0; step < output_tokens - 1; ++step) {
       const std::vector<int32_t> ids{decode_ids[step]};
       const std::vector<int32_t> positions{prompt_tokens + step};
@@ -215,6 +238,7 @@ int Run(const std::string& checkpoint, int prompt_tokens, int output_tokens,
           result.vocab != config.vocab_size)
         throw std::runtime_error("invalid decode output");
       backend.Synchronize(queue);
+      if (capture && step == 0) capture_logits(result, "decode");
     }
   };
 
@@ -247,6 +271,8 @@ int Run(const std::string& checkpoint, int prompt_tokens, int output_tokens,
         {"prompt_tokens", prompt_tokens}, {"output_tokens", output_tokens},
         {"prompt_ids_fnv1a64", TokenHash(prompt_ids)},
         {"decode_ids_fnv1a64", TokenHash(decode_ids)},
+        {"decode_first_token", decode_ids[0]},
+        {"quality_capture", !quality_dir.empty()},
         {"rounds", rounds}, {"warm_blocks", 1},
         {"gdn_chunk_size", 64}, {"kv_block_size", block_size},
         {"gdn_prefill_mode", Env("VT_XPU_GDN_PREFILL", "auto")},
@@ -254,7 +280,9 @@ int Run(const std::string& checkpoint, int prompt_tokens, int output_tokens,
         {"graph_opt_in", std::string(Env("VT_GPTQ4_GRAPH")) == "1"},
         {"graph_profile", graph_profile},
         {"host_profile", host_profile},
-        {"measurement_scope", "synchronized full-model forward; load, JIT and warm block excluded"},
+        {"measurement_scope", quality_dir.empty()
+            ? "synchronized full-model forward; load, JIT and warm block excluded"
+            : "quality logits capture included; timing invalid"},
         {"warm_primitive_count", warm_stats.primitive_count},
         {"warm_scratch_allocations", warm_stats.scratchpad_allocation_count},
         {"warm_allocated_bytes", warm_memory.allocated_bytes}});
@@ -264,7 +292,7 @@ int Run(const std::string& checkpoint, int prompt_tokens, int output_tokens,
     const auto captures_before = backend.GraphsCaptured();
     const auto replays_before = backend.GraphReplays();
     const auto start = Clock::now();
-    prefill();
+    prefill(!quality_dir.empty());
     const auto prefill_end = Clock::now();
     if (stage_profile)
       Emit({{"event", "gptq4_stage_trace"}, {"phase", "prefill"}, {"round", round},
@@ -274,7 +302,7 @@ int Run(const std::string& checkpoint, int prompt_tokens, int output_tokens,
       prefill_host_spans = SummarizeHostSpans(
           vt::xpu::DrainHostProfileRecords(queue.device.index));
     const auto decode_start = Clock::now();
-    decode();
+    decode(!quality_dir.empty());
     const auto decode_end = Clock::now();
     if (stage_profile)
       Emit({{"event", "gptq4_stage_trace"}, {"phase", "decode"}, {"round", round},

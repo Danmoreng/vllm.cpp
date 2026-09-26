@@ -1,6 +1,7 @@
 #include "xpu_common.h"
 #include "xpu_fp8.h"
 #include "xpu_kernels.h"
+#include <cstdlib>
 #include <limits>
 
 namespace vt::xpu {
@@ -16,7 +17,20 @@ bool PagedAttentionSplitKernel(Queue& q, Tensor& out, const Tensor& query, const
   const auto sizes = NativeQueue(q).get_device().get_info<sycl::info::device::sub_group_sizes>();
   if (tokens < 1 || tokens > 20 || heads > 24 || dim > SG * Components ||
       std::find(sizes.begin(), sizes.end(), SG) == sizes.end()) return false;
-  const int64_t parts = std::min(int64_t{32}, std::max(int64_t{1}, (capacity + 255) / 256));
+  const auto device = NativeQueue(q).get_device();
+  const bool b70_fp8 = key_cache.dtype == DType::kI8 &&
+      device.has(sycl::aspect::ext_intel_device_id) &&
+      device.get_info<sycl::ext::intel::info::device::device_id>() == 57891;
+  // Short E4M3 contexts need more independent page slices to occupy the B70.
+  // F16/BF16 and other devices retain the original 256-token partitioning.
+  int span = b70_fp8 ? 32 : 256;
+  if (const char* setting = std::getenv("VT_XPU_ATTN_SPLIT_SPAN")) {
+    span = std::atoi(setting);
+    VT_CHECK(span == 32 || span == 64 || span == 128 || span == 256,
+             "VT_XPU_ATTN_SPLIT_SPAN must be 32, 64, 128 or 256");
+  }
+  const int64_t parts = std::min(int64_t{32},
+      std::max(int64_t{1}, (capacity + span - 1) / span));
   const int64_t stride = dim + 2, pairs = (ratio + Reuse - 1) / Reuse;
   if (tokens * heads * parts * stride * sizeof(float) > Workspace) return false;
   const View qs(query), kc(key_cache), vc(value_cache), dst(out), bt(block_table);
