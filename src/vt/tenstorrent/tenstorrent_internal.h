@@ -198,46 +198,24 @@ inline bool& tt_capture_active() {
   return b;
 }
 
-// Capture-safe reshape: the free ttnn::reshape (from reshape_view/reshape.hpp)
-// launches ReshapeViewTiledProgramFactory::create_program_artifacts which
-// calls to_device — forbidden during trace capture, and a cache miss when
-// the slot state differs between eager warmup and capture. During capture,
-// the member Tensor::reshape(logical, old_padded) is a pure metadata view
-// (view_device, same buffer, no program). The old padded shape is reused so
-// the buffer size check passes. The data is correct for same-numel reshapes
-// because TILE layout stores data in flat row-major within the tile grid —
-// element i maps to the same physical byte regardless of the logical shape
-// interpretation (the tile grid is the same; only the logical dims change).
-// Downstream ops may see a different padded shape than the eager step warmed,
-// but element-wise ops (sigmoid, multiply, typecast, add) don't depend on
-// the padded shape for correctness; shape-dependent ops (matmul, rms_norm)
-// use the logical shape which matches.
+// Capture-safe reshape (W4 of the capture-warmup redesign): BOTH passes run
+// the FREE ttnn::reshape, always. The member-view branch this replaced
+// relabeled the capture pass's tensors with the ORIGINAL padded shape (the
+// double-failure `return t` fallback returned the input unchanged), so the
+// first consumer saw a different spec than every warmed program — the
+// mid-capture program-cache miss ("Cannot load new binaries during trace
+// capture") the rows2d scatter fatalled on
+// (ISSUE-LOCAL-01M3918KQ580Z3NHVRNXVF15FZ). One code path in both passes
+// makes the capture's reshape spec IDENTICAL to the eager warmup's by
+// construction: the free reshape is a program-cache HIT under capture (the
+// eager step created the program for the same input/output spec), and a spec
+// the warmup did NOT warm fatals LOUDLY at the miss — which is the W4 audit's
+// divergence detector, not a defect to paper over. The free reshape's own
+// to_device runs only on the program-creation (cache-miss) path, which the
+// loud fatal names anyway; the metadata-view (same-tile-count) cases launch
+// no program in either pass.
 inline ttnn::Tensor CaptureSafeReshape(const ttnn::Tensor& t, const ttnn::Shape& shape) {
-  if (!tt_capture_active()) {
-    return ttnn::reshape(t, shape);
-  }
-  // During capture, use the member Tensor::reshape (pure metadata view,
-  // same buffer, no device program). Try the old padded shape first
-  // (always fits the buffer), then tile-aligned padded as fallback.
-  const auto old_padded = t.padded_shape();
-  try {
-    return t.reshape(shape, old_padded);
-  } catch (...) {
-    const auto rank = shape.rank();
-    ttsl::SmallVector<uint32_t> padded_dims;
-    for (uint32_t i = 0; i < rank; ++i) {
-      if (i + 2 >= rank) {
-        padded_dims.push_back(((shape[i] + 31u) / 32u) * 32u);
-      } else {
-        padded_dims.push_back(shape[i]);
-      }
-    }
-    try {
-      return t.reshape(shape, ttnn::Shape(padded_dims));
-    } catch (...) {
-      return t;  // both failed: return original (may cause downstream issues)
-    }
-  }
+  return ttnn::reshape(t, shape);
 }
 
 // KEEPQUANT W3 capture-safety probe (tenstorrent_device.h): staging writes the
@@ -501,13 +479,16 @@ inline std::map<uintptr_t, DecodedWeightShadow>& DecodedWeightShadows() {
   return *m;
 }
 
-// GroupedActShadow: the grouped-quant activation's device-side bf16 TILE
-// staging, keyed by the host activation pointer. EnsureDevice2D's slot
-// staging corrupts under trace capture (ISSUE-LOCAL-01M2NSDATJQ1YNW1PA9ZBMAAM5);
-// from_span stages directly from host, and the shadow cache serves the same
-// device tensor under capture (the warm-first contract — the eager step stages
-// before capture, the capture-time miss refuses). Same collision discipline as
-// the other resident shadows: the free path drops by host pointer.
+// (W3 of the capture-warmup redesign narrowed the GroupedActShadow staging
+// to the HOST-STAGED fallback: the engine's activations are served from
+// their resident device shadows in-region (the serve in
+// MatmulBTQuantGroupedKernel), and this pointer-keyed cache now only serves
+// activations that were HOST-STAGED by the same kernel's from_span fallback
+// — a pattern where pointer identity holds by construction (one buffer,
+// staged eagerly then captured, no pool recycling in between: the op-level
+// capture tests). The engine's pool-recycled activations structurally miss
+// this cache and reach the by-name refusal, as designed —
+// ISSUE-LOCAL-01M3918KQ580Z3NHVRNXVF15FZ.)
 struct GroupedActShadow {
   ttnn::Tensor device;
   uint32_t rows = 0, cols = 0;
@@ -650,6 +631,39 @@ ttnn::Tensor CachedTile(const void* owner, uint64_t g0, uint64_t g1, uint64_t g2
                         const std::function<std::vector<float>()>& build,
                         const ttnn::Shape& shape, MeshDevice& device);
 
+// ---- Persistent embedding-table shadows (ROW_MAJOR BF16 on device) ----
+// The vocab table is multi-hundred MB for Qwen3; re-uploading every forward
+// was a pure tax. Keyed by host table base; invalidated by MarkHostWritten /
+// UnregisterHostBuffer. Split stage 5 lifted the struct here (the capture
+// TU's EmbedDeviceIdsInto reads the map); the accessor definitions stay in
+// tenstorrent_ops.cpp with the eager embedding paths.
+struct EmbedTableShadow {
+  std::optional<ttnn::Tensor> device;
+  uint32_t vocab = 0, h = 0;
+};
+std::mutex& EmbedTableMutex();
+std::map<uintptr_t, EmbedTableShadow>& EmbedTableShadows();
+
+// ---- moved declarations (definitions in tenstorrent_ops.cpp; shared with the
+// capture TU) ----
+std::atomic<int64_t>& LastTraceBytes();
+
+// ---- moved declarations (definitions in tenstorrent_capture.cpp; shared with
+// the paged TU and the staying ops.cpp rope-warm path) ----
+int GraphCapturesDone();
+bool ReplayRegimeBisectSkip(const char* flag);
+
+// ---- moved declarations (definitions in tenstorrent_paged.cpp) ----
+void DropPagedKvShadow(void* host);
+void ReshapeAndCacheKernel(Queue&, const Tensor& k, const Tensor& v,
+                           Tensor& k_cache, Tensor& v_cache,
+                           const Tensor& slot_mapping);
+void PagedAttentionKernel(Queue&, Tensor& out, const Tensor& query,
+                          const Tensor& k_cache, const Tensor& v_cache,
+                          const Tensor& block_table, const Tensor& seq_lens,
+                          const Tensor& query_start_loc,
+                          const PagedAttentionArgs& args);
+
 // ---- moved declarations (definitions in tenstorrent_gdn.cpp) ----
 void GdnPostConvKernel(Queue& q, Tensor& q_out, Tensor& k_out, Tensor& v_out,
                        Tensor& g_out, Tensor& beta_out, const Tensor& conv,
@@ -666,6 +680,36 @@ void GdnStateGatherKernel(Queue&, Tensor& working, const Tensor& cache,
                           const Tensor& state_idx, const Tensor* has_initial_state);
 void GdnStateScatterKernel(Queue&, Tensor& cache, const Tensor& working,
                            const Tensor& state_idx);
+// Split stage 6: these kernels moved verbatim from tenstorrent_ops.cpp into
+// tenstorrent_gdn.cpp (L2Norm/RmsNormGated/CausalConv1d*) and the staging
+// helpers into tenstorrent_residency.cpp; ops.cpp keeps the Registrar.
+void L2NormKernel(Queue&, Tensor& out, const Tensor& x, const L2NormArgs& args);
+void RmsNormGatedKernel(Queue&, Tensor& out, const Tensor& x, const Tensor& gate,
+                        const Tensor& weight, const RmsNormGatedArgs& args);
+void CausalConv1dFwdKernel(Queue&, Tensor& out, const Tensor& x, const Tensor& w,
+                           const Tensor* bias, Tensor& conv_state,
+                           const Tensor& qsl, const Tensor& his,
+                           const CausalConv1dArgs& args);
+void CausalConv1dUpdateKernel(Queue&, Tensor& out, const Tensor& x, const Tensor& w,
+                              const Tensor* bias, Tensor& conv_state,
+                              const Tensor* conv_state_indices,
+                              const CausalConv1dArgs& args);
+ttnn::Tensor EnsureEmbedTableDevice(const Tensor& table, MeshDevice& device);
+ttnn::Tensor EnsureAffine1D(const Tensor& t, uint32_t d, MeshDevice& device);
+bool ServeDeviceShadowRaw(const Tensor& t, uint32_t rows, uint32_t cols,
+                          ttnn::Tensor& out);
+bool ServeDeviceWindow(const Tensor& t, uint32_t rows, uint32_t cols,
+                       ttnn::Tensor& out);
+ttnn::Tensor NormalizeDevF32Tile(ttnn::Tensor x, uint32_t rows, uint32_t cols);
+ttnn::Tensor CachedRepeatIdx(uint64_t t, uint64_t heads, uint64_t half,
+                             MeshDevice& device);
+double Llama3ScaleFreq(double freq, const RopeArgs& a);
+void ExpandCosSinPerHead(const float* cos_t, const float* sin_t, int64_t tokens,
+                         int64_t heads, int64_t half, std::vector<float>& cos_exp,
+                         std::vector<float>& sin_exp);
+void BuildCosSinFromPositions(const Tensor& pos, int64_t tokens, int rot, double base,
+                              const RopeArgs& args, std::vector<float>& cos_t,
+                              std::vector<float>& sin_t);
 
 // ---- BACKEND-TENSTORRENT-QWEN35 W4 (#2107): bulk staging counters ----
 std::atomic<uint64_t>& StagingBulkUploads();

@@ -36,6 +36,7 @@
 #include "vllm/model_executor/layers/quantization/fp8_block_quant.h"
 #include "vllm/model_executor/model_loader/gptq4_weight.h"
 #include "vllm/model_executor/models/qwen3_5_weights.h"  // OwnedTensor, Gdn/FullAttn weights, TensorResolver
+#include "vllm/model_executor/models/qwen3_vl_vision.h"  // MODEL-QWEN35-DENSE-VL-EXL3: the dense arm's tower
 #include "vllm/transformers_utils/hf_config.h"
 #include "vt/device.h"
 #include "vt/tensor.h"
@@ -228,6 +229,22 @@ struct Qwen3_5DenseWeights {
   // still passing (`Exl3Weight::Bits`). Empty on every other head storage.
   Exl3Weight lm_head_exl3;
   std::vector<Qwen3_5DenseLayerWeights> layers;
+
+  // MODEL-QWEN35-DENSE-VL-EXL3 (ISSUE-LOCAL-01M3AHX9DQX8HNE32G80C9VGMJ): the
+  // checkpoint's vision tower, loaded by `LoadQwen3_5Dense` when the index
+  // carries `model.visual.*` tensors. Before this member the dense loader
+  // SILENTLY DROPPED those 333 bf16 tensors — a vision-inclusive checkpoint
+  // loaded as a text-only model with no diagnostic, so no production path
+  // could ever answer an image prompt. Unquantized-but-required: the tower is
+  // bf16 on the EXL3 27B even while the text arm is trellis-quantized (see
+  // `IsQwen27QuantizedLinear`, which already exempted the prefix). EMPTY (and
+  // `has_visual` false) on every text-only checkpoint, which is what keeps a
+  // text load byte-identical.
+  multimodal::Qwen3VLVisionWeights visual;
+  // The tower's geometry, the checkpoint's `vision_config` as the family
+  // builder expresses it (`Qwen3_5DenseVisionConfig`); valid iff `has_visual`.
+  multimodal::Qwen3VLVisionConfig visual_cfg;
+  bool has_visual = false;
 
   size_t Gptq4ResidentBytes() const {
     size_t total = 0;
@@ -462,6 +479,22 @@ class Qwen3_5DenseModel {
                                     const HfConfig& config, vt::Queue& queue,
                                     const std::vector<int32_t>& logits_indices = {});
 
+  // MODEL-KEV Phase 3: the pooling forward — the same embed + layer stack as
+  // Forward, stopping after the final GemmaRMSNorm (+ optional gather) with NO
+  // lm_head, mirroring Qwen3DenseModel::ForwardHidden (qwen3.cpp:570-592).
+  // The [n_out, H] f32 rows are downloaded to the host carrier for the kev
+  // PointerHead readout, whose ops are host-side.
+  static ForwardLogits ForwardHidden(
+      const std::vector<int32_t>& token_ids,
+      const std::vector<int32_t>& positions,
+      const v1::CommonAttentionMetadata& attn_meta,
+      const v1::GDNAttentionMetadata& gdn_meta,
+      const std::vector<PagedKvCache>& attn_kv,
+      const std::vector<GdnStateCache>& gdn_state,
+      const Qwen3_5DenseWeights& weights,
+      const HfConfig& config, vt::Queue& queue,
+      const std::vector<int32_t>& logits_indices = {});
+
   // DEVICE-resident variant of Forward (sampler-on-device hot path): same contract
   // as Forward but returns the lm_head output as a pool-backed DEVICE buffer
   // (ForwardLogits::device_*) with NO full-logits D2H. See
@@ -514,6 +547,16 @@ class Qwen3_5DenseModel {
                                          const Qwen3_5DenseWeights& weights,
                                          const HfConfig& config,
                                          vt::Queue& queue);
+
+  // MODEL-KEV Phase 5a: single-sequence hidden-state forward. Mirrors
+  // ForwardDense but stops after the final GemmaRMSNorm (no lm_head) and
+  // returns [T, H] f32 hidden states for the kev PointerHead readout.
+  static std::vector<float> ForwardDenseHidden(
+      const std::vector<int32_t>& token_ids,
+      const std::vector<int32_t>& positions,
+      const Qwen3_5DenseWeights& weights,
+      const HfConfig& config,
+      vt::Queue& queue);
 };
 
 // M3-b — single-image, single-sequence GREEDY image->text generation on the

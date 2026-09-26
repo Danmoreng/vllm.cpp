@@ -161,15 +161,24 @@ is 380 commits behind main and needs rebasing before it can merge.
 
 ## Now
 
-`ACTIVE`. The first-c1 hard blocker (#3111) is cleared (2026-09-21). A
-partial token gate between llama.cpp (Q4_K_M) and vllm.cpp (BF16) completed
-on 2026-09-22: all 6 prompts succeeded on both engines, first token matches on
-4 of 6, not token-exact due to quantization difference. The primary token
-gate (against vLLM) and the full four-engine harness are blocked: vLLM and
-SGLang need ROCm 7.2 + torch 2.13.0+rocm7.2, and Strix has ROCm 5.7. The ROCm
-7.2.4 install a previous lease put at `/opt/rocm` was cleaned up. A quant-
-matched C++-only gate is also blocked: vllm.cpp does not support the `qwen3`
-GGUF arch. Next: restore ROCm 7.2 on Strix or find a device that can run
+`ACTIVE`. Two Strix build fixes landed on main (2026-09-23): the
+`rotary_dim` default-to-0 bug in `qwen3_5_gguf_weights.cpp` (now defaults to
+`head_dim`, mirroring the qwen3 fix) and the `#ifndef HIPBLAS_COMPUTE_32F`
+guard in `rocm_mat_mul_hipblaslt.hip` and `hip_shfl_compat.h` (replaced with
+`#if HIP_VERSION_MAJOR < 6` because the enum value is not a macro on ROCm 7.2).
+
+The Q4_K_M gate denominator is vLLM eager-mode, not llama.cpp. This decision
+holds because vLLM always expands merged Q4_K_M weights to bf16, so a
+`LoadMerged` path diverges from the primary oracle. `LoadMerged` was tested
+and abandoned (commit `d1e26c9cb`): it shifted the mismatch pattern but did
+not improve the count (still 3 of 6 first-token mismatches). The 3/6
+mismatches are a property of Q4_K_M's heterogeneous quantization (Q4_K + Q6_K),
+not a bug.
+
+The primary token gate (against vLLM) and the full four-engine harness remain
+blocked: vLLM and SGLang need ROCm 7.2 + torch 2.13.0+rocm7.2, and Strix has
+ROCm 5.7. The ROCm 7.2.4 install a previous lease put at `/opt/rocm` was
+cleaned up. Next: restore ROCm 7.2 on Strix or find a device that can run
 vLLM/SGLang, then run the full four-engine harness.
 
 ## Git integration

@@ -1069,6 +1069,14 @@ add_library(vllm STATIC
   src/vllm/model_executor/models/opt.cpp
   src/vllm/model_executor/models/llama_registry.cpp
   src/vllm/model_executor/models/llama_embedding_registry.cpp
+  src/vllm/model_executor/models/kev_head.cpp
+  src/vllm/model_executor/models/kev_registry.cpp
+  src/vllm/model_executor/models/clm_head.cpp
+  src/vllm/model_executor/models/clm_registry.cpp
+  src/vllm/model_executor/models/gliner25_decide_head.cpp
+  src/vllm/model_executor/models/gliner25_decide_registry.cpp
+  src/vllm/model_executor/models/xor_registry.cpp
+  src/vllm/model_executor/models/tev1_registry.cpp
   src/vllm/model_executor/models/llama_weights.cpp
   src/vllm/model_executor/models/mistral_registry.cpp
   src/vllm/model_executor/models/mistral_weights.cpp
@@ -1295,6 +1303,7 @@ add_library(vllm STATIC
   src/vllm/model_executor/layers/rotary_embedding/mrope.cpp
   src/vllm/entrypoints/chat_template.cpp
   src/vllm/entrypoints/model_loader.cpp
+  src/vllm/entrypoints/openai/systemone.cpp
   src/capi/vllm_c.cpp
   src/capi/chat_prompt.cpp
   src/vllm/entrypoints/openai/protocol.cpp
@@ -1808,7 +1817,9 @@ if(VLLM_CPP_TENSTORRENT)
     src/vt/tenstorrent/tenstorrent_ops.cpp
     src/vt/tenstorrent/tenstorrent_residency.cpp
     src/vt/tenstorrent/tenstorrent_keepquant.cpp
-    src/vt/tenstorrent/tenstorrent_gdn.cpp)
+    src/vt/tenstorrent/tenstorrent_paged.cpp
+    src/vt/tenstorrent/tenstorrent_gdn.cpp
+    src/vt/tenstorrent/tenstorrent_capture.cpp)
   target_include_directories(vllm_tenstorrent_ops PRIVATE
     ${CMAKE_SOURCE_DIR}/include ${CMAKE_BINARY_DIR}/include ${CMAKE_SOURCE_DIR}/src)
   target_link_libraries(vllm_tenstorrent_ops PRIVATE TTNN::TTNN)

@@ -21,6 +21,15 @@ which checkpoint was used, the exact command, and what has not been measured.
 | [Muse Glimmer](muse-glimmer.md) | A 30B multimodal model, text with image and video input | Running the text tower from a 17 GB GGUF, and how narrow the verified surface is |
 | [Gemma 4](gemma-4.md) | The Gemma 4 family | The ROCm RDNA4 dual-GPU FP8 recipe |
 
+## Decision models
+
+| Model | What it is | Read the page for |
+|---|---|---|
+| [CLM](clm.md) | A bi-encoder (Qwen3-8B + dual MLP heads) decision model | The projection-head conversion, the confidence formula, and what has not been measured |
+| [GLiNER2.5-Decide](gliner25-decide.md) | A DeBERTa-v3-large + classification head decision model | The checkpoint, the sequence layout, and what has not been measured |
+| [xor](xor.md) | A 35B MoE (Qwen3.6-35B-A3B) decision model with forward+reverse calibration | The checkpoint, the double-pass cost, and what has not been measured |
+| [Tev1](tev1.md) | An autoregressive (Qwen3.5-4B SFT) decision model | The chat-completions prompt format, the `enable_thinking=false` flag, and what has not been measured |
+
 ## Speech, music, and video
 
 | Model | What it is | Read the page for |
