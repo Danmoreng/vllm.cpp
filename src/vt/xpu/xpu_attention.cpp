@@ -1,6 +1,7 @@
 #include "xpu_common.h"
 #include "xpu_kernels.h"
 #include "xpu_fp8.h"
+#include <algorithm>
 #include <cstdio>
 #include <limits>
 #include <cstdlib>
@@ -70,6 +71,71 @@ void AttnQkNormRopeGateKernel(Queue& q, Tensor& q_out, Tensor& k_out,
   const int64_t half = rope_args.rotary_dim / 2, rot = rope_args.rotary_dim;
   const float eps = norm_args.eps;
   const bool gemma = norm_args.gemma;
+  enum class PreambleMode { kAuto, kReference, kSubgroup };
+  static const PreambleMode mode = [] {
+    const char* value = std::getenv("VT_XPU_ATTN_PREAMBLE");
+    const std::string_view name = value ? value : "auto";
+    VT_CHECK(name == "auto" || name == "reference" || name == "subgroup",
+             "Invalid VT_XPU_ATTN_PREAMBLE");
+    return name == "reference" ? PreambleMode::kReference :
+           name == "subgroup" ? PreambleMode::kSubgroup : PreambleMode::kAuto;
+  }();
+  const bool shape_ok = dim == 256 && rot > 0 && rot <= dim && half % 16 == 0 &&
+      qgate.dtype == DType::kF16 && kf.dtype == DType::kF16 &&
+      q_out.dtype == DType::kF16 && k_out.dtype == DType::kF16;
+  bool subgroup = false;
+  if (shape_ok && mode != PreambleMode::kReference) {
+    const auto sizes = NativeQueue(q).get_device().get_info<sycl::info::device::sub_group_sizes>();
+    subgroup = std::find(sizes.begin(), sizes.end(), 16) != sizes.end();
+  }
+  VT_CHECK(mode != PreambleMode::kSubgroup || subgroup,
+           "VT_XPU_ATTN_PREAMBLE=subgroup requires F16 D256, RoPE half divisible by 16 and SG16");
+  if (subgroup) {
+    constexpr int lanes = 16, tile = 16, workgroup = 128;
+    const auto heads = tokens * (hq + hk);
+    const auto global = ((heads * lanes + workgroup - 1) / workgroup) * workgroup;
+    const auto event = NativeQueue(q).parallel_for(
+        sycl::nd_range<1>(sycl::range<1>(global), sycl::range<1>(workgroup)),
+        [=](sycl::nd_item<1> item) [[sycl::reqd_sub_group_size(16)]] {
+      const int64_t index = item.get_global_linear_id() / lanes;
+      if (index >= heads) return;
+      const int lane = item.get_local_linear_id() % lanes;
+      const int64_t token = index / (hq + hk), head = index % (hq + hk);
+      const bool query = head < hq;
+      const int64_t local_head = query ? head : head - hq;
+      const View src = query ? qs : ks, weight = query ? qw : kw, dst = query ? qo : ko;
+      const int64_t src_base = token * src.stride[0] + local_head * (query ? 2 * dim : dim);
+      const int64_t out_base = (token * (query ? hq : hk) + local_head) * dim;
+      float values[tile], norm[tile], sum = 0.0f;
+      for (int j = 0; j < tile; ++j) {
+        values[j] = Load(src, src_base + lane + lanes * j);
+        sum += values[j] * values[j];
+      }
+      sum = sycl::reduce_over_group(item.get_sub_group(), sum, sycl::plus<float>());
+      const float inv = 1.0f / sycl::sqrt(sum / static_cast<float>(dim) + eps);
+      for (int j = 0; j < tile; ++j) {
+        const int col = lane + lanes * j;
+        const float w = Load(weight, col);
+        norm[j] = values[j] * inv * (gemma ? 1.0f + w : w);
+      }
+      for (int j = 0; j < tile; ++j) {
+        const int col = lane + lanes * j;
+        float value = norm[j];
+        if (col < rot) {
+          const int pair = col < half ? col : col - half;
+          const int first = pair / lanes, second = (pair + half) / lanes;
+          const float c = Load(cs, token * rot + pair);
+          const float s = Load(cs, token * rot + half + pair);
+          value = col < half ? norm[first] * c - norm[second] * s
+                             : norm[first] * s + norm[second] * c;
+        }
+        Store(dst, out_base + col, value);
+        if (query) Store(go, out_base + col, Load(qs, src_base + dim + col));
+      }
+    });
+    RecordProfileEvent(q, "attn_qk_norm_rope_gate_subgroup", event);
+    return;
+  }
   const auto event = NativeQueue(q).parallel_for(
       sycl::range<1>(tokens * (hq + hk)), [=](sycl::id<1> item) {
     const int64_t token = item[0] / (hq + hk), head = item[0] % (hq + hk);

@@ -118,6 +118,47 @@ TEST_CASE("XPU F16 attention preamble and output gate preserve model dtype") {
     CHECK(std::abs(actual[i] - 0.25f / (1.0f + std::exp(-ref_gate[i]))) < 0.0003f);
 }
 
+TEST_CASE("XPU SG16 attention preamble: F16 real geometry, strided inputs and partial RoPE") {
+  Queue cpu(vt::DeviceType::kCPU), gpu(vt::DeviceType::kXPU);
+  constexpr int tokens = 3, hq = 24, hk = 4, dim = 256, rot = 64;
+  Buffer pos(gpu.q, DType::kI32, {tokens}), cos_gpu(gpu.q, DType::kF32, {tokens, rot});
+  const int32_t positions[] = {1, 137, 4097};
+  pos.upload(positions);
+  vt::RopeCosSinCache(gpu.q, cos_gpu.tensor, pos.tensor, {10000000.0f, rot});
+  const auto cos_values = cos_gpu.floats();
+  std::vector<float> expected_q, expected_k, expected_gate;
+  for (auto* q : {&cpu.q, &gpu.q}) {
+    const auto type = q == &cpu.q ? DType::kF32 : DType::kF16;
+    Buffer packed(*q, type, {tokens, 2 * hq * dim + 7});
+    Buffer key(*q, type, {tokens, hk * dim + 3});
+    Buffer query(*q, type, {tokens, hq, dim}), keys(*q, type, {tokens, hk, dim});
+    Buffer gate(*q, DType::kF32, {tokens, hq, dim});
+    Buffer qw(*q, DType::kF32, {dim}), kw(*q, DType::kF32, {dim});
+    Buffer cos(*q, DType::kF32, {tokens, rot});
+    auto put_rounded = [&](Buffer& buffer, std::vector<float> values) {
+      if (q == &cpu.q) for (auto& value : values) value = vt::F16ToF32(vt::F32ToF16(value));
+      buffer.put(values);
+    };
+    put_rounded(packed, Values(tokens * (2 * hq * dim + 7), 4));
+    put_rounded(key, Values(tokens * (hk * dim + 3), 9));
+    packed.tensor.shape[1] = 2 * hq * dim;
+    key.tensor.shape[1] = hk * dim;
+    qw.put(Values(dim, 2, 0.02f));
+    kw.put(Values(dim, 3, 0.02f));
+    cos.put(cos_values);
+    vt::AttnQkNormRopeGate(*q, query.tensor, keys.tensor, gate.tensor,
+                           packed.tensor, key.tensor, qw.tensor, kw.tensor,
+                           cos.tensor, {1e-6f, true}, {10000000.0f, rot});
+    if (q == &cpu.q) {
+      expected_q = query.floats(); expected_k = keys.floats(); expected_gate = gate.floats();
+    } else {
+      Close(query.floats(), expected_q, 0.003f, 0.0005f);
+      Close(keys.floats(), expected_k, 0.003f, 0.0005f);
+      Close(gate.floats(), expected_gate, 0.0f);
+    }
+  }
+}
+
 TEST_CASE("XPU cached RoPE: supplied positions, strided heads, optional K and both pair styles") {
   Queue cpu(vt::DeviceType::kCPU), gpu(vt::DeviceType::kXPU);
   constexpr int tokens = 4, hq = 24, hk = 4, dim = 256, rot = 64, count = 130;
