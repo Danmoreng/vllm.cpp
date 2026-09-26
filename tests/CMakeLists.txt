@@ -3028,6 +3028,7 @@ vllm_cpp_add_test(test_exl3_vulkan vt/test_exl3_vulkan.cpp)
 vllm_cpp_add_test(test_cast_f16 vt/test_cast_f16.cpp)
 vllm_cpp_add_test(test_exl3_linear_method vllm/model_executor/layers/test_exl3_linear_method.cpp)
 vllm_cpp_add_test(test_exl3_native_loader vllm/model_executor/layers/test_exl3_native_loader.cpp)
+vllm_cpp_add_test(test_exl3_checkpoint vllm/model_executor/layers/test_exl3_checkpoint.cpp)
 # The decode against REAL exllamav3 data (#2181): the gate whose absence let a
 # wrong codebook ship.
 vllm_cpp_add_test(test_exl3_real_decode vt/test_exl3_real_decode.cpp)
