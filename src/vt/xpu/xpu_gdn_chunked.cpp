@@ -163,6 +163,36 @@ void System(Queue& queue, ChunkScratch<Input> s, View beta, const int32_t* offse
     }
   });
   RecordProfileEvent(queue, "gdn_chunk_system", system_event);
+  static const bool local_inverse = [] {
+    const char* value = std::getenv("VT_XPU_GDN_INVERSE");
+    const std::string_view mode = value ? value : "slm";
+    VT_CHECK(mode == "slm" || mode == "reference", "Invalid VT_XPU_GDN_INVERSE");
+    return mode == "slm";
+  }();
+  if (local_inverse) {
+    const auto inverse_event = q.submit([&](sycl::handler& handler) {
+      sycl::local_accessor<float> tile(C * C, handler);
+      handler.parallel_for(sycl::nd_range<1>(heads * C, C), [=](sycl::nd_item<1> item) {
+        const int h = item.get_group(0), col = item.get_local_id(0);
+        const auto* lower = s.lower + h * C * C;
+        // A column has no dependency on another column. Keep its intermediate
+        // values in SLM, then write the completed inverse to the workspace.
+        for (int row = 0; row < C; ++row) {
+          float value = row == col ? 1.0f : 0.0f;
+          if (row > col) {
+            value = -lower[row * C + col];
+            for (int j = col + 1; j < row; ++j)
+              value -= lower[row * C + j] * tile[j * C + col];
+          }
+          tile[row * C + col] = value;
+        }
+        for (int row = 0; row < C; ++row)
+          s.inverse[(h * C + row) * C + col] = tile[row * C + col];
+      });
+    });
+    RecordProfileEvent(queue, "gdn_chunk_inverse_slm", inverse_event);
+    return;
+  }
   // Each work-item solves one column of (I + lower)^-1. Dependencies stay in
   // that column, so neither subgroup barriers nor cross-workgroup waits occur.
   const auto inverse_event = q.parallel_for(sycl::range<1>(heads * C), [=](sycl::id<1> item) {
