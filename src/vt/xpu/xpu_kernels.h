@@ -60,4 +60,8 @@ bool PagedAttentionSplitKernel(Queue&, Tensor&, const Tensor&, const Tensor&, co
                                const Tensor&, const Tensor&, const Tensor&, const PagedAttentionArgs&);
 bool PagedAttentionPrefillKernel(Queue&, Tensor&, const Tensor&, const Tensor&, const Tensor&,
                                  const Tensor&, const Tensor&, const Tensor&, const PagedAttentionArgs&);
+#ifdef VLLM_CPP_XPU_XE2_PREFILL
+bool PagedAttentionXe2PrefillKernel(Queue&, Tensor&, const Tensor&, const Tensor&, const Tensor&,
+                                    const Tensor&, const Tensor&, const Tensor&, const PagedAttentionArgs&);
+#endif
 }  // namespace vt::xpu

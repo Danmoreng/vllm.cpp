@@ -356,13 +356,20 @@ void PagedAttentionKernel(Queue& q, Tensor& out, const Tensor& query, const Tens
     const bool split = try_split && PagedAttentionSplitKernel(
         q, target, query, key_cache, value_cache,
         block_table, seq_lens, query_start_loc, args);
-    const bool try_prefill = !split && (automatic || mode == "prefill");
+#ifdef VLLM_CPP_XPU_XE2_PREFILL
+    const bool xe2 = !split && (automatic || mode == "prefill") &&
+        PagedAttentionXe2PrefillKernel(q, target, query, key_cache, value_cache,
+                                      block_table, seq_lens, query_start_loc, args);
+#else
+    const bool xe2 = false;
+#endif
+    const bool try_prefill = !split && !xe2 && (automatic || mode == "prefill");
     const bool prefill = try_prefill && PagedAttentionPrefillKernel(
         q, target, query, key_cache, value_cache,
         block_table, seq_lens, query_start_loc, args);
     if (const char* trace = std::getenv("VT_XPU_TRACE_FAST_PATH");
         trace != nullptr && trace[0] == '1' && trace[1] == '\0') {
-      const char* reason = split || prefill ? "eligible" :
+      const char* reason = split || xe2 || prefill ? "eligible" :
           mode == "reference" ? "mode_reference" :
           mode == "auto" && !automatic ? "stack_gate_or_shape" :
           "kernel_declined";
@@ -371,11 +378,12 @@ void PagedAttentionKernel(Queue& q, Tensor& out, const Tensor& query, const Tens
                    "\"selected\":\"%s\",\"reason\":\"%s\","
                    "\"mode\":\"%.*s\",\"auto_eligible\":%s,"
                    "\"tokens\":%lld}\n",
-                   split ? "split" : prefill ? "prefill" : "reference", reason,
+                   split ? "split" : xe2 ? "xe2_prefill" :
+                   prefill ? "prefill" : "reference", reason,
                    static_cast<int>(mode.size()), mode.data(),
                    automatic ? "true" : "false", static_cast<long long>(tokens));
     }
-    if (split || prefill) return;
+    if (split || xe2 || prefill) return;
     const View qs(query), kc(key_cache), vc(value_cache), dst(target);
     const auto event = NativeQueue(q).submit([&](sycl::handler& h) {
       sycl::local_accessor<float, 1> partial(sycl::range<1>(lanes), h);
