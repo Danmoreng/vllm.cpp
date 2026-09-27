@@ -585,11 +585,12 @@ TEST_CASE("XPU Xe2 FP8 prefill: default dispatch with 1600-token pages"
   CHECK(fallback == 0);
 }
 
-TEST_CASE("XPU Xe2 FP8 prefill: 4K boundaries and 8K with paged KV"
+TEST_CASE("XPU Xe2 FP8 prefill: 2K/4K boundaries and 8K with paged KV"
           * doctest::skip(!std::getenv("VT_XPU_PROFILE") ||
                           std::getenv("VT_XPU_XE2_PREFILL"))) {
   Queue gpu(vt::DeviceType::kXPU);
-  for (int tokens : {4095, 4096, 4097, 8192}) for (int page : {64, 1600}) {
+  for (int tokens : {2048, 2049, 4095, 4096, 4097, 8192})
+      for (int page : {64, 1600}) {
     CAPTURE(tokens);
     CAPTURE(page);
     Fixture f(gpu.q, 1, tokens, tokens, true, false, page,
