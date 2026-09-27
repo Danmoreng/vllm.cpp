@@ -100,10 +100,13 @@ TEST_CASE("XPU split-KV: 32k, batch4, M2-5, uneven requests and windowed softcap
       (void)vt::xpu::DrainProfileEvents();
     ref.run("reference"); got.run("split"); Accuracy(got.result(), ref.result());
     if (fp8 && chunk == 5 && std::getenv("VT_XPU_PROFILE")) {
-      int split_events = 0;
-      for (const auto& event : vt::xpu::DrainProfileEvents())
+      int split_events = 0, reduce_events = 0;
+      for (const auto& event : vt::xpu::DrainProfileEvents()) {
         split_events += event.stage == "attention_split_partial";
+        reduce_events += event.stage == "attention_split_reduce_cooperative";
+      }
       CHECK(split_events == 1);
+      CHECK(reduce_events == 1);
     }
     if (chunk == 5) {
       ref.args.causal = got.args.causal = false;

@@ -3,6 +3,7 @@
 #include "xpu_kernels.h"
 #include <cstdlib>
 #include <limits>
+#include <string_view>
 
 namespace vt::xpu {
 bool PagedAttentionSplitKernel(Queue& q, Tensor& out, const Tensor& query, const Tensor& key_cache,
@@ -114,6 +115,55 @@ bool PagedAttentionSplitKernel(Queue& q, Tensor& out, const Tensor& query, const
       }
     });
     RecordProfileEvent(q, "attention_split_partial", partial_event);
+    const char* reduce_setting = std::getenv("VT_XPU_ATTN_SPLIT_REDUCE");
+    const std::string_view reduce_mode = reduce_setting ? reduce_setting : "auto";
+    VT_CHECK(reduce_mode == "auto" || reduce_mode == "scalar" ||
+                 reduce_mode == "cooperative",
+             "VT_XPU_ATTN_SPLIT_REDUCE must be auto, scalar or cooperative");
+    if (b70_fp8 && args.kv_cache_dtype == Fp8KVCacheDataType::kFp8E4M3 &&
+        heads == 24 && dim == 256 && reduce_mode != "scalar") {
+      constexpr int ReduceLanes = 64;
+      const int64_t component_groups = (dim + ReduceLanes - 1) / ReduceLanes;
+      const int64_t groups = tokens * heads * component_groups;
+      const auto reduce_event = NativeQueue(q).submit([&](sycl::handler& h) {
+        sycl::local_accessor<float, 1> weights(sycl::range<1>(256), h);
+        h.parallel_for(sycl::nd_range<1>(groups * ReduceLanes, ReduceLanes),
+            [=](sycl::nd_item<1> item) {
+          const auto group = item.get_group(0);
+          const int64_t row = group / component_groups;
+          const int64_t component = group % component_groups * ReduceLanes +
+                                    item.get_local_id(0);
+          const int lane = item.get_local_id(0);
+          const auto* src = partial + row * parts * stride;
+          float local_max = -std::numeric_limits<float>::infinity();
+          for (int p = lane; p < parts; p += ReduceLanes)
+            if (src[p * stride + dim + 1] > 0)
+              local_max = sycl::max(local_max, src[p * stride + dim]);
+          const auto workgroup = item.get_group();
+          const float maximum = sycl::reduce_over_group(
+              workgroup, local_max, sycl::maximum<float>{});
+          float local_sum = 0;
+          for (int p = lane; p < parts; p += ReduceLanes) {
+            const float denominator = src[p * stride + dim + 1];
+            const float factor = denominator > 0 ?
+                sycl::exp(src[p * stride + dim] - maximum) : 0.0f;
+            weights[p] = factor;
+            local_sum += factor * denominator;
+          }
+          const float sum = sycl::reduce_over_group(
+              workgroup, local_sum, sycl::plus<float>{});
+          item.barrier(sycl::access::fence_space::local_space);
+          if (component < dim) {
+            float value = 0;
+            for (int p = 0; p < parts; ++p)
+              value += weights[p] * src[p * stride + component];
+            Store(dst, row * dim + component, value / sum);
+          }
+        });
+      });
+      RecordProfileEvent(q, "attention_split_reduce_cooperative", reduce_event);
+      return;
+    }
     const auto reduce_event = NativeQueue(q).parallel_for(sycl::range<1>(tokens * heads * dim), [=](sycl::id<1> item) {
       const int64_t row = item[0] / dim, d = item[0] % dim;
       const auto* src = partial + row * parts * stride;
