@@ -1,0 +1,212 @@
+{
+  "status": "P3_baseline_measurement_no_optimization",
+  "instrumentation": "CheckDeviceMetadata host span measured before VT_CHECK; staging wait is nested; graph capture path remains separate",
+  "cases": {
+    "p4096_d1": {
+      "P": 4096,
+      "D": 1,
+      "kv_dtype": "fp8_e4m3",
+      "page_tokens": 1600,
+      "prompt_ids_fnv1a64": "9705ea213a213545",
+      "decode_ids_fnv1a64": "c5112a962b05756e",
+      "raw_log": "raw/p3_metadata_span_4096_2.log.gz",
+      "raw_log_sha256": "9f0393278221afcbd08ba10a3097e13c5d19d5f6b80960343faefa32a4a42de0",
+      "phases": {
+        "prefill": {
+          "validation_calls": 321,
+          "validation_host_ms": 2550.854202000002,
+          "metadata_d2h_region_ms": 2549.9407119999973,
+          "staged_d2h_wait_ms": 2549.388011999998,
+          "outside_d2h_region_ms": 0.9134900000044581,
+          "outside_staged_wait_ms": 1.466190000003735,
+          "checks_by_message": {},
+          "allocation_and_workspace_spans": {
+            "alloc_device": {
+              "count": 321,
+              "host_ms": 0.10610999999999997
+            },
+            "alloc_pinned": {
+              "count": 335,
+              "host_ms": 0.09805
+            },
+            "free_device_drain": {
+              "count": 321,
+              "host_ms": 0.04290000000000005
+            },
+            "free_pinned_drain": {
+              "count": 335,
+              "host_ms": 0.1421
+            },
+            "staged_h2d_wait": {
+              "count": 14,
+              "host_ms": 0.878261
+            },
+            "workspace_wait_gdn": {
+              "count": 48,
+              "host_ms": 728.8758279999998
+            }
+          }
+        },
+        "decode": {
+          "validation_calls": 129,
+          "validation_host_ms": 33.29596500000002,
+          "metadata_d2h_region_ms": 32.954995,
+          "staged_d2h_wait_ms": 32.763215,
+          "outside_d2h_region_ms": 0.34097000000002,
+          "outside_staged_wait_ms": 0.5327500000000143,
+          "checks_by_message": {},
+          "allocation_and_workspace_spans": {
+            "alloc_device": {
+              "count": 129,
+              "host_ms": 0.038399999999999976
+            },
+            "alloc_pinned": {
+              "count": 136,
+              "host_ms": 0.034699999999999974
+            },
+            "free_device_drain": {
+              "count": 129,
+              "host_ms": 0.01693000000000001
+            },
+            "free_pinned_drain": {
+              "count": 136,
+              "host_ms": 0.049069999999999996
+            },
+            "staged_h2d_wait": {
+              "count": 7,
+              "host_ms": 0.1084
+            },
+            "workspace_wait_attention": {
+              "count": 16,
+              "host_ms": 6.747363
+            }
+          }
+        }
+      }
+    },
+    "p128_d1": {
+      "P": 128,
+      "D": 1,
+      "kv_dtype": "fp8_e4m3",
+      "page_tokens": 1600,
+      "prompt_ids_fnv1a64": "213481898339b401",
+      "decode_ids_fnv1a64": "c5112a962b05756e",
+      "raw_log": "raw/p3_metadata_types_128_2.log.gz",
+      "raw_log_sha256": "903d035b99d8868b6a4c82a4ea6a97fd3b71d707f81cf9b3408b28f56bb8893b",
+      "phases": {
+        "prefill": {
+          "validation_calls": 321,
+          "validation_host_ms": 90.63230299999996,
+          "metadata_d2h_region_ms": 89.80026299999999,
+          "staged_d2h_wait_ms": 97.07145700000012,
+          "outside_d2h_region_ms": 0.8320399999999779,
+          "outside_staged_wait_ms": -6.439154000000158,
+          "checks_by_message": {
+            "XPU GDN/conv invalid or duplicate state slot": {
+              "count": 192,
+              "host_ms": 70.29611199999998
+            },
+            "XPU GDN/conv invalid sequence offsets": {
+              "count": 48,
+              "host_ms": 0.479431
+            },
+            "XPU KV slot outside cache": {
+              "count": 16,
+              "host_ms": 18.26068
+            },
+            "XPU chunked GDN invalid sequence offsets": {
+              "count": 48,
+              "host_ms": 1.07883
+            },
+            "XPU index out of range": {
+              "count": 1,
+              "host_ms": 0.12572
+            },
+            "XPU paged attention invalid sequence offsets, lengths or block table": {
+              "count": 16,
+              "host_ms": 0.39153000000000004
+            }
+          },
+          "allocation_and_workspace_spans": {
+            "alloc_device": {
+              "count": 337,
+              "host_ms": 0.08348999999999998
+            },
+            "alloc_pinned": {
+              "count": 351,
+              "host_ms": 0.08571000000000005
+            },
+            "free_device_drain": {
+              "count": 337,
+              "host_ms": 0.049720000000000035
+            },
+            "free_pinned_drain": {
+              "count": 351,
+              "host_ms": 0.11245000000000009
+            },
+            "staged_h2d_wait": {
+              "count": 14,
+              "host_ms": 0.12851
+            },
+            "workspace_wait_gdn": {
+              "count": 48,
+              "host_ms": 16.309641
+            }
+          }
+        },
+        "decode": {
+          "validation_calls": 129,
+          "validation_host_ms": 29.268307999999998,
+          "metadata_d2h_region_ms": 28.923598000000005,
+          "staged_d2h_wait_ms": 28.73168799999999,
+          "outside_d2h_region_ms": 0.3447099999999921,
+          "outside_staged_wait_ms": 0.5366200000000063,
+          "checks_by_message": {
+            "XPU GDN/conv invalid or duplicate state slot": {
+              "count": 96,
+              "host_ms": 22.559194
+            },
+            "XPU KV slot outside cache": {
+              "count": 16,
+              "host_ms": 6.455773999999999
+            },
+            "XPU index out of range": {
+              "count": 1,
+              "host_ms": 0.01477
+            },
+            "XPU paged attention invalid sequence offsets, lengths or block table": {
+              "count": 16,
+              "host_ms": 0.23857
+            }
+          },
+          "allocation_and_workspace_spans": {
+            "alloc_device": {
+              "count": 129,
+              "host_ms": 0.03770999999999999
+            },
+            "alloc_pinned": {
+              "count": 136,
+              "host_ms": 0.03445999999999998
+            },
+            "free_device_drain": {
+              "count": 129,
+              "host_ms": 0.018640000000000018
+            },
+            "free_pinned_drain": {
+              "count": 136,
+              "host_ms": 0.048389999999999996
+            },
+            "staged_h2d_wait": {
+              "count": 7,
+              "host_ms": 0.09247
+            },
+            "workspace_wait_attention": {
+              "count": 16,
+              "host_ms": 1.00302
+            }
+          }
+        }
+      }
+    }
+  }
+}
