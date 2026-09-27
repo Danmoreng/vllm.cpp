@@ -148,6 +148,59 @@ void GdnPostConvKernel(Queue& q, Tensor& qo, Tensor& ko, Tensor& vo, Tensor& go,
   const int64_t hv = vo.shape[1], dv = vo.shape[2], keys = hk * dk, values = hv * dv;
   const View src(conv), qs(qo), ks(ko), vs(vo), gs(go), bs(bo), a(araw), b(braw), al(alog), dt(bias);
   const float eps = args.eps;
+  const char* subgroup_setting = std::getenv("VT_XPU_GDN_POSTCONV_SUBGROUP");
+  const auto device = NativeQueue(q).get_device();
+  const bool subgroup = (!subgroup_setting ||
+      std::string_view(subgroup_setting) == "1") &&
+      conv.dtype == DType::kF16 && qo.dtype == DType::kF16 &&
+      ko.dtype == DType::kF16 && vo.dtype == DType::kF16 &&
+      hk == 16 && hv == 48 && dk == 128 && dv == 128 &&
+      device.has(sycl::aspect::ext_intel_device_id) &&
+      device.get_info<sycl::ext::intel::info::device::device_id>() == 57891;
+  if (subgroup) {
+    constexpr int SG = 16;
+    const auto event = NativeQueue(q).parallel_for(
+        sycl::nd_range<1>(tokens * (hk + hv) * SG, SG),
+        [=](sycl::nd_item<1> item) [[sycl::reqd_sub_group_size(16)]] {
+      const int64_t group = item.get_group(0);
+      const int64_t token = group / (hk + hv), head = group % (hk + hv);
+      const int lane = item.get_local_id(0);
+      const int64_t base = token * (2 * keys + values);
+      if (head < hk) {
+        float qss = 0, kss = 0;
+        for (int64_t i = lane; i < dk; i += SG) {
+          const float qv = Load(src, base + head * dk + i);
+          const float kv = Load(src, base + keys + head * dk + i);
+          qss += qv * qv; kss += kv * kv;
+        }
+        const auto sg = item.get_sub_group();
+        qss = sycl::reduce_over_group(sg, qss, sycl::plus<float>());
+        kss = sycl::reduce_over_group(sg, kss, sycl::plus<float>());
+        const float qi = 1.0f / sycl::sqrt(qss + eps);
+        const float ki = 1.0f / sycl::sqrt(kss + eps);
+        for (int64_t i = lane; i < dk; i += SG) {
+          Store(qs, (token * hk + head) * dk + i,
+                Load(src, base + head * dk + i) * qi);
+          Store(ks, (token * hk + head) * dk + i,
+                Load(src, base + keys + head * dk + i) * ki);
+        }
+      } else {
+        const int64_t h = head - hk;
+        for (int64_t i = lane; i < dv; i += SG)
+          Store(vs, (token * hv + h) * dv + i,
+                Load(src, base + 2 * keys + h * dv + i));
+        if (lane == 0) {
+          const float x = Load(a, token * a.stride[0] + h) + Load(dt, h);
+          const float softplus = x > 20.0f ? x : sycl::log1p(sycl::exp(x));
+          Store(gs, token * hv + h, -sycl::exp(Load(al, h)) * softplus);
+          Store(bs, token * hv + h,
+                1.0f / (1.0f + sycl::exp(-Load(b, token * b.stride[0] + h))));
+        }
+      }
+    });
+    RecordProfileEvent(q, "gdn_postconv_subgroup", event);
+    return;
+  }
   const auto event = NativeQueue(q).parallel_for(sycl::range<1>(tokens * (hk + hv)), [=](sycl::id<1> item) {
     const int64_t token = item[0] / (hk + hv), head = item[0] % (hk + hv);
     const int64_t base = token * (2 * keys + values);
