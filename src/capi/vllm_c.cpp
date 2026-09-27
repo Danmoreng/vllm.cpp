@@ -1463,12 +1463,14 @@ VLLM_API void vllm_transcription_free(vllm_transcription* out) {
 
 // ── Speaker diarization (ABI v30) ──────────────────────────────────────────
 
-#ifdef VLLM_WITH_DIARIZATION
+// ── Speaker diarization (ABI v30) ──────────────────────────────────────────
+
 VLLM_API vllm_engine* vllm_diarization_load(const char* gguf_path) {
   if (gguf_path == nullptr) {
     SetError("vllm_diarization_load: gguf_path is null");
     return nullptr;
   }
+#ifdef VLLM_WITH_DIARIZATION
   parakeet_ctx* diar_ctx = parakeet_capi_load(gguf_path);
   if (diar_ctx == nullptr) {
     SetError(std::string("vllm_diarization_load: parakeet_capi_load failed: ")
@@ -1476,14 +1478,38 @@ VLLM_API vllm_engine* vllm_diarization_load(const char* gguf_path) {
     return nullptr;
   }
   auto* handle = new vllm_engine;
-  handle->diarizer = std::unique_ptr<vllm::multimodal::Diarizer>(
-      new vllm::multimodal::Diarizer());
-  // Steal the ctx into the Diarizer wrapper
   handle->diarizer_ctx = diar_ctx;
   handle->model_path = gguf_path;
   ClearError();
   return handle;
+#else
+  SetError("vllm_diarization_load: diarization not compiled in");
+  return nullptr;
+#endif
 }
+
+#ifdef VLLM_WITH_DIARIZATION
+// Parse parakeet.cpp diarization JSON into vllm_speaker_segment array.
+// JSON format: {"segments": [{"speaker": N, "start": S, "end": E}, ...]}
+static vllm_status ParseDiarizationJson(
+    const char* json_str, vllm_diarization* out) {
+  if (!json_str) return VLLM_ERR_RUNTIME;
+  auto j = nlohmann::json::parse(json_str);
+  int n = 0;
+  if (j.contains("segments")) n = j["segments"].size();
+  auto* segs = static_cast<vllm_speaker_segment*>(
+      std::malloc(n == 0 ? 1 : n * sizeof(vllm_speaker_segment)));
+  if (segs == nullptr) return VLLM_ERR_RUNTIME;
+  for (int i = 0; i < n; ++i) {
+    segs[i].speaker = j["segments"][i].value("speaker", -1);
+    segs[i].start = j["segments"][i].value("start", 0.0f);
+    segs[i].end = j["segments"][i].value("end", 0.0f);
+  }
+  out->segments = segs;
+  out->n_segments = n;
+  return VLLM_OK;
+}
+#endif
 
 VLLM_API vllm_status vllm_diarize_path(vllm_engine* diar_engine,
                                        const char* wav_path,
@@ -1504,28 +1530,18 @@ VLLM_API vllm_status vllm_diarize_path(vllm_engine* diar_engine,
     return VLLM_ERR_INVALID_ARGUMENT;
   }
   try {
-    parakeet_diarization_result* result =
-        parakeet_capi_diarize_path(diar_engine->diarizer_ctx, wav_path);
-    if (result == nullptr) {
+    char* json = parakeet_capi_diarize_path(
+        diar_engine->diarizer_ctx, wav_path);
+    if (json == nullptr) {
       SetError("vllm_diarize_path: diarize returned null");
       return VLLM_ERR_RUNTIME;
     }
-    int n = result->n_segments;
-    auto* segs = static_cast<vllm_speaker_segment*>(
-        std::malloc(n * sizeof(vllm_speaker_segment)));
-    if (segs == nullptr && n > 0) {
-      parakeet_capi_free_diarization_result(result);
-      SetError("vllm_diarize_path: out-of-memory");
-      return VLLM_ERR_RUNTIME;
+    auto status = ParseDiarizationJson(json, out);
+    parakeet_capi_free_string(json);
+    if (status != VLLM_OK) {
+      SetError("vllm_diarize_path: failed to parse diarization JSON");
+      return status;
     }
-    for (int i = 0; i < n; ++i) {
-      segs[i].speaker = result->segments[i].speaker;
-      segs[i].start = result->segments[i].start;
-      segs[i].end = result->segments[i].end;
-    }
-    parakeet_capi_free_diarization_result(result);
-    out->segments = segs;
-    out->n_segments = n;
     ClearError();
     return VLLM_OK;
   } catch (const std::exception& e) {
@@ -1542,6 +1558,7 @@ VLLM_API vllm_status vllm_diarize_pcm(vllm_engine* diar_engine,
                                       const float* pcm, int64_t n_samples,
                                       int32_t sample_rate,
                                       vllm_diarization* out) {
+  (void)sample_rate;  // used only in the VLLM_WITH_DIARIZATION path
   if (out == nullptr) {
     SetError("vllm_diarize_pcm: out is null");
     return VLLM_ERR_INVALID_ARGUMENT;
@@ -1558,28 +1575,18 @@ VLLM_API vllm_status vllm_diarize_pcm(vllm_engine* diar_engine,
     return VLLM_ERR_INVALID_ARGUMENT;
   }
   try {
-    parakeet_diarization_result* result = parakeet_capi_diarize_pcm(
+    char* json = parakeet_capi_diarize_pcm(
         diar_engine->diarizer_ctx, pcm, (int)n_samples, sample_rate);
-    if (result == nullptr) {
+    if (json == nullptr) {
       SetError("vllm_diarize_pcm: diarize returned null");
       return VLLM_ERR_RUNTIME;
     }
-    int n = result->n_segments;
-    auto* segs = static_cast<vllm_speaker_segment*>(
-        std::malloc(n * sizeof(vllm_speaker_segment)));
-    if (segs == nullptr && n > 0) {
-      parakeet_capi_free_diarization_result(result);
-      SetError("vllm_diarize_pcm: out-of-memory");
-      return VLLM_ERR_RUNTIME;
+    auto status = ParseDiarizationJson(json, out);
+    parakeet_capi_free_string(json);
+    if (status != VLLM_OK) {
+      SetError("vllm_diarize_pcm: failed to parse diarization JSON");
+      return status;
     }
-    for (int i = 0; i < n; ++i) {
-      segs[i].speaker = result->segments[i].speaker;
-      segs[i].start = result->segments[i].start;
-      segs[i].end = result->segments[i].end;
-    }
-    parakeet_capi_free_diarization_result(result);
-    out->segments = segs;
-    out->n_segments = n;
     ClearError();
     return VLLM_OK;
   } catch (const std::exception& e) {
@@ -1625,8 +1632,26 @@ VLLM_API vllm_status vllm_transcribe_and_diarize(
     return VLLM_ERR_INVALID_ARGUMENT;
   }
   try {
-    // Read WAV into PCM
-    auto pcm = vllm::multimodal::ReadWavPcm16Mono(wav_path);
+    // Read WAV into PCM inline (ReadWavPcm16Mono is static in diarization.cpp)
+    std::vector<float> pcm;
+    {
+      FILE* f = std::fopen(wav_path, "rb");
+      if (!f) {
+        SetError("vllm_transcribe_and_diarize: cannot open WAV");
+        return VLLM_ERR_RUNTIME;
+      }
+      char hdr[44];
+      if (std::fread(hdr, 1, 44, f) != 44) {
+        std::fclose(f);
+        SetError("vllm_transcribe_and_diarize: WAV too short");
+        return VLLM_ERR_RUNTIME;
+      }
+      std::fseek(f, 44, SEEK_SET);
+      int16_t sample;
+      while (std::fread(&sample, 2, 1, f) == 1)
+        pcm.push_back(static_cast<float>(sample) / 32768.0f);
+      std::fclose(f);
+    }
     int n_sas = 0;
     parakeet_sas_result* sas = parakeet_capi_transcribe_and_diarize(
         asr_engine->parakeet_asr_ctx, diar_engine->diarizer_ctx,
@@ -1671,6 +1696,7 @@ VLLM_API vllm_status vllm_transcribe_and_diarize_pcm(
     vllm_engine* asr_engine, vllm_engine* diar_engine,
     const float* pcm, int64_t n_samples, int32_t sample_rate,
     vllm_sas_result* out) {
+  (void)sample_rate;  // used only in the VLLM_WITH_DIARIZATION path
   if (out == nullptr) {
     SetError("vllm_transcribe_and_diarize_pcm: out is null");
     return VLLM_ERR_INVALID_ARGUMENT;

@@ -143,6 +143,12 @@ class ApiServer {
   // extracts the upload and calls this with the raw file bytes.
   DispatchResult handle_audio_transcriptions(
       const std::string& file_bytes, const std::string& response_format) const;
+#ifdef VLLM_WITH_DIARIZATION
+  DispatchResult handle_audio_diarizations(
+      const std::string& file_bytes, const std::string& response_format) const;
+  DispatchResult handle_audio_sas(
+      const std::string& file_bytes, const std::string& response_format) const;
+#endif
 
   // POST /v1/embeddings (ARCH-ONE-SURFACE ROW 6). Mirror of vLLM's
   // pooling/embed/api_router.py:28 `create_embedding` over the
