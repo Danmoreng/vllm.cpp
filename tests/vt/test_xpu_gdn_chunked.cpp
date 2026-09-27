@@ -136,11 +136,15 @@ TEST_CASE("XPU GDN short F16 prefill selects chunked kernel"
   Accuracy(got.state, ref.state);
   const auto records = vt::xpu::DrainProfileEvents();
   size_t dots = 0, recurrence = 0, wu_xmx = 0, wu_xmx_prepare = 0;
+  size_t state_xmx = 0, state_xmx_prepare = 0, state_tile4 = 0;
   for (const auto& record : records) {
     dots += record.stage == "gdn_chunk_dots_qk";
     recurrence += record.stage == "gdn_prefill_recurrence";
     wu_xmx += record.stage == "gdn_chunk_wu_xmx";
     wu_xmx_prepare += record.stage == "gdn_chunk_wu_xmx_prepare";
+    state_xmx += record.stage == "gdn_chunk_state_xmx";
+    state_xmx_prepare += record.stage == "gdn_chunk_state_xmx_prepare";
+    state_tile4 += record.stage == "gdn_chunk_state_tile4";
   }
   CHECK(dots == 1);
   CHECK(recurrence == 0);
@@ -149,6 +153,12 @@ TEST_CASE("XPU GDN short F16 prefill selects chunked kernel"
   const bool expect_xmx = wu == "auto" || wu == "xmx";
   CHECK(wu_xmx == static_cast<size_t>(expect_xmx));
   CHECK(wu_xmx_prepare == static_cast<size_t>(expect_xmx));
+  requested = std::getenv("VT_XPU_GDN_STATE");
+  const std::string_view state = requested ? requested : "auto";
+  const bool expect_state_xmx = state == "auto" || state == "xmx";
+  CHECK(state_xmx == static_cast<size_t>(expect_state_xmx));
+  CHECK(state_xmx_prepare == static_cast<size_t>(expect_state_xmx));
+  CHECK(state_tile4 == static_cast<size_t>(!expect_state_xmx));
 }
 
 TEST_CASE("XPU GDN chunk64: full output and F32 state against sequential CPU") {

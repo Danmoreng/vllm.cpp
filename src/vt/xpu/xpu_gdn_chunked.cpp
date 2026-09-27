@@ -45,6 +45,7 @@ template <typename Input>
 struct ChunkScratch {
   Input *q, *k, *kt, *inverse_xmx, *weighted_k, *weighted_v;
   Input *inverse_xmx_lo, *weighted_k_lo, *weighted_v_lo;
+  Input *weighted_delta_hi, *weighted_delta_lo;
   float *g, *exp_g, *tail_decay, *lower, *qk, *inverse, *w, *u, *delta, *cross, *state_t;
   ChunkScratch(void* storage, int heads) {
     auto* cursor = static_cast<char*>(storage);
@@ -62,6 +63,9 @@ struct ChunkScratch {
     inverse_xmx_lo = reinterpret_cast<Input*>(lower);
     weighted_k_lo = reinterpret_cast<Input*>(delta);
     weighted_v_lo = weighted_k_lo + heads * C * D;
+    // Cross is dead after the output kernel and can hold the state operands.
+    weighted_delta_hi = reinterpret_cast<Input*>(cross);
+    weighted_delta_lo = weighted_delta_hi + heads * D * C;
     VT_CHECK(size_t(cursor - static_cast<char*>(storage)) <= WorkspaceBytes, "GDN workspace overflow");
   }
 };
@@ -401,6 +405,56 @@ void ComputeWU(Queue& queue, ChunkScratch<Input> s, View vi, View beta, const in
 }
 
 template <typename Input>
+void ComputeStateXmx(Queue& queue, ChunkScratch<Input> s, float* state,
+                     const int32_t* offsets, int sequence, int base, int heads) {
+  namespace mx = sycl::ext::oneapi::experimental::matrix;
+  auto& q = NativeQueue(queue);
+  const auto prepare = q.parallel_for(sycl::range<1>(heads * D * C), [=](sycl::id<1> item) {
+    const int index = item[0], h = index / (D * C), v = index / C % D, j = index % C;
+    const int n = sycl::min(C, sycl::max(0, offsets[sequence + 1] - offsets[sequence] - base));
+    const float weighted = j < n
+        ? s.delta[(h * C + j) * D + v] * s.tail_decay[h * C + j] : 0.0f;
+    const Input hi(weighted);
+    s.weighted_delta_hi[index] = hi;
+    s.weighted_delta_lo[index] = Input(weighted - static_cast<float>(hi));
+  });
+  RecordProfileEvent(queue, "gdn_chunk_state_xmx_prepare", prepare);
+  const auto gemm = q.parallel_for(
+      sycl::nd_range<1>(heads * (D / 16) * (D / 16) * 16, 16),
+      [=](sycl::nd_item<1> item) [[sycl::reqd_sub_group_size(16)]] {
+    const int n = sycl::min(C, sycl::max(0, offsets[sequence + 1] - offsets[sequence] - base));
+    if (!n) return;
+    auto sg = item.get_sub_group();
+    const int tile = item.get_group(0), h = tile / ((D / 16) * (D / 16));
+    const int v = tile / (D / 16) % (D / 16) * 16, d = tile % (D / 16) * 16;
+    mx::joint_matrix<sycl::sub_group, Input, mx::use::a, 16, 16, mx::layout::row_major> a, a_lo;
+    mx::joint_matrix<sycl::sub_group, Input, mx::use::b, 16, 16, mx::layout::row_major> b;
+    mx::joint_matrix<sycl::sub_group, float, mx::use::accumulator, 16, 16> product;
+    mx::joint_matrix_fill(sg, product, 0.0f);
+    for (int j = 0; j < C; j += 16) {
+      mx::joint_matrix_load(sg, a, sycl::address_space_cast<sycl::access::address_space::global_space,
+          sycl::access::decorated::no>(s.weighted_delta_hi + (h * D + v) * C + j), C);
+      mx::joint_matrix_load(sg, a_lo, sycl::address_space_cast<sycl::access::address_space::global_space,
+          sycl::access::decorated::no>(s.weighted_delta_lo + (h * D + v) * C + j), C);
+      mx::joint_matrix_load(sg, b, sycl::address_space_cast<sycl::access::address_space::global_space,
+          sycl::access::decorated::no>(s.k + (h * C + j) * D + d), D);
+      mx::joint_matrix_mad(sg, product, a, b, product);
+      mx::joint_matrix_mad(sg, product, a_lo, b, product);
+    }
+    float* out = state + (sequence * heads + h) * D * D + v * D + d;
+    mx::joint_matrix_store(sg, product, sycl::address_space_cast<sycl::access::address_space::global_space,
+        sycl::access::decorated::no>(out), D, mx::layout::row_major);
+    item.barrier(sycl::access::fence_space::global_space);
+    const float decay = s.exp_g[h * C + n - 1];
+    for (int i = item.get_local_id(0); i < 16 * 16; i += 16) {
+      const int row = i / 16, col = i % 16;
+      out[row * D + col] += s.state_t[(h * D + d + col) * D + v + row] * decay;
+    }
+  });
+  RecordProfileEvent(queue, "gdn_chunk_state_xmx", gemm);
+}
+
+template <typename Input>
 void OutputState(Queue& queue, ChunkScratch<Input> s, View output, float* state, const int32_t* offsets,
                  int sequence, int base, int heads, float scale) {
   auto& q = NativeQueue(queue);
@@ -473,6 +527,19 @@ void OutputState(Queue& queue, ChunkScratch<Input> s, View output, float* state,
     });
     RecordProfileEvent(queue, "gdn_chunk_output", output_event);
   }
+  static const std::string_view state_mode = [] {
+    const char* value = std::getenv("VT_XPU_GDN_STATE");
+    const std::string_view requested = value ? value : "auto";
+    VT_CHECK(requested == "auto" || requested == "tile4" || requested == "xmx",
+             "Invalid VT_XPU_GDN_STATE");
+    const std::string_view mode = requested == "auto"
+        ? (std::is_same_v<Input, sycl::half> ? "xmx" : "tile4") : requested;
+    VT_CHECK((mode != "xmx" || std::is_same_v<Input, sycl::half>),
+             "XPU GDN state XMX requires F16 input");
+    return mode;
+  }();
+  if (state_mode == "xmx")
+    return ComputeStateXmx(queue, s, state, offsets, sequence, base, heads);
   if (intra_state_tile) {
     constexpr int width = 4;
     const auto event = q.parallel_for(sycl::range<1>(heads * D * (D / width)), [=](sycl::id<1> item) {
