@@ -12,9 +12,9 @@
 // discoverable, the config parses, the KV-cache spec builds.
 //
 // The KV-cache has two groups:
-//   1. FullAttentionSpec for full-attention layers (every 6th: 0,6,12,...,42):
+//   1. FullAttentionSpec for full-attention layers (0,5,11,17,23,29,35,41,47):
 //      4 KV heads, head_size=192, head_size_v=128
-//   2. SlidingWindowSpec for SWA layers (the remaining 40):
+//   2. SlidingWindowSpec for SWA layers (the remaining 39):
 //      8 KV heads, head_size=192, head_size_v=128, sliding_window=128
 //
 // The v_head_dim != head_dim pattern is new: both specs accept head_size_v
@@ -176,6 +176,7 @@ v1::KVCacheConfig MakeMiMoV2KVCache(const HfConfig& config, int block_size,
   // Two KV-cache groups: full-attention layers and SWA layers.
   // Full-attention layers: 4 KV heads, head_size=192, head_size_v=128
   // SWA layers: 8 KV heads, head_size=192, head_size_v=128, sliding_window=128
+  // Pattern: [0,1,1,1,1,0,...] — full attention (0) at 0,5,11,17,23,29,35,41,47
   std::vector<std::string> full_layer_names;
   std::vector<std::string> swa_layer_names;
   for (int i = 0; i < static_cast<int>(p.hybrid_layer_pattern.size()); ++i) {
