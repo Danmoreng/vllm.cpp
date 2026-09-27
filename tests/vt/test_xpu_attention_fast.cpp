@@ -125,6 +125,53 @@ TEST_CASE("XPU split-KV: E4M3 quantization against BF16 at 32k") {
   Accuracy(fp8.result(), bf16.result(), true);
   CHECK(fp8.cache.bytes * 2 == bf16.cache.bytes);
 }
+TEST_CASE("XPU FP8 attention: 20-query split boundary at 4K context"
+          * doctest::skip(!std::getenv("VT_XPU_PROFILE"))) {
+  Queue gpu(vt::DeviceType::kXPU);
+  for (int queries : {20, 21, 31, 32, 33}) {
+    CAPTURE(queries);
+    Fixture f(gpu.q, 1, queries, 4096 + queries, true, false, 1600,
+              DType::kF16, DType::kF16, DType::kF16, true);
+    f.run("reference");
+    const auto expected = f.result();
+    (void)vt::xpu::DrainProfileEvents();
+    f.run("auto");
+    Accuracy(f.result(), expected, false, true);
+    int split = 0, q32 = 0, fallback = 0;
+    for (const auto& event : vt::xpu::DrainProfileEvents()) {
+      split += event.stage == "attention_split_partial";
+      q32 += event.stage == "attention_prefill_q32";
+      fallback += event.stage == "attention_reference";
+    }
+    CHECK(split + q32 + fallback == 1);
+    CHECK((queries <= 31 ? split == 1 : q32 == 1));
+    if (queries == 21) {
+      setenv("VT_XPU_ATTN_SPLIT_EXTENDED", "0", 1);
+      (void)vt::xpu::DrainProfileEvents();
+      f.run("auto");
+      int opted_out = 0;
+      for (const auto& event : vt::xpu::DrainProfileEvents())
+        opted_out += event.stage == "attention_reference";
+      CHECK(opted_out == 1);
+      unsetenv("VT_XPU_ATTN_SPLIT_EXTENDED");
+    }
+    if (std::getenv("VT_B70_ATTN_BENCH")) {
+      std::vector<double> samples;
+      for (int repeat = 0; repeat < 5; ++repeat) {
+        const auto start = std::chrono::steady_clock::now();
+        f.run("auto");
+        samples.push_back(std::chrono::duration<double, std::milli>(
+            std::chrono::steady_clock::now() - start).count());
+      }
+      std::sort(samples.begin(), samples.end());
+      std::cout << nlohmann::json{{"event", "fp8_attention_boundary"},
+          {"query_tokens", queries}, {"context_tokens", 4096 + queries},
+          {"route", split ? "split" : q32 ? "q32" : "reference"},
+          {"median_ms", samples[2]}, {"samples_ms", samples}}.dump()
+                << std::endl;
+    }
+  }
+}
 TEST_CASE("XPU attention: timing" * doctest::skip(!std::getenv("VT_B70_ATTN_BENCH"))) {
   Queue gpu(vt::DeviceType::kXPU);
   std::cout << "DEVICE " << vt::xpu::DeviceDescription() << std::endl;
