@@ -17,7 +17,9 @@ then run on VT's own queue and FP32 state. No Python, PyTorch, or Triton
 runtime is used by this route. A separate bounded 160 MiB workspace keeps
 the existing 16/32 MiB GDN fallback untouched.
 
-The prototype selects only the single-sequence P4096 F16/Hv48/Hk16/D128
-shape and requires `VT_XPU_GDN_NATIVE=1`. Other inputs use the existing path.
-It must pass the real-layer, continuation, full-model quality, and performance
-gates before becoming a default or being reported as a speed improvement.
+The prototype selects single-sequence P4096, P8192 or P16384 with
+F16/Hv48/Hk16/D128 and requires `VT_XPU_GDN_NATIVE=1`. Longer inputs are
+processed as sequential 4K macro segments with the same bounded scratch and
+the FP32 state carried forward. Other inputs use the existing path. The 4K
+and 8K model results are recorded under `docs/bench-evidence`; wider default
+qualification remains open.

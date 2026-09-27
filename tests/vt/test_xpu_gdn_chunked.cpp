@@ -306,6 +306,122 @@ TEST_CASE("XPU GDN P4 native Xe2 real layer diagnostic"
 #endif
 }
 
+TEST_CASE("XPU GDN P4 native Xe2 long macro continuation diagnostic"
+          * doctest::skip(!std::getenv("VT_B70_GDN_REPLAY_DIR") ||
+                          !std::getenv("VT_B70_GDN_LONG_TEST"))) {
+#ifdef VLLM_CPP_XPU_XE2_GDN
+  const std::string dir = std::getenv("VT_B70_GDN_REPLAY_DIR");
+  Queue gpu(vt::DeviceType::kXPU);
+  auto& q = gpu.q;
+  constexpr int segment = 4096, key_heads = 16, heads = 48;
+  const int tokens = std::getenv("VT_B70_GDN_LONG_TOKENS")
+      ? std::stoi(std::getenv("VT_B70_GDN_LONG_TOKENS")) : 2 * segment;
+  const bool supported_length = tokens == 2 * segment || tokens == 4 * segment;
+  REQUIRE(supported_length);
+  Buffer qi(q, DType::kF16, {tokens, key_heads, D});
+  Buffer ki(q, DType::kF16, {tokens, key_heads, D});
+  Buffer vi(q, DType::kF16, {tokens, heads, D});
+  Buffer g(q, DType::kF32, {tokens, heads});
+  Buffer beta(q, DType::kF32, {tokens, heads});
+  Buffer state(q, DType::kF32, {1, heads, D, D});
+  Buffer qsl(q, DType::kI32, {2});
+  Buffer out(q, DType::kF16, {tokens, heads, D});
+  auto duplicate = [&](Buffer& buffer, const char* name) {
+    const auto first = ReplayBytes(dir, name, buffer.bytes / (tokens / segment));
+    std::vector<unsigned char> data(buffer.bytes);
+    for (int token = 0; token < tokens; token += segment)
+      std::memcpy(data.data() + token * buffer.bytes / tokens,
+                  first.data(), first.size());
+    buffer.upload(data.data());
+  };
+  duplicate(qi, "q"); duplicate(ki, "k"); duplicate(vi, "v");
+  duplicate(g, "g"); duplicate(beta, "beta");
+  const auto initial = ReplayBytes(dir, "ssm_state_before", state.bytes);
+  state.upload(initial.data());
+  const int32_t full_offsets[2] = {0, tokens};
+  qsl.upload(full_offsets);
+  REQUIRE(vt::xpu::GdnNativePrefillKernel(q, out.tensor, qi.tensor, ki.tensor,
+      vi.tensor, g.tensor, beta.tensor, state.tensor, qsl.tensor,
+      {0.0883883476f}));
+  const auto native_out = out.floats();
+  const auto native_state = state.floats();
+  CHECK(vt::xpu::GetMemoryInfo().native_gdn_workspace_bytes <= 160u * 1024 * 1024);
+
+  state.upload(initial.data());
+  const int32_t segment_offsets[2] = {0, segment};
+  qsl.upload(segment_offsets);
+  auto rows = [](vt::Tensor tensor, int first, int count) {
+    tensor.data = static_cast<char*>(tensor.data) +
+        first * tensor.stride[0] * vt::SizeOf(tensor.dtype);
+    tensor.shape[0] = count;
+    return tensor;
+  };
+  for (int first = 0; first < tokens; first += segment) {
+    auto target = rows(out.tensor, first, segment);
+    REQUIRE(vt::xpu::GdnChunkedPrefillKernel(q, target,
+        rows(qi.tensor, first, segment), rows(ki.tensor, first, segment),
+        rows(vi.tensor, first, segment), rows(g.tensor, first, segment),
+        rows(beta.tensor, first, segment), state.tensor, qsl.tensor,
+        {0.0883883476f}));
+  }
+  const auto old_out = out.floats();
+  const auto old_state = state.floats();
+  auto report = [](const char* name, const std::vector<float>& actual,
+                   const std::vector<float>& reference) {
+    REQUIRE(actual.size() == reference.size());
+    double squared_error = 0, squared_ref = 0, max_abs = 0;
+    for (size_t i = 0; i < actual.size(); ++i) {
+      REQUIRE(std::isfinite(actual[i]));
+      const double diff = double(actual[i]) - reference[i];
+      squared_error += diff * diff;
+      squared_ref += double(reference[i]) * reference[i];
+      max_abs = std::max(max_abs, std::abs(diff));
+    }
+    std::cout << "GDN_NATIVE_LONG stage=" << name << " relative_rms="
+              << std::sqrt(squared_error / std::max(squared_ref, 1e-30))
+              << " max_abs=" << max_abs << std::endl;
+  };
+  report("core_out", native_out, old_out);
+  report("ssm_state_after", native_state, old_state);
+  if (std::getenv("VT_B70_GDN_LONG_BENCH")) {
+    auto& backend = vt::GetBackend(q.device);
+    auto measure = [&](bool native) {
+      qsl.upload(native ? full_offsets : segment_offsets);
+      std::vector<double> milliseconds;
+      for (int repetition = 0; repetition < 6; ++repetition) {
+        state.upload(initial.data());
+        const auto start = std::chrono::steady_clock::now();
+        if (native) {
+          REQUIRE(vt::xpu::GdnNativePrefillKernel(q, out.tensor, qi.tensor,
+              ki.tensor, vi.tensor, g.tensor, beta.tensor, state.tensor,
+              qsl.tensor, {0.0883883476f}));
+        } else {
+          for (int first = 0; first < tokens; first += segment) {
+            auto target = rows(out.tensor, first, segment);
+            REQUIRE(vt::xpu::GdnChunkedPrefillKernel(q, target,
+                rows(qi.tensor, first, segment), rows(ki.tensor, first, segment),
+                rows(vi.tensor, first, segment), rows(g.tensor, first, segment),
+                rows(beta.tensor, first, segment), state.tensor, qsl.tensor,
+                {0.0883883476f}));
+          }
+        }
+        backend.Synchronize(q);
+        const auto end = std::chrono::steady_clock::now();
+        if (repetition) milliseconds.push_back(
+            std::chrono::duration<double, std::milli>(end - start).count());
+      }
+      std::sort(milliseconds.begin(), milliseconds.end());
+      return milliseconds[milliseconds.size() / 2];
+    };
+    const double old_ms = measure(false);
+    const double native_ms = measure(true);
+    std::cout << "GDN_NATIVE_LONG_BENCH tokens=" << tokens << " old_median_ms="
+              << old_ms << " native_median_ms=" << native_ms
+              << " speedup=" << old_ms / native_ms << std::endl;
+  }
+#endif
+}
+
 TEST_CASE("XPU GDN chunk64: F16 XMX output and F32 state match sequential CPU") {
   Queue cpu(vt::DeviceType::kCPU), gpu(vt::DeviceType::kXPU);
   for (int length : {64, 65}) {
