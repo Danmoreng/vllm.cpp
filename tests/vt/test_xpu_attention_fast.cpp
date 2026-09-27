@@ -7,6 +7,7 @@
 #include <iostream>
 #include <numeric>
 #include <string_view>
+#include <utility>
 #include <nlohmann/json.hpp>
 
 namespace {
@@ -585,11 +586,12 @@ TEST_CASE("XPU Xe2 FP8 prefill: default dispatch with 1600-token pages"
   CHECK(fallback == 0);
 }
 
-TEST_CASE("XPU Xe2 FP8 prefill: 2K/4K boundaries and 8K with paged KV"
+TEST_CASE("XPU Xe2 FP8 prefill: 2K-8K ragged initial prompt with paged KV"
           * doctest::skip(!std::getenv("VT_XPU_PROFILE") ||
                           std::getenv("VT_XPU_XE2_PREFILL"))) {
   Queue gpu(vt::DeviceType::kXPU);
-  for (int tokens : {2048, 2049, 4095, 4096, 4097, 8192})
+  for (int tokens : {2048, 2049, 2050, 3071, 3072, 3073,
+                     4095, 4096, 4097, 6143, 6144, 6145, 8191, 8192})
       for (int page : {64, 1600}) {
     CAPTURE(tokens);
     CAPTURE(page);
@@ -624,13 +626,24 @@ TEST_CASE("XPU Xe2 FP8 prefill: 2K/4K boundaries and 8K with paged KV"
   }
 }
 
-TEST_CASE("XPU Xe2 FP8 prefill: causal 2K/4K continuation over 4K prefix"
+TEST_CASE("XPU Xe2 FP8 prefill: ragged continuation through 8K KV"
           * doctest::skip(!std::getenv("VT_XPU_PROFILE") ||
                           std::getenv("VT_XPU_XE2_PREFILL"))) {
   Queue gpu(vt::DeviceType::kXPU);
-  for (int queries : {2048, 4096}) for (int page : {64, 1600}) {
-    const int context = 4096 + queries;
+  for (auto [queries, prefix] : {std::pair{2048, 63},
+                                 std::pair{2048, 2048},
+                                 std::pair{2048, 4096},
+                                 std::pair{2049, 4096},
+                                 std::pair{3071, 4096},
+                                 std::pair{3072, 1600},
+                                 std::pair{3072, 4096},
+                                 std::pair{3073, 4096},
+                                 std::pair{4095, 4096},
+                                 std::pair{4096, 4096}})
+      for (int page : {64, 1600}) {
+    const int context = prefix + queries;
     CAPTURE(queries);
+    CAPTURE(prefix);
     CAPTURE(page);
     Fixture f(gpu.q, 1, queries, context, true, false, page,
               DType::kF16, DType::kF16, DType::kF16, true);
@@ -670,7 +683,10 @@ TEST_CASE("XPU Xe2 FP8 prefill: causal 2K/4K continuation over 4K prefix"
       CHECK(opted_out == 1);
       unsetenv("VT_XPU_XE2_CONTINUATION");
     }
-    if (std::getenv("VT_B70_ATTN_BENCH")) {
+    if (std::getenv("VT_B70_ATTN_BENCH") &&
+        ((queries == 3072 && prefix == 4096) ||
+         (queries == 2048 && prefix == 4096) ||
+         (queries == 4096 && prefix == 4096))) {
       std::vector<double> old_ms, xe2_ms;
       for (int repeat = 0; repeat < 5; ++repeat) {
         setenv("VT_XPU_XE2_PREFILL", "0", 1);

@@ -25,13 +25,13 @@ bool PagedAttentionXe2PrefillKernel(Queue& q, Tensor& out, const Tensor& query,
   const auto device = NativeQueue(q).get_device();
   constexpr int dim = 256, q_heads = 24, kv_heads = 4;
   const auto tokens = query.shape[0], page = key_cache.shape[1];
-  // The qualified continuations read an existing 4K prefix. The donor's
-  // causal offset uses the device KV length minus the device query length.
-  const bool initial_prefill = args.max_seq_len == tokens &&
-      (tokens == 2048 || tokens == 2049 || tokens == 4095 ||
-       tokens == 4096 || tokens == 4097 || tokens == 8192);
-  const bool continuation = (tokens == 2048 && args.max_seq_len == 6144) ||
-      (tokens == 4096 && args.max_seq_len == 8192);
+  // The native causal offset uses KV length minus query length. Limit this
+  // qualified range to one request, at most 8K KV and a 4K existing prefix;
+  // the remaining shape/layout checks below still apply.
+  const int64_t prefix = args.max_seq_len - tokens;
+  const bool initial_prefill = prefix == 0 && tokens >= 2048 && tokens <= 8192;
+  const bool continuation = prefix > 0 && prefix <= 4096 &&
+      tokens >= 2048 && tokens <= 4096 && args.max_seq_len <= 8192;
   if (continuation) {
     const char* continuation_setting = std::getenv("VT_XPU_XE2_CONTINUATION");
     if (continuation_setting && std::string_view(continuation_setting) != "1")
