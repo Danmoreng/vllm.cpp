@@ -50,9 +50,12 @@ HfConfig MakeMiMoV2Config() {
   j["rms_norm_eps"] = 1e-6;
   j["hidden_act"] = "silu";
 
-  // 48-element hybrid pattern: 0 every 6th, 1 for the rest.
+  // 48-element hybrid pattern matching the actual checkpoint:
+  // [0, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 0, ...]
+  // Full-attention (0) at indices 0, 5, 11, 17, 23, 29, 35, 41, 47 → 9 layers
   std::vector<int> pattern(48, 1);
-  for (int i = 0; i < 48; i += 6) pattern[i] = 0;
+  pattern[0] = 0;
+  for (int i = 5; i < 48; i += 6) pattern[i] = 0;
   j["hybrid_layer_pattern"] = pattern;
 
   // MoE: layer 0 dense, layers 1-47 MoE.
@@ -121,7 +124,7 @@ TEST_CASE("mimov2: ParseMiMoV2Params reads all fields correctly") {
   CHECK(p.moe_layer_freq[1] == 1);
 }
 
-TEST_CASE("mimov2: hybrid_layer_pattern has 8 full-attn and 40 SWA layers") {
+TEST_CASE("mimov2: hybrid_layer_pattern has 9 full-attn and 39 SWA layers") {
   const HfConfig config = MakeMiMoV2Config();
   const MiMoV2Params p = ParseMiMoV2Params(config);
 
@@ -133,8 +136,8 @@ TEST_CASE("mimov2: hybrid_layer_pattern has 8 full-attn and 40 SWA layers") {
     else
       ++swa_count;
   }
-  CHECK(full_count == 8);   // indices 0,6,12,...,42
-  CHECK(swa_count == 40);
+  CHECK(full_count == 9);   // indices 0,5,11,17,23,29,35,41,47
+  CHECK(swa_count == 39);
 }
 
 TEST_CASE("mimov2: KV-cache spec builds with two groups") {
@@ -144,8 +147,8 @@ TEST_CASE("mimov2: KV-cache spec builds with two groups") {
 
   REQUIRE(kv.kv_cache_groups.size() == 2);
 
-  // Group 0: full-attention layers (8 layers, 4 KV heads).
-  CHECK(kv.kv_cache_groups[0].layer_names.size() == 8);
+  // Group 0: full-attention layers (9 layers, 4 KV heads).
+  CHECK(kv.kv_cache_groups[0].layer_names.size() == 9);
   const auto* full_spec = dynamic_cast<const vllm::v1::FullAttentionSpec*>(
       kv.kv_cache_groups[0].kv_cache_spec.get());
   REQUIRE(full_spec != nullptr);
@@ -153,8 +156,8 @@ TEST_CASE("mimov2: KV-cache spec builds with two groups") {
   CHECK(full_spec->head_size == 192);
   CHECK(full_spec->head_size_v == 128);
 
-  // Group 1: SWA layers (40 layers, 8 KV heads, sliding_window=128).
-  CHECK(kv.kv_cache_groups[1].layer_names.size() == 40);
+  // Group 1: SWA layers (39 layers, 8 KV heads, sliding_window=128).
+  CHECK(kv.kv_cache_groups[1].layer_names.size() == 39);
   const auto* swa_spec = dynamic_cast<const vllm::v1::SlidingWindowSpec*>(
       kv.kv_cache_groups[1].kv_cache_spec.get());
   REQUIRE(swa_spec != nullptr);
@@ -169,17 +172,18 @@ TEST_CASE("mimov2: KV-cache group layer names are correct") {
   const vllm::v1::KVCacheConfig kv =
       vllm::MakeMiMoV2KVCache(config, 16, 8);
 
-  // Full-attention layers: 0, 6, 12, 18, 24, 30, 36, 42
+  // Full-attention layers: 0, 5, 11, 17, 23, 29, 35, 41, 47 → 9 names.
   const auto& full_names = kv.kv_cache_groups[0].layer_names;
   CHECK(full_names[0] == "model.layers.0.self_attn");
-  CHECK(full_names[1] == "model.layers.6.self_attn");
-  CHECK(full_names[7] == "model.layers.42.self_attn");
+  CHECK(full_names[1] == "model.layers.5.self_attn");
+  CHECK(full_names[2] == "model.layers.11.self_attn");
+  CHECK(full_names[8] == "model.layers.47.self_attn");
 
-  // SWA layers: 1, 2, 3, 4, 5, 7, 8, ...
+  // SWA layers: 1, 2, 3, 4, 6, 7, 8, ...
   const auto& swa_names = kv.kv_cache_groups[1].layer_names;
   CHECK(swa_names[0] == "model.layers.1.self_attn");
   CHECK(swa_names[1] == "model.layers.2.self_attn");
-  CHECK(swa_names[5] == "model.layers.7.self_attn");
+  CHECK(swa_names[4] == "model.layers.6.self_attn");
 }
 
 TEST_CASE("mimov2: parse_config rejects mismatched hybrid_layer_pattern length") {
