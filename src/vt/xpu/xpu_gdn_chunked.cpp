@@ -79,30 +79,47 @@ void Prepare(Queue& queue, ChunkScratch<Input> s, View qi, View ki, View gates, 
   // VT has already normalized q/k and transformed g/beta. Only a chunk-local
   // prefix sum belongs here; do not repeat donor softplus, sigmoid or L2Norm.
   // Gate sums and input/state copies are independent, so one launch prepares both.
-  const auto prepare_event = q.parallel_for(sycl::range<1>(heads * D * D), [=](sycl::id<1> item) {
-    const int h = item[0] / (D * D), inner = item[0] % (D * D), v = inner / D, k = inner % D;
-    if (inner == 0) {
-      const int first = offsets[sequence] + base, end = offsets[sequence + 1];
-      float sum = 0;
-      for (int i = 0; i < C; ++i) {
-        if (first + i < end) sum += Load(gates, (first + i) * heads + h);
-        s.g[h * C + i] = sum;
+  // Transpose the F32 state through a padded local tile for contiguous global writes.
+  constexpr int tile_size = 16, tiles_per_head = (D / tile_size) * (D / tile_size);
+  const auto prepare_event = q.submit([&](sycl::handler& handler) {
+    sycl::local_accessor<float> state_tile(tile_size * (tile_size + 1), handler);
+    handler.parallel_for(sycl::nd_range<1>(heads * tiles_per_head * tile_size * tile_size,
+                                          tile_size * tile_size),
+        [=](sycl::nd_item<1> item) {
+      const int group = item.get_group(0), lane = item.get_local_id(0);
+      const int h = group / tiles_per_head, tile = group % tiles_per_head;
+      const int v = (tile / (D / tile_size)) * tile_size + lane / tile_size;
+      const int k = (tile % (D / tile_size)) * tile_size + lane % tile_size;
+      const int inner = v * D + k;
+      if (tile == 0 && lane == 0) {
+        const int first = offsets[sequence] + base, end = offsets[sequence + 1];
+        float sum = 0;
+        for (int i = 0; i < C; ++i) {
+          if (first + i < end) sum += Load(gates, (first + i) * heads + h);
+          s.g[h * C + i] = sum;
+        }
+        for (int i = 0; i < C; ++i) {
+          s.exp_g[h * C + i] = sycl::exp(s.g[h * C + i]);
+          s.tail_decay[h * C + i] = sycl::exp(sum - s.g[h * C + i]);
+        }
       }
-      for (int i = 0; i < C; ++i) {
-        s.exp_g[h * C + i] = sycl::exp(s.g[h * C + i]);
-        s.tail_decay[h * C + i] = sycl::exp(sum - s.g[h * C + i]);
+      state_tile[(lane / tile_size) * (tile_size + 1) + lane % tile_size] =
+          state[(sequence * heads + h) * D * D + inner];
+      if (inner < C * D) {
+        const int row = inner / D, d = inner % D, token = offsets[sequence] + base + row;
+        const bool valid = token < offsets[sequence + 1];
+        const int kh = h / (heads / key_heads);
+        const Input qv(valid ? Load(qi, (token * key_heads + kh) * D + d) : 0.0f);
+        const Input kv(valid ? Load(ki, (token * key_heads + kh) * D + d) : 0.0f);
+        s.q[h * C * D + inner] = qv; s.k[h * C * D + inner] = kv;
+        s.kt[(h * D + d) * C + row] = kv;
       }
-    }
-    s.state_t[(h * D + k) * D + v] = state[(sequence * heads + h) * D * D + inner];
-    if (inner < C * D) {
-      const int row = inner / D, d = inner % D, token = offsets[sequence] + base + row;
-      const bool valid = token < offsets[sequence + 1];
-      const int kh = h / (heads / key_heads);
-      const Input qv(valid ? Load(qi, (token * key_heads + kh) * D + d) : 0.0f);
-      const Input kv(valid ? Load(ki, (token * key_heads + kh) * D + d) : 0.0f);
-      s.q[h * C * D + inner] = qv; s.k[h * C * D + inner] = kv;
-      s.kt[(h * D + d) * C + row] = kv;
-    }
+      item.barrier(sycl::access::fence_space::local_space);
+      const int out_v = (tile / (D / tile_size)) * tile_size + lane % tile_size;
+      const int out_k = (tile % (D / tile_size)) * tile_size + lane / tile_size;
+      s.state_t[(h * D + out_k) * D + out_v] =
+          state_tile[(lane % tile_size) * (tile_size + 1) + lane / tile_size];
+    });
   });
   RecordProfileEvent(queue, "gdn_chunk_prepare", prepare_event);
 }
