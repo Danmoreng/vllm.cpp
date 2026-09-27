@@ -124,6 +124,9 @@ vllm_cpp_add_test(test_model_registry vllm/models/test_model_registry.cpp)
 # MODEL-TEXT-mimo-v2 W1 gate (ISSUE-LOCAL-01M3F82S8ZYCTTDSKPFF5PGAH7):
 # config parses, KV-cache spec builds, model is discoverable.
 vllm_cpp_add_test(test_mimov2_w1 vllm/models/test_mimov2_w1.cpp)
+# mimo_v2_weights.h is a MODEL-PRIVATE header under src/, not include/vllm/.
+vllm_cpp_add_test(test_mimov2_w2 vllm/models/test_mimov2_w2.cpp)
+target_include_directories(test_mimov2_w2 PRIVATE ${CMAKE_SOURCE_DIR}/src)
 vllm_cpp_add_test(test_vocoder1d vllm/models/test_vocoder1d.cpp)
 # For src/vt/cpu/cpu_conv1d_block.h: the multi-block case asserts the geometry
 # it claims rather than assuming it (#1664). Same reach as test_host_parallel.

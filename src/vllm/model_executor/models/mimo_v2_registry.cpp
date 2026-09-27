@@ -1,15 +1,16 @@
 // MiMoV2 (`MiMoV2ForCausalLM`) registry TU — the additive self-registration
-// seam for the MiMoV2 bring-up (MODEL-TEXT-mimo-v2, W1). Follows the
+// seam for the MiMoV2 bring-up (MODEL-TEXT-mimo-v2, W1+W2). Follows the
 // deepseek_v4_registry.cpp / dots3_note_registry.cpp seam exactly: a NEW
 // translation unit with ONE REGISTER_VLLM_MODEL line and ZERO edit to any
 // shared array. It owns the arch entry points: the config hook (config-descent
 // validation), the KV-cache spec (two groups: full-attention + sliding-window),
-// and stub load/prepare/forward functions.
+// the weight loader (W2), and stub prepare/forward functions.
 //
 // SCOPE HONESTY: registering this arch makes it RESOLVE + parse config +
-// build the hybrid KV-cache spec. The weight loader (W2) and forward pass
-// (W3) are stubs that VT_CHECK(false, ...) — so the W1 gate is: the model is
-// discoverable, the config parses, the KV-cache spec builds.
+// build the hybrid KV-cache spec + load weights. The forward pass (W3) is
+// still a stub that VT_CHECK(false, ...) — so the W2 gate is: the model is
+// discoverable, the config parses, the KV-cache spec builds, and all weights
+// load and account cleanly.
 //
 // The KV-cache has two groups:
 //   1. FullAttentionSpec for full-attention layers (0,5,11,17,23,29,35,41,47):
@@ -21,6 +22,7 @@
 // as an optional parameter that defaults to head_size.
 
 #include "vllm/model_executor/models/mimo_v2.h"
+#include "vllm/model_executor/models/mimo_v2_weights.h"
 #include "vllm/model_executor/models/model_registry.h"
 #include "vllm/model_executor/models/qwen3_5.h"  // ForwardLogits carrier
 #include "vllm/v1/kv_cache_dtype.h"
@@ -211,36 +213,48 @@ v1::KVCacheConfig MakeMiMoV2KVCache(const HfConfig& config, int block_size,
   return kv;
 }
 
-// ---- Stub Load/Prepare/Forward (W2-W3 will implement) ----
+// ---- LoadedModel subclass ----
+
+class MiMoV2LoadedModel final : public LoadedModel {
+ public:
+  MiMoV2LoadedModel(const ModelRegistration& registration,
+                    MiMoV2Weights weights)
+      : LoadedModel(registration), weights_(std::move(weights)) {}
+  const MiMoV2Weights& weights() const { return weights_; }
+
+ private:
+  MiMoV2Weights weights_;
+};
+
+// ---- Load / Prepare / Forward ----
+
 std::unique_ptr<LoadedModel> LoadMiMoV2ForCausalLM(
     const ModelRegistration& registration, const HfConfig& config,
     const ModelSource& source) {
-  (void)registration;
-  // The config still has to be VALID to get a truthful refusal.
-  ParseMiMoV2Config(config);
-  (void)source;
-  VT_CHECK(false,
-           "MiMoV2ForCausalLM: the weight loader is not ported. W1 makes "
-           "this architecture RESOLVE and makes its config.json PARSE and "
-           "VALIDATE; it loads no weights. The loader is OWED to W2. "
-           "Row MODEL-TEXT-mimo-v2, spec .agents/specs/mimov2.md, "
-           "issue ISSUE-LOCAL-01M3F82S8ZYCTTDSKPFF5PGAH7.");
+  if (source.kind == ModelSource::Kind::kGguf) {
+    throw std::runtime_error(
+        "MiMoV2ForCausalLM: GGUF is not supported for this architecture. "
+        "Row MODEL-TEXT-mimo-v2, spec .agents/specs/mimov2.md, "
+        "issue ISSUE-LOCAL-01M3F82S8ZYCTTDSKPFF5PGAH7.");
+  }
+  if (source.safetensors == nullptr) {
+    throw std::runtime_error("safetensors model source is empty");
+  }
+  return std::make_unique<MiMoV2LoadedModel>(
+      registration, LoadMiMoV2Weights(*source.safetensors, config));
 }
 
 void PrepareMiMoV2ForCausalLM(LoadedModel& model, const HfConfig& config,
                                 vt::Queue& queue) {
+  // Following Dots3Note: prepare is a no-op. Materialization happens inside
+  // load_weights; device upload is lazy via ResidentWeight.
   (void)model;
   (void)config;
   (void)queue;
-  // Unreachable while the loader refuses. Still a refusal rather than a no-op.
-  VT_CHECK(false,
-           "MiMoV2ForCausalLM: prepare is not ported (no weights can be "
-           "loaded yet -- W2 owes the loader). Row MODEL-TEXT-mimo-v2, "
-           "issue ISSUE-LOCAL-01M3F82S8ZYCTTDSKPFF5PGAH7.");
 }
 
 ForwardLogits ForwardMiMoV2ForCausalLM(LoadedModel& model,
-                                       const ModelForwardInput& input) {
+                                        const ModelForwardInput& input) {
   (void)model;
   (void)input;
   VT_CHECK(false,
