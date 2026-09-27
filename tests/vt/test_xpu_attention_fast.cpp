@@ -43,7 +43,8 @@ struct Fixture {
   vt::PagedAttentionArgs args;
   Fixture(vt::Queue& q, int nreq, int chunk, int length, bool fp8, bool unequal = false,
           int block = 16, DType query_type = DType::kF32,
-          DType output_type = DType::kF32, DType cache_type = DType::kBF16)
+          DType output_type = DType::kF32, DType cache_type = DType::kBF16,
+          bool unit_scales = false)
       : queue(q), requests(nreq), tokens(nreq * chunk), context(length), page(block),
         blocks(nreq * ((length + block - 1) / block)), columns((length + block - 1) / block),
         query(q, query_type, {tokens, 24, 256}), out(q, output_type, {tokens, 24, 256}),
@@ -66,7 +67,8 @@ struct Fixture {
     args.scale = 1.0f / 16;
     if (fp8) {
       args.kv_cache_dtype = vt::Fp8KVCacheDataType::kFp8E4M3;
-      args.k_scale = 0.125f; args.v_scale = 0.0625f;
+      args.k_scale = unit_scales ? 1.0f : 0.125f;
+      args.v_scale = unit_scales ? 1.0f : 0.0625f;
       std::vector<uint8_t> bytes(data.size());
       for (size_t i = 0; i < data.size(); ++i)
         bytes[i] = vt::StoreKvFp8E4M3(data[i], (i / (page * 4 * 256)) % 2 ? args.v_scale : args.k_scale);
@@ -494,6 +496,37 @@ TEST_CASE("XPU FP8 prefill: focused F16 P64 baseline"
   CHECK(vt::GetReferenceTierHits() == 0); // generic reference above is a GPU kernel
 }
 
+TEST_CASE("XPU Xe2 FP8 prefill: default dispatch with 1600-token pages"
+          * doctest::skip(!std::getenv("VT_XPU_PROFILE") ||
+                          std::getenv("VT_XPU_XE2_PREFILL"))) {
+  Queue gpu(vt::DeviceType::kXPU);
+  Fixture reference(gpu.q, 1, 4096, 4096, true, false, 1600,
+                    DType::kF16, DType::kF16, DType::kF16, true);
+  Fixture selected(gpu.q, 1, 4096, 4096, true, false, 1600,
+                   DType::kF16, DType::kF16, DType::kF16, true);
+  Buffer contiguous_table(gpu.q, DType::kI32, {1, 3});
+  const int32_t page_ids[] = {2, 1, 0};
+  contiguous_table.upload(page_ids);
+  setenv("VT_XPU_XE2_PREFILL", "0", 1);
+  reference.run("prefill");
+  unsetenv("VT_XPU_XE2_PREFILL");
+  (void)vt::xpu::DrainProfileEvents();
+  setenv("VT_XPU_ATTENTION", "auto", 1);
+  vt::PagedAttention(gpu.q, selected.out.tensor, selected.query.tensor,
+                     selected.kc, selected.vc, contiguous_table.tensor,
+                     selected.lens.tensor, selected.offsets.tensor, selected.args);
+  vt::GetBackend(gpu.q.device).Synchronize(gpu.q);
+  Accuracy(selected.result(), reference.result(), false, true);
+  const auto events = vt::xpu::DrainProfileEvents();
+  size_t xe2 = 0, fallback = 0;
+  for (const auto& event : events) {
+    xe2 += event.stage == "attention_prefill_xe2";
+    fallback += event.stage == "attention_prefill_q64";
+  }
+  CHECK(xe2 == 1);
+  CHECK(fallback == 0);
+}
+
 TEST_CASE("XPU FP8 prefill: captured 4096-token Python operator replay"
           * doctest::skip(!std::getenv("VT_B70_FP8_PREFILL_REPLAY_DIR"))) {
   const std::string directory = std::getenv("VT_B70_FP8_PREFILL_REPLAY_DIR");
@@ -516,8 +549,8 @@ TEST_CASE("XPU FP8 prefill: captured 4096-token Python operator replay"
   const int dim = metadata_bytes.at("q_original_shape").at(2).get<int>();
   const int source_pages = metadata_bytes.at("files").at("k").at("shape").at(0).get<int>();
   const int source_page = metadata_bytes.at("files").at("k").at("shape").at(1).get<int>();
-  const bool xe2 = std::getenv("VT_XPU_XE2_PREFILL") &&
-                   std::string_view(std::getenv("VT_XPU_XE2_PREFILL")) == "1";
+  const char* xe2_setting = std::getenv("VT_XPU_XE2_PREFILL");
+  const bool xe2 = !xe2_setting || std::string_view(xe2_setting) == "1";
   const int page = xe2 ? 64 : source_page;
   const int pages = (tokens + page - 1) / page;
   const int physical_pages = xe2 ? pages + 7 : pages;
