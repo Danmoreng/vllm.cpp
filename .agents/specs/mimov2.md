@@ -1,8 +1,10 @@
-# MiMoV2 — architecture port spec (MODEL-TEXT-mimo-v2)
+# MiMoV2 — architecture port spec (`MODEL-TEXT-mimo-v2-mi-mo-v2-for-causal-lm`)
 
-> **Scope:** port the `MiMoV2ForCausalLM` architecture (text-only LLM arm) so
-> the server loads, forward runs, and parity holds against the upstream
-> reference. The EXL3 quant row is a separate issue (see Dependencies).
+## Scope
+
+Port the `MiMoV2ForCausalLM` architecture (text-only LLM arm) so the server
+loads, forward runs, and parity holds against the upstream reference. The EXL3
+quant row is a separate issue (see Dependencies).
 
 ## Now
 
@@ -180,6 +182,15 @@ sigmoid MoE, partial rotary). The deltas:
 | Dense MLP (layer 0) | `vt::MatmulBT` | SwiGLU at `intermediate_size=16384` |
 | MTP | existing MTP infra | 3 nextn layers, shared embedding + shared lm_head |
 | lm_head | `vt::MatmulNB` | untied (`tie_word_embeddings=false`) |
+
+## Our baseline
+
+The closest existing model is Dots3Note (`dots3_note.cpp`): per-layer kind
+dispatch in weight loading, device materialization, and forward pass; hybrid
+attention (full + SWA); `consumes_multi_kv=true`. MiMoV2 diverges on KV
+geometry (per-layer `num_kv_heads` and `v_head_dim != head_dim`), the
+attention sink bias mechanism, the attention value scale, and the sigmoid +
+noaux_tc MoE with no shared expert.
 
 ### New code
 
