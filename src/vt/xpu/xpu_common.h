@@ -29,6 +29,7 @@ void RecordProfileSpan(Queue& q, const char* stage, const sycl::event& begin,
 // was insufficient; callers can retain their native non-panel path.
 bool WithExl3Workspace(Queue& q, size_t bytes, const std::function<void(void*)>& launch);
 bool WithGdnWorkspace(Queue& q, size_t bytes, const std::function<void(void*)>& launch);
+bool WithGdnNativeWorkspace(Queue& q, size_t bytes, const std::function<void(void*)>& launch);
 bool WithAttentionWorkspace(Queue& q, size_t bytes, const std::function<void(void*)>& launch);
 bool WithSamplingWorkspace(Queue& q, size_t bytes, const std::function<void(void*)>& launch);
 // Captured metadata checks run in a separate graph before the mutating graph.

@@ -1,0 +1,321 @@
+{
+  "case": {
+    "model": "Qwen3.8-27B-GPTQ-G128",
+    "P": 4096,
+    "D": 64,
+    "O": 65,
+    "batch": 1,
+    "execution": "eager",
+    "kv_dtype": "fp8_e4m3",
+    "kv_page_tokens": 1600,
+    "prompt_ids_fnv1a64": "9705ea213a213545",
+    "decode_ids_fnv1a64": "6ec3b01cb7f65be5",
+    "measurement_scope": "synchronized C++ worker forward including host metadata build and upload; load/JIT/reset excluded",
+    "warmup_requests_per_session": 1,
+    "measured_rounds_per_session": 5,
+    "independent_sessions": 3
+  },
+  "selector": {
+    "baseline": "VT_XPU_GDN_NATIVE=0",
+    "candidate": "VT_XPU_GDN_NATIVE=1, P4096/Hv48/Hk16/D128/F16 only, fallback otherwise"
+  },
+  "sessions": {
+    "baseline": [
+      {
+        "raw_log": "raw/p4_native_baseline_s1.log.gz",
+        "build_id": "Sep 27 2026 16:19:43",
+        "rounds": [
+          {
+            "prefill_seconds": 3.390933826,
+            "decode_seconds": 2.694638963,
+            "prefill_tokens_per_second": 1207.9268455768445,
+            "decode_tokens_per_second": 23.750862686534976,
+            "peak_allocated_bytes": 19350113448
+          },
+          {
+            "prefill_seconds": 3.388814543,
+            "decode_seconds": 2.695779678,
+            "prefill_tokens_per_second": 1208.6822539347206,
+            "decode_tokens_per_second": 23.740812545735054,
+            "peak_allocated_bytes": 19350113448
+          },
+          {
+            "prefill_seconds": 3.387070056,
+            "decode_seconds": 2.697101231,
+            "prefill_tokens_per_second": 1209.3047773677345,
+            "decode_tokens_per_second": 23.72917978175807,
+            "peak_allocated_bytes": 19350113448
+          },
+          {
+            "prefill_seconds": 3.397603838,
+            "decode_seconds": 2.6992506,
+            "prefill_tokens_per_second": 1205.55550184777,
+            "decode_tokens_per_second": 23.710284624925155,
+            "peak_allocated_bytes": 19350113448
+          },
+          {
+            "prefill_seconds": 3.391232085,
+            "decode_seconds": 2.697470011,
+            "prefill_tokens_per_second": 1207.8206083615773,
+            "decode_tokens_per_second": 23.72593568752005,
+            "peak_allocated_bytes": 19350113448
+          }
+        ],
+        "median_prefill_tokens_per_second": 1207.9268455768445,
+        "median_decode_tokens_per_second": 23.72917978175807,
+        "peak_allocated_bytes": 19350113448
+      },
+      {
+        "raw_log": "raw/p4_native_baseline_s2.log.gz",
+        "build_id": "Sep 27 2026 16:19:43",
+        "rounds": [
+          {
+            "prefill_seconds": 3.419377854,
+            "decode_seconds": 2.707959054,
+            "prefill_tokens_per_second": 1197.8787296667097,
+            "decode_tokens_per_second": 23.6340353468284,
+            "peak_allocated_bytes": 19350113448
+          },
+          {
+            "prefill_seconds": 3.419285304,
+            "decode_seconds": 2.711191219,
+            "prefill_tokens_per_second": 1197.91115272199,
+            "decode_tokens_per_second": 23.605859871295195,
+            "peak_allocated_bytes": 19350113448
+          },
+          {
+            "prefill_seconds": 3.430158154,
+            "decode_seconds": 2.713309017,
+            "prefill_tokens_per_second": 1194.1140367605335,
+            "decode_tokens_per_second": 23.587434972947648,
+            "peak_allocated_bytes": 19350113448
+          },
+          {
+            "prefill_seconds": 3.429669133,
+            "decode_seconds": 2.712016294,
+            "prefill_tokens_per_second": 1194.2843000768262,
+            "decode_tokens_per_second": 23.59867827549269,
+            "peak_allocated_bytes": 19350113448
+          },
+          {
+            "prefill_seconds": 3.430378018,
+            "decode_seconds": 2.713343303,
+            "prefill_tokens_per_second": 1194.0375021374687,
+            "decode_tokens_per_second": 23.587136920432663,
+            "peak_allocated_bytes": 19350113448
+          }
+        ],
+        "median_prefill_tokens_per_second": 1194.2843000768262,
+        "median_decode_tokens_per_second": 23.59867827549269,
+        "peak_allocated_bytes": 19350113448
+      },
+      {
+        "raw_log": "raw/p4_native_baseline_s3.log.gz",
+        "build_id": "Sep 27 2026 16:19:43",
+        "rounds": [
+          {
+            "prefill_seconds": 3.419478349,
+            "decode_seconds": 2.710389359,
+            "prefill_tokens_per_second": 1197.8435252259585,
+            "decode_tokens_per_second": 23.612843589237247,
+            "peak_allocated_bytes": 19350113448
+          },
+          {
+            "prefill_seconds": 3.428501187,
+            "decode_seconds": 2.712951401,
+            "prefill_tokens_per_second": 1194.6911424534385,
+            "decode_tokens_per_second": 23.59054422294828,
+            "peak_allocated_bytes": 19350113448
+          },
+          {
+            "prefill_seconds": 3.433456975,
+            "decode_seconds": 2.713996586,
+            "prefill_tokens_per_second": 1192.9667474572038,
+            "decode_tokens_per_second": 23.58145928780472,
+            "peak_allocated_bytes": 19350113448
+          },
+          {
+            "prefill_seconds": 3.429713613,
+            "decode_seconds": 2.714132442,
+            "prefill_tokens_per_second": 1194.2688113883635,
+            "decode_tokens_per_second": 23.58027891698588,
+            "peak_allocated_bytes": 19350113448
+          },
+          {
+            "prefill_seconds": 3.437359584,
+            "decode_seconds": 2.714499907,
+            "prefill_tokens_per_second": 1191.612311689995,
+            "decode_tokens_per_second": 23.577086827286454,
+            "peak_allocated_bytes": 19350113448
+          }
+        ],
+        "median_prefill_tokens_per_second": 1194.2688113883635,
+        "median_decode_tokens_per_second": 23.58145928780472,
+        "peak_allocated_bytes": 19350113448
+      }
+    ],
+    "native": [
+      {
+        "raw_log": "raw/p4_native_native_s4_no_barriers.log.gz",
+        "build_id": "Sep 27 2026 16:19:43",
+        "rounds": [
+          {
+            "prefill_seconds": 2.932090719,
+            "decode_seconds": 2.711426515,
+            "prefill_tokens_per_second": 1396.9554125518173,
+            "decode_tokens_per_second": 23.60381136864408,
+            "peak_allocated_bytes": 19460738344
+          },
+          {
+            "prefill_seconds": 2.9241212,
+            "decode_seconds": 2.710964943,
+            "prefill_tokens_per_second": 1400.762731722611,
+            "decode_tokens_per_second": 23.60783018063543,
+            "peak_allocated_bytes": 19460738344
+          },
+          {
+            "prefill_seconds": 2.934399794,
+            "decode_seconds": 2.709337732,
+            "prefill_tokens_per_second": 1395.8561503361393,
+            "decode_tokens_per_second": 23.622008893205052,
+            "peak_allocated_bytes": 19460738344
+          },
+          {
+            "prefill_seconds": 2.929227941,
+            "decode_seconds": 2.710754068,
+            "prefill_tokens_per_second": 1398.3206778376145,
+            "decode_tokens_per_second": 23.60966668113103,
+            "peak_allocated_bytes": 19460738344
+          },
+          {
+            "prefill_seconds": 2.92834832,
+            "decode_seconds": 2.712837132,
+            "prefill_tokens_per_second": 1398.7407071847244,
+            "decode_tokens_per_second": 23.591537894063297,
+            "peak_allocated_bytes": 19460738344
+          }
+        ],
+        "median_prefill_tokens_per_second": 1398.3206778376145,
+        "median_decode_tokens_per_second": 23.60783018063543,
+        "peak_allocated_bytes": 19460738344
+      },
+      {
+        "raw_log": "raw/p4_native_native_s5_no_barriers.log.gz",
+        "build_id": "Sep 27 2026 16:19:43",
+        "rounds": [
+          {
+            "prefill_seconds": 2.934038958,
+            "decode_seconds": 2.709047468,
+            "prefill_tokens_per_second": 1396.0278164786387,
+            "decode_tokens_per_second": 23.624539900457734,
+            "peak_allocated_bytes": 19460738344
+          },
+          {
+            "prefill_seconds": 2.925843285,
+            "decode_seconds": 2.712251789,
+            "prefill_tokens_per_second": 1399.9382745477428,
+            "decode_tokens_per_second": 23.596629287724287,
+            "peak_allocated_bytes": 19460738344
+          },
+          {
+            "prefill_seconds": 2.935206479,
+            "decode_seconds": 2.715480593,
+            "prefill_tokens_per_second": 1395.4725261425126,
+            "decode_tokens_per_second": 23.568572047607336,
+            "peak_allocated_bytes": 19460738344
+          },
+          {
+            "prefill_seconds": 2.935477817,
+            "decode_seconds": 2.719607738,
+            "prefill_tokens_per_second": 1395.3435370143693,
+            "decode_tokens_per_second": 23.532805524029584,
+            "peak_allocated_bytes": 19460738344
+          },
+          {
+            "prefill_seconds": 2.944585317,
+            "decode_seconds": 2.722193159,
+            "prefill_tokens_per_second": 1391.0277879715447,
+            "decode_tokens_per_second": 23.510455085968424,
+            "peak_allocated_bytes": 19460738344
+          }
+        ],
+        "median_prefill_tokens_per_second": 1395.4725261425126,
+        "median_decode_tokens_per_second": 23.568572047607336,
+        "peak_allocated_bytes": 19460738344
+      },
+      {
+        "raw_log": "raw/p4_native_native_s6_no_barriers.log.gz",
+        "build_id": "Sep 27 2026 16:19:43",
+        "rounds": [
+          {
+            "prefill_seconds": 2.948072345,
+            "decode_seconds": 2.718198449,
+            "prefill_tokens_per_second": 1389.3824576411473,
+            "decode_tokens_per_second": 23.54500644481826,
+            "peak_allocated_bytes": 19460738344
+          },
+          {
+            "prefill_seconds": 2.94001855,
+            "decode_seconds": 2.721907068,
+            "prefill_tokens_per_second": 1393.1884885556249,
+            "decode_tokens_per_second": 23.512926195171627,
+            "peak_allocated_bytes": 19460738344
+          },
+          {
+            "prefill_seconds": 2.951084471,
+            "decode_seconds": 2.723887747,
+            "prefill_tokens_per_second": 1387.9643365857419,
+            "decode_tokens_per_second": 23.495828736146517,
+            "peak_allocated_bytes": 19460738344
+          },
+          {
+            "prefill_seconds": 2.958076425,
+            "decode_seconds": 2.725461109,
+            "prefill_tokens_per_second": 1384.683629328475,
+            "decode_tokens_per_second": 23.482264996796182,
+            "peak_allocated_bytes": 19460738344
+          },
+          {
+            "prefill_seconds": 2.940348273,
+            "decode_seconds": 2.723947444,
+            "prefill_tokens_per_second": 1393.0322600257496,
+            "decode_tokens_per_second": 23.495313810467188,
+            "peak_allocated_bytes": 19460738344
+          }
+        ],
+        "median_prefill_tokens_per_second": 1389.3824576411473,
+        "median_decode_tokens_per_second": 23.495828736146517,
+        "peak_allocated_bytes": 19460738344
+      }
+    ]
+  },
+  "summary": {
+    "baseline": {
+      "prefill_tokens_per_second": 1194.2843000768262,
+      "decode_tokens_per_second": 23.59867827549269,
+      "peak_allocated_bytes": 19350113448
+    },
+    "native": {
+      "prefill_tokens_per_second": 1395.4725261425126,
+      "decode_tokens_per_second": 23.568572047607336,
+      "peak_allocated_bytes": 19460738344
+    }
+  },
+  "prefill_speedup": 1.1684592404444607,
+  "decode_speedup": 0.9987242409285007,
+  "peak_device_memory_delta_bytes": 110624896,
+  "route_evidence": {
+    "raw_log": "raw/p4_native_native_route.log.gz",
+    "native_gdn_prefill_events": 96,
+    "interpretation": "one warmup plus one measured P4096/O2 request, 48 GDN layers each"
+  },
+  "quality_evidence": [
+    "p4_native_real_layer_compare.json",
+    "p4_native_quality_4096_1024.json"
+  ],
+  "limitations": [
+    "candidate uses only the exact P4096 single-sequence F16 shape; 8K/16K and ragged/multi-sequence P4 qualification remain open",
+    "the 3 final candidate sessions were run after the paired preliminary A/B series; exact session alternation did not survive the last removal of profile-only barriers",
+    "Python worker reference 1593 prefill/29.67 decode tokens/s is from earlier matched-scope sessions, not concurrent A/B"
+  ]
+}

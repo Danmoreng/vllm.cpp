@@ -177,6 +177,135 @@ TEST_CASE("XPU GDN P4 real GPTQ layer-0 prefill replay"
   xpu_test::SameBytes(state.download(), ReplayBytes(dir, "ssm_state_after", state.bytes));
 }
 
+TEST_CASE("XPU GDN P4 native Xe2 real layer diagnostic"
+          * doctest::skip(!std::getenv("VT_B70_GDN_REPLAY_DIR") ||
+                          !std::getenv("VT_B70_GDN_NATIVE_TEST"))) {
+#ifdef VLLM_CPP_XPU_XE2_GDN
+  const std::string dir = std::getenv("VT_B70_GDN_REPLAY_DIR");
+  Queue gpu(vt::DeviceType::kXPU);
+  auto& q = gpu.q;
+  constexpr int tokens = 4096, key_heads = 16, heads = 48;
+  Buffer qi(q, DType::kF16, {tokens, key_heads, D});
+  Buffer ki(q, DType::kF16, {tokens, key_heads, D});
+  Buffer vi(q, DType::kF16, {tokens, heads, D});
+  Buffer g(q, DType::kF32, {tokens, heads});
+  Buffer beta(q, DType::kF32, {tokens, heads});
+  Buffer state(q, DType::kF32, {1, heads, D, D});
+  Buffer qsl(q, DType::kI32, {2});
+  Buffer out(q, DType::kF16, {tokens, heads, D});
+  qi.upload(ReplayBytes(dir, "q", qi.bytes).data());
+  ki.upload(ReplayBytes(dir, "k", ki.bytes).data());
+  vi.upload(ReplayBytes(dir, "v", vi.bytes).data());
+  g.upload(ReplayBytes(dir, "g", g.bytes).data());
+  beta.upload(ReplayBytes(dir, "beta", beta.bytes).data());
+  state.upload(ReplayBytes(dir, "ssm_state_before", state.bytes).data());
+  qsl.upload(ReplayBytes(dir, "query_start_loc", qsl.bytes).data());
+  REQUIRE(vt::xpu::GdnNativePrefillKernel(q, out.tensor, qi.tensor, ki.tensor,
+      vi.tensor, g.tensor, beta.tensor, state.tensor, qsl.tensor,
+      {0.0883883476f}));
+  CHECK(vt::xpu::GetMemoryInfo().native_gdn_workspace_bytes > 0);
+  CHECK(vt::xpu::GetMemoryInfo().native_gdn_workspace_bytes <= 160u * 1024 * 1024);
+  const auto output = out.download();
+  const auto final_state = state.download();
+  auto compare = [&](const char* stage, const std::vector<unsigned char>& actual,
+                     DType dtype) {
+    const auto expected = ReplayBytes(dir, stage, actual.size());
+    const size_t elements = actual.size() / vt::SizeOf(dtype);
+    double squared_error = 0, squared_ref = 0, max_abs = 0;
+    for (size_t i = 0; i < elements; ++i) {
+      float a, b;
+      if (dtype == DType::kF32) {
+        std::memcpy(&a, actual.data() + 4 * i, 4);
+        std::memcpy(&b, expected.data() + 4 * i, 4);
+      } else {
+        uint16_t ah, bh;
+        std::memcpy(&ah, actual.data() + 2 * i, 2);
+        std::memcpy(&bh, expected.data() + 2 * i, 2);
+        a = vt::F16ToF32(ah); b = vt::F16ToF32(bh);
+      }
+      REQUIRE(std::isfinite(a));
+      const double diff = double(a) - b;
+      squared_error += diff * diff;
+      squared_ref += double(b) * b;
+      max_abs = std::max(max_abs, std::abs(diff));
+    }
+    const double relative_rms = std::sqrt(squared_error / std::max(squared_ref, 1e-30));
+    std::cout << "GDN_NATIVE_REAL stage=" << stage << " relative_rms="
+              << relative_rms << " max_abs=" << max_abs << std::endl;
+  };
+  compare("core_out", output, DType::kF16);
+  compare("ssm_state_after", final_state, DType::kF32);
+  // Reuse the real first-pass state as a nonempty continuation input. The
+  // frozen Python snapshot covers only the fresh-state call, so this is a
+  // diagnostic native-versus-existing-C++ comparison, not a Python gate.
+  state.upload(final_state.data());
+  REQUIRE(vt::xpu::GdnNativePrefillKernel(q, out.tensor, qi.tensor, ki.tensor,
+      vi.tensor, g.tensor, beta.tensor, state.tensor, qsl.tensor,
+      {0.0883883476f}));
+  const auto native_cont_out = out.floats();
+  const auto native_cont_state = state.floats();
+  state.upload(final_state.data());
+  REQUIRE(vt::xpu::GdnChunkedPrefillKernel(q, out.tensor, qi.tensor, ki.tensor,
+      vi.tensor, g.tensor, beta.tensor, state.tensor, qsl.tensor,
+      {0.0883883476f}));
+  const auto old_cont_out = out.floats();
+  const auto old_cont_state = state.floats();
+  auto continuation_error = [&](const char* stage, const std::vector<float>& actual,
+                                const std::vector<float>& reference) {
+    REQUIRE(actual.size() == reference.size());
+    double squared_error = 0, squared_ref = 0, max_abs = 0;
+    for (size_t i = 0; i < actual.size(); ++i) {
+      REQUIRE(std::isfinite(actual[i]));
+      const double diff = double(actual[i]) - reference[i];
+      squared_error += diff * diff;
+      squared_ref += double(reference[i]) * reference[i];
+      max_abs = std::max(max_abs, std::abs(diff));
+    }
+    std::cout << "GDN_NATIVE_CONTINUATION stage=" << stage
+              << " relative_rms=" << std::sqrt(squared_error / std::max(squared_ref, 1e-30))
+              << " max_abs=" << max_abs << std::endl;
+  };
+  continuation_error("core_out", native_cont_out, old_cont_out);
+  continuation_error("ssm_state_after", native_cont_state, old_cont_state);
+  if (const char* dump = std::getenv("VT_B70_GDN_NATIVE_DUMP_DIR")) {
+    std::ofstream output_file(std::string(dump) + "/native_core_out.bin", std::ios::binary);
+    std::ofstream state_file(std::string(dump) + "/native_ssm_state_after.bin", std::ios::binary);
+    REQUIRE(output_file.write(reinterpret_cast<const char*>(output.data()), output.size()));
+    REQUIRE(state_file.write(reinterpret_cast<const char*>(final_state.data()), final_state.size()));
+  }
+  if (std::getenv("VT_B70_GDN_NATIVE_BENCH")) {
+    auto& backend = vt::GetBackend(q.device);
+    auto measure = [&](bool native) {
+      std::vector<double> milliseconds;
+      for (int repetition = 0; repetition < 6; ++repetition) {
+        backend.Memset(q, state.tensor.data, 0, state.bytes);
+        backend.Synchronize(q);
+        const auto start = std::chrono::steady_clock::now();
+        const bool selected = native
+            ? vt::xpu::GdnNativePrefillKernel(q, out.tensor, qi.tensor, ki.tensor,
+                vi.tensor, g.tensor, beta.tensor, state.tensor, qsl.tensor,
+                {0.0883883476f})
+            : vt::xpu::GdnChunkedPrefillKernel(q, out.tensor, qi.tensor, ki.tensor,
+                vi.tensor, g.tensor, beta.tensor, state.tensor, qsl.tensor,
+                {0.0883883476f});
+        REQUIRE(selected);
+        backend.Synchronize(q);
+        const auto end = std::chrono::steady_clock::now();
+        if (repetition) milliseconds.push_back(
+            std::chrono::duration<double, std::milli>(end - start).count());
+      }
+      std::sort(milliseconds.begin(), milliseconds.end());
+      return milliseconds[milliseconds.size() / 2];
+    };
+    const double old_ms = measure(false);
+    const double native_ms = measure(true);
+    std::cout << "GDN_NATIVE_REAL_BENCH old_median_ms=" << old_ms
+              << " native_median_ms=" << native_ms
+              << " speedup=" << old_ms / native_ms << std::endl;
+  }
+#endif
+}
+
 TEST_CASE("XPU GDN chunk64: F16 XMX output and F32 state match sequential CPU") {
   Queue cpu(vt::DeviceType::kCPU), gpu(vt::DeviceType::kXPU);
   for (int length : {64, 65}) {

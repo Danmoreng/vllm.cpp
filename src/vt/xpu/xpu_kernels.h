@@ -30,6 +30,10 @@ bool Exl3PrefillKernel(Queue&, Tensor&, const Tensor&, const Tensor&, const Tens
                        bool matrix = true, bool all_rows = false);
 bool GdnChunkedPrefillKernel(Queue&, Tensor&, const Tensor&, const Tensor&, const Tensor&, const Tensor&,
                              const Tensor&, Tensor&, const Tensor&, const GdnArgs&);
+#ifdef VLLM_CPP_XPU_XE2_GDN
+bool GdnNativePrefillKernel(Queue&, Tensor&, const Tensor&, const Tensor&, const Tensor&,
+                            const Tensor&, const Tensor&, Tensor&, const Tensor&, const GdnArgs&);
+#endif
 void Exl3OutputHadPanel(Queue&, Tensor&, const Tensor&, const Tensor&, int64_t);
 void CausalConv1dFwdKernel(Queue&, Tensor&, const Tensor&, const Tensor&, const Tensor*,
                            Tensor&, const Tensor&, const Tensor&, const CausalConv1dArgs&);
