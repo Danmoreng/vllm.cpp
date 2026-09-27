@@ -3,14 +3,34 @@
 
 The native arm is ``bench_gptq4_model`` with VT_B70_BENCH_QUALITY_DIR set to
 the same output directory and VT_B70_BENCH_DECODE_FIRST_TOKEN set to the first
-ID in each prompt's metadata JSON. Use matching 64-token KV pages.
+ID in each prompt's metadata JSON. Check the actual attention page size: this
+hybrid model raises a requested 64-token block to 1600 tokens.
 """
 
 import argparse
 import json
+import struct
 from pathlib import Path
 
 import numpy as np
+
+
+def prompt_ids(args, length):
+    if args.prompt_ids_file is None:
+        return [100 + i % 11 for i in range(length)]
+    ids = json.loads(args.prompt_ids_file.read_text())
+    if (not isinstance(ids, list) or len(ids) != length or
+            any(not isinstance(token, int) or token < 0 for token in ids)):
+        raise ValueError("prompt IDs must be a nonnegative integer list of the requested length")
+    return ids
+
+
+def token_hash(ids):
+    value = 14695981039346656037
+    for token in ids:
+        for byte in struct.pack("<i", token):
+            value = ((value ^ byte) * 1099511628211) & ((1 << 64) - 1)
+    return f"{value:016x}"
 
 
 def reference(args):
@@ -22,6 +42,7 @@ def reference(args):
         quantization="gptq", dtype="float16", kv_cache_dtype="fp8",
         max_model_len=8192, max_num_seqs=1,
         max_num_batched_tokens=max(args.lengths), max_logprobs=-1,
+        block_size=64,
         gpu_memory_utilization=0.85, enable_prefix_caching=False,
         enforce_eager=True, mamba_cache_mode="align",
     )
@@ -35,7 +56,10 @@ def reference(args):
         ignore_eos=True, logprobs=-1,
     )
     for length in args.lengths:
-        prompt = TokensPrompt(prompt_token_ids=[100 + i % 11 for i in range(length)])
+        ids = prompt_ids(args, length)
+        if any(token >= vocab for token in ids):
+            raise ValueError("prompt ID exceeds model vocabulary")
+        prompt = TokensPrompt(prompt_token_ids=ids)
         output = llm.generate([prompt], sampling)[0].outputs[0]
         if len(output.token_ids) != 2 or output.logprobs is None or len(output.logprobs) != 2:
             raise RuntimeError(f"unexpected output at {length} tokens")
@@ -57,6 +81,9 @@ def reference(args):
             "prefix_caching": config.cache_config.enable_prefix_caching,
             "speculative": config.speculative_config is not None,
             "revision": args.revision,
+            "prompt_ids_fnv1a64": token_hash(ids),
+            "requested_block_size": 64,
+            "actual_attention_page_size": config.cache_config.block_size,
         }
         (args.out / f"p{length}_metadata.json").write_text(
             json.dumps(metadata, indent=2) + "\n")
@@ -73,6 +100,9 @@ def compare(args):
     reports = []
     for length in args.lengths:
         metadata = json.loads((args.out / f"p{length}_metadata.json").read_text())
+        if (args.prompt_ids_file is not None and
+                metadata.get("prompt_ids_fnv1a64") != token_hash(prompt_ids(args, length))):
+            raise RuntimeError(f"{length}: Python prompt IDs differ from requested fixture")
         vocab = metadata["vocab_size"]
         for phase in ("prefill", "decode"):
             native = np.fromfile(args.out / f"p{length}_{phase}.f32", dtype=np.float32)
@@ -116,6 +146,7 @@ def main():
     parser.add_argument("--revision", default=None)
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--lengths", type=int, nargs="+", default=(512, 4096))
+    parser.add_argument("--prompt-ids-file", type=Path)
     parser.add_argument("--max-kl", type=float, default=0.01)
     parser.add_argument("--max-tv", type=float, default=0.02)
     args = parser.parse_args()

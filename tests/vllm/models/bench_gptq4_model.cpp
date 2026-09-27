@@ -166,6 +166,18 @@ int Run(const std::string& checkpoint, int prompt_tokens, int output_tokens,
     prompt_ids[token] = 100 + token % 11;
     prompt_positions[token] = token;
   }
+  const std::string prompt_ids_file = Env("VT_B70_BENCH_PROMPT_IDS_FILE");
+  if (!prompt_ids_file.empty()) {
+    std::ifstream file(prompt_ids_file);
+    if (!file) throw std::runtime_error("cannot open prompt IDs: " + prompt_ids_file);
+    const auto ids = nlohmann::json::parse(file).get<std::vector<int32_t>>();
+    if (ids.size() != static_cast<size_t>(prompt_tokens) ||
+        std::any_of(ids.begin(), ids.end(), [&](int32_t id) {
+          return id < 0 || id >= config.vocab_size;
+        }))
+      throw std::runtime_error("prompt IDs must match prompt length and vocabulary");
+    prompt_ids = ids;
+  }
   for (int step = 0; step < output_tokens - 1; ++step)
     decode_ids[step] = 300 + step;
   if (const char* first = std::getenv("VT_B70_BENCH_DECODE_FIRST_TOKEN"))
