@@ -60,7 +60,9 @@
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
+#include <map>
 #include <memory>
+#include <sstream>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -70,6 +72,7 @@
 #include "npy.h"
 #include "vllm/entrypoints/model_loader.h"
 #include "vllm/sampling_params.h"
+#include "vt/breakable_graph.h"  // GetGraphBreakStats: the served-replay gate's replays/captures counters
 #include "vt/op_provider.h"  // the "which backend actually ran" proof
 #include "vt/ops.h"
 #include "vt/tenstorrent/tenstorrent_device.h"
@@ -854,4 +857,212 @@ TEST_CASE("qwen3.5-0.8B GGUF Q4_K_M int8-dot lane e2e battery (Tenstorrent, leve
   }
   RunLaneGate("qwen35_gguf_q4km_lanegate", "qwen35-gguf-q4km-lanegate",
               std::string(gguf));
+}
+
+// ─── TT-GDN-REGION-REPLAY: the served-replay gates ──────────────────────────
+//
+// The dense captured arm's replays must SERVE, and the SERVED stream must be
+// byte-identical to the eager stream. The design is recorded in
+// ISSUE-LOCAL-01M3G75X89F89R331165AE6TMS and the spec
+// .agents/specs/tenstorrent-gdn-region-replay.md (gate 1): the arm's GDN state
+// slots bind persistently in-region (the W3 discipline extended to the ssm and
+// conv caches — the captured trace reads and writes the SAME device shadow),
+// the two post-replay expected_cur_pos continuation increments make replays
+// serve (qwen3.cpp:971/:1118's mirrors, landed by the #2469 continuation port),
+// and the served tokens equal the eager stream.
+//
+// RED-FIRST CONTRACT (both cases): on the pre-fix tree the mechanical half
+// passed (replays > captures — the increments' red) while the token half
+// failed — the anchor's first served replay wrote 248,320/248,320 exact-zero
+// logits (argmax 0 → token 0), the bf16 9B's first served replay diverged
+// coherently ([220,16,220,220] vs the eager [220,16,220,16]) — the stale
+// state-slot binding the fix removes (the trace's baked shadow-read address
+// was replaced every step by the out-of-place state commit).
+//
+// The workload is the recorded anchor leg verbatim
+// (docs/bench-evidence/tt-dense-embed-in-region-20260927.md): the first four
+// prompts of tests/fixtures/tt-int8dot-sweep-sharegpt-64-20260923.json (their
+// exact `conversations[0].value` strings, embedded so the gate needs no
+// dataset plumbing and the prompt bytes cannot drift), greedy temperature-0,
+// --output-len 4, --ignore-eos, concurrency 1, and the anchor leg's own
+// engine geometry (max_num_seqs 1, block 32, 256 blocks, auto-fit
+// max_model_len — the parameters the capture runs cleanly at).
+//
+// The expected streams are the recorded EAGER references: the anchor's
+// main-line stream (sha256 13c3f70b3611ff6b59fef413357704ca2bcd84251c72baff45
+// 0a935de1a049cb of the [4,4] token matrix) and the 9B's fresh-process eager
+// leg ([220,16,220,16] on the row-0 prompt). The 9B's FOURTH cell is an
+// exact tie in the transformers oracle (both tied tokens at 0.00 mnats —
+// the case's comment carries the adjudication), so that one cell accepts
+// either tied token; the anchor is byte-identical everywhere.
+namespace {
+
+// The first four prompts of the sweep fixture, verbatim (see above).
+const std::vector<std::string>& SweepFixturePrompts() {
+  static const std::vector<std::string> p = {
+      "1 2 world 1 hello 1 2 hello 1 world 2 hello 1 1 hello world 2 world "
+      "world hello 2 world 1 1 hello 2 1 1 2 world hello 2 2 2 2 2 2 1 world "
+      "hello 2",
+      "world hello world 1 world 2 world hello 2 hello world world hello world "
+      "2 1 hello hello 2 world world hello 2 1 2 world hello hello hello world "
+      "hello 1 1 2 2 world hello 2 world 2 hello 1 1 world 1 hello",
+      "2 world 1 2 world world 1 hello world world hello 2 2 world 2 2 hello "
+      "world 2 hello hello hello hello hello world 1 1 world 2 hello hello "
+      "hello 2 1 2 2 world 1 hello 2 1 hello 1 2",
+      "hello world world 1 1 1 1 2 1 1 hello 1 hello hello hello hello world 1 "
+      "world 2 1 hello hello hello 1 world 1 world world 2 hello hello 1 2 2 "
+      "world world hello 2 hello hello hello world hello 1",
+  };
+  return p;
+}
+
+// Drive the served-replay gate: every prompt's greedy stream must equal the
+// recorded eager reference, and the decode graph must have SERVED replays
+// (replays strictly greater than the captures' own launches). `oracle_ties`
+// names cells where the ORACLE ITSELF cannot separate the tokens — the
+// teacher-forced adjudication recorded in the owning case's comment — and
+// accepts any listed token there; every other cell is byte-identity.
+void RunServedReplayGate(
+    const char* label, const std::string& model,
+    const std::vector<std::string>& prompts,
+    const std::vector<std::vector<int32_t>>& expected,
+    const std::map<std::pair<size_t, size_t>, std::vector<int32_t>>&
+        oracle_ties = {}) {
+  // The anchor leg's engine geometry (see the block comment above).
+  vllm::entrypoints::EngineParams params;
+  params.max_num_seqs = 1;
+  params.block_size = 32;
+  params.num_blocks = 256;
+  MESSAGE(label << ": loading via FromModelDir(" << model << ")...");
+  std::unique_ptr<vllm::entrypoints::LoadedEngine> loaded =
+      vllm::entrypoints::LoadedEngine::FromModelDir(model, params);
+  const vt::DeviceType run_dev = loaded->runner().device().type;
+  if (run_dev != vt::DeviceType::kTENSTORRENT) {
+    SkipGate(label, "the served-replay gate is the Tenstorrent captured arm's; "
+                    "this run is on device type " +
+                        std::to_string(static_cast<int>(run_dev)));
+  }
+  if (!vt::GraphCaptureEnabled() || !vt::tenstorrent::DecodeCaptureEnabled()) {
+    SkipGate(label, "capture is disabled on this run (VLLM_CPP_CUDAGRAPH=0 or "
+                    "VT_TT_HOST_FREE_DECODE=0) — the served-replay gate is the "
+                    "captured arm's");
+  }
+  vt::ResetGraphBreakStats();
+  std::vector<std::vector<int32_t>> got;
+  for (size_t i = 0; i < prompts.size(); ++i) {
+    vllm::SamplingParams sp;
+    sp.temperature = 0.0;
+    sp.max_tokens = static_cast<int>(expected[i].size());
+    sp.ignore_eos = true;
+    sp.PostInit();
+    const vllm::RequestOutput out =
+        loaded->engine().generate(prompts[i], sp, "sr" + std::to_string(i));
+    got.push_back(out.outputs[0].token_ids);
+  }
+  const vt::GraphBreakStats stats = vt::GetGraphBreakStats();
+  CHECK_MESSAGE(stats.replays > stats.segments_captured,
+                label << ": the dense decode graph never SERVED a replay: "
+                         "replays (" << stats.replays << ") never exceeded the "
+                         "captures' own launches (segments_captured "
+                      << stats.segments_captured
+                      << ") — the #2469 continuation-port masking defect (the "
+                         "missing expected_cur_pos increments)");
+  REQUIRE(got.size() == expected.size());
+  bool all_ok = true;
+  for (size_t i = 0; i < got.size(); ++i) {
+    bool row_ok = got[i].size() == expected[i].size();
+    if (row_ok) {
+      for (size_t k = 0; k < got[i].size(); ++k) {
+        const auto tie = oracle_ties.find({i, k});
+        if (tie != oracle_ties.end()) {
+          bool in_tie = false;
+          for (int32_t t : tie->second) in_tie = in_tie || got[i][k] == t;
+          if (!in_tie) {
+            row_ok = false;
+            std::fprintf(stderr,
+                         "%s: row %zu token %zu: served %d, oracle-tied "
+                         "alternatives {",
+                         label, i, k, got[i][k]);
+            for (size_t a = 0; a < tie->second.size(); ++a)
+              std::fprintf(stderr, "%s%d", a ? ", " : "", tie->second[a]);
+            std::fprintf(stderr, "}\n");
+          }
+          continue;
+        }
+        if (got[i][k] != expected[i][k]) {
+          row_ok = false;
+          std::fprintf(stderr,
+                       "%s: row %zu token %zu: served %d, eager reference %d\n",
+                       label, i, k, got[i][k], expected[i][k]);
+        }
+      }
+    } else {
+      std::fprintf(stderr, "%s: row %zu: %zu served tokens vs %zu expected\n",
+                   label, i, got[i].size(), expected[i].size());
+    }
+    if (!row_ok) all_ok = false;
+  }
+  std::ostringstream rows;
+  for (size_t i = 0; i < got.size(); ++i) {
+    rows << "[";
+    for (size_t k = 0; k < got[i].size(); ++k) {
+      if (k) rows << ",";
+      rows << got[i][k];
+    }
+    rows << "]";
+    if (i + 1 < got.size()) rows << ",";
+  }
+  CHECK_MESSAGE(all_ok, label << ": the SERVED stream diverged from the eager "
+                                 "reference; served=[" << rows.str() << "]");
+}
+
+}  // namespace
+
+// The anchor (27B APEX I-Nano, quantized): served stream must equal the
+// recorded anchor [[220,17,220,17],[220,17,220,17],[220,16,220,17],
+// [220,16,220,16]] — the same bytes as main's recorded anchor leg.
+// Checkpoint-gated: absent VLLM_CPP_QWEN38_27B_APEX_NANO_GGUF -> loud SKIP.
+TEST_CASE("qwen3.8-27B APEX dense captured arm SERVES replays byte-identical to eager (Tenstorrent, checkpoint-gated)") {
+  const char* gguf = std::getenv("VLLM_CPP_QWEN38_27B_APEX_NANO_GGUF");
+  if (gguf == nullptr || gguf[0] == '\0') {
+    SkipGate("qwen38-apex-nano-served-replay",
+             "VLLM_CPP_QWEN38_27B_APEX_NANO_GGUF is absent — set it to the "
+             "local Qwen3.8-27B-APEX-I-Nano.gguf (mudler-qwen3.8-27B-APEX-gguf "
+             "local artifact, 11,240,605,152 bytes) to run the served-replay "
+             "gate");
+  }
+  RunServedReplayGate("qwen38-apex-nano-served-replay", std::string(gguf),
+                      SweepFixturePrompts(),
+                      {{220, 17, 220, 17},
+                       {220, 17, 220, 17},
+                       {220, 16, 220, 17},
+                       {220, 16, 220, 16}});
+}
+
+// The bf16 9B (Qwen3.5-9B-hf, dense GDN-hybrid): the CLEANER instrument of
+// the pair. The first three served tokens are byte-identical to the recorded
+// eager leg ([220,16,220,16] on the row-0 prompt; the pre-fix defect diverged
+// the fourth to 220 — a different-distribution value — and corrupted every
+// later step). The FOURTH cell is an EXACT TIE in the transformers oracle:
+// teacher-forced on the shared prefix (…,220,16,220), the oracle's top-2 are
+// {17, 16} at IDENTICAL log-prob (-0.706930 both; gaps 0.00 mnats, pinned
+// oracle env torch 2.7.1+cpu / transformers 5.8.1, bf16, CPU — the keepquant
+// row's oracle pin; evidence in this row's bench record) — the eager arm
+// took 16, the served arm takes 17, and both are the oracle's argmax. The
+// recorded tie treatment applies (the 0.8B gate's own words: "at exact ties
+// the arm may take the tied runner-up"), so the cell accepts either tied
+// token; the ORACLE's own greedy stream for this prompt is [220,16,220,16].
+// Checkpoint-gated: absent VLLM_CPP_QWEN35_9B_DIR -> loud SKIP.
+TEST_CASE("qwen3.5-9B dense captured arm SERVES replays byte-identical to eager up to the oracle-tied cell (Tenstorrent, checkpoint-gated)") {
+  const char* dir = std::getenv("VLLM_CPP_QWEN35_9B_DIR");
+  if (dir == nullptr || dir[0] == '\0') {
+    SkipGate("qwen35-9b-served-replay",
+             "VLLM_CPP_QWEN35_9B_DIR is absent — set it to the local "
+             "Qwen3.5-9B-hf snapshot directory (Qwen3_5ForConditionalGeneration, "
+             "32 layers, GDN-hybrid dense) to run the served-replay gate");
+  }
+  RunServedReplayGate("qwen35-9b-served-replay", std::string(dir),
+                      {SweepFixturePrompts()[0]},
+                      {{220, 16, 220, 16}},
+                      /*oracle_ties=*/{{{0, 3}, {16, 17}}});
 }
