@@ -1,0 +1,11 @@
+[0/1] Re-running CMake...
+-- Triton AOT: default OFF — the vendored artifacts are CUDA cubins and VLLM_CPP_CUDA is OFF
+-- CUDA FA2 compiled-arch manifest: []
+-- Configuring done (0.2s)
+-- Generating done (0.4s)
+-- Build files have been written to: /build/cmake
+[1/6] Building CXX object tests/CMakeFiles/test_xpu_gdn_chunked.dir/vt/test_xpu_gdn_chunked.cpp.o
+[2/6] Building CXX object CMakeFiles/vllm_xpu_backend.dir/src/vt/xpu/xpu_backend.cpp.o
+[3/6] Linking CXX static library libvllm.a
+[4/6] Linking CXX executable tests/bench_gptq4_model
+[5/6] Linking CXX executable tests/test_xpu_gdn_chunked

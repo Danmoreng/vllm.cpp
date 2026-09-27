@@ -1,0 +1,40 @@
+{
+  "cpp": {
+    "model_route_counts_including_warmup": {
+      "eager/gptq_graph_opt_in_missing": 2,
+      "eager/not_uniform_decode": 2
+    },
+    "raw": "raw/cpp_4096_route.log",
+    "route_counts_including_warmup": {
+      "gdn_prefill/chunked/eligible": 96,
+      "paged_attention/split/eligible": 32,
+      "paged_attention/xe2_prefill/eligible": 32
+    }
+  },
+  "interpretation": "Route and submission counts only. The profiled Python durations are not used for throughput comparisons.",
+  "python": {
+    "attention_and_gptq_trace_counts": {
+      "XeFMHAFwdKernel": 16,
+      "XeFMHAFwdSplitKVKernel": 16,
+      "_vllm_fa2_C::varlen_fwd": 16,
+      "_xpu_C::int4_gemm_w4a16": 256,
+      "gemm_kernel": 305,
+      "reshape_and_cache_flash_strided_kernel": 16
+    },
+    "custom_op_trace_counts": {
+      "_xpu_C::gdn_attention": 48,
+      "gdn::ChunkComputeAKernel": 48,
+      "gdn::ChunkComputeWUKernel": 48,
+      "gdn::ChunkFwdOKernel": 48,
+      "gdn::ChunkInverseOptKernel": 48,
+      "gdn::ChunkPrepareKernel": 48,
+      "gdn::chunk_update_states_kernel": 48,
+      "vllm::gdn_attention_core_xpu": 48
+    },
+    "exact_wheel_native_source_proven": false,
+    "runner": "XPUModelRunnerV2",
+    "runner_evidence": "raw/python_4096_runner.log: Using V2 Model Runner"
+  },
+  "schema_version": 1,
+  "scope": "One profiled Python 4096-token prefill; C++ one warm plus one measured 4096-token prefill and one decode forward"
+}
