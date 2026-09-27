@@ -29,10 +29,20 @@ bool PagedAttentionSplitKernel(Queue& q, Tensor& out, const Tensor& query, const
     VT_CHECK(span == 32 || span == 64 || span == 128 || span == 256,
              "VT_XPU_ATTN_SPLIT_SPAN must be 32, 64, 128 or 256");
   }
-  const int64_t parts = std::min(int64_t{32},
-      std::max(int64_t{1}, (capacity + span - 1) / span));
+  // Long B70 FP8 decode benefits from more independent slices. Keep short
+  // contexts and other formats on the established partition count.
+  const int64_t context = args.max_seq_len > 0 ? args.max_seq_len : capacity;
+  int max_parts = b70_fp8 && context >= 4096 ? 256 : 32;
+  if (const char* setting = std::getenv("VT_XPU_ATTN_SPLIT_MAX_PARTS")) {
+    max_parts = std::atoi(setting);
+    VT_CHECK(max_parts == 32 || max_parts == 64 || max_parts == 128 || max_parts == 256,
+             "VT_XPU_ATTN_SPLIT_MAX_PARTS must be 32, 64, 128 or 256");
+  }
   const int64_t stride = dim + 2, pairs = (ratio + Reuse - 1) / Reuse;
-  if (tokens * heads * parts * stride * sizeof(float) > Workspace) return false;
+  const int64_t budget_parts = Workspace / (tokens * heads * stride * sizeof(float));
+  if (budget_parts < 1) return false;
+  const int64_t parts = std::min({int64_t{max_parts}, budget_parts,
+      std::max(int64_t{1}, (capacity + span - 1) / span)});
   const View qs(query), kc(key_cache), vc(value_cache), dst(out), bt(block_table);
   const auto* table = static_cast<const int32_t*>(bt.data);
   const auto* lengths = static_cast<const int32_t*>(seq_lens.data);

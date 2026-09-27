@@ -96,7 +96,15 @@ TEST_CASE("XPU split-KV: 32k, batch4, M2-5, uneven requests and windowed softcap
     CAPTURE(chunk);
     Fixture ref(cpu.q, nreq, chunk, length, fp8, nreq == 4);
     Fixture got(gpu.q, nreq, chunk, length, fp8, nreq == 4);
+    if (fp8 && chunk == 5 && std::getenv("VT_XPU_PROFILE"))
+      (void)vt::xpu::DrainProfileEvents();
     ref.run("reference"); got.run("split"); Accuracy(got.result(), ref.result());
+    if (fp8 && chunk == 5 && std::getenv("VT_XPU_PROFILE")) {
+      int split_events = 0;
+      for (const auto& event : vt::xpu::DrainProfileEvents())
+        split_events += event.stage == "attention_split_partial";
+      CHECK(split_events == 1);
+    }
     if (chunk == 5) {
       ref.args.causal = got.args.causal = false;
       ref.args.window_size = got.args.window_size = vt::AttentionWindow{129, 3};
