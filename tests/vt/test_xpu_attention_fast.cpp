@@ -624,15 +624,17 @@ TEST_CASE("XPU Xe2 FP8 prefill: 2K/4K boundaries and 8K with paged KV"
   }
 }
 
-TEST_CASE("XPU Xe2 FP8 prefill: causal 4K continuation over 4K prefix"
+TEST_CASE("XPU Xe2 FP8 prefill: causal 2K/4K continuation over 4K prefix"
           * doctest::skip(!std::getenv("VT_XPU_PROFILE") ||
                           std::getenv("VT_XPU_XE2_PREFILL"))) {
   Queue gpu(vt::DeviceType::kXPU);
-  for (int page : {64, 1600}) {
+  for (int queries : {2048, 4096}) for (int page : {64, 1600}) {
+    const int context = 4096 + queries;
+    CAPTURE(queries);
     CAPTURE(page);
-    Fixture f(gpu.q, 1, 4096, 8192, true, false, page,
+    Fixture f(gpu.q, 1, queries, context, true, false, page,
               DType::kF16, DType::kF16, DType::kF16, true);
-    const int pages = (8192 + page - 1) / page;
+    const int pages = (context + page - 1) / page;
     Buffer contiguous_table(gpu.q, DType::kI32, {1, pages});
     std::vector<int32_t> page_ids(pages);
     for (int b = 0; b < pages; ++b) page_ids[b] = pages - 1 - b;
@@ -685,7 +687,7 @@ TEST_CASE("XPU Xe2 FP8 prefill: causal 4K continuation over 4K prefix"
       std::sort(old_ms.begin(), old_ms.end());
       std::sort(xe2_ms.begin(), xe2_ms.end());
       std::cout << nlohmann::json{{"event", "xe2_continuation_benchmark"},
-          {"query_tokens", 4096}, {"context_tokens", 8192}, {"page", page},
+          {"query_tokens", queries}, {"context_tokens", context}, {"page", page},
           {"q64_median_ms", old_ms[2]}, {"xe2_median_ms", xe2_ms[2]},
           {"q64_samples_ms", old_ms}, {"xe2_samples_ms", xe2_ms}}.dump()
                 << std::endl;
