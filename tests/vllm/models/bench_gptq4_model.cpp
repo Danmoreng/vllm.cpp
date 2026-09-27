@@ -203,12 +203,10 @@ int Run(const std::string& checkpoint, int prompt_tokens, int output_tokens,
   if (attn_kv.size() + gdn_state.size() != 64)
     throw std::runtime_error("expected 64 language layers");
 
-  std::vector<int32_t> prompt_ids(prompt_tokens), prompt_positions(prompt_tokens);
+  std::vector<int32_t> prompt_ids(prompt_tokens);
   std::vector<int32_t> decode_ids(output_tokens - 1);
-  for (int token = 0; token < prompt_tokens; ++token) {
+  for (int token = 0; token < prompt_tokens; ++token)
     prompt_ids[token] = 100 + token % 11;
-    prompt_positions[token] = token;
-  }
   const std::string prompt_ids_file = Env("VT_B70_BENCH_PROMPT_IDS_FILE");
   if (!prompt_ids_file.empty()) {
     std::ifstream file(prompt_ids_file);
@@ -257,15 +255,6 @@ int Run(const std::string& checkpoint, int prompt_tokens, int output_tokens,
                     static_cast<std::streamsize>(values.size() * sizeof(float))))
       throw std::runtime_error("cannot write quality logits: " + path);
   };
-  const auto prompt_meta = gptq4_model_bench::AttentionMetadata(
-      prompt_tokens, 0, block_size);
-  const auto prompt_gdn = gptq4_model_bench::GdnMetadata(prompt_tokens, false);
-  const std::vector<int32_t> prompt_logits_index{prompt_tokens - 1};
-  vllm::ModelForwardInput prompt_input{
-      prompt_ids, prompt_positions, prompt_meta, prompt_gdn, attn_kv,
-      gdn_state, config, queue, prompt_logits_index};
-  prompt_input.num_reqs = 1;
-
   const auto reset = [&] {
     for (const auto& cache : attn_kv)
       backend.Memset(queue, cache.data, 0,
@@ -279,7 +268,18 @@ int Run(const std::string& checkpoint, int prompt_tokens, int output_tokens,
     backend.Synchronize(queue);
   };
   const auto prefill = [&](bool capture = false) {
-    const auto result = vllm::ModelRegistry::Forward(*model, prompt_input);
+    std::vector<int32_t> positions(prompt_tokens);
+    for (int token = 0; token < prompt_tokens; ++token)
+      positions[token] = token;
+    const auto meta = gptq4_model_bench::AttentionMetadata(
+        prompt_tokens, 0, block_size);
+    const auto gdn = gptq4_model_bench::GdnMetadata(prompt_tokens, false);
+    const std::vector<int32_t> logits_index{prompt_tokens - 1};
+    vllm::ModelForwardInput input{
+        prompt_ids, positions, meta, gdn, attn_kv,
+        gdn_state, config, queue, logits_index};
+    input.num_reqs = 1;
+    const auto result = vllm::ModelRegistry::Forward(*model, input);
     if (!result.on_device() || result.rows != 1 ||
         result.vocab != config.vocab_size)
       throw std::runtime_error("invalid prefill output");

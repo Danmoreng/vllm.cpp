@@ -92,3 +92,26 @@ sessions and alternate A/B order. Report all raw per-run and per-step values,
 median, dispersion, active routes, quality status, and peak memory. Do not use
 profiled durations as scored times or infer confidence from correlated token
 steps as if they were independent sessions.
+
+## First 4096/64 worker-path diagnostic
+
+`worker_scope_4096_64_report.json` contains three separate sessions, each
+with one warmup and five measured requests per engine, in Python/C++, C++/Python,
+Python/C++ order. The Python V2 hook starts at `execute_model` entry and stops
+after `compute_logits` and one XPU synchronization, before sampling. It buffers
+step records until worker shutdown. The C++ timer starts before prompt position
+and attention/GDN metadata preparation and stops after synchronized logits.
+Both exclude model loading, warmup, scheduler, and sampler; both include input
+preparation/upload and the LM head. The joiner rejects any mismatch in P/D/O,
+token hashes, effective page size, model-call count, phase, query length, or
+context. The exact host preparation differs between the two workers, so this
+is a worker-path diagnostic, not a device-core-only or end-to-end result.
+
+At P=4096, D=64, O=65 with FP8 KV and 1600-token pages, median of the three
+session medians was 2.571 s Python vs 3.418 s C++ for prefill (1593 vs 1198
+tokens/s), and 33.71 ms Python vs 42.38 ms C++ per decode forward (29.67 vs
+23.60 forwards/s). Decode windows 1-16 and 17-64 are in the report; every raw
+step is in the compressed logs. These data establish a repeatable baseline under
+the stated diagnostic boundary. Long-replay numerical quality, per-session
+kernel-route evidence, device-core timing, and streaming TTFT/TPOT are still
+open; this is not a performance-parity qualification.

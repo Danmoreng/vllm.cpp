@@ -1,0 +1,383 @@
+{
+  "status": "diagnostic_worker_scope_only_quality_and_per_run_routes_pending",
+  "P": 4096,
+  "D": 64,
+  "O": 65,
+  "kv_dtype": "fp8_e4m3",
+  "kv_page_size": 1600,
+  "model_dtype": "fp16",
+  "ssm_state_dtype": "fp32",
+  "execution": "eager",
+  "warmup_requests_per_session": 1,
+  "measured_rounds_per_session": 5,
+  "independent_sessions": 3,
+  "token_replay": "Python trace_decode_token_ids matches C++ first D decode inputs; last emitted trace token is not fed to either model",
+  "timing_boundaries": {
+    "python": "XPUModelRunnerV2.execute_model entry to completion of model.compute_logits in sample_tokens; one XPU synchronization at logits endpoint; scheduler and sampler excluded",
+    "cpp": "before host positions/attention/GDN metadata construction through synchronized ModelRegistry::Forward logits; cache reset/load/warmup excluded",
+    "remaining_scope_differences": "Python request-state/input staging and C++ metadata building differ in implementation; this is a worker-path diagnostic, not device-core or end-to-end parity."
+  },
+  "qualification_gaps": [
+    "long decode quality checkpoints and fixed thresholds",
+    "per-session selected kernel routes",
+    "device-core-only timing adapter",
+    "streaming TTFT/TPOT"
+  ],
+  "summary": {
+    "P": 4096,
+    "D": 64,
+    "O": 65,
+    "effective_kv_page_size": 1600,
+    "independent_sessions": 3,
+    "measured_rounds_per_engine": 15,
+    "prefill_seconds": {
+      "python": {
+        "median_of_session_medians": 2.57124083,
+        "minimum_session_median": 2.561536384,
+        "maximum_session_median": 2.571472124
+      },
+      "cpp": {
+        "median_of_session_medians": 3.417928657,
+        "minimum_session_median": 3.407337012,
+        "maximum_session_median": 3.424045121
+      }
+    },
+    "prefill_cpp_throughput_fraction_of_python": {
+      "median_of_session_medians": 0.7517707743550904,
+      "minimum_session_median": 0.7509366083496771,
+      "maximum_session_median": 0.7523480979433446
+    },
+    "decode_seconds_per_forward": {
+      "python": {
+        "median_of_session_medians": 0.033705628015625,
+        "minimum_session_median": 0.033669150609375,
+        "maximum_session_median": 0.033774543625
+      },
+      "cpp": {
+        "median_of_session_medians": 0.042380228046875,
+        "minimum_session_median": 0.04232822359375,
+        "maximum_session_median": 0.04240257
+      }
+    },
+    "decode_cpp_throughput_fraction_of_python": {
+      "median_of_session_medians": 0.7948958757835906,
+      "minimum_session_median": 0.7944542103958231,
+      "maximum_session_median": 0.7979201761253927
+    },
+    "decode_windows_seconds_per_forward": {
+      "1-16": {
+        "python": {
+          "median_of_session_medians": 0.0351481064375,
+          "minimum_session_median": 0.035144861625,
+          "maximum_session_median": 0.035209948125
+        },
+        "cpp": {
+          "median_of_session_medians": 0.0442943170625,
+          "minimum_session_median": 0.044236131625,
+          "maximum_session_median": 0.04435212325
+        }
+      },
+      "17-64": {
+        "python": {
+          "median_of_session_medians": 0.03319970785416667,
+          "minimum_session_median": 0.033166264520833336,
+          "maximum_session_median": 0.03331740370833333
+        },
+        "cpp": {
+          "median_of_session_medians": 0.041742198375,
+          "minimum_session_median": 0.04169225425,
+          "maximum_session_median": 0.04175524789583333
+        }
+      }
+    }
+  },
+  "sessions": [
+    {
+      "index": 1,
+      "execution_order": [
+        "python",
+        "cpp"
+      ],
+      "rounds": 5,
+      "prefill_seconds": {
+        "python": {
+          "median": 2.561536384,
+          "median_absolute_deviation": 0.0019089499999997983
+        },
+        "cpp": {
+          "median": 3.407337012,
+          "median_absolute_deviation": 0.0024597840000000204
+        }
+      },
+      "decode_seconds_per_forward": {
+        "python": {
+          "median": 0.033774543625,
+          "median_absolute_deviation": 4.1408999999999196e-05
+        },
+        "cpp": {
+          "median": 0.04232822359375,
+          "median_absolute_deviation": 8.338451562499988e-05
+        }
+      },
+      "decode_windows": {
+        "1-16": {
+          "python_seconds_per_forward": {
+            "median": 0.0351481064375,
+            "median_absolute_deviation": 2.2745812500002405e-05
+          },
+          "cpp_seconds_per_forward": {
+            "median": 0.044236131625,
+            "median_absolute_deviation": 8.526043749999823e-05
+          }
+        },
+        "17-64": {
+          "python_seconds_per_forward": {
+            "median": 0.03331740370833333,
+            "median_absolute_deviation": 6.350829166666683e-05
+          },
+          "cpp_seconds_per_forward": {
+            "median": 0.04169225425,
+            "median_absolute_deviation": 7.655152083333588e-05
+          }
+        }
+      },
+      "token_hashes_match": true,
+      "schedule_matches": true,
+      "artifacts": {
+        "python_runner_log": {
+          "path": "raw/worker_scope_4096_64/session_1_python_runner_log.gz",
+          "uncompressed_sha256": "7979414974f3f8d0da79b2262882cfa22115dd8c7792536e3347e64d709d0ea7",
+          "uncompressed_bytes": 77649
+        },
+        "python_worker_steps": {
+          "path": "raw/worker_scope_4096_64/session_1_python_worker_steps.gz",
+          "uncompressed_sha256": "ed3c0849ef67db832391eb8bee69571121f865fd56b94fbb8589279978a3513b",
+          "uncompressed_bytes": 147820
+        },
+        "python_scheduler_steps": {
+          "path": "raw/worker_scope_4096_64/session_1_python_scheduler_steps.gz",
+          "uncompressed_sha256": "c18e8c565251457415599cdb30fc57a49b3145fdc1231dc18e44bc34045720d6",
+          "uncompressed_bytes": 73312
+        },
+        "cpp_benchmark_log": {
+          "path": "raw/worker_scope_4096_64/session_1_cpp_benchmark_log.gz",
+          "uncompressed_sha256": "9c2cd5fbb26e880bf3365025cd7ceb286a54566a6ab18fb336e195785291afe9",
+          "uncompressed_bytes": 69348
+        }
+      }
+    },
+    {
+      "index": 2,
+      "execution_order": [
+        "cpp",
+        "python"
+      ],
+      "rounds": 5,
+      "prefill_seconds": {
+        "python": {
+          "median": 2.571472124,
+          "median_absolute_deviation": 0.0068697509999999795
+        },
+        "cpp": {
+          "median": 3.417928657,
+          "median_absolute_deviation": 0.011751778999999907
+        }
+      },
+      "decode_seconds_per_forward": {
+        "python": {
+          "median": 0.033669150609375,
+          "median_absolute_deviation": 2.8469562500001155e-05
+        },
+        "cpp": {
+          "median": 0.042380228046875,
+          "median_absolute_deviation": 2.4833515624995972e-05
+        }
+      },
+      "decode_windows": {
+        "1-16": {
+          "python_seconds_per_forward": {
+            "median": 0.035144861625,
+            "median_absolute_deviation": 2.5318124999999803e-05
+          },
+          "cpp_seconds_per_forward": {
+            "median": 0.0442943170625,
+            "median_absolute_deviation": 4.638112500000152e-05
+          }
+        },
+        "17-64": {
+          "python_seconds_per_forward": {
+            "median": 0.033166264520833336,
+            "median_absolute_deviation": 1.4835875000000776e-05
+          },
+          "cpp_seconds_per_forward": {
+            "median": 0.041742198375,
+            "median_absolute_deviation": 1.655618750000254e-05
+          }
+        }
+      },
+      "token_hashes_match": true,
+      "schedule_matches": true,
+      "artifacts": {
+        "python_runner_log": {
+          "path": "raw/worker_scope_4096_64/session_2_python_runner_log.gz",
+          "uncompressed_sha256": "f20778095e81e2a1b7cf8a98958d7824dc7814cd9a8af360081f7880e21f04a6",
+          "uncompressed_bytes": 77657
+        },
+        "python_worker_steps": {
+          "path": "raw/worker_scope_4096_64/session_2_python_worker_steps.gz",
+          "uncompressed_sha256": "b984196783eb2966e5abe835850d6b4a444b575068bd345685962944371ffd6a",
+          "uncompressed_bytes": 147820
+        },
+        "python_scheduler_steps": {
+          "path": "raw/worker_scope_4096_64/session_2_python_scheduler_steps.gz",
+          "uncompressed_sha256": "c67b4f462a2222f4eb5693e608211a91a1f24e22bb308dcb9f5d091689e5566d",
+          "uncompressed_bytes": 73312
+        },
+        "cpp_benchmark_log": {
+          "path": "raw/worker_scope_4096_64/session_2_cpp_benchmark_log.gz",
+          "uncompressed_sha256": "e99d591e5a58105598e5f9c25c8546ef737ada5ba9f097f3f8a864da291d1e0d",
+          "uncompressed_bytes": 69329
+        }
+      }
+    },
+    {
+      "index": 3,
+      "execution_order": [
+        "python",
+        "cpp"
+      ],
+      "rounds": 5,
+      "prefill_seconds": {
+        "python": {
+          "median": 2.57124083,
+          "median_absolute_deviation": 0.0032234350000002188
+        },
+        "cpp": {
+          "median": 3.424045121,
+          "median_absolute_deviation": 0.007856246000000233
+        }
+      },
+      "decode_seconds_per_forward": {
+        "python": {
+          "median": 0.033705628015625,
+          "median_absolute_deviation": 3.3600937500016803e-06
+        },
+        "cpp": {
+          "median": 0.04240257,
+          "median_absolute_deviation": 6.713625000001611e-06
+        }
+      },
+      "decode_windows": {
+        "1-16": {
+          "python_seconds_per_forward": {
+            "median": 0.035209948125,
+            "median_absolute_deviation": 3.8683437499999196e-05
+          },
+          "cpp_seconds_per_forward": {
+            "median": 0.04435212325,
+            "median_absolute_deviation": 3.8532312499998944e-05
+          }
+        },
+        "17-64": {
+          "python_seconds_per_forward": {
+            "median": 0.03319970785416667,
+            "median_absolute_deviation": 2.2222645833326615e-05
+          },
+          "cpp_seconds_per_forward": {
+            "median": 0.04175524789583333,
+            "median_absolute_deviation": 3.901166666667177e-06
+          }
+        }
+      },
+      "token_hashes_match": true,
+      "schedule_matches": true,
+      "artifacts": {
+        "python_runner_log": {
+          "path": "raw/worker_scope_4096_64/session_3_python_runner_log.gz",
+          "uncompressed_sha256": "6378458f9ba5edc578084e1d552dccdf0fb75391abbf8753632af9b78b7fd376",
+          "uncompressed_bytes": 77626
+        },
+        "python_worker_steps": {
+          "path": "raw/worker_scope_4096_64/session_3_python_worker_steps.gz",
+          "uncompressed_sha256": "c03192844bded022f143d5dc8651133551356ec1bdeaeee0e596fa956276b2a7",
+          "uncompressed_bytes": 147820
+        },
+        "python_scheduler_steps": {
+          "path": "raw/worker_scope_4096_64/session_3_python_scheduler_steps.gz",
+          "uncompressed_sha256": "6ddcd61271b9b3acdcdba11ac32bc8e4c83d8b291d18728afb14af0e6141d5ff",
+          "uncompressed_bytes": 73312
+        },
+        "cpp_benchmark_log": {
+          "path": "raw/worker_scope_4096_64/session_3_cpp_benchmark_log.gz",
+          "uncompressed_sha256": "bfc9badb6afb9f4c60976c5ff453744c0b5904c64a5aa690548ea00fe53d9008",
+          "uncompressed_bytes": 69359
+        }
+      }
+    }
+  ],
+  "provenance": {
+    "cpp_branch": "b70-gptq-int4",
+    "cpp_binary_sha256": "979979db43e1d2a2c10403d852b093db78b85a2816be50fd999a94e0ccb92ad2",
+    "cpp_benchmark_source_sha256": "adf73a13d42eb5d376e122e69a04d08762d5127e2e0a96b32ecf4138acdd37fc",
+    "python_image_id": "sha256:2d289fbe80c0be37f5d6e8b62234bf3da9392413b3b06044f2490f733116d1f6",
+    "python_runner_source_sha256": "c99f833127802fe98d24f0eb97d86617ce3ea0a441668c33104028f21376d5e3",
+    "python_worker_hook_sha256": "9f7960a51789db4a5c9d1084c1265cff68980f27330b23fca1c1dd5e35a4f611",
+    "model_revision": "a47b0c6f0d756bc394c4cc629d5b0ded1acc7001",
+    "onednn_version": "3.13.0",
+    "session_joiner_source_sha256": "6422224a7cb46b3d2b7e9fd9fe8e94822e329681c15d6094e1e3d8e1f1463706",
+    "session_aggregator_source_sha256": "a1d80d68e645fe4d954d3459b0e518fabc6a7947b423dea68a7719b37db25931"
+  },
+  "invocations": {
+    "python_args": [
+      "python",
+      "/bench.py",
+      "--model",
+      "/models",
+      "--prompt-tokens",
+      "4096",
+      "--generated-tokens",
+      "65",
+      "--rounds",
+      "5"
+    ],
+    "python_env": {
+      "PYTHONPATH": "/trace",
+      "B70_WORKER_TIMING_PATH": "/out/worker.jsonl",
+      "B70_WORKER_SCHED_PATH": "/out/sched.jsonl",
+      "B70_WORKER_TIMING_BUFFER": "1",
+      "VLLM_NO_USAGE_STATS": "1",
+      "HF_HUB_OFFLINE": "1"
+    },
+    "cpp_args": [
+      "/build/cmake/tests/bench_gptq4_model",
+      "/models",
+      "4096",
+      "65",
+      "5"
+    ],
+    "cpp_env": {
+      "VT_B70_BENCH_KV_DTYPE": "fp8_e4m3",
+      "VT_B70_BENCH_BLOCK_SIZE": "1600",
+      "VT_B70_BENCH_MAX_CONTEXT": "8192",
+      "VT_GPTQ4_GRAPH": "0",
+      "LD_LIBRARY_PATH": "/opt/dnnl/lib:/opt/intel/oneapi/compiler/latest/lib:$LD_LIBRARY_PATH"
+    },
+    "docker_gpu_flags": [
+      "--device",
+      "/dev/dri",
+      "--group-add",
+      "video",
+      "--group-add",
+      "render",
+      "--ipc=host"
+    ],
+    "volume_roles": {
+      "/models": "pinned model snapshot",
+      "/build": "current C++ build",
+      "/opt/dnnl": "pinned oneDNN 3.13 install",
+      "/bench.py": "Python replay script",
+      "/trace": "Python worker timing sitecustomize",
+      "/out": "per-session raw trace output"
+    }
+  }
+}
