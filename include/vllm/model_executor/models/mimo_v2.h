@@ -18,8 +18,9 @@
 namespace vllm {
 
 // Hybrid layer pattern: 0 = full attention, 1 = sliding-window attention.
-// The checkpoint carries a 48-element list; every 6th layer (indices 0,6,12,
-// ...,42) is full attention, the rest are SWA with sliding_window=128.
+// The checkpoint carries a 48-element list: [0,1,1,1,1,0,...] — full
+// attention (pattern==0) at indices 0,5,11,17,23,29,35,41,47 (9 layers),
+// the rest are SWA with sliding_window=128.
 struct MiMoV2Params {
   int64_t hidden_size = 0;
   int64_t num_hidden_layers = 0;
