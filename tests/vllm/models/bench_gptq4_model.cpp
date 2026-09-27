@@ -113,6 +113,11 @@ int Run(const std::string& checkpoint, int prompt_tokens, int output_tokens,
   if (kv_dtype != "f16" && kv_dtype != "fp8_e4m3")
     throw std::invalid_argument("VT_B70_BENCH_KV_DTYPE must be f16 or fp8_e4m3");
   const bool fp8_kv = kv_dtype == "fp8_e4m3";
+  const std::string prefill_chunk_arg = Env("VT_B70_BENCH_PREFILL_CHUNK");
+  const int prefill_chunk = prefill_chunk_arg.empty()
+      ? prompt_tokens : std::stoi(prefill_chunk_arg);
+  if (prefill_chunk < 1 || prefill_chunk > prompt_tokens)
+    throw std::invalid_argument("VT_B70_BENCH_PREFILL_CHUNK must be in 1..prompt_tokens");
   const int block_size = std::stoi(Env("VT_B70_BENCH_BLOCK_SIZE", fp8_kv ? "1600" : "128"));
   if (block_size != 64 && block_size != 128 && block_size != 1600)
     throw std::invalid_argument("VT_B70_BENCH_BLOCK_SIZE must be 64, 128 or 1600");
@@ -293,24 +298,38 @@ int Run(const std::string& checkpoint, int prompt_tokens, int output_tokens,
     }
     backend.Synchronize(queue);
   };
-  const auto prefill = [&](bool capture = false) {
-    std::vector<int32_t> positions(prompt_tokens);
-    for (int token = 0; token < prompt_tokens; ++token)
-      positions[token] = token;
-    const auto meta = gptq4_model_bench::AttentionMetadata(
-        prompt_tokens, 0, block_size);
-    const auto gdn = gptq4_model_bench::GdnMetadata(prompt_tokens, false);
-    const std::vector<int32_t> logits_index{prompt_tokens - 1};
-    vllm::ModelForwardInput input{
-        prompt_ids, positions, meta, gdn, attn_kv,
-        gdn_state, config, queue, logits_index};
-    input.num_reqs = 1;
-    const auto result = vllm::ModelRegistry::Forward(*model, input);
-    if (!result.on_device() || result.rows != 1 ||
-        result.vocab != config.vocab_size)
-      throw std::runtime_error("invalid prefill output");
-    backend.Synchronize(queue);
-    if (capture) capture_logits(result, "prefill");
+  struct PrefillStepTiming { int before, after; double seconds; };
+  const auto prefill = [&](bool capture = false,
+                           std::vector<PrefillStepTiming>* steps = nullptr) {
+    for (int context = 0; context < prompt_tokens; context += prefill_chunk) {
+      const int query_len = std::min(prefill_chunk, prompt_tokens - context);
+      const auto step_start = Clock::now();
+      std::vector<int32_t> positions(query_len);
+      for (int token = 0; token < query_len; ++token)
+        positions[token] = context + token;
+      const std::vector<int32_t> ids(prompt_ids.begin() + context,
+                                     prompt_ids.begin() + context + query_len);
+      const auto meta = gptq4_model_bench::AttentionMetadata(
+          query_len, context, block_size);
+      const auto gdn = gptq4_model_bench::GdnMetadata(
+          query_len, false, context > 0);
+      const std::vector<int32_t> logits_index{query_len - 1};
+      vllm::ModelForwardInput input{
+          ids, positions, meta, gdn, attn_kv,
+          gdn_state, config, queue, logits_index};
+      input.num_reqs = 1;
+      const auto result = vllm::ModelRegistry::Forward(*model, input);
+      if (!result.on_device() || result.rows != 1 ||
+          result.vocab != config.vocab_size)
+        throw std::runtime_error("invalid prefill output");
+      backend.Synchronize(queue);
+      const auto step_end = Clock::now();
+      if (steps != nullptr)
+        steps->push_back({context, context + query_len,
+                          Seconds(step_start, step_end)});
+      if (capture && context + query_len == prompt_tokens)
+        capture_logits(result, "prefill");
+    }
   };
   const auto decode = [&](bool capture = false,
                           std::vector<DecodeStepTiming>* steps = nullptr) {
@@ -372,6 +391,8 @@ int Run(const std::string& checkpoint, int prompt_tokens, int output_tokens,
         {"model_dtype", "f16"}, {"kv_dtype", kv_dtype},
         {"weights", "gptq4-g128 with dense BA/head"},
         {"prompt_tokens", prompt_tokens}, {"output_tokens", output_tokens},
+        {"prefill_chunk_tokens", prefill_chunk},
+        {"prefill_model_calls", (prompt_tokens + prefill_chunk - 1) / prefill_chunk},
         {"generated_tokens", output_tokens},
         {"decode_forward_steps", output_tokens - 1},
         {"max_context", max_context},
@@ -401,12 +422,13 @@ int Run(const std::string& checkpoint, int prompt_tokens, int output_tokens,
 
   for (int round = 0; round < rounds; ++round) {
     reset();
+    std::vector<PrefillStepTiming> prefill_steps;
     std::vector<DecodeStepTiming> decode_steps;
     decode_steps.reserve(static_cast<size_t>(output_tokens - 1));
     const auto captures_before = backend.GraphsCaptured();
     const auto replays_before = backend.GraphReplays();
     const auto start = Clock::now();
-    prefill(!quality_dir.empty());
+    prefill(!quality_dir.empty(), &prefill_steps);
     const auto prefill_end = Clock::now();
     if (stage_profile)
       Emit({{"event", "gptq4_stage_trace"}, {"phase", "prefill"}, {"round", round},
@@ -473,10 +495,11 @@ int Run(const std::string& checkpoint, int prompt_tokens, int output_tokens,
           {"allocated_bytes", memory.allocated_bytes},
           {"peak_allocated_bytes", memory.peak_allocated_bytes},
           {"graph_device_bytes", memory.graph_device_bytes}});
-    Emit({{"event", "gptq4_benchmark_step"}, {"round", round},
-          {"phase", "prefill"}, {"query_tokens", prompt_tokens},
-          {"context_before", 0}, {"context_after", prompt_tokens},
-          {"seconds", prefill_seconds}});
+    for (const auto& step : prefill_steps)
+      Emit({{"event", "gptq4_benchmark_step"}, {"round", round},
+            {"phase", "prefill"}, {"query_tokens", step.after - step.before},
+            {"context_before", step.before}, {"context_after", step.after},
+            {"seconds", step.seconds}});
     for (size_t step = 0; step < decode_steps.size(); ++step) {
       const auto& timing = decode_steps[step];
       Emit({{"event", "gptq4_benchmark_step"}, {"round", round},
