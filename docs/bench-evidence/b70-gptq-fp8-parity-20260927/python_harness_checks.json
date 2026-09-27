@@ -1,0 +1,117 @@
+{
+  "purpose": "functional_P1_replay_and_phase_check_not_performance_score",
+  "P": 4096,
+  "D": 2,
+  "O": 3,
+  "resolved_kv_page_size": 1600,
+  "prompt_ids_fnv1a64": "9705ea213a213545",
+  "decode_ids_fnv1a64": "98435744242ba048",
+  "requests_traced": 2,
+  "schedule_per_request": [
+    {
+      "phase": "prefill",
+      "query_tokens": 4096,
+      "context_before": 0,
+      "context_after": 4096
+    },
+    {
+      "phase": "decode",
+      "query_tokens": 1,
+      "context_before": 4096,
+      "context_after": 4097
+    },
+    {
+      "phase": "decode",
+      "query_tokens": 1,
+      "context_before": 4097,
+      "context_after": 4098
+    }
+  ],
+  "run_count_including_warmup": 2,
+  "ttft_status": "not_measured_batch_LLM_generate_buffers_output",
+  "raw_log_label_correction": "The diagnostic runner version named first_nonempty_api_output_seconds ttft_seconds_at_api_step. It was a batch API output timestamp, not TTFT; the source field has been renamed.",
+  "artifacts": {
+    "runner_log": {
+      "path": "raw/python_replay_4096_3.log.gz",
+      "uncompressed_sha256": "de510be265741271e45ceb92c051264f9cd3b85578d0b1bdc5ac1c2c4ff3e884",
+      "bytes": 16483
+    },
+    "scheduler_trace": {
+      "path": "raw/python_scheduler_4096_3.jsonl.gz",
+      "uncompressed_sha256": "2b4729ce2c71097857343058ba1129bb637ed288e96dc058682ddfc28932fed0",
+      "bytes": 2192
+    }
+  },
+  "chunked_prefill_boundary": {
+    "P": 4097,
+    "D": 0,
+    "O": 1,
+    "run_count_including_warmup": 2,
+    "scheduler_calls_per_request": [
+      {
+        "phase": "prefill",
+        "query_tokens": 4096,
+        "context_before": 0,
+        "context_after": 4096
+      },
+      {
+        "phase": "prefill",
+        "query_tokens": 1,
+        "context_before": 4096,
+        "context_after": 4097
+      }
+    ],
+    "outer_engine_steps_per_request": 1,
+    "interpretation": "two actual prefill model calls inside one outer LLMEngine.step; C++ unchunked 4097 forward is a different schedule",
+    "artifacts": {
+      "runner_log": {
+        "path": "raw/python_replay_4097_1.log.gz",
+        "uncompressed_sha256": "c66dcff5475e1fcd9636a681c09769e903eefee11e0efb62cc3f769a90154029",
+        "bytes": 16023
+      },
+      "scheduler_trace": {
+        "path": "raw/python_scheduler_4097_1.jsonl.gz",
+        "uncompressed_sha256": "9c2bd860de06c375ada51e75a27d9e19ede00fd71cdd5181da3f358cdc0b776b",
+        "bytes": 1566
+      }
+    }
+  },
+  "diagnostic_invocation": {
+    "image": "local/b70-qwen38-vllm:vllm-0.30.0-xpu-kernels-0.1.15.4",
+    "runner": "tools/bench/b70_gptq_fp8_python_replay.py",
+    "scheduler_hook": "tools/bench/b70_scheduler_trace/sitecustomize.py",
+    "environment": {
+      "PYTHONPATH": "/trace",
+      "B70_SCHED_TRACE_PATH": "/out/trace.jsonl",
+      "HF_HUB_OFFLINE": "1"
+    },
+    "common_args": [
+      "--model",
+      "/models",
+      "--rounds",
+      "1"
+    ],
+    "case_args": {
+      "4096_3": [
+        "--prompt-tokens",
+        "4096",
+        "--generated-tokens",
+        "3"
+      ],
+      "4097_1": [
+        "--prompt-tokens",
+        "4097",
+        "--generated-tokens",
+        "1"
+      ]
+    },
+    "binds": {
+      "/models": "/home/sebastian/LocalLLM/models-legacy/Qwen3.8-27B-GPTQ-G128",
+      "/bench.py": "tools/bench/b70_gptq_fp8_python_replay.py",
+      "/trace": "tools/bench/b70_scheduler_trace",
+      "/out": "per-run temporary output directory"
+    },
+    "gpu": "/dev/dri",
+    "notes": "The 4096 diagnostic was recorded before the API-output timestamp field was renamed; code and status now name it correctly."
+  }
+}
