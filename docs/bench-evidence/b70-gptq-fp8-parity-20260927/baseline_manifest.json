@@ -1,0 +1,949 @@
+{
+  "cpp": {
+    "benchmark_config": {
+      "attention_mode": "auto",
+      "build_id": "Sep 27 2026 12:22:02",
+      "checkpoint": "/models",
+      "checkpoint_revision_declared": "",
+      "decode_first_token": 300,
+      "decode_ids_file": "",
+      "decode_ids_fnv1a64": "c5112a962b05756e",
+      "device": {
+        "compiler": "Intel(R) oneAPI DPC++/C++ Compiler 2026.1.1 (2026.1.1.20260724)",
+        "device_id": 57891,
+        "driver": "1.17.39758+10",
+        "index": 0,
+        "matrix_combinations": [
+          {
+            "a_type": 9,
+            "b_type": 9,
+            "c_type": 7,
+            "d_type": 7,
+            "k": 32,
+            "m": 0,
+            "max_k": 0,
+            "max_m": 8,
+            "max_n": 0,
+            "n": 16
+          },
+          {
+            "a_type": 9,
+            "b_type": 5,
+            "c_type": 7,
+            "d_type": 7,
+            "k": 32,
+            "m": 0,
+            "max_k": 0,
+            "max_m": 8,
+            "max_n": 0,
+            "n": 16
+          },
+          {
+            "a_type": 5,
+            "b_type": 9,
+            "c_type": 7,
+            "d_type": 7,
+            "k": 32,
+            "m": 0,
+            "max_k": 0,
+            "max_m": 8,
+            "max_n": 0,
+            "n": 16
+          },
+          {
+            "a_type": 5,
+            "b_type": 5,
+            "c_type": 7,
+            "d_type": 7,
+            "k": 32,
+            "m": 0,
+            "max_k": 0,
+            "max_m": 8,
+            "max_n": 0,
+            "n": 16
+          },
+          {
+            "a_type": 1,
+            "b_type": 1,
+            "c_type": 3,
+            "d_type": 3,
+            "k": 16,
+            "m": 0,
+            "max_k": 0,
+            "max_m": 8,
+            "max_n": 0,
+            "n": 16
+          },
+          {
+            "a_type": 1,
+            "b_type": 1,
+            "c_type": 1,
+            "d_type": 3,
+            "k": 16,
+            "m": 0,
+            "max_k": 0,
+            "max_m": 8,
+            "max_n": 0,
+            "n": 16
+          },
+          {
+            "a_type": 1,
+            "b_type": 1,
+            "c_type": 3,
+            "d_type": 1,
+            "k": 16,
+            "m": 0,
+            "max_k": 0,
+            "max_m": 8,
+            "max_n": 0,
+            "n": 16
+          },
+          {
+            "a_type": 1,
+            "b_type": 1,
+            "c_type": 1,
+            "d_type": 1,
+            "k": 16,
+            "m": 0,
+            "max_k": 0,
+            "max_m": 8,
+            "max_n": 0,
+            "n": 16
+          },
+          {
+            "a_type": 1,
+            "b_type": 1,
+            "c_type": 3,
+            "d_type": 3,
+            "k": 16,
+            "m": 16,
+            "max_k": 0,
+            "max_m": 0,
+            "max_n": 0,
+            "n": 16
+          },
+          {
+            "a_type": 1,
+            "b_type": 1,
+            "c_type": 3,
+            "d_type": 1,
+            "k": 16,
+            "m": 16,
+            "max_k": 0,
+            "max_m": 0,
+            "max_n": 0,
+            "n": 16
+          },
+          {
+            "a_type": 1,
+            "b_type": 1,
+            "c_type": 1,
+            "d_type": 3,
+            "k": 16,
+            "m": 16,
+            "max_k": 0,
+            "max_m": 0,
+            "max_n": 0,
+            "n": 16
+          },
+          {
+            "a_type": 1,
+            "b_type": 1,
+            "c_type": 1,
+            "d_type": 1,
+            "k": 16,
+            "m": 16,
+            "max_k": 0,
+            "max_m": 0,
+            "max_n": 0,
+            "n": 16
+          },
+          {
+            "a_type": 1,
+            "b_type": 1,
+            "c_type": 3,
+            "d_type": 3,
+            "k": 16,
+            "m": 1,
+            "max_k": 0,
+            "max_m": 0,
+            "max_n": 0,
+            "n": 64
+          },
+          {
+            "a_type": 1,
+            "b_type": 1,
+            "c_type": 1,
+            "d_type": 3,
+            "k": 16,
+            "m": 1,
+            "max_k": 0,
+            "max_m": 0,
+            "max_n": 0,
+            "n": 64
+          },
+          {
+            "a_type": 1,
+            "b_type": 1,
+            "c_type": 3,
+            "d_type": 1,
+            "k": 16,
+            "m": 1,
+            "max_k": 0,
+            "max_m": 0,
+            "max_n": 0,
+            "n": 64
+          },
+          {
+            "a_type": 1,
+            "b_type": 1,
+            "c_type": 1,
+            "d_type": 1,
+            "k": 16,
+            "m": 1,
+            "max_k": 0,
+            "max_m": 0,
+            "max_n": 0,
+            "n": 64
+          },
+          {
+            "a_type": 1,
+            "b_type": 1,
+            "c_type": 3,
+            "d_type": 3,
+            "k": 16,
+            "m": 32,
+            "max_k": 0,
+            "max_m": 0,
+            "max_n": 0,
+            "n": 64
+          },
+          {
+            "a_type": 1,
+            "b_type": 1,
+            "c_type": 1,
+            "d_type": 3,
+            "k": 16,
+            "m": 32,
+            "max_k": 0,
+            "max_m": 0,
+            "max_n": 0,
+            "n": 64
+          },
+          {
+            "a_type": 1,
+            "b_type": 1,
+            "c_type": 3,
+            "d_type": 1,
+            "k": 16,
+            "m": 32,
+            "max_k": 0,
+            "max_m": 0,
+            "max_n": 0,
+            "n": 64
+          },
+          {
+            "a_type": 1,
+            "b_type": 1,
+            "c_type": 1,
+            "d_type": 1,
+            "k": 16,
+            "m": 32,
+            "max_k": 0,
+            "max_m": 0,
+            "max_n": 0,
+            "n": 64
+          },
+          {
+            "a_type": 1,
+            "b_type": 1,
+            "c_type": 3,
+            "d_type": 3,
+            "k": 32,
+            "m": 1,
+            "max_k": 0,
+            "max_m": 0,
+            "max_n": 0,
+            "n": 64
+          },
+          {
+            "a_type": 1,
+            "b_type": 1,
+            "c_type": 1,
+            "d_type": 3,
+            "k": 32,
+            "m": 1,
+            "max_k": 0,
+            "max_m": 0,
+            "max_n": 0,
+            "n": 64
+          },
+          {
+            "a_type": 1,
+            "b_type": 1,
+            "c_type": 3,
+            "d_type": 1,
+            "k": 32,
+            "m": 1,
+            "max_k": 0,
+            "max_m": 0,
+            "max_n": 0,
+            "n": 64
+          },
+          {
+            "a_type": 1,
+            "b_type": 1,
+            "c_type": 1,
+            "d_type": 1,
+            "k": 32,
+            "m": 1,
+            "max_k": 0,
+            "max_m": 0,
+            "max_n": 0,
+            "n": 64
+          },
+          {
+            "a_type": 1,
+            "b_type": 1,
+            "c_type": 3,
+            "d_type": 3,
+            "k": 32,
+            "m": 32,
+            "max_k": 0,
+            "max_m": 0,
+            "max_n": 0,
+            "n": 64
+          },
+          {
+            "a_type": 1,
+            "b_type": 1,
+            "c_type": 1,
+            "d_type": 3,
+            "k": 32,
+            "m": 32,
+            "max_k": 0,
+            "max_m": 0,
+            "max_n": 0,
+            "n": 64
+          },
+          {
+            "a_type": 1,
+            "b_type": 1,
+            "c_type": 3,
+            "d_type": 1,
+            "k": 32,
+            "m": 32,
+            "max_k": 0,
+            "max_m": 0,
+            "max_n": 0,
+            "n": 64
+          },
+          {
+            "a_type": 1,
+            "b_type": 1,
+            "c_type": 1,
+            "d_type": 1,
+            "k": 32,
+            "m": 32,
+            "max_k": 0,
+            "max_m": 0,
+            "max_n": 0,
+            "n": 64
+          },
+          {
+            "a_type": 0,
+            "b_type": 0,
+            "c_type": 0,
+            "d_type": 0,
+            "k": 16,
+            "m": 0,
+            "max_k": 0,
+            "max_m": 8,
+            "max_n": 0,
+            "n": 16
+          },
+          {
+            "a_type": 0,
+            "b_type": 0,
+            "c_type": 3,
+            "d_type": 0,
+            "k": 16,
+            "m": 0,
+            "max_k": 0,
+            "max_m": 8,
+            "max_n": 0,
+            "n": 16
+          },
+          {
+            "a_type": 0,
+            "b_type": 0,
+            "c_type": 0,
+            "d_type": 3,
+            "k": 16,
+            "m": 0,
+            "max_k": 0,
+            "max_m": 8,
+            "max_n": 0,
+            "n": 16
+          },
+          {
+            "a_type": 0,
+            "b_type": 0,
+            "c_type": 3,
+            "d_type": 3,
+            "k": 16,
+            "m": 0,
+            "max_k": 0,
+            "max_m": 8,
+            "max_n": 0,
+            "n": 16
+          },
+          {
+            "a_type": 0,
+            "b_type": 0,
+            "c_type": 3,
+            "d_type": 3,
+            "k": 16,
+            "m": 16,
+            "max_k": 0,
+            "max_m": 0,
+            "max_n": 0,
+            "n": 16
+          },
+          {
+            "a_type": 0,
+            "b_type": 0,
+            "c_type": 0,
+            "d_type": 3,
+            "k": 16,
+            "m": 16,
+            "max_k": 0,
+            "max_m": 0,
+            "max_n": 0,
+            "n": 16
+          },
+          {
+            "a_type": 0,
+            "b_type": 0,
+            "c_type": 3,
+            "d_type": 0,
+            "k": 16,
+            "m": 16,
+            "max_k": 0,
+            "max_m": 0,
+            "max_n": 0,
+            "n": 16
+          },
+          {
+            "a_type": 0,
+            "b_type": 0,
+            "c_type": 0,
+            "d_type": 0,
+            "k": 16,
+            "m": 16,
+            "max_k": 0,
+            "max_m": 0,
+            "max_n": 0,
+            "n": 16
+          },
+          {
+            "a_type": 0,
+            "b_type": 0,
+            "c_type": 3,
+            "d_type": 3,
+            "k": 16,
+            "m": 1,
+            "max_k": 0,
+            "max_m": 0,
+            "max_n": 0,
+            "n": 64
+          },
+          {
+            "a_type": 0,
+            "b_type": 0,
+            "c_type": 0,
+            "d_type": 3,
+            "k": 16,
+            "m": 1,
+            "max_k": 0,
+            "max_m": 0,
+            "max_n": 0,
+            "n": 64
+          },
+          {
+            "a_type": 0,
+            "b_type": 0,
+            "c_type": 3,
+            "d_type": 0,
+            "k": 16,
+            "m": 1,
+            "max_k": 0,
+            "max_m": 0,
+            "max_n": 0,
+            "n": 64
+          },
+          {
+            "a_type": 0,
+            "b_type": 0,
+            "c_type": 0,
+            "d_type": 0,
+            "k": 16,
+            "m": 1,
+            "max_k": 0,
+            "max_m": 0,
+            "max_n": 0,
+            "n": 64
+          },
+          {
+            "a_type": 0,
+            "b_type": 0,
+            "c_type": 3,
+            "d_type": 3,
+            "k": 16,
+            "m": 32,
+            "max_k": 0,
+            "max_m": 0,
+            "max_n": 0,
+            "n": 64
+          },
+          {
+            "a_type": 0,
+            "b_type": 0,
+            "c_type": 0,
+            "d_type": 3,
+            "k": 16,
+            "m": 32,
+            "max_k": 0,
+            "max_m": 0,
+            "max_n": 0,
+            "n": 64
+          },
+          {
+            "a_type": 0,
+            "b_type": 0,
+            "c_type": 3,
+            "d_type": 0,
+            "k": 16,
+            "m": 32,
+            "max_k": 0,
+            "max_m": 0,
+            "max_n": 0,
+            "n": 64
+          },
+          {
+            "a_type": 0,
+            "b_type": 0,
+            "c_type": 0,
+            "d_type": 0,
+            "k": 16,
+            "m": 32,
+            "max_k": 0,
+            "max_m": 0,
+            "max_n": 0,
+            "n": 64
+          },
+          {
+            "a_type": 0,
+            "b_type": 0,
+            "c_type": 3,
+            "d_type": 3,
+            "k": 32,
+            "m": 1,
+            "max_k": 0,
+            "max_m": 0,
+            "max_n": 0,
+            "n": 64
+          },
+          {
+            "a_type": 0,
+            "b_type": 0,
+            "c_type": 0,
+            "d_type": 3,
+            "k": 32,
+            "m": 1,
+            "max_k": 0,
+            "max_m": 0,
+            "max_n": 0,
+            "n": 64
+          },
+          {
+            "a_type": 0,
+            "b_type": 0,
+            "c_type": 3,
+            "d_type": 0,
+            "k": 32,
+            "m": 1,
+            "max_k": 0,
+            "max_m": 0,
+            "max_n": 0,
+            "n": 64
+          },
+          {
+            "a_type": 0,
+            "b_type": 0,
+            "c_type": 0,
+            "d_type": 0,
+            "k": 32,
+            "m": 1,
+            "max_k": 0,
+            "max_m": 0,
+            "max_n": 0,
+            "n": 64
+          },
+          {
+            "a_type": 0,
+            "b_type": 0,
+            "c_type": 3,
+            "d_type": 3,
+            "k": 32,
+            "m": 32,
+            "max_k": 0,
+            "max_m": 0,
+            "max_n": 0,
+            "n": 64
+          },
+          {
+            "a_type": 0,
+            "b_type": 0,
+            "c_type": 0,
+            "d_type": 3,
+            "k": 32,
+            "m": 32,
+            "max_k": 0,
+            "max_m": 0,
+            "max_n": 0,
+            "n": 64
+          },
+          {
+            "a_type": 0,
+            "b_type": 0,
+            "c_type": 3,
+            "d_type": 0,
+            "k": 32,
+            "m": 32,
+            "max_k": 0,
+            "max_m": 0,
+            "max_n": 0,
+            "n": 64
+          },
+          {
+            "a_type": 0,
+            "b_type": 0,
+            "c_type": 0,
+            "d_type": 0,
+            "k": 32,
+            "m": 32,
+            "max_k": 0,
+            "max_m": 0,
+            "max_n": 0,
+            "n": 64
+          },
+          {
+            "a_type": 2,
+            "b_type": 2,
+            "c_type": 3,
+            "d_type": 3,
+            "k": 8,
+            "m": 0,
+            "max_k": 0,
+            "max_m": 8,
+            "max_n": 0,
+            "n": 16
+          }
+        ],
+        "name": "Intel(R) Arc(TM) Pro B70 Graphics",
+        "queue_profiling": false,
+        "runtime": "1.17",
+        "subgroups": [
+          16,
+          32
+        ],
+        "sycl_language": 202012,
+        "total_bytes": 34242297856
+      },
+      "event": "gptq4_benchmark_config",
+      "gdn_chunk_size": 64,
+      "gdn_prefill_mode": "auto",
+      "graph_opt_in": false,
+      "graph_profile": false,
+      "host_profile": false,
+      "kv_block_size": 1600,
+      "kv_dtype": "fp8_e4m3",
+      "measurement_scope": "synchronized full-model forward; load, JIT and warm block excluded",
+      "model_dtype": "f16",
+      "onednn_source_hash": "0e2a5bfeef1bfbffc3137464606540233086ce9b",
+      "onednn_version": [
+        3,
+        13,
+        0
+      ],
+      "output_tokens": 2,
+      "prompt_ids_fnv1a64": "9705ea213a213545",
+      "prompt_tokens": 4096,
+      "quality_capture": false,
+      "rounds": 1,
+      "source_base_commit": "b83d7812a7450e9f405d05a33e77686ba7fcfc79",
+      "warm_allocated_bytes": 19350113444,
+      "warm_blocks": 1,
+      "warm_primitive_count": 13,
+      "warm_scratch_allocations": 0,
+      "weights": "gptq4-g128 with dense BA/head"
+    },
+    "binary_sha256": "fd84e595fdf78eabf6c3a41e69173578892d1f72840dd809eef2969a6eda19cf",
+    "branch": "b70-gptq-int4",
+    "builder_image_id": "sha256:ae6950731b3c031f812a95c0eb615a572239426440bf67fd1b3c9c9cbfce9eca",
+    "checkpoint_revision_declared": "a47b0c6f0d756bc394c4cc629d5b0ded1acc7001",
+    "cmake_cache_sha256": "a155f9c2b98253325e6b07d64c2acd1c7e7e526d441153ed0290d535390bf992",
+    "cmake_flags": {
+      "VLLM_CPP_SYCL_COMPILER_WORKS:INTERNAL": "1",
+      "VLLM_CPP_SYCL_TLA_DIR:PATH": "/opt/tla",
+      "VLLM_CPP_XPU:BOOL": "ON",
+      "VLLM_CPP_XPU_GPTQ4:BOOL": "ON",
+      "VLLM_CPP_XPU_XE2_PREFILL:BOOL": "ON",
+      "VLLM_CPP_XPU_XE2_PREFILL_PREFETCH:BOOL": "OFF"
+    },
+    "commit": "b83d7812a7450e9f405d05a33e77686ba7fcfc79",
+    "diagnostic_log": "raw/cpp_4096_route.log",
+    "last_build_log_sha256": "bbc50e99d0955fab9371b0f9e2e424361ec6b7c1b885b3627bf93cba5124d83b",
+    "model_file_sha256": {
+      "config.json": "a9ada073c3f3729799ce6586cf170bc6b6449bd062ad0ece9bb14fa22138d0a3",
+      "quantize_config.json": "4fa58123f35d6f6ec2a2189cf8732370122b94ada635bc59b802c4b65f65e74a",
+      "tokenizer.json": "06b9509352d2af50381ab2247e083b80d32d5c0aba91c272ca9ff729b6a0e523",
+      "tokenizer_config.json": "314b470940db0d9f1a08026459181965a7ef1bf6b3502e21283fbfa578b2df02"
+    },
+    "model_route_counts": {
+      "eager/gptq_graph_opt_in_missing": 2,
+      "eager/not_uniform_decode": 2
+    },
+    "onednn_binary_bytes": 43182192,
+    "onednn_binary_sha256": "ee8fc42adcf851ea0f8013ebda24f07629f49ca6ed815835a16da45ad718ca20",
+    "process_cpu_affinity": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11
+    ],
+    "remote_commit": "b83d7812a7450e9f405d05a33e77686ba7fcfc79",
+    "route_counts_including_one_warm_and_one_measured_forward": {
+      "gdn_prefill/chunked/eligible": 96,
+      "paged_attention/split/eligible": 32,
+      "paged_attention/xe2_prefill/eligible": 32
+    },
+    "thread_environment": {}
+  },
+  "dependency_source": {
+    "sycl_tla_commit": "87f6850680a580654b9ea2c80dbc01aeb36ad231",
+    "sycl_tla_status": [],
+    "xe2_prefill_vendored_sha256": {
+      "third_party/b70_xe2_prefill/LICENSE": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+      "third_party/b70_xe2_prefill/README.md": "8ebbf960bc56a225b812bea4abe622596c807415a2124a62b3d29e538dab8469",
+      "third_party/b70_xe2_prefill/csrc/xpu/attn/xe_2/chunk_prefill.hpp": "4a6ef5fe1d5b5c4cefdbc9f9a729a325d822873f8e1774bb33abb613bf8b1362",
+      "third_party/b70_xe2_prefill/csrc/xpu/attn/xe_2/collective/chunk_prefill_epilogue.hpp": "edd78bf05bc40b51a72ed82e79ecc12f2652e114a41730f85486e90bd3c2f171",
+      "third_party/b70_xe2_prefill/csrc/xpu/attn/xe_2/collective/chunk_prefill_mainloop.hpp": "a23862c80d1b9b0366f20469c98b01e57d29adaabd6e8e1d43289e24e1b09b0f",
+      "third_party/b70_xe2_prefill/csrc/xpu/attn/xe_2/collective/chunk_prefill_scheduler.hpp": "6b7b94844ea5fc29f6bbd36c4fe0ac638c0d30e090129da203196b0b81ed981a",
+      "third_party/b70_xe2_prefill/csrc/xpu/attn/xe_2/kernel/chunk_prefill_kernel.hpp": "420a8276cf1843aab3e21fb664412ff7c649786cfca9e3d4b405d30c51676a7c"
+    }
+  },
+  "exact_xpu_wheel_native_source": {
+    "reason": "installed 0.1.15.4 wheel has no bundled native source; PyPI publishes no sdist for this version; nearby v0.1.15 tag is not treated as exact",
+    "status": "missing"
+  },
+  "hardware_observation": {
+    "frequency_MHz": null,
+    "frequency_status": "No local counter found; not measured",
+    "memory_migration": null,
+    "memory_migration_status": "No direct counter captured yet",
+    "power_W": null,
+    "power_status": "Only cap and cumulative energy exposed by sensors at this point; instantaneous power not measured",
+    "xe_sensors_at_capture": {
+      "Adapter": "PCI adapter",
+      "card": {
+        "energy1_input": 333639.425292
+      },
+      "fan1": {
+        "fan1_input": 62.0
+      },
+      "mctrl": {
+        "temp4_crit": 100.0,
+        "temp4_emergency": 125.0,
+        "temp4_input": 22.0
+      },
+      "pcie": {
+        "temp5_crit": 100.0,
+        "temp5_emergency": 125.0,
+        "temp5_input": 31.0
+      },
+      "pkg": {
+        "energy2_input": 246351.07611
+      },
+      "vram": {
+        "temp3_crit": 105.0,
+        "temp3_emergency": 120.0,
+        "temp3_input": 28.0
+      },
+      "vram_ch_0": {
+        "temp6_crit": 105.0,
+        "temp6_emergency": 120.0,
+        "temp6_input": 26.0
+      },
+      "vram_ch_1": {
+        "temp7_crit": 105.0,
+        "temp7_emergency": 120.0,
+        "temp7_input": 28.0
+      },
+      "vram_ch_10": {
+        "temp16_crit": 105.0,
+        "temp16_emergency": 120.0,
+        "temp16_input": 28.0
+      },
+      "vram_ch_11": {
+        "temp17_crit": 105.0,
+        "temp17_emergency": 120.0,
+        "temp17_input": 26.0
+      },
+      "vram_ch_12": {
+        "temp18_crit": 105.0,
+        "temp18_emergency": 120.0,
+        "temp18_input": 26.0
+      },
+      "vram_ch_13": {
+        "temp19_crit": 105.0,
+        "temp19_emergency": 120.0,
+        "temp19_input": 28.0
+      },
+      "vram_ch_14": {
+        "temp20_crit": 105.0,
+        "temp20_emergency": 120.0,
+        "temp20_input": 28.0
+      },
+      "vram_ch_15": {
+        "temp21_crit": 105.0,
+        "temp21_emergency": 120.0,
+        "temp21_input": 26.0
+      },
+      "vram_ch_2": {
+        "temp8_crit": 105.0,
+        "temp8_emergency": 120.0,
+        "temp8_input": 28.0
+      },
+      "vram_ch_3": {
+        "temp9_crit": 105.0,
+        "temp9_emergency": 120.0,
+        "temp9_input": 28.0
+      },
+      "vram_ch_4": {
+        "temp10_crit": 105.0,
+        "temp10_emergency": 120.0,
+        "temp10_input": 28.0
+      },
+      "vram_ch_5": {
+        "temp11_crit": 105.0,
+        "temp11_emergency": 120.0,
+        "temp11_input": 28.0
+      },
+      "vram_ch_6": {
+        "temp12_crit": 105.0,
+        "temp12_emergency": 120.0,
+        "temp12_input": 28.0
+      },
+      "vram_ch_7": {
+        "temp13_crit": 105.0,
+        "temp13_emergency": 120.0,
+        "temp13_input": 26.0
+      },
+      "vram_ch_8": {
+        "temp14_crit": 105.0,
+        "temp14_emergency": 120.0,
+        "temp14_input": 28.0
+      },
+      "vram_ch_9": {
+        "temp15_crit": 105.0,
+        "temp15_emergency": 120.0,
+        "temp15_input": 28.0
+      }
+    }
+  },
+  "measurement_date": "2026-09-27",
+  "python": {
+    "binary_sha256": {
+      "_C.abi3.so": "15289a0f57fe14634417248b3dbe1582b29ace6a1483992d5c27d76eed69a6d2",
+      "_moe_C.abi3.so": "803b4a7b40393df1670b28cdb34533d09a352202dbceb35bcad5a6a99a9b5482",
+      "_vllm_fa2_C.abi3.so": "28c36760256c4065e1eabd5ba6ffd3fa181073dafe372b35a3e2952e86d262fe",
+      "_xpu_C.abi3.so": "9a103edaa1457c719671e2b20e9b28cbf86fc77e7e60429468661d1bbcda4289",
+      "libattn_kernels_xe_2.so": "ec26f8f58ca8d868dceb5fb80f622410c669a12852e541916cc093be92b60663",
+      "libattn_kernels_xe_3.so": "c4fe9db4de4c47af695e7ba990d9f22e9d46608958b4aad7dcb47d509d57a12e",
+      "libgdn_attn_kernels_xe_2.so": "eaa927edd271b91b2785aed0b5888cbfd5acc9f0d210aae970ee25d0d2675f69",
+      "libgrouped_gemm_xe_2.so": "a8c48caf6bf89f5e7f3b3ee780e53e915b97aedf2ebd05308ff34c8f8513bbed",
+      "libgrouped_gemm_xe_default.so": "e1bc7550b41ca23f9d782aad5c271cc9fd598486958c9499012f1bc78ad368c5",
+      "libmhc_kernels_xe_2.so": "344c91e6707f60c28f9baab655fe5ee8ba655b58288b18ec1e9084cf4b3a2a8d",
+      "libmqa_logits_kernels_xe_2.so": "a3b3270ad9c8f47d40940598f0cd93fd5771b1d7ee5077904b11a899aa9dd230",
+      "xpumem_allocator.abi3.so": "a305006da0aaf3f91dc0b6c0127fb00484fb91d7f80d734d1a3efaaddabc8568"
+    },
+    "image": "local/b70-qwen38-vllm:vllm-0.30.0-xpu-kernels-0.1.15.4",
+    "packages": {
+      "safetensors": "0.8.0",
+      "torch": "2.13.0+xpu",
+      "transformers": "5.16.1",
+      "triton": "3.7.2+xpu",
+      "vllm": "0.30.0+xpu",
+      "vllm-xpu-kernels": "0.1.15.4"
+    },
+    "process_cpu_affinity": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11
+    ],
+    "source_sha256": {
+      "vllm/_xpu_ops.py": "4db00df212d772601fe59272cf8d4d0822ec8ef7bad219100c978943a7daf37b",
+      "vllm/model_executor/layers/mamba/gdn/qwen_gdn_linear_attn.py": "b80f8e6f3fff442fb880aebb3209c52f814f66490009f4ac4003de603576d10a",
+      "vllm/v1/worker/gpu/model_runner.py": "174c93db921c23cf0396eee4764be25b2bd2d4b6a06e9fa41ce3598b884ce8ce",
+      "vllm/v1/worker/xpu_model_runner.py": "07fa0390d28f2b8c3c3c0019eb9c3b126e2397aea268ba47c889f06b423deb23",
+      "vllm/v1/worker/xpu_worker.py": "711b56432506b58041cd86e71320c3960413f7bd61061990b66488421d81cfc3"
+    },
+    "thread_environment": {
+      "VLLM_TARGET_DEVICE": "xpu",
+      "VLLM_WORKER_MULTIPROC_METHOD": "spawn"
+    },
+    "torch_xpu_device": "_XpuDeviceProperties(name='Intel(R) Arc(TM) Pro B70 Graphics', platform_name='Intel(R) oneAPI Unified Runtime over Level-Zero V2', type='gpu', device_id=0xE223, uuid=868023e2-0000-0000-0300-000000000000, driver_version='1.17.39758+10', total_memory=32656MB, local_mem_size=128KB, last_level_cache_size=24576KB, max_compute_units=256, memory_clock_rate=19000MHz, memory_bus_width=64-bit, gpu_eu_count=256, gpu_subslice_count=32, max_work_group_size=1024, max_num_sub_groups=64, sub_group_sizes=[16 32], has_fp16=1, has_fp64=1, has_atomic64=1, is_integrated_gpu=0)",
+    "torch_xpu_device_count": 1,
+    "vllm_commit": "ced6857afa0ea7b2e3f0846a62e1394e90f15607",
+    "vllm_diff_sha256": "378daa2d28c477a6c081f9fe8bd33be8242e1d15596c9e640e36469782940394",
+    "vllm_modified_files": [
+      " M vllm/v1/worker/gpu_model_runner.py",
+      " M vllm/v1/worker/mamba_utils.py"
+    ]
+  },
+  "python_image_id": "sha256:2d289fbe80c0be37f5d6e8b62234bf3da9392413b3b06044f2490f733116d1f6",
+  "raw_artifacts": {
+    "raw/CMakeCache.txt": "a155f9c2b98253325e6b07d64c2acd1c7e7e526d441153ed0290d535390bf992",
+    "raw/cpp_4096_route.log": "c0b6ee75176abc5a9de05064eb7a8113ee735f0dd8e1a53d077ab4c82b595f67",
+    "raw/cpp_build.log": "bbc50e99d0955fab9371b0f9e2e424361ec6b7c1b885b3627bf93cba5124d83b",
+    "raw/python_4096_profile.json.gz": "398ab48e92387d838545534c977de7b2595e8813d3c9f3ade10b3331d505396f",
+    "raw/python_4096_runner.log": "a42896121e7fdbdef8550dd21b37aec52429498615b7c7961b2a5e99fee83a10"
+  },
+  "reference_artifacts": {
+    "reference/LICENSE": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+    "reference/python_v2_model_runner.py": "174c93db921c23cf0396eee4764be25b2bd2d4b6a06e9fa41ce3598b884ce8ce"
+  },
+  "schema_version": 1,
+  "status": "P0 baseline evidence; not a matched-scope performance claim",
+  "xpu_wheel_bytes": 141438192,
+  "xpu_wheel_sha256": "4ec262f7afdd07c62defc8286dc9f357569627b996c09b410f7972b653696fe7"
+}
