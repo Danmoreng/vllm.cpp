@@ -783,7 +783,7 @@ bool WithExl3Workspace(Queue& q, size_t bytes, const std::function<void(void*)>&
                        "workspace_wait_exl3", bytes, launch);
 }
 bool WithGdnWorkspace(Queue& q, size_t bytes, const std::function<void(void*)>& launch) {
-  VT_CHECK(bytes > 0 && bytes <= 16 * 1024 * 1024, "XPU GDN workspace exceeds 16 MiB budget");
+  VT_CHECK(bytes > 0 && bytes <= 32 * 1024 * 1024, "XPU GDN workspace exceeds 32 MiB budget");
   return WithWorkspace(q, GetContext(q.device.index).gdn, 2,
                        "workspace_wait_gdn", bytes, launch);
 }
