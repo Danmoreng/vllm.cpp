@@ -4,6 +4,7 @@
 // — this asserts the HARNESS: all N requests finish, throughput > 0, TTFT > 0,
 // and the token accounting is coherent. The real parity numbers come from a GB10
 // run with --model (dgx-pending), which this same code path drives.
+#define VLLM_BENCH_TEST_OUTPUT_WAIT_TRACE
 #include "bench_core.h"
 
 #include <doctest/doctest.h>
@@ -22,6 +23,8 @@ using vllm::bench::BenchConfig;
 using vllm::bench::BenchResult;
 using vllm::bench::DispatchBenchPromptAdmission;
 using vllm::bench::DispatchBenchPromptWaveAdmission;
+using vllm::bench::OutputWaitMode;
+using vllm::bench::OutputWaitTestEvent;
 using vllm::bench::PretokenizeBenchPromptsThenStartClock;
 using vllm::bench::RunBench;
 
@@ -296,6 +299,109 @@ TEST_CASE("bench: pretokenized vectors match timed-string InputProcessor") {
   CHECK(clock_value == 17);
 }
 
+TEST_CASE("bench: text report identifies the exercised output wait") {
+  BenchConfig cfg;
+  cfg.concurrency = 1;
+  BenchResult result;
+  result.async_frontend = true;
+  result.output_wait = OutputWaitMode::kBlockingC1;
+  result.blocking_wait_calls = 37;
+
+  std::FILE* output = std::tmpfile();
+  REQUIRE(output != nullptr);
+  vllm::bench::PrintReport(cfg, result, output);
+  REQUIRE(std::fflush(output) == 0);
+  REQUIRE(std::fseek(output, 0, SEEK_END) == 0);
+  const long size = std::ftell(output);
+  REQUIRE(size >= 0);
+  REQUIRE(std::fseek(output, 0, SEEK_SET) == 0);
+  std::string text(static_cast<size_t>(size), '\0');
+  CHECK(std::fread(text.data(), 1, text.size(), output) == text.size());
+  std::fclose(output);
+
+  auto report_line = [&](std::string_view label) {
+    const size_t begin = text.find(label);
+    REQUIRE(begin != std::string::npos);
+    const size_t end = text.find('\n', begin);
+    REQUIRE(end != std::string::npos);
+    return text.substr(begin, end - begin);
+  };
+  CHECK(report_line("Output wait:").find("blocking-c1") != std::string::npos);
+  CHECK(report_line("Blocking wait calls:").find("37") != std::string::npos);
+}
+
+TEST_CASE("bench: blocking-c1 selector rejects concurrent requests by name") {
+  BenchConfig cfg;
+  cfg.num_prompts = 2;
+  cfg.input_len = 8;
+  cfg.output_len = 4;
+  cfg.concurrency = 2;
+  cfg.output_wait = OutputWaitMode::kBlockingC1;
+
+  CHECK_THROWS_WITH_AS(
+      RunBench(cfg),
+      "benchmark output wait 'blocking-c1' requires --concurrency 1",
+      std::invalid_argument);
+}
+
+TEST_CASE("bench: blocking-c1 exercises blocking control with exact tokens") {
+  BenchConfig cfg;
+  cfg.num_prompts = 3;
+  cfg.input_len = 8;
+  cfg.output_len = 4;
+  cfg.concurrency = 1;
+  cfg.seed = 91;
+
+  const BenchResult poll = RunBench(cfg);
+  cfg.output_wait = OutputWaitMode::kBlockingC1;
+  std::vector<OutputWaitTestEvent> output_wait_trace;
+  cfg.output_wait_test_trace = &output_wait_trace;
+  const BenchResult blocking = RunBench(cfg);
+
+  CHECK(poll.output_wait == OutputWaitMode::kPoll);
+  CHECK(poll.blocking_wait_calls == 0);
+  CHECK(blocking.output_wait == OutputWaitMode::kBlockingC1);
+  CHECK(blocking.blocking_wait_calls > 0);
+  CHECK(blocking.completed == poll.completed);
+  CHECK(blocking.total_input == poll.total_input);
+  CHECK(blocking.total_output == poll.total_output);
+  CHECK(blocking.output_token_ids == poll.output_token_ids);
+
+  const nlohmann::json artifact = vllm::bench::ResultJson(cfg, blocking);
+  CHECK(artifact.at("output_wait") == "blocking-c1");
+  CHECK(artifact.at("blocking_wait_calls").get<int64_t>() > 0);
+  CHECK(artifact.at("output_token_ids") ==
+        nlohmann::json(blocking.output_token_ids));
+
+  REQUIRE(!output_wait_trace.empty());
+  bool observed_blocking_wait = false;
+  bool every_blocking_wait_has_preceding_empty_nowait = true;
+  for (size_t i = 0; i < output_wait_trace.size(); ++i) {
+    if (output_wait_trace[i] != OutputWaitTestEvent::kBlockingWait) continue;
+    observed_blocking_wait = true;
+    if (i == 0 || output_wait_trace[i - 1] != OutputWaitTestEvent::kNowaitEmpty) {
+      every_blocking_wait_has_preceding_empty_nowait = false;
+    }
+  }
+  CHECK(observed_blocking_wait);
+  CHECK(every_blocking_wait_has_preceding_empty_nowait);
+}
+
+TEST_CASE("bench: runtime executes the production nowait call") {
+  BenchConfig cfg;
+  cfg.num_prompts = 1;
+  cfg.input_len = 8;
+  cfg.output_len = 4;
+  cfg.concurrency = 1;
+  cfg.output_wait = OutputWaitMode::kBlockingC1;
+  cfg.output_wait_test_probe.seed_first_collector = true;
+  cfg.output_wait_test_probe.stop_after_first_nowait = true;
+
+  CHECK_THROWS_WITH_AS(
+      RunBench(cfg), "nowait runtime probe observed seeded output",
+      std::logic_error);
+}
+
 TEST_CASE("bench: synthetic engine completes all requests with sane metrics") {
   BenchConfig cfg;
   cfg.num_prompts = 8;
@@ -406,6 +512,17 @@ TEST_CASE("bench: pretokenized default preserves prompt and output token IDs") {
   cfg.seed = 31;
   cfg.temperature = 0.0;
 
+  const vllm::tok::Tokenizer tokenizer =
+      vllm::bench::detail::BuildSyntheticTokenizer();
+  std::vector<std::vector<int32_t>> expected_prompt_token_ids;
+  expected_prompt_token_ids.reserve(static_cast<size_t>(cfg.num_prompts));
+  for (int i = 0; i < cfg.num_prompts; ++i) {
+    const std::string prompt = vllm::bench::detail::BuildPrompt(
+        tokenizer, cfg.input_len, cfg.seed + static_cast<uint64_t>(i));
+    expected_prompt_token_ids.push_back(
+        tokenizer.EncodeWithSpecialTokens(prompt));
+  }
+
   BenchResult pretokenized;
   {
     ScopedEnv env("VT_BENCH_PRETOKENIZE", std::nullopt);
@@ -424,6 +541,14 @@ TEST_CASE("bench: pretokenized default preserves prompt and output token IDs") {
           static_cast<size_t>(cfg.num_prompts));
   REQUIRE(timed_string.prompt_token_ids.size() ==
           static_cast<size_t>(cfg.num_prompts));
+  REQUIRE(expected_prompt_token_ids.size() ==
+          static_cast<size_t>(cfg.num_prompts));
+  for (size_t i = 0; i < expected_prompt_token_ids.size(); ++i) {
+    CAPTURE(i);
+    REQUIRE_FALSE(expected_prompt_token_ids[i].empty());
+    CHECK(pretokenized.prompt_token_ids[i] == expected_prompt_token_ids[i]);
+    CHECK(timed_string.prompt_token_ids[i] == expected_prompt_token_ids[i]);
+  }
   CHECK(pretokenized.prompt_token_ids == timed_string.prompt_token_ids);
   CHECK(pretokenized.output_token_ids == timed_string.output_token_ids);
   CHECK(pretokenized.total_input == timed_string.total_input);
