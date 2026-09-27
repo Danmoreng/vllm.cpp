@@ -79,6 +79,7 @@ by #2794 (goldens predate the pin) and #2817 (the advance).
 | CUDA graph decode capture | ◐ per-family | ✅ | ✅ | ✅ |
 | Partial-prefill concurrency | ☐ | ✅ | ✅ | ☐ |
 | Cascade attention | ☐ | ✅ | ◐ | ☐ |
+| Benchmark output-wait selection | ◐ `poll` default; blocking diagnostic at c1 | n/a | n/a | n/a |
 
 ## KV cache and memory
 
