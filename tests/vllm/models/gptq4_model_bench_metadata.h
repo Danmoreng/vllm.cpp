@@ -10,8 +10,10 @@
 namespace gptq4_model_bench {
 
 inline vllm::v1::CommonAttentionMetadata AttentionMetadata(
-    int query_len, int context, int block_size = 128) {
-  if (query_len <= 0 || context < 0 || block_size <= 0)
+    int query_len, int context, int block_size = 128,
+    int reserved_table_cols = 0) {
+  if (query_len <= 0 || context < 0 || block_size <= 0 ||
+      reserved_table_cols < 0)
     throw std::invalid_argument("invalid GPTQ4 benchmark attention length");
   vllm::v1::CommonAttentionMetadata meta;
   meta.num_reqs = 1;
@@ -22,10 +24,12 @@ inline vllm::v1::CommonAttentionMetadata AttentionMetadata(
   meta.seq_lens_cpu = meta.seq_lens;
   meta.max_query_len = query_len;
   meta.max_seq_len = context + query_len;
-  meta.block_table_num_cols =
-      (meta.max_seq_len + block_size - 1) / block_size;
-  meta.block_table_tensor.resize(meta.block_table_num_cols);
-  for (int block = 0; block < meta.block_table_num_cols; ++block)
+  const int active_cols = (meta.max_seq_len + block_size - 1) / block_size;
+  if (reserved_table_cols && reserved_table_cols < active_cols)
+    throw std::invalid_argument("reserved GPTQ4 block table is too narrow");
+  meta.block_table_num_cols = reserved_table_cols ? reserved_table_cols : active_cols;
+  meta.block_table_tensor.resize(meta.block_table_num_cols, 0);
+  for (int block = 0; block < active_cols; ++block)
     meta.block_table_tensor[block] = block;
   for (int token = 0; token < query_len; ++token)
     meta.slot_mapping.push_back(context + token);

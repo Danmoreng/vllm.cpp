@@ -40,13 +40,17 @@ also pass; see `p5_split_reduce_quality_8192_64.json`. The 8K decode-1 TV is
 0.01913 against the frozen 0.02 limit, so future numerical changes need
 special scrutiny there. Python is used only as an external quality oracle.
 
-Before this change, a compact Split-K plan based on the host-known active
-length was tested separately. With 4096 active tokens and 262400 reserved KV
-slots, it reduced 256 parts to 128 and passed the focused numerical check,
-but the full P4096/D64/O65 decode fell from 23.624/23.627 to 23.433/23.429
-forwards/s. That candidate was reverted; its small raw logs remain under
-`raw/p5_split_parts_*.log.gz`. Lower split counts need a different occupancy
-or reduction plan before adoption.
+Before this change, a compact Split-K plan based on the host-known exact
+active length was tested separately. In the full P4096/D64/O65 benchmark,
+the block table had three 1600-token columns, so the original 32-token span
+selected 150 parts; the candidate selected 128. Decode fell from
+23.624/23.627 to 23.433/23.429 forwards/s, despite passing the focused
+numerical check. That candidate was reverted; its small raw logs remain
+under `raw/p5_split_parts_*.log.gz`. The earlier statement that this full
+model run had 262400 reserved KV slots and 256 original parts was incorrect:
+`max_context=262144` constrained admission but did not set the table width.
+The later padded-table experiment is documented in
+`p5_split_active_page_cap.md`.
 
 Remaining P5 work includes further prefill lengths and continuation, mixed
 requests and GQA reuse, split span/part configuration across context lengths,
