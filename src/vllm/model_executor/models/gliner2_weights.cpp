@@ -75,8 +75,10 @@ deberta_v2::Params InferEncoderParams(
   const auto& rel_shape = tensors.Shape("encoder.encoder.rel_embeddings.weight");
   p.position_buckets = rel_shape[0] / 2;
 
-  // Fields the checkpoint does not carry — mdeberta-v3-base defaults.
-  p.num_attention_heads = 12;
+  // Fields the checkpoint does not carry. DeBERTa-v3 always uses head_dim 64,
+  // so num_attention_heads = hidden_size / 64. This covers mdeberta-v3-base
+  // (768/12) and deberta-v3-large (1024/16).
+  p.num_attention_heads = p.hidden_size / 64;
   p.max_position_embeddings = 512;
   p.layer_norm_eps = 1e-7;
   p.position_biased_input = false;
@@ -140,11 +142,16 @@ Gliner2ModelWeights LoadGliner2Weights(
   gliner2::BoundaryParams bnd_params = ParseBoundaryParams(config);
   bnd_params.hidden_size = enc_params.hidden_size;
 
-  // Load encoder + boundary head weights via the existing host reference
-  // loaders, which look up tensors by name and validate shapes.
+  // Load encoder weights via the host reference loader.
   deberta_v2::Weights enc_weights = deberta_v2::Load(enc_params, tensors);
-  gliner2::BoundaryHeadWeights bnd_weights =
-      gliner2::LoadBoundaryHead(bnd_params, tensors);
+
+  // Load boundary head weights only if the checkpoint contains
+  // boundary_head tensors. The GLiNER2.5-Decide checkpoint does not
+  // include a boundary head (it uses the classification head instead).
+  gliner2::BoundaryHeadWeights bnd_weights;
+  if (tensors.Has("boundary_head.boundary_encoder.left_projection.weight")) {
+    bnd_weights = gliner2::LoadBoundaryHead(bnd_params, tensors);
+  }
 
   return Gliner2ModelWeights{
       std::move(enc_params), std::move(enc_weights),
