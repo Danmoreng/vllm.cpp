@@ -25,10 +25,17 @@ bool PagedAttentionXe2PrefillKernel(Queue& q, Tensor& out, const Tensor& query,
   const auto device = NativeQueue(q).get_device();
   constexpr int dim = 256, q_heads = 24, kv_heads = 4;
   const auto tokens = query.shape[0], page = key_cache.shape[1];
-  // Each admitted length is covered by the Xe2/Q64 route and output test.
-  const bool qualified_length = tokens == 4095 || tokens == 4096 ||
-                                tokens == 4097 || tokens == 8192;
-  if (!qualified_length || query.rank != 3 || out.rank != 3 ||
+  // The 4K continuation reads an existing 4K prefix. The donor's causal
+  // offset uses the device KV length minus the device query length.
+  const bool initial_prefill = args.max_seq_len == tokens &&
+      (tokens == 4095 || tokens == 4096 || tokens == 4097 || tokens == 8192);
+  const bool continuation = tokens == 4096 && args.max_seq_len == 8192;
+  if (continuation) {
+    const char* continuation_setting = std::getenv("VT_XPU_XE2_CONTINUATION");
+    if (continuation_setting && std::string_view(continuation_setting) != "1")
+      return false;
+  }
+  if (!(initial_prefill || continuation) || query.rank != 3 || out.rank != 3 ||
       query.dtype != DType::kF16 || out.dtype != DType::kF16 ||
       query.shape[1] != q_heads || query.shape[2] != dim ||
       out.shape[0] != query.shape[0] || out.shape[1] != query.shape[1] ||
@@ -56,14 +63,14 @@ bool PagedAttentionXe2PrefillKernel(Queue& q, Tensor& out, const Tensor& query,
           (key_cache.stride[0] / key_cache.stride[1]) ||
       block_table.rank != 2 || block_table.dtype != DType::kI32 ||
       block_table.shape[0] != 1 || block_table.stride[1] != 1 ||
-      block_table.shape[1] < (tokens + page - 1) / page ||
+      block_table.shape[1] < (args.max_seq_len + page - 1) / page ||
       block_table.shape[1] > std::numeric_limits<int>::max() ||
       seq_lens.rank != 1 || seq_lens.dtype != DType::kI32 ||
       seq_lens.Numel() != 1 || query_start_loc.rank != 1 ||
       query_start_loc.dtype != DType::kI32 || query_start_loc.Numel() != 2 ||
       !args.causal || args.window_size || args.logits_soft_cap != 0 ||
       args.k_scale != 1.0f || args.v_scale != 1.0f ||
-      args.scale != 1.0f / 16 || args.max_seq_len != tokens ||
+      args.scale != 1.0f / 16 ||
       (reinterpret_cast<uintptr_t>(query.data) & 15) ||
       (reinterpret_cast<uintptr_t>(out.data) & 15) ||
       (reinterpret_cast<uintptr_t>(key_cache.data) & 15) ||

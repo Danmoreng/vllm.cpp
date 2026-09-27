@@ -34,7 +34,8 @@ inline vllm::v1::CommonAttentionMetadata AttentionMetadata(
 }
 
 inline vllm::v1::GDNAttentionMetadata GdnMetadata(int query_len,
-                                                   bool initial) {
+                                                   bool initial,
+                                                   bool has_initial_state = false) {
   vllm::v1::GDNAttentionMetadata meta;
   meta.num_actual_tokens = query_len;
   meta.non_spec_state_indices_tensor = std::vector<int32_t>{0};
@@ -45,10 +46,11 @@ inline vllm::v1::GDNAttentionMetadata GdnMetadata(int query_len,
   } else {
     meta.num_prefills = 1;
     meta.num_prefill_tokens = query_len;
-    meta.has_initial_state = std::vector<uint8_t>{0};
+    meta.has_initial_state = std::vector<uint8_t>{static_cast<uint8_t>(has_initial_state)};
     meta.prefill_query_start_loc = std::vector<int32_t>{0, query_len};
     meta.prefill_state_indices = std::vector<int32_t>{0};
-    meta.prefill_has_initial_state = std::vector<uint8_t>{0};
+    meta.prefill_has_initial_state =
+        std::vector<uint8_t>{static_cast<uint8_t>(has_initial_state)};
     const auto conv = vllm::v1::ComputeCausalConv1dMetadata(
         *meta.non_spec_query_start_loc);
     meta.batch_ptr = conv.batch_ptr;

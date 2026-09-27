@@ -576,6 +576,75 @@ TEST_CASE("XPU Xe2 FP8 prefill: 4K boundaries and 8K with paged KV"
   }
 }
 
+TEST_CASE("XPU Xe2 FP8 prefill: causal 4K continuation over 4K prefix"
+          * doctest::skip(!std::getenv("VT_XPU_PROFILE") ||
+                          std::getenv("VT_XPU_XE2_PREFILL"))) {
+  Queue gpu(vt::DeviceType::kXPU);
+  for (int page : {64, 1600}) {
+    CAPTURE(page);
+    Fixture f(gpu.q, 1, 4096, 8192, true, false, page,
+              DType::kF16, DType::kF16, DType::kF16, true);
+    const int pages = (8192 + page - 1) / page;
+    Buffer contiguous_table(gpu.q, DType::kI32, {1, pages});
+    std::vector<int32_t> page_ids(pages);
+    for (int b = 0; b < pages; ++b) page_ids[b] = pages - 1 - b;
+    contiguous_table.upload(page_ids.data());
+    auto run = [&](const char* mode) {
+      setenv("VT_XPU_ATTENTION", mode, 1);
+      vt::PagedAttention(gpu.q, f.out.tensor, f.query.tensor, f.kc, f.vc,
+                         contiguous_table.tensor, f.lens.tensor, f.offsets.tensor,
+                         f.args);
+      vt::GetBackend(gpu.q.device).Synchronize(gpu.q);
+    };
+    setenv("VT_XPU_XE2_PREFILL", "0", 1);
+    run("prefill");
+    const auto expected = f.result();
+    unsetenv("VT_XPU_XE2_PREFILL");
+    (void)vt::xpu::DrainProfileEvents();
+    run("auto");
+    Accuracy(f.result(), expected, false, true);
+    int xe2 = 0, fallback = 0;
+    for (const auto& event : vt::xpu::DrainProfileEvents()) {
+      xe2 += event.stage == "attention_prefill_xe2";
+      fallback += event.stage == "attention_prefill_q64";
+    }
+    CHECK(xe2 == 1);
+    CHECK(fallback == 0);
+    if (page == 1600) {
+      setenv("VT_XPU_XE2_CONTINUATION", "0", 1);
+      (void)vt::xpu::DrainProfileEvents();
+      run("auto");
+      int opted_out = 0;
+      for (const auto& event : vt::xpu::DrainProfileEvents())
+        opted_out += event.stage == "attention_prefill_q64";
+      CHECK(opted_out == 1);
+      unsetenv("VT_XPU_XE2_CONTINUATION");
+    }
+    if (std::getenv("VT_B70_ATTN_BENCH")) {
+      std::vector<double> old_ms, xe2_ms;
+      for (int repeat = 0; repeat < 5; ++repeat) {
+        setenv("VT_XPU_XE2_PREFILL", "0", 1);
+        auto start = std::chrono::steady_clock::now();
+        run("prefill");
+        old_ms.push_back(std::chrono::duration<double, std::milli>(
+            std::chrono::steady_clock::now() - start).count());
+        unsetenv("VT_XPU_XE2_PREFILL");
+        start = std::chrono::steady_clock::now();
+        run("auto");
+        xe2_ms.push_back(std::chrono::duration<double, std::milli>(
+            std::chrono::steady_clock::now() - start).count());
+      }
+      std::sort(old_ms.begin(), old_ms.end());
+      std::sort(xe2_ms.begin(), xe2_ms.end());
+      std::cout << nlohmann::json{{"event", "xe2_continuation_benchmark"},
+          {"query_tokens", 4096}, {"context_tokens", 8192}, {"page", page},
+          {"q64_median_ms", old_ms[2]}, {"xe2_median_ms", xe2_ms[2]},
+          {"q64_samples_ms", old_ms}, {"xe2_samples_ms", xe2_ms}}.dump()
+                << std::endl;
+    }
+  }
+}
+
 TEST_CASE("XPU FP8 prefill: captured 4096-token Python operator replay"
           * doctest::skip(!std::getenv("VT_B70_FP8_PREFILL_REPLAY_DIR"))) {
   const std::string directory = std::getenv("VT_B70_FP8_PREFILL_REPLAY_DIR");
