@@ -440,6 +440,19 @@ void WarmAttnCosSin(const int32_t* positions, int64_t tokens, int64_t rot,
 inline void WarmAttnCosSin(const int32_t*, int64_t, int64_t, double) {}
 #endif
 
+// TT-GDN-REGION-REPLAY attribution instrument: checksum the CURRENT device
+// shadow a GDN state cache (ssm or conv) holds, between steps and outside
+// capture (the driver calls this from the decode graph; a replay runs no
+// host code and a download is the read a trace capture refuses). Advances
+// print changing FNVs; a slot frozen at the capture-time values prints one
+// identical checksum at every replay. Read-only; inert while a trace capture
+// is open.
+#ifdef VLLM_CPP_TENSTORRENT
+void GdnShadowProbe(const void* host_ptr, const char* what);
+#else
+inline void GdnShadowProbe(const void*, const char*) {}
+#endif
+
 // ---- ttnn mesh-trace capture (Backend graph-capture mapping) --------------
 // Maps vt::Backend::{BeginCapture,EndCapture,Replay} onto
 // ttnn::operations::trace::{begin,end,execute}_trace_capture. Implemented in
