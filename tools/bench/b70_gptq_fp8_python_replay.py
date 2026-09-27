@@ -44,6 +44,7 @@ def main():
     parser.add_argument("--prompt-tokens", type=int, required=True)
     parser.add_argument("--generated-tokens", type=int, required=True)
     parser.add_argument("--rounds", type=int, default=5)
+    parser.add_argument("--warmup-runs", type=int, default=1)
     parser.add_argument("--max-model-len", type=int, default=8192)
     parser.add_argument("--prompt-ids-file", type=Path)
     parser.add_argument("--decode-ids-file", type=Path)
@@ -51,8 +52,9 @@ def main():
 
     p, o = args.prompt_tokens, args.generated_tokens
     d = o - 1
-    if p < 1 or o < 1 or args.rounds < 1 or p + o > args.max_model_len:
-        parser.error("require P>=1, O>=1, rounds>=1, P+O<=max-model-len")
+    if (p < 1 or o < 1 or args.rounds < 1 or args.warmup_runs < 0 or
+            p + o > args.max_model_len):
+        parser.error("require P>=1, O>=1, rounds>=1, warmup-runs>=0, P+O<=max-model-len")
     prompt_ids = load_ids(args.prompt_ids_file, p, 100, 11)
     decode_ids = load_ids(args.decode_ids_file, d, 300, 248020)
     llm = LLM(
@@ -79,6 +81,7 @@ def main():
         "actual_kv_block_size": config.cache_config.block_size,
         "max_model_len": config.model_config.max_model_len,
         "max_num_batched_tokens": config.scheduler_config.max_num_batched_tokens,
+        "warmup_runs": args.warmup_runs,
         "prompt_ids_fnv1a64": hash_ids(prompt_ids),
         "decode_ids_fnv1a64": hash_ids(decode_ids),
         "trace_replay": d > 0,
@@ -116,7 +119,7 @@ def main():
         return result
 
     engine.step = timed_step
-    for round_index in range(args.rounds + 1):
+    for request_index in range(args.warmup_runs + args.rounds):
         step_seconds.clear()
         step_events.clear()
         start = request_start = time.perf_counter()
@@ -129,8 +132,8 @@ def main():
                                  for event in step_events
                                  if event["cumulative_output_tokens"] > 0), None)
         print("B70_RUN " + json.dumps({
-            "round": round_index - 1,
-            "warmup": round_index == 0,
+            "round": request_index - args.warmup_runs,
+            "warmup": request_index < args.warmup_runs,
             "P": p, "D": d, "O": o,
             "engine_steps": len(step_seconds),
             "engine_step_seconds": step_seconds,

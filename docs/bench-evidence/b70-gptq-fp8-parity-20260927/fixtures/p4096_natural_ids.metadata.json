@@ -1,0 +1,17 @@
+{
+  "tokens": 4096,
+  "available_source_tokens": 15996,
+  "prompt_ids_sha256": "60d167ba80b7552d0bc33f79173267859af3c56f810ebfd968fc64e1a270eff0",
+  "tokenizer_json_sha256": "06b9509352d2af50381ab2247e083b80d32d5c0aba91c272ca9ff729b6a0e523",
+  "prefix": "Bitte fasse den technischen Plan pr\u00e4zise zusammen und erl\u00e4utere die GPU-Pfade. Please compare the implementation details and performance goals.",
+  "sources": [
+    {
+      "path": "/repo/docs/B70-SYCL-Qwen38-EXL3-Implementation-Plan.md",
+      "sha256": "4c6b7efb01e76d3dcc5580fb663acb4f4cd59cd769c30ee917a3ed4bb79f9247"
+    },
+    {
+      "path": "/repo/README.md",
+      "sha256": "a1bd7ffa018f504d1bab365eece9a4a7c9060aa616da1f8983111fc8c3b96f7d"
+    }
+  ]
+}
