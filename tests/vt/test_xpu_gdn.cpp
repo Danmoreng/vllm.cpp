@@ -172,6 +172,60 @@ TEST_CASE("XPU GDN post-conv and gated RMSNorm: actual heads, strided gates, one
   }
 }
 
+TEST_CASE("XPU GDN post-conv subgroup: FP16 matches native scalar") {
+  Queue gpu(vt::DeviceType::kXPU);
+  constexpr int hk = 16, hv = 48, dk = 128, dv = 128;
+  constexpr int channels = 2 * hk * dk + hv * dv;
+  for (int t : {1, 256}) {
+    CAPTURE(t);
+    Buffer conv(gpu.q, DType::kF16, {t, channels});
+    Buffer a(gpu.q, DType::kF16, {t, hv + 3});
+    Buffer b(gpu.q, DType::kF16, {t, hv + 3});
+    Buffer al(gpu.q, DType::kF32, {hv});
+    Buffer dt(gpu.q, DType::kF32, {hv});
+    Buffer qo(gpu.q, DType::kF16, {t, hk, dk});
+    Buffer ko(gpu.q, DType::kF16, {t, hk, dk});
+    Buffer vo(gpu.q, DType::kF16, {t, hv, dv});
+    Buffer go(gpu.q, DType::kF32, {t, hv});
+    Buffer bo(gpu.q, DType::kF32, {t, hv});
+    conv.put(Values(t * channels));
+    a.put(Values(t * (hv + 3), 7, 2));
+    b.put(Values(t * (hv + 3), 3));
+    al.put(Values(hv, 3)); dt.put(Values(hv, 9));
+    a.tensor.shape[1] = b.tensor.shape[1] = hv;
+    const auto run = [&] {
+      vt::GdnPostConv(gpu.q, qo.tensor, ko.tensor, vo.tensor, go.tensor,
+                      bo.tensor, conv.tensor, a.tensor, b.tensor, al.tensor,
+                      dt.tensor, {1e-6f});
+      vt::GetBackend(gpu.q.device).Synchronize(gpu.q);
+    };
+    setenv("VT_XPU_GDN_POSTCONV_SUBGROUP", "0", 1);
+    if (std::getenv("VT_XPU_PROFILE"))
+      (void)vt::xpu::DrainProfileEvents();
+    run();
+    if (std::getenv("VT_XPU_PROFILE")) {
+      int scalar = 0;
+      for (const auto& event : vt::xpu::DrainProfileEvents())
+        scalar += event.stage == "gdn_postconv";
+      CHECK(scalar == 1);
+    }
+    const std::vector<std::vector<float>> expected{
+        qo.floats(), ko.floats(), vo.floats(), go.floats(), bo.floats()};
+    unsetenv("VT_XPU_GDN_POSTCONV_SUBGROUP");
+    run();
+    if (std::getenv("VT_XPU_PROFILE")) {
+      int subgroup = 0;
+      for (const auto& event : vt::xpu::DrainProfileEvents())
+        subgroup += event.stage == "gdn_postconv_subgroup";
+      CHECK(subgroup == 1);
+    }
+    const std::vector<std::vector<float>> actual{
+        qo.floats(), ko.floats(), vo.floats(), go.floats(), bo.floats()};
+    for (size_t i = 0; i < actual.size(); ++i)
+      Close(actual[i], expected[i], i < 3 ? 0.002f : 3e-6f);
+  }
+}
+
 TEST_CASE("XPU GDN recurrence: varlen, Hv/Hk=3, complete output and F32 state") {
   SequentialReference mode;
   Queue cpu(vt::DeviceType::kCPU), gpu(vt::DeviceType::kXPU);

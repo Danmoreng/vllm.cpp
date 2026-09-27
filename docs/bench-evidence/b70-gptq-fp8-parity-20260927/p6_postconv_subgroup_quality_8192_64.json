@@ -1,0 +1,102 @@
+{
+  "prompt_tokens": 8192,
+  "replay": {
+    "prompt_ids_fnv1a64": "ff856a7b9b7666e5",
+    "decode_ids_fnv1a64": "6ec3b01cb7f65be5",
+    "attention_page_tokens": 1600,
+    "generated_tokens": 65,
+    "capture_contexts": [
+      8192,
+      8193,
+      8256
+    ]
+  },
+  "kl_direction": "D_KL(Python || C++)",
+  "normalization": "float64 log-sum-exp of finite F32 logits",
+  "quality_pass": true,
+  "thresholds": {
+    "schema_version": 1,
+    "scope": "Pinned Qwen3.8-27B-GPTQ-G128, eager batch-1 FP8 E4M3 KV, 1600-token attention pages, identical teacher-forced tokens; full-vocabulary logits after P=128 smoke or P=4096 prefill and selected decode forwards",
+    "accuracy_objective": "At every selected checkpoint, move at most 2% of probability mass (TV), retain at least 9 of the reference top 10 tokens, and retain the reference top 1 unless its own logit margin is at most 0.1. KL(Python || C++) is an additional tail-sensitive bound. Nonfinite logits fail before metrics are computed.",
+    "baseline_before_candidate_tuning": "2026-09-27 periodic, German/English technical text, and C++ code P4096/D1024, plus periodic P4096/D2048; max observed TV 0.018243928763799596 and KL(Python || C++) 0.0011231690940174915, min top-10 overlap 9, all top-1 exact",
+    "max_total_variation": 0.02,
+    "max_kl_python_to_cpp": 0.002,
+    "min_top10_overlap": 9,
+    "top1_tie_margin_max": 0.1,
+    "policy": "Freeze before P3/P4 tuning. Do not relax in response to a faster candidate; investigate or reject a failing candidate. A near-tie top-1 change still must pass TV, KL, and top-10 overlap. Layer/conv-state gates remain a separate P2 task."
+  },
+  "records": [
+    {
+      "checkpoint": "prefill",
+      "python_sha256": "917fd8a776cc821b78b8950132523190bc6ea3be28158b4eae4e49f5fd391b79",
+      "cpp_sha256": "8e60096a1bff3f849dcf1e94987735210673071dafa9ace03b2780e6db992045",
+      "vocab": 248320,
+      "total_variation": 0.0016456070822981018,
+      "kl_python_to_cpp": 7.814848805594555e-05,
+      "top10_overlap": 9,
+      "python_top1": 108,
+      "cpp_top1": 108,
+      "python_top1_probability": 0.9562752392785079,
+      "cpp_probability_for_python_top1": 0.9547099745648553,
+      "python_top1_logit_margin": 3.65625,
+      "cpp_top1_logit_margin": 3.640625,
+      "top1_agrees": true,
+      "checks": {
+        "total_variation": true,
+        "kl_python_to_cpp": true,
+        "top10_overlap": true,
+        "top1_or_near_tie": true
+      },
+      "near_tie_exemption": false,
+      "passed": true
+    },
+    {
+      "checkpoint": "decode_1",
+      "python_sha256": "01830909c67a3fd74a0204d9891e6053144344e54c37e2483174579141b0b9c3",
+      "cpp_sha256": "fd0175f5ae2e29cc5c10d30f39e172c78e2bda612e872481b18eec22c7778d26",
+      "vocab": 248320,
+      "total_variation": 0.01590466642956218,
+      "kl_python_to_cpp": 0.0008294279465872357,
+      "top10_overlap": 10,
+      "python_top1": 198,
+      "cpp_top1": 198,
+      "python_top1_probability": 0.05222809861832364,
+      "cpp_probability_for_python_top1": 0.053792766536279395,
+      "python_top1_logit_margin": 0.2578125,
+      "cpp_top1_logit_margin": 0.3125,
+      "top1_agrees": true,
+      "checks": {
+        "total_variation": true,
+        "kl_python_to_cpp": true,
+        "top10_overlap": true,
+        "top1_or_near_tie": true
+      },
+      "near_tie_exemption": false,
+      "passed": true
+    },
+    {
+      "checkpoint": "decode_64",
+      "python_sha256": "1963020ffa9e38910be5aeacc1db495560e5d15a485fbbee1c99441743d70847",
+      "cpp_sha256": "bfec8cee3dede57a843ce32a223c1d0909c0a3e3d7ea7f48e5473aa41821173d",
+      "vocab": 248320,
+      "total_variation": 0.0029471208993365754,
+      "kl_python_to_cpp": 3.219209059820138e-05,
+      "top10_overlap": 10,
+      "python_top1": 317,
+      "cpp_top1": 317,
+      "python_top1_probability": 0.046940046490050666,
+      "cpp_probability_for_python_top1": 0.04668506115028012,
+      "python_top1_logit_margin": 0.20703125,
+      "cpp_top1_logit_margin": 0.19921875,
+      "top1_agrees": true,
+      "checks": {
+        "total_variation": true,
+        "kl_python_to_cpp": true,
+        "top10_overlap": true,
+        "top1_or_near_tie": true
+      },
+      "near_tie_exemption": false,
+      "passed": true
+    }
+  ]
+}
