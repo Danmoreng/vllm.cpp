@@ -167,7 +167,8 @@ neither answers 404 at the route table. The request carries `state`, the text
 to reason over, and `questions`, an object mapping question ids to question
 specs. Each question's `type` selects the reasoning mode:
 
-- `noul` extracts a named entity. `instructions` names the label.
+- `noul` returns the probability of "yes" for a decision model.
+  For a NER model, it extracts an entity whose label comes from `instructions`.
 - `choice` picks one option from `criteria`, an object whose keys are the
   option names.
 - `score` rates the state against `criteria`, an array of two or more level

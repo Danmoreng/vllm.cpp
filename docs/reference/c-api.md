@@ -45,9 +45,9 @@ int main(void) {
 ```
 
 The ABI covers engine lifecycle, completion, chat, embeddings, transcription,
-media generation, speech generation, memory helpers, and diagnostics. It also
-exposes blocking, streaming, and concurrent request interfaces. The current
-version is `VLLM_ABI_VERSION 26`.
+media generation, speech generation, decisions, option scoring, memory helpers,
+and diagnostics. It also exposes blocking, streaming, and concurrent request
+interfaces. The current version is `VLLM_ABI_VERSION 29`.
 
 Read [`include/vllm.h`](../../include/vllm.h) for the fields and functions in
 the current ABI. Call `vllm_abi_version()` at runtime to detect a header and
@@ -74,6 +74,32 @@ individual fields.
   `1` disables the model-level window, and `2` explicitly enables it.
   Other values return `VLLM_ERR_INVALID_ARGUMENT` during loading.
   Per-layer windows take precedence. Models without a window ignore this control.
+
+## Decisions and option scoring
+
+ABI 29 adds the blocking `vllm_decide(engine, request_json, &out_json)` call.
+Load the model with `vllm_engine_load()` and pass a NUL-terminated JSON request.
+The loaded architecture selects the request format:
+
+| Architecture | Request format |
+|---|---|
+| `KevModel`, `LayaModel`, `ClmModel`, `SpanExtractor` (GLiNER2.5-Decide), `XorModel` | [`/v1/systemone`](../USAGE.md#system-1-decisions-with-v1systemone): `state` and a nonempty `questions` object with `choice`, `score`, or `noul` questions |
+| `CuaS1Forms` | [`/v1/score`](../USAGE.md#option-scoring-with-v1score): a `context` string and a nonempty `options` array of strings |
+
+Use the linked HTTP examples as request bodies, without the `curl` command.
+Decision responses contain `answers`, keyed by question ID. Option scoring returns
+`probabilities`, `winner`, and `confidence`. Both include `model`, `usage`, and `latency_ms`.
+Tev1 uses ordinary chat generation. `vllm_decide` also rejects the
+`BoundaryExtractor` NER architecture, although its server can expose `/v1/systemone`.
+
+On `VLLM_OK`, `out_json` owns a library-allocated, NUL-terminated response.
+Release it with `vllm_decide_free(out_json)`. Passing `NULL` to that free function is safe.
+On failure, a non-NULL output pointer receives `NULL`. Read `vllm_last_error()` for details.
+
+Null arguments, unsupported architectures, malformed JSON, and invalid request fields
+return `VLLM_ERR_INVALID_ARGUMENT`. Inference exceptions derived from `std::exception`
+and response allocation failures return `VLLM_ERR_RUNTIME`. Other inference exceptions
+return `VLLM_ERR_UNKNOWN`.
 
 ## Consuming it from C++
 
