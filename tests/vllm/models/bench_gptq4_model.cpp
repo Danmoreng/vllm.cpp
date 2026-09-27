@@ -104,9 +104,9 @@ int Run(const std::string& checkpoint, int prompt_tokens, int output_tokens,
   if (kv_dtype != "f16" && kv_dtype != "fp8_e4m3")
     throw std::invalid_argument("VT_B70_BENCH_KV_DTYPE must be f16 or fp8_e4m3");
   const bool fp8_kv = kv_dtype == "fp8_e4m3";
-  const int block_size = std::stoi(Env("VT_B70_BENCH_BLOCK_SIZE", "128"));
-  if (block_size != 64 && block_size != 128)
-    throw std::invalid_argument("VT_B70_BENCH_BLOCK_SIZE must be 64 or 128");
+  const int block_size = std::stoi(Env("VT_B70_BENCH_BLOCK_SIZE", fp8_kv ? "1600" : "128"));
+  if (block_size != 64 && block_size != 128 && block_size != 1600)
+    throw std::invalid_argument("VT_B70_BENCH_BLOCK_SIZE must be 64, 128 or 1600");
   Resources resources;
   auto& queue = resources.queue;
   auto& backend = vt::GetBackend(queue.device);

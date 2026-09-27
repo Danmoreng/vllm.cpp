@@ -13,8 +13,11 @@ established.
 The policy requires Intel SYCL-TLA commit
 `87f6850680a580654b9ea2c80dbc01aeb36ad231` and the pinned oneAPI 2026.1.1
 compiler. It is built only with `VLLM_CPP_XPU_XE2_PREFILL=ON` and an explicit
-`VLLM_CPP_SYCL_TLA_DIR`. Runtime selection additionally requires
-`VT_XPU_XE2_PREFILL=1`; unsupported inputs use the existing attention path.
+`VLLM_CPP_SYCL_TLA_DIR`. The build option defaults to ON for XPU builds that
+provide that checkout. Eligible FP8 prefill inputs select Xe2 by default;
+`VT_XPU_XE2_PREFILL=0` disables it. Unsupported inputs use the existing
+attention path. The qualified B70 configuration accepts 64- and 1600-token
+KV pages.
 
 Copied source files relative to `csrc/xpu/attn/xe_2/` and original SHA-256:
 

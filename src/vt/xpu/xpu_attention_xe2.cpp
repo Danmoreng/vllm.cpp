@@ -21,7 +21,7 @@ bool PagedAttentionXe2PrefillKernel(Queue& q, Tensor& out, const Tensor& query,
     const Tensor& seq_lens, const Tensor& query_start_loc,
     const PagedAttentionArgs& args) {
   const char* setting = std::getenv("VT_XPU_XE2_PREFILL");
-  if (!setting || std::string_view(setting) != "1") return false;
+  if (setting && std::string_view(setting) != "1") return false;
   const auto device = NativeQueue(q).get_device();
   constexpr int dim = 256, q_heads = 24, kv_heads = 4;
   const auto tokens = query.shape[0], page = key_cache.shape[1];
@@ -40,7 +40,8 @@ bool PagedAttentionXe2PrefillKernel(Queue& q, Tensor& out, const Tensor& query,
       key_cache.shape[1] != value_cache.shape[1] ||
       key_cache.shape[2] != kv_heads || value_cache.shape[2] != kv_heads ||
       key_cache.shape[3] != dim || value_cache.shape[3] != dim ||
-      page != 64 || key_cache.stride[1] != kv_heads * dim ||
+      (page != 64 && page != 1600) ||
+      key_cache.stride[1] != kv_heads * dim ||
       value_cache.stride[1] != kv_heads * dim ||
       key_cache.stride[2] != dim || value_cache.stride[2] != dim ||
       key_cache.stride[3] != 1 || value_cache.stride[3] != 1 ||
@@ -52,7 +53,7 @@ bool PagedAttentionXe2PrefillKernel(Queue& q, Tensor& out, const Tensor& query,
           (key_cache.stride[0] / key_cache.stride[1]) ||
       block_table.rank != 2 || block_table.dtype != DType::kI32 ||
       block_table.shape[0] != 1 || block_table.stride[1] != 1 ||
-      block_table.shape[1] < tokens / page ||
+      block_table.shape[1] < (tokens + page - 1) / page ||
       block_table.shape[1] > std::numeric_limits<int>::max() ||
       seq_lens.rank != 1 || seq_lens.dtype != DType::kI32 ||
       seq_lens.Numel() != 1 || query_start_loc.rank != 1 ||
