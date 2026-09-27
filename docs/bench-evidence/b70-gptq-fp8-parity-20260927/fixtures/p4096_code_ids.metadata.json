@@ -1,0 +1,17 @@
+{
+  "tokens": 4096,
+  "available_source_tokens": 14717,
+  "prompt_ids_sha256": "a93d6f43a9f913c8966c8e42a97689a17e786fff2c316c3acf92b44b775b72ff",
+  "tokenizer_json_sha256": "06b9509352d2af50381ab2247e083b80d32d5c0aba91c272ca9ff729b6a0e523",
+  "prefix": "Review this C++ model implementation for correctness and performance. Explain the critical execution path.",
+  "sources": [
+    {
+      "path": "/repo/src/vllm/model_executor/models/qwen3_moe.cpp",
+      "sha256": "870725d274f772d375a1da636a86aeac678a2325c494ec30a891291580f3f348"
+    },
+    {
+      "path": "/repo/src/vllm/model_executor/models/qwen3_vl_text.cpp",
+      "sha256": "9c39c2c994befd9428480bfedcc15e67b6ed941013f47e51815ba9baef0d70ce"
+    }
+  ]
+}

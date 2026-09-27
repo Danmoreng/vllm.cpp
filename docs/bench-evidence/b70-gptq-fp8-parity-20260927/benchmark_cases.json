@@ -434,8 +434,8 @@
       "top1 and logit margin",
       "per-layer recurrent state error on selected diagnostic cases"
     ],
-    "thresholds": null,
-    "threshold_policy": "Calibrate from baseline and fixed goldens before optimizing; commit explicit thresholds; never relax to accept a candidate."
+    "thresholds": "quality_thresholds.json",
+    "threshold_policy": "Frozen from pre-candidate baseline; never relax to accept a candidate."
   },
   "later_serving_suite": {
     "concurrency": [

@@ -237,8 +237,34 @@ int Run(const std::string& checkpoint, int prompt_tokens, int output_tokens,
     decode_ids = ids;
   }
   const std::string quality_dir = Env("VT_B70_BENCH_QUALITY_DIR");
+  const std::string quality_steps_arg = Env("VT_B70_BENCH_QUALITY_STEPS");
+  if (quality_dir.empty() && !quality_steps_arg.empty())
+    throw std::invalid_argument("VT_B70_BENCH_QUALITY_STEPS requires VT_B70_BENCH_QUALITY_DIR");
+  std::vector<int> quality_steps;
+  if (!quality_dir.empty() && !quality_steps_arg.empty()) {
+    if (quality_steps_arg.back() == ',')
+      throw std::invalid_argument("quality decode steps must not end with a comma");
+    std::istringstream stream(quality_steps_arg);
+    std::string item;
+    while (std::getline(stream, item, ',')) {
+      size_t parsed = 0;
+      const int step = std::stoi(item, &parsed);
+      if (parsed != item.size())
+        throw std::invalid_argument("quality decode steps must be integers");
+      if (step < 1 || step >= output_tokens)
+        throw std::invalid_argument("quality decode step must be in 1..generated-1");
+      quality_steps.push_back(step);
+    }
+    std::sort(quality_steps.begin(), quality_steps.end());
+    if (quality_steps.empty() ||
+        std::adjacent_find(quality_steps.begin(), quality_steps.end()) !=
+            quality_steps.end())
+      throw std::invalid_argument("quality decode steps must be nonempty and unique");
+  } else if (!quality_dir.empty() && output_tokens > 1) {
+    quality_steps.push_back(1);
+  }
   const auto capture_logits = [&](const vllm::ForwardLogits& logits,
-                                  const char* phase) {
+                                  const std::string& phase) {
     if (quality_dir.empty()) return;
     if (!logits.on_device() || logits.rows != 1 ||
         logits.vocab != config.vocab_size ||
@@ -312,7 +338,10 @@ int Run(const std::string& checkpoint, int prompt_tokens, int output_tokens,
       if (steps != nullptr)
         steps->push_back({prompt_tokens + step, decode_ids[step],
                           Seconds(step_start, step_end)});
-      if (capture && step == 0) capture_logits(result, "decode");
+      if (capture && std::binary_search(quality_steps.begin(),
+                                       quality_steps.end(), step + 1))
+        capture_logits(result, quality_steps_arg.empty()
+            ? "decode" : "decode_" + std::to_string(step + 1));
     }
   };
 
@@ -355,6 +384,7 @@ int Run(const std::string& checkpoint, int prompt_tokens, int output_tokens,
         {"decode_first_token", decode_ids.empty()
             ? nlohmann::json(nullptr) : nlohmann::json(decode_ids[0])},
         {"quality_capture", !quality_dir.empty()},
+        {"quality_decode_steps", quality_steps},
         {"rounds", rounds}, {"warm_blocks", 1},
         {"gdn_chunk_size", 64}, {"kv_block_size", block_size},
         {"gdn_prefill_mode", Env("VT_XPU_GDN_PREFILL", "auto")},
