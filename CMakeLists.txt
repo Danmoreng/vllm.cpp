@@ -834,6 +834,7 @@ add_library(vllm STATIC
   src/vllm/model_executor/models/dots3_note_audio.cpp
   src/vllm/model_executor/models/dots3_note_registry.cpp
   src/vllm/model_executor/models/mimo_v2_registry.cpp
+  src/vllm/model_executor/models/mimo_v2_weights.cpp
   src/vllm/model_executor/models/qwen4_exp_ple.cpp
   src/vllm/model_executor/models/qwen4_exp.cpp
   src/vllm/model_executor/models/qwen4_exp_weights.cpp
