@@ -63,6 +63,29 @@ TEST_CASE("XPU conv prefill: raw history, lengths 0/1/2/3/4/63/64/65, dtype and 
     }
 }
 
+TEST_CASE("XPU conv long single-sequence prefill matches CPU output and state") {
+  Queue cpu(vt::DeviceType::kCPU), gpu(vt::DeviceType::kXPU);
+  constexpr int rows = 4096, channels = 17;
+  std::vector<float> expected;
+  std::vector<unsigned char> expected_state;
+  for (auto* q : {&cpu.q, &gpu.q}) {
+    Buffer x(*q, DType::kF16, {rows, channels + 3}), w(*q, DType::kF16, {channels, 4});
+    Buffer out(*q, DType::kF32, {rows, channels});
+    Buffer state(*q, DType::kF32, {1, channels, 3});
+    Buffer qsl(*q, DType::kI32, {2}), init(*q, DType::kI8, {1});
+    x.put(Values(rows * (channels + 3))); w.put(Values(channels * 4, 2));
+    state.put(Values(channels * 3, 8));
+    const int32_t offsets[] = {0, rows};
+    const int8_t flags[] = {1};
+    qsl.upload(offsets); init.upload(flags);
+    x.tensor.shape[1] = channels;
+    vt::CausalConv1dFwd(*q, out.tensor, x.tensor, w.tensor, nullptr, state.tensor,
+                         qsl.tensor, init.tensor, {});
+    if (q == &cpu.q) { expected = out.floats(); expected_state = state.download(); }
+    else { Close(out.floats(), expected, 2e-6f); SameBytes(state.download(), expected_state); }
+  }
+}
+
 TEST_CASE("XPU conv decode: permuted/null slots, wider history, in-place output and invalid metadata") {
   Queue cpu(vt::DeviceType::kCPU), gpu(vt::DeviceType::kXPU);
   for (auto dtype : {DType::kF32, DType::kBF16}) {

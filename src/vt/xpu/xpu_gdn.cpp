@@ -50,6 +50,37 @@ void CausalConv1dFwdKernel(Queue& q, Tensor& out, const Tensor& x, const Tensor&
     const auto* offsets = static_cast<const int32_t*>(qsl.data);
     const View cache(state);
     const bool has_bias = bias != nullptr, activation = args.silu_activation;
+    static const bool parallel_prefill = [] {
+      const char* value = std::getenv("VT_XPU_CONV_PREFILL_PARALLEL");
+      return !value || std::string_view(value) != "0";
+    }();
+    // Long single-sequence prefills have independent output tokens. Keep the
+    // history write in a later launch so early outputs still see the old state.
+    if (parallel_prefill && sequences == 1 && x.shape[0] >= std::max<int64_t>(512, width)) {
+      const auto tokens = x.shape[0];
+      const auto output_event = NativeQueue(q).parallel_for(sycl::range<1>(tokens * channels), [=](sycl::id<1> item) {
+        const int64_t t = item[0] / channels, channel = item[0] % channels;
+        const bool use_history = Initial(flags, 0);
+        float acc = has_bias ? Load(b, channel) : 0.0f;
+        for (int64_t j = 0; j < taps; ++j) {
+          const auto token = t - width + j;
+          const float value = token >= 0 ? Load(src, token * src.stride[0] + channel)
+                                        : use_history ? Load(cache, channel * state_width + width + token) : 0.0f;
+          acc += Load(w, channel * taps + j) * value;
+        }
+        Store(dst, t * channels + channel, activation ? Silu(acc) : acc);
+      });
+      RecordProfileEvent(q, "conv1d_prefill", output_event);
+      if (width) {
+        const auto state_event = NativeQueue(q).parallel_for(sycl::range<1>(channels * width), [=](sycl::id<1> item) {
+          const int64_t channel = item[0] / width, j = item[0] % width;
+          Store(cache, channel * state_width + j,
+                Load(src, (tokens - width + j) * src.stride[0] + channel));
+        });
+        RecordProfileEvent(q, "conv1d_prefill_state", state_event);
+      }
+      return;
+    }
     const auto event = NativeQueue(q).parallel_for(sycl::range<1>(sequences * channels), [=](sycl::id<1> item) {
       const int64_t seq = item[0] / channels, channel = item[0] % channels;
       const int64_t begin = offsets[seq], length = offsets[seq + 1] - begin;
