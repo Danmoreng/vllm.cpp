@@ -66,21 +66,21 @@ void Prepare(Queue& queue, ChunkScratch<Input> s, View qi, View ki, View gates, 
   auto& q = NativeQueue(queue);
   // VT has already normalized q/k and transformed g/beta. Only a chunk-local
   // prefix sum belongs here; do not repeat donor softplus, sigmoid or L2Norm.
-  const auto gates_event = q.parallel_for(sycl::range<1>(heads), [=](sycl::id<1> item) {
-    const int h = item[0], first = offsets[sequence] + base, end = offsets[sequence + 1];
-    float sum = 0;
-    for (int i = 0; i < C; ++i) {
-      if (first + i < end) sum += Load(gates, (first + i) * heads + h);
-      s.g[h * C + i] = sum;
-    }
-    for (int i = 0; i < C; ++i) {
-      s.exp_g[h * C + i] = sycl::exp(s.g[h * C + i]);
-      s.tail_decay[h * C + i] = sycl::exp(sum - s.g[h * C + i]);
-    }
-  });
-  RecordProfileEvent(queue, "gdn_chunk_gates", gates_event);
-  const auto inputs_event = q.parallel_for(sycl::range<1>(heads * D * D), [=](sycl::id<1> item) {
+  // Gate sums and input/state copies are independent, so one launch prepares both.
+  const auto prepare_event = q.parallel_for(sycl::range<1>(heads * D * D), [=](sycl::id<1> item) {
     const int h = item[0] / (D * D), inner = item[0] % (D * D), v = inner / D, k = inner % D;
+    if (inner == 0) {
+      const int first = offsets[sequence] + base, end = offsets[sequence + 1];
+      float sum = 0;
+      for (int i = 0; i < C; ++i) {
+        if (first + i < end) sum += Load(gates, (first + i) * heads + h);
+        s.g[h * C + i] = sum;
+      }
+      for (int i = 0; i < C; ++i) {
+        s.exp_g[h * C + i] = sycl::exp(s.g[h * C + i]);
+        s.tail_decay[h * C + i] = sycl::exp(sum - s.g[h * C + i]);
+      }
+    }
     s.state_t[(h * D + k) * D + v] = state[(sequence * heads + h) * D * D + inner];
     if (inner < C * D) {
       const int row = inner / D, d = inner % D, token = offsets[sequence] + base + row;
@@ -92,7 +92,7 @@ void Prepare(Queue& queue, ChunkScratch<Input> s, View qi, View ki, View gates, 
       s.kt[(h * D + d) * C + row] = kv;
     }
   });
-  RecordProfileEvent(queue, "gdn_chunk_inputs", inputs_event);
+  RecordProfileEvent(queue, "gdn_chunk_prepare", prepare_event);
 }
 
 // Compute K K^T using native BF16/F16 XMX, F32 accumulation. Each SG16
