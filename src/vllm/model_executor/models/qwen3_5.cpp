@@ -5423,6 +5423,26 @@ DBuf GdnBlockPaged(Dev d, const GdnLayerWeights& w, const HfConfig& cfg,
   VT_CHECK(gptq == nullptr || !spec,
            "gptq4: speculative GDN state routing is not enabled for the text control");
 
+  // P4 diagnostic: capture one real GPTQ prefill layer for an isolated GDN
+  // replay. The environment knob is inert on ordinary model runs. Capturing
+  // once avoids a second warmup/measurement forward overwriting the fixture.
+  static const char* capture_dir = std::getenv("VT_B70_GDN_CAPTURE");
+  static std::atomic<bool> captured_gdn_layer{false};
+  const bool capture_gdn = capture_dir && capture_dir[0] && gptq &&
+      T == 4096 && np == 1 && nd == 0 && actdump::Current().layer == 0 &&
+      !captured_gdn_layer.exchange(true);
+  auto CaptureGdn = [&](const char* stage, const Tensor& tensor) {
+    if (!capture_gdn) return;
+    const int64_t rows = tensor.shape[0];
+    const int64_t cols = tensor.Numel() / rows;
+    VT_CHECK(tensor.stride[0] == cols,
+             "VT_B70_GDN_CAPTURE requires contiguous tensor rows");
+    ActDumpTensor(d, "VT_B70_GDN_CAPTURE", capture_dir, stage, tensor, rows,
+                  cols);
+  };
+  CaptureGdn("conv_cache_before", state.conv_state);
+  CaptureGdn("ssm_cache_before", state.ssm_state);
+
   const DType indt = GdnInputDType(d);
   const DType outdt = GdnOutputDType(d);
   // PERF-27B-GDN-PACKED-REACHABLE (#365). `dtype_compatible` is decided by the
@@ -5659,6 +5679,8 @@ DBuf GdnBlockPaged(Dev d, const GdnLayerWeights& w, const HfConfig& cfg,
     }
   }
 
+  CaptureGdn("conv_cache_after", state.conv_state);
+
   // Post-conv prep (§1 layout, §4 l2norm, §6 g/beta): split q|k|v, l2-normalize
   // q/k over Dk, derive g/beta. Fused into one vt::GdnPostConv launch
   // (perf/glue-fuse; mirror fla fused_gdn_prefill_post_conv), or four per-op
@@ -5800,6 +5822,12 @@ DBuf GdnBlockPaged(Dev d, const GdnLayerWeights& w, const HfConfig& cfg,
       Tensor g_pre = SubView(dg.t(), nd_tok, np_tok);
       Tensor b_pre = SubView(dbeta.t(), nd_tok, np_tok);
       Tensor o_pre = SubView(dcore.t(), nd_tok, np_tok);
+      CaptureGdn("q", q_pre);
+      CaptureGdn("k", k_pre);
+      CaptureGdn("v", v_pre);
+      CaptureGdn("g", g_pre);
+      CaptureGdn("beta", b_pre);
+      CaptureGdn("ssm_state_before", dss.t());
       // Hand the CUDA chunked-prefill path the HOST query_start_loc (p_qsl,
       // already materialized by the GDN metadata build) so it skips the
       // per-layer D2H copy + synchronization. p_qsl outlives this call.
@@ -5808,6 +5836,9 @@ DBuf GdnBlockPaged(Dev d, const GdnLayerWeights& w, const HfConfig& cfg,
       if (indexed_state_io) {
         vt::GdnPrefill(d.q, o_pre, q_pre, k_pre, v_pre, g_pre, b_pre,
                        dss.t(), sdi.gdn_prefill_qsl.t(), gdn_args);
+        CaptureGdn("query_start_loc", sdi.gdn_prefill_qsl.t());
+        CaptureGdn("core_out", o_pre);
+        CaptureGdn("ssm_state_after", dss.t());
         Tensor ssm_cache = state.ssm_state;
         DumpGdnStage(d, "core", o_pre);
         if (const char* td = std::getenv("VT_DUMP_TRUST")) vt::tenstorrent::TrustDump(d.q, td, "core", o_pre);
@@ -5817,6 +5848,9 @@ DBuf GdnBlockPaged(Dev d, const GdnLayerWeights& w, const HfConfig& cfg,
         DBuf dpqsl(d, DType::kI32, {np + 1}, p_qsl.data());
         vt::GdnPrefill(d.q, o_pre, q_pre, k_pre, v_pre, g_pre, b_pre,
                        dss.t(), dpqsl.t(), gdn_args);
+        CaptureGdn("query_start_loc", dpqsl.t());
+        CaptureGdn("core_out", o_pre);
+        CaptureGdn("ssm_state_after", dss.t());
         ScatterStateF32(d, state.ssm_state, dss, pidx, ssm_row_elems);
         if (const char* td = std::getenv("VT_DUMP_TRUST")) vt::tenstorrent::TrustDump(d.q, td, "core", o_pre);
       }

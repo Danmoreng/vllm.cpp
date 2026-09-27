@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "case": "Qwen3.8-27B GPTQ G128 FP16 activations, FP8 KV, P4096, first GDN layer, fresh state",
+  "reference": "pinned Python vLLM 0.30.0 XPU native wheel 0.1.15.4",
+  "fixed_before_p4_candidate": true,
+  "core_out": {
+    "relative_rms_error_max": 0.002,
+    "max_abs_error_max": 0.012
+  },
+  "ssm_after": {
+    "relative_rms_error_max": 0.003,
+    "max_abs_error_max": 0.06
+  },
+  "conv_after": {
+    "exact_fraction_min": 1.0
+  }
+}

@@ -9,6 +9,7 @@ benchmark's D decode inputs.
 import argparse
 import hashlib
 import json
+import os
 import time
 from pathlib import Path
 
@@ -130,6 +131,12 @@ def main():
         return result
 
     engine.step = timed_step
+
+    capture_arm = os.environ.get("B70_GDN_CAPTURE_ARM")
+    if capture_arm:
+        if args.warmup_runs != 0 or args.rounds != 1 or p != 4096:
+            raise ValueError("GDN capture requires P4096, one run and no request warmup")
+        Path(capture_arm).touch()
 
     def run_requests():
         nonlocal request_start
