@@ -98,8 +98,8 @@ nlohmann::json StageTrace(const std::vector<vt::xpu::ProfileRecord>& records) {
 int Run(const std::string& checkpoint, int prompt_tokens, int output_tokens,
         int rounds) {
   if (prompt_tokens < 64 || prompt_tokens > 4096 || output_tokens < 2 ||
-      output_tokens > 64 || rounds < 1 || rounds > 20)
-    throw std::invalid_argument("expected 64<=prompt<=4096, 2<=output<=64, 1<=rounds<=20");
+      output_tokens > 65 || rounds < 1 || rounds > 20)
+    throw std::invalid_argument("expected 64<=prompt<=4096, 2<=output<=65, 1<=rounds<=20");
   const std::string_view kv_dtype = Env("VT_B70_BENCH_KV_DTYPE", "f16");
   if (kv_dtype != "f16" && kv_dtype != "fp8_e4m3")
     throw std::invalid_argument("VT_B70_BENCH_KV_DTYPE must be f16 or fp8_e4m3");
@@ -182,6 +182,18 @@ int Run(const std::string& checkpoint, int prompt_tokens, int output_tokens,
     decode_ids[step] = 300 + step;
   if (const char* first = std::getenv("VT_B70_BENCH_DECODE_FIRST_TOKEN"))
     decode_ids[0] = std::stoi(first);
+  const std::string decode_ids_file = Env("VT_B70_BENCH_DECODE_IDS_FILE");
+  if (!decode_ids_file.empty()) {
+    std::ifstream file(decode_ids_file);
+    if (!file) throw std::runtime_error("cannot open decode IDs: " + decode_ids_file);
+    const auto ids = nlohmann::json::parse(file).get<std::vector<int32_t>>();
+    if (ids.size() != decode_ids.size() ||
+        std::any_of(ids.begin(), ids.end(), [&](int32_t id) {
+          return id < 0 || id >= config.vocab_size;
+        }))
+      throw std::runtime_error("decode IDs must match output length - 1 and vocabulary");
+    decode_ids = ids;
+  }
   const std::string quality_dir = Env("VT_B70_BENCH_QUALITY_DIR");
   const auto capture_logits = [&](const vllm::ForwardLogits& logits,
                                   const char* phase) {
@@ -283,6 +295,7 @@ int Run(const std::string& checkpoint, int prompt_tokens, int output_tokens,
         {"prompt_tokens", prompt_tokens}, {"output_tokens", output_tokens},
         {"prompt_ids_fnv1a64", TokenHash(prompt_ids)},
         {"decode_ids_fnv1a64", TokenHash(decode_ids)},
+        {"decode_ids_file", decode_ids_file},
         {"decode_first_token", decode_ids[0]},
         {"quality_capture", !quality_dir.empty()},
         {"rounds", rounds}, {"warm_blocks", 1},
