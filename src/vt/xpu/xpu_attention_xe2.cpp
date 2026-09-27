@@ -25,7 +25,10 @@ bool PagedAttentionXe2PrefillKernel(Queue& q, Tensor& out, const Tensor& query,
   const auto device = NativeQueue(q).get_device();
   constexpr int dim = 256, q_heads = 24, kv_heads = 4;
   const auto tokens = query.shape[0], page = key_cache.shape[1];
-  if (tokens != 4096 || query.rank != 3 || out.rank != 3 ||
+  // Each admitted length is covered by the Xe2/Q64 route and output test.
+  const bool qualified_length = tokens == 4095 || tokens == 4096 ||
+                                tokens == 4097 || tokens == 8192;
+  if (!qualified_length || query.rank != 3 || out.rank != 3 ||
       query.dtype != DType::kF16 || out.dtype != DType::kF16 ||
       query.shape[1] != q_heads || query.shape[2] != dim ||
       out.shape[0] != query.shape[0] || out.shape[1] != query.shape[1] ||
