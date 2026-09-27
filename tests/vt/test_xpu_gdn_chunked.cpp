@@ -170,11 +170,11 @@ TEST_CASE("XPU GDN profile: chunk stages and decode recurrence"
   const std::string_view mode = inverse_mode ? inverse_mode : "blocked";
   const char* inverse_stage = mode == "reference" ? "gdn_chunk_inverse"
       : mode == "blocked" ? "gdn_chunk_inverse_blocked" : "gdn_chunk_inverse_slm";
-  for (const char* stage : {"gdn_chunk_gates", "gdn_chunk_inputs", "gdn_chunk_dots_qk",
+  for (const char* stage : {"gdn_chunk_prepare", "gdn_chunk_dots_qk",
                             "gdn_chunk_system", inverse_stage, "gdn_chunk_wu_tile4",
                             "gdn_chunk_delta_cross_tile4", "gdn_chunk_output_tile4", "gdn_chunk_state_tile4",
                             "gdn_decode_recurrence"}) CHECK(counts[stage] == 1);
-  CHECK(records.size() == 10);
+  CHECK(records.size() == 9);
 }
 
 TEST_CASE("XPU GDN chunk64: empty and unequal sequences, long drift, decode continuation") {
