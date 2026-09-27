@@ -106,9 +106,18 @@ class Scratch {
 template<class Check>
 void CheckDeviceMetadata(Queue& q, Check check, const char* message,
                           std::initializer_list<const Tensor*> inputs) {
+  const auto check_start = HostProfileSpansEnabled() ? HostProfileClockNs() : 0;
   if (CaptureMetadataCheck(q, [check](sycl::handler& h, int* result) {
         h.single_task([=] { *result = check() ? 1 : 0; });
-      }, message, inputs)) return;
+      }, message, inputs)) {
+    if (check_start) {
+      const auto check_end = HostProfileClockNs();
+      RecordHostProfileSpan(q, "metadata_validation_host", check_start,
+                            check_end);
+      RecordHostProfileSpan(q, message, check_start, check_end);
+    }
+    return;
+  }
   Scratch scratch(q.device, sizeof(int));
   auto* result = static_cast<int*>(scratch.data);
   NativeQueue(q).single_task([=] { *result = check() ? 1 : 0; });
@@ -120,6 +129,12 @@ void CheckDeviceMetadata(Queue& q, Check check, const char* message,
   if (wait_start)
     RecordHostProfileSpan(q, "metadata_d2h_wait", wait_start,
                           HostProfileClockNs());
+  if (check_start) {
+    const auto check_end = HostProfileClockNs();
+    RecordHostProfileSpan(q, "metadata_validation_host", check_start,
+                          check_end);
+    RecordHostProfileSpan(q, message, check_start, check_end);
+  }
   VT_CHECK(valid, message);
 }
 // The correctness path snapshots only when the output could clobber an input.
