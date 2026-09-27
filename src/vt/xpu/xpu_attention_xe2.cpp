@@ -28,7 +28,8 @@ bool PagedAttentionXe2PrefillKernel(Queue& q, Tensor& out, const Tensor& query,
   // The 4K continuation reads an existing 4K prefix. The donor's causal
   // offset uses the device KV length minus the device query length.
   const bool initial_prefill = args.max_seq_len == tokens &&
-      (tokens == 4095 || tokens == 4096 || tokens == 4097 || tokens == 8192);
+      (tokens == 2048 || tokens == 2049 || tokens == 4095 ||
+       tokens == 4096 || tokens == 4097 || tokens == 8192);
   const bool continuation = tokens == 4096 && args.max_seq_len == 8192;
   if (continuation) {
     const char* continuation_setting = std::getenv("VT_XPU_XE2_CONTINUATION");
