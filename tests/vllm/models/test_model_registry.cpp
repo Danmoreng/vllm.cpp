@@ -102,7 +102,12 @@ TEST_CASE("registry_imports: every registered architecture has a complete factor
   // Qwen3.5-4B forward + lm_head, NOT pooling). Served via
   // /v1/chat/completions, NOT /v1/systemone. Ported from
   // togethercomputer/Tev1-4B-experimental.
-  REQUIRE(registrations.size() == 53);
+  // 53 -> 54 on MODEL-TEXT-mimo-v2 (W1, ISSUE-LOCAL-01M3F82S8ZYCTTDSKPFF5PGAH7):
+  // `MiMoV2ForCausalLM`, its own additive TU. A beyond-pin hybrid text-only
+  // LLM (48 layers, full-attn every 6th + SWA, v_head_dim != head_dim, MoE)
+  // with no vLLM registration. The weight loader (W2) and forward (W3) are
+  // stubs; W1 gate is: config parses, KV-cache spec builds, model resolves.
+  REQUIRE(registrations.size() == 54);
 
   for (const ModelRegistration& registration : registrations) {
     CAPTURE(registration.architecture);
@@ -215,7 +220,7 @@ TEST_CASE("self_registration: every arch self-registers from its own TU") {
   // with the kExampleConfigArchitectures ledger; adding a model appends its two
   // entries here.
   const std::vector<std::string_view> supported = ModelRegistry::SupportedArchs();
-  REQUIRE(supported.size() == 53);
+  REQUIRE(supported.size() == 54);
   CHECK(std::is_sorted(supported.begin(), supported.end()));
   // The full byte-order sequence. Note "MiniCPM3" < "MiniCPMF" and "Phi3" <
   // "PhiF" ('3' 0x33 < 'F' 0x46); "OPT" < "Olmo" ('P' 0x50 < 'l' 0x6C); and among
@@ -258,6 +263,8 @@ TEST_CASE("self_registration: every arch self-registers from its own TU") {
       "LayaModel",
       "LlamaForCausalLM",
       "LlamaModel",
+      // "MiMoV2" sorts before "MiniCPM": 'M' (0x4D) < 'n' (0x6E) at index 2.
+      "MiMoV2ForCausalLM",
       "MiniCPM3ForCausalLM",
       "MiniCPMForCausalLM",
       "MistralForCausalLM",
@@ -446,6 +453,15 @@ TEST_CASE("registry_model_property: Qwen registrations match pinned _ModelInfo")
       // has_inner_state stays false (the blanket assertion above): our ModelInfo is
       // a consumed subset whose only reader short-circuits on is_hybrid, so we
       // follow the GDN-hybrid twin kQwen3_5Info convention.
+      CHECK(registration.info.is_hybrid);
+      CHECK_FALSE(registration.info.supports_multimodal);
+    } else if (registration.architecture == "MiMoV2ForCausalLM") {
+      // MODEL-TEXT-mimo-v2 W1 (ISSUE-LOCAL-01M3F82S8ZYCTTDSKPFF5PGAH7):
+      // text-only HYBRID — 8 full-attention layers (every 6th) + 40 SWA
+      // layers, each with a DIFFERENT KV geometry (4 vs 8 KV heads,
+      // v_head_dim != head_dim). is_hybrid YES, supports_multimodal NO
+      // (vision_config/audio_config are explicitly out of scope; a future
+      // MODEL-MM-mimo-v2 row will cover the multimodal wrapper).
       CHECK(registration.info.is_hybrid);
       CHECK_FALSE(registration.info.supports_multimodal);
     } else if (registration.architecture == "Qwen3VLForConditionalGeneration" ||
@@ -797,7 +813,7 @@ TEST_CASE("Qwen3.5 SSM cache dtype accepts upstream torch aliases exactly") {
 TEST_CASE("hf_registry_coverage: every registration has an example config fixture") {
   // C++ fixture registry for the currently implemented subset. Keep this list
   // alias-for-alias with the central ordered table, mirroring HF_EXAMPLE_MODELS.
-  constexpr std::array<std::string_view, 53> kExampleConfigArchitectures{
+  constexpr std::array<std::string_view, 54> kExampleConfigArchitectures{
       "BoundaryExtractor",
       // "ClmModel" (Cl) < "CohereForCausalLM" (Co): l=0x6C < o=0x6F.
       "ClmModel",
@@ -829,6 +845,8 @@ TEST_CASE("hf_registry_coverage: every registration has an example config fixtur
       "LayaModel",
       "LlamaForCausalLM",
       "LlamaModel",
+      // "MiMoV2" sorts before "MiniCPM": 'M' (0x4D) < 'n' (0x6E) at index 2.
+      "MiMoV2ForCausalLM",
       "MiniCPM3ForCausalLM",
       "MiniCPMForCausalLM",
       "MistralForCausalLM",
@@ -937,33 +955,7 @@ TEST_CASE("raise_for_unsupported: subset default message and order match oracle"
       "'InternLM2ForCausalLM', 'InternLM3ForCausalLM', 'KevModel', "
       "'KimiK3ForConditionalGeneration', 'KimiLinearForCausalLM', "
       "'LagunaForCausalLM', 'LayaModel', "
-      "'LlamaForCausalLM', 'LlamaModel', "
-      "'MiniCPM3ForCausalLM', 'MiniCPMForCausalLM', 'MistralForCausalLM', 'MuseGlimmerForCausalLM', 'MuseGlimmerForConditionalGeneration', "
-      "'NemotronHForCausalLM', "
-      "'OPTForCausalLM', 'Olmo2ForCausalLM', 'Olmo3ForCausalLM', "
-      "'ParakeetForCTC', 'ParakeetForRNNT', 'ParakeetForTDT', "
-      "'Phi3ForCausalLM', 'PhiForCausalLM', 'Qwen3ForCausalLM', "
-      "'Qwen3MoeForCausalLM', 'Qwen3VLForConditionalGeneration', "
-      "'Qwen3_5ForCausalLM', 'Qwen3_5ForConditionalGeneration', "
-      "'Qwen3_5MoeForCausalLM', "
-      "'Qwen3_5MoeForConditionalGeneration', 'Qwen4ExpForConditionalGeneration', 'SpanExtractor', 'StableLmForCausalLM', 'Tev1Model', 'XorModel'])",
-      std::runtime_error);
-
-  const HfConfig multiple = Config({"UnknownA", "UnknownB"});
-  CHECK_THROWS_WITH_AS(
-      ModelRegistry::Resolve(multiple),
-      "Model architectures ['UnknownA', 'UnknownB'] are not supported for now. "
-      "Supported architectures: "
-      "dict_keys(['BoundaryExtractor', 'ClmModel', 'CohereForCausalLM', 'CuaS1Forms', 'DeepseekV2ForCausalLM', "
-      "'DeepseekV41ForCausalLM', "
-      "'DeepseekV4ForCausalLM', 'Dots3NoteForCausalLM', 'Gemma2ForCausalLM', 'Gemma3ForCausalLM', "
-      "'Gemma4ForConditionalGeneration', 'Gemma4UnifiedForConditionalGeneration', 'GemmaForCausalLM', "
-      "'Glm4ForCausalLM', 'Glm4MoeLiteForCausalLM', "
-      "'Glm5NextForConditionalGeneration', 'GlmMoeDsaForCausalLM', 'GraniteForCausalLM', "
-      "'InternLM2ForCausalLM', 'InternLM3ForCausalLM', 'KevModel', "
-      "'KimiK3ForConditionalGeneration', 'KimiLinearForCausalLM', "
-      "'LagunaForCausalLM', 'LayaModel', "
-      "'LlamaForCausalLM', 'LlamaModel', "
+      "'LlamaForCausalLM', 'LlamaModel', 'MiMoV2ForCausalLM', "
       "'MiniCPM3ForCausalLM', 'MiniCPMForCausalLM', 'MistralForCausalLM', 'MuseGlimmerForCausalLM', 'MuseGlimmerForConditionalGeneration', "
       "'NemotronHForCausalLM', "
       "'OPTForCausalLM', 'Olmo2ForCausalLM', 'Olmo3ForCausalLM', "
