@@ -293,6 +293,18 @@ void GdnPrefillKernel(Queue& q, Tensor& out, const Tensor& qi, const Tensor& ki,
     VT_CHECK(name == "auto" || name == "reference" || name == "chunked", "Invalid VT_XPU_GDN_PREFILL");
     return name == "auto" ? Mode::kAuto : name == "chunked" ? Mode::kChunked : Mode::kReference;
   }();
+#ifdef VLLM_CPP_XPU_XE2_GDN
+  static const bool native_requested = [] {
+    const char* value = std::getenv("VT_XPU_GDN_NATIVE");
+    const std::string_view setting = value ? value : "0";
+    VT_CHECK(setting == "0" || setting == "1", "Invalid VT_XPU_GDN_NATIVE");
+    return setting == "1";
+  }();
+  const bool native_selected = native_requested &&
+      GdnNativePrefillKernel(q, out, qi, ki, vi, g, beta, state, qsl, args);
+#else
+  const bool native_selected = false;
+#endif
   bool chunked = mode == Mode::kChunked;
   if (mode == Mode::kAuto && qi.shape[1] == 16 && state.shape[1] == 48) {
     const auto device = NativeQueue(q).get_device();
@@ -302,11 +314,11 @@ void GdnPrefillKernel(Queue& q, Tensor& out, const Tensor& qi, const Tensor& ki,
   }
   const bool supported = GdnChunkedPrefillEnabled();
   const bool eligible = chunked && supported && qi.shape[0] >= 64;
-  const bool selected = eligible &&
+  const bool selected = !native_selected && eligible &&
       GdnChunkedPrefillKernel(q, out, qi, ki, vi, g, beta, state, qsl, args);
   if (const char* trace = std::getenv("VT_XPU_TRACE_FAST_PATH");
       trace != nullptr && trace[0] == '1' && trace[1] == '\0') {
-    const char* reason = selected ? "eligible" :
+    const char* reason = (selected || native_selected) ? "eligible" :
         !chunked ? "mode_or_stack_gate" : !supported ? "kernel_disabled" :
         qi.shape[0] < 64 ? "short_query" : "kernel_declined";
     const char* mode_name = mode == Mode::kAuto ? "auto" :
@@ -315,10 +327,11 @@ void GdnPrefillKernel(Queue& q, Tensor& out, const Tensor& qi, const Tensor& ki,
                  "{\"event\":\"xpu_fast_path\",\"operator\":\"gdn_prefill\","
                  "\"selected\":\"%s\",\"reason\":\"%s\","
                  "\"mode\":\"%s\",\"tokens\":%lld}\n",
-                 selected ? "chunked" : "reference", reason, mode_name,
+                 native_selected ? "native" : selected ? "chunked" : "reference",
+                 reason, mode_name,
                  static_cast<long long>(qi.shape[0]));
   }
-  if (selected) return;
+  if (selected || native_selected) return;
   Recurrence(q, out, qi, ki, vi, g, beta, state, &qsl, nullptr, args.scale);
 }
 void GdnDecodeKernel(Queue& q, Tensor& out, const Tensor& qi, const Tensor& ki, const Tensor& vi,

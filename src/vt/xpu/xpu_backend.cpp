@@ -132,7 +132,7 @@ struct Context {
   sycl::device device;
   sycl::context context;
   std::mutex mutex;
-  Workspace exl3, gdn, attention, sampling;
+  Workspace exl3, gdn, attention, sampling, native_gdn;
   std::unordered_map<sycl::queue*, std::unique_ptr<sycl::queue>> queues;
   std::vector<PendingProfileEvent> profile_events;
   std::vector<HostProfileRecord> host_profile_records;
@@ -433,7 +433,8 @@ class XpuBackend final : public Backend {
     // The bounded workspaces belong to the device, not to each captured slot.
     // Share their ordering with eager callers; a second queue must wait for
     // the prior user's GPU event before overwriting the same scratch.
-    std::scoped_lock workspaces(c.exl3.mutex, c.gdn.mutex, c.attention.mutex, c.sampling.mutex);
+    std::scoped_lock workspaces(c.exl3.mutex, c.gdn.mutex, c.attention.mutex,
+                                c.sampling.mutex, c.native_gdn.mutex);
     std::lock_guard lock(c.mutex);
     auto it = c.graphs.find(handle);
     VT_CHECK(it != c.graphs.end(), "XPU graph handle is not owned by this device");
@@ -441,7 +442,7 @@ class XpuBackend final : public Backend {
     auto& graph = *it->second;
     const bool graph_profile = GraphProfileEnabled();
     const bool host_profile = graph_profile || HostProfileEnabled();
-    Workspace* scratch[] = {&c.exl3, &c.gdn, &c.attention, &c.sampling};
+    Workspace* scratch[] = {&c.exl3, &c.gdn, &c.attention, &c.sampling, &c.native_gdn};
     if (graph.validation) {
       // All check kernels share one small D2H. They read the freshly staged
       // metadata on this queue; invalid indices fail before compute can write
@@ -469,7 +470,7 @@ class XpuBackend final : public Backend {
     const auto compute_submit_start = host_profile ? SteadyNs() : 0;
     graph.last = native.submit([&](sycl::handler& h) {
       if (graph.last) h.depends_on(*graph.last);
-      for (unsigned i = 0; i < 4; ++i)
+      for (unsigned i = 0; i < 5; ++i)
         if ((graph.workspace_mask & (1u << i)) && scratch[i]->last) h.depends_on(*scratch[i]->last);
       h.ext_oneapi_graph(graph.executable);
     });
@@ -477,7 +478,7 @@ class XpuBackend final : public Backend {
       AppendProfileEvent(c, q, "graph_compute", nullptr, *graph.last);
     if (host_profile)
       AppendHostProfileRecord(c, q.id, "graph_compute_submit", compute_submit_start, SteadyNs());
-    for (unsigned i = 0; i < 4; ++i) if (graph.workspace_mask & (1u << i)) scratch[i]->last = graph.last;
+    for (unsigned i = 0; i < 5; ++i) if (graph.workspace_mask & (1u << i)) scratch[i]->last = graph.last;
     ++c.replays;
   }
   void DestroyGraph(void* handle) override {
@@ -716,6 +717,7 @@ MemoryInfo GetMemoryInfo(int index) {
   MemoryInfo info{c.total, c.budget, c.allocated, c.pinned_bytes, 0, false};
   info.exl3_workspace_bytes = c.exl3.bytes;
   info.gdn_workspace_bytes = c.gdn.bytes;
+  info.native_gdn_workspace_bytes = c.native_gdn.bytes;
   info.attention_workspace_bytes = c.attention.bytes;
   info.sampling_workspace_bytes = c.sampling.bytes;
   info.peak_allocated_bytes = c.peak_allocated;
@@ -786,6 +788,12 @@ bool WithGdnWorkspace(Queue& q, size_t bytes, const std::function<void(void*)>& 
   VT_CHECK(bytes > 0 && bytes <= 32 * 1024 * 1024, "XPU GDN workspace exceeds 32 MiB budget");
   return WithWorkspace(q, GetContext(q.device.index).gdn, 2,
                        "workspace_wait_gdn", bytes, launch);
+}
+bool WithGdnNativeWorkspace(Queue& q, size_t bytes, const std::function<void(void*)>& launch) {
+  VT_CHECK(bytes > 0 && bytes <= 160 * 1024 * 1024,
+           "XPU native GDN workspace exceeds 160 MiB budget");
+  return WithWorkspace(q, GetContext(q.device.index).native_gdn, 16,
+                       "workspace_wait_gdn_native", bytes, launch);
 }
 bool WithAttentionWorkspace(Queue& q, size_t bytes, const std::function<void(void*)>& launch) {
   VT_CHECK(bytes > 0 && bytes <= 16 * 1024 * 1024, "XPU attention workspace exceeds 16 MiB budget");
