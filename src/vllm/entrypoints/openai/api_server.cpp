@@ -38,6 +38,88 @@
 
 namespace vllm::entrypoints::openai {
 
+namespace {
+
+// Build the OpenAI ErrorResponse JSON body for a failed request
+// (serve/utils/error_response.py::create_error_response). `code` == the HTTP
+// status code (upstream ErrorInfo.code carries it).
+ApiServer::DispatchResult MakeError(int status, const std::string& type,
+                                    const std::string& message) {
+  ErrorResponse err;
+  err.error.message = message;
+  err.error.type = type;
+  err.error.code = status;
+  ApiServer::DispatchResult r;
+  r.status = status;
+  r.content_type = "application/json";
+  r.body = nlohmann::json(err).dump();
+  return r;
+}
+
+}  // namespace
+
+#ifdef VLLM_WITH_DIARIZATION
+static ApiServer::DispatchResult HandleAudioDiarizations(
+    const ApiServer& server,
+    const std::string& file_bytes,
+    const std::string& /*response_format*/) {
+  auto diarizer = server.diarizer_callback();
+  if (!diarizer) {
+    return MakeError(404, "NotFoundError", "diarization not enabled");
+  }
+  try {
+    auto segs = diarizer(reinterpret_cast<const uint8_t*>(file_bytes.data()),
+                         file_bytes.size());
+    nlohmann::json j = nlohmann::json::array();
+    for (const auto& s : segs) {
+      j.push_back({{"speaker", s.speaker},
+                    {"start", s.start},
+                    {"end", s.end}});
+    }
+    ApiServer::DispatchResult r;
+    r.status = 200;
+    r.content_type = "application/json";
+    r.body = j.dump();
+    return r;
+  } catch (const std::exception& e) {
+    return MakeError(500, "InternalServerError", e.what());
+  }
+}
+
+static ApiServer::DispatchResult HandleAudioSas(
+    const ApiServer& server,
+    const std::string& file_bytes,
+    const std::string& /*response_format*/) {
+  auto sas_fn = server.sas_callback();
+  if (!sas_fn) {
+    return MakeError(404, "NotFoundError", "speaker-attributed ASR not enabled");
+  }
+  try {
+    auto result = sas_fn(reinterpret_cast<const uint8_t*>(file_bytes.data()),
+                         file_bytes.size());
+    nlohmann::json j;
+    j["segments"] = nlohmann::json::array();
+    for (const auto& u : result.utterances) {
+      j["segments"].push_back({
+        {"speaker", u.speaker},
+        {"text", u.text},
+        {"start", u.start},
+        {"end", u.end},
+        {"confidence", u.conf}
+      });
+    }
+    ApiServer::DispatchResult r;
+    r.status = 200;
+    r.content_type = "application/json";
+    r.body = j.dump();
+    return r;
+  } catch (const std::exception& e) {
+    return MakeError(500, "InternalServerError", e.what());
+  }
+}
+#endif
+
+
 // SystemOne helpers (ParseSystemOneBody, BuildSystemOneAnswer*, R2, R4, etc.)
 // are defined in systemone.h/.cpp. Imported here so the handlers below can
 // call them unqualified, matching the former anonymous-namespace usage.
@@ -110,26 +192,6 @@ struct ApiServer::Impl {
   // Production handlers use AsyncLLM and never take this request-level lock.
   std::mutex legacy_engine_mutex;
 };
-
-namespace {
-
-// Build the OpenAI ErrorResponse JSON body for a failed request
-// (serve/utils/error_response.py::create_error_response). `code` == the HTTP
-// status code (upstream ErrorInfo.code carries it).
-ApiServer::DispatchResult MakeError(int status, const std::string& type,
-                                    const std::string& message) {
-  ErrorResponse err;
-  err.error.message = message;
-  err.error.type = type;
-  err.error.code = status;
-  ApiServer::DispatchResult r;
-  r.status = status;
-  r.content_type = "application/json";
-  r.body = nlohmann::json(err).dump();
-  return r;
-}
-
-}  // namespace
 
 ApiServer::ApiServer(OpenAIServingCompletion& completion,
                      OpenAIServingChat& chat, OpenAIServingModels& models,
@@ -504,6 +566,72 @@ ApiServer::DispatchResult ApiServer::handle_audio_transcriptions(
     return MakeError(400, "BadRequestError", e.what());
   }
 }
+
+// ── Speaker diarization handler (ABI v30) ────────────────────────────────
+#ifdef VLLM_WITH_DIARIZATION
+ApiServer::DispatchResult ApiServer::handle_audio_diarizations(
+    const std::string& file_bytes,
+    const std::string& /*response_format*/) const {
+  if (!diarizer_) {
+    return MakeError(500, "InternalServerError",
+                     "The model does not support Diarization API");
+  }
+  if (file_bytes.empty()) {
+    return MakeError(400, "BadRequestError",
+                     "Expected a non-empty `file` upload (16-bit PCM mono RIFF/WAVE)");
+  }
+  try {
+    auto segs = diarizer_(
+        reinterpret_cast<const uint8_t*>(file_bytes.data()), file_bytes.size());
+    nlohmann::json j = nlohmann::json::array();
+    for (const auto& s : segs) {
+      j.push_back({{"speaker", s.speaker},
+                    {"start", s.start},
+                    {"end", s.end}});
+    }
+    DispatchResult r;
+    r.content_type = "application/json";
+    r.body = j.dump();
+    return r;
+  } catch (const std::exception& e) {
+    return MakeError(400, "BadRequestError", e.what());
+  }
+}
+
+ApiServer::DispatchResult ApiServer::handle_audio_sas(
+    const std::string& file_bytes,
+    const std::string& /*response_format*/) const {
+  if (!sas_) {
+    return MakeError(500, "InternalServerError",
+                     "The model does not support Speaker-Attributed ASR API");
+  }
+  if (file_bytes.empty()) {
+    return MakeError(400, "BadRequestError",
+                     "Expected a non-empty `file` upload (16-bit PCM mono RIFF/WAVE)");
+  }
+  try {
+    auto result = sas_(
+        reinterpret_cast<const uint8_t*>(file_bytes.data()), file_bytes.size());
+    nlohmann::json j;
+    j["segments"] = nlohmann::json::array();
+    for (const auto& u : result.utterances) {
+      j["segments"].push_back({
+        {"speaker", u.speaker},
+        {"text", u.text},
+        {"start", u.start},
+        {"end", u.end},
+        {"confidence", u.conf}
+      });
+    }
+    DispatchResult r;
+    r.content_type = "application/json";
+    r.body = j.dump();
+    return r;
+  } catch (const std::exception& e) {
+    return MakeError(400, "BadRequestError", e.what());
+  }
+}
+#endif
 
 ApiServer::DispatchResult ApiServer::handle_embeddings(
     const std::string& request_body) const {
@@ -1696,6 +1824,44 @@ void ApiServer::register_routes() {
                         res);
                 });
   }
+
+#ifdef VLLM_WITH_DIARIZATION
+  if (diarizer_) {
+    server.Post("/v1/audio/diarizations",
+                [this, write](const httplib::Request& req,
+                              httplib::Response& res) {
+                  if (!req.form.has_file("file")) {
+                    write(MakeError(400, "BadRequestError",
+                                    "multipart/form-data with a `file` upload "
+                                    "is required"),
+                          res);
+                    return;
+                  }
+                  write(HandleAudioDiarizations(*this,
+                            req.form.get_file("file").content,
+                            req.form.get_field("response_format")),
+                        res);
+                });
+  }
+
+  if (sas_) {
+    server.Post("/v1/audio/sas",
+                [this, write](const httplib::Request& req,
+                              httplib::Response& res) {
+                  if (!req.form.has_file("file")) {
+                    write(MakeError(400, "BadRequestError",
+                                    "multipart/form-data with a `file` upload "
+                                    "is required"),
+                          res);
+                    return;
+                  }
+                  write(HandleAudioSas(*this,
+                            req.form.get_file("file").content,
+                            req.form.get_field("response_format")),
+                        res);
+                });
+  }
+#endif
 
   if (synthesizer_) {
     // Speech + music (W6 of #672). Registered ONLY when a synthesizer is
