@@ -5,6 +5,7 @@
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <limits>
 #include <map>
 #include <memory>
 #include <sstream>
@@ -64,6 +65,12 @@ struct Resources {
   }
 };
 
+struct DecodeStepTiming {
+  int context_before;
+  int input_token;
+  double seconds;
+};
+
 double Seconds(Clock::time_point start, Clock::time_point end) {
   return std::chrono::duration<double>(end - start).count();
 }
@@ -97,9 +104,11 @@ nlohmann::json StageTrace(const std::vector<vt::xpu::ProfileRecord>& records) {
 
 int Run(const std::string& checkpoint, int prompt_tokens, int output_tokens,
         int rounds) {
-  if (prompt_tokens < 64 || prompt_tokens > 4096 || output_tokens < 2 ||
-      output_tokens > 65 || rounds < 1 || rounds > 20)
-    throw std::invalid_argument("expected 64<=prompt<=4096, 2<=output<=65, 1<=rounds<=20");
+  // The unchunked native GDN prefill currently supports at most 6656 tokens.
+  // Longer prompts need an explicit scheduler-chunked benchmark path.
+  if (prompt_tokens < 1 || prompt_tokens > 6656 || output_tokens < 1 ||
+      rounds < 1 || rounds > 20)
+    throw std::invalid_argument("expected 1<=prompt<=6656, generated>=1, 1<=rounds<=20");
   const std::string_view kv_dtype = Env("VT_B70_BENCH_KV_DTYPE", "f16");
   if (kv_dtype != "f16" && kv_dtype != "fp8_e4m3")
     throw std::invalid_argument("VT_B70_BENCH_KV_DTYPE must be f16 or fp8_e4m3");
@@ -111,6 +120,17 @@ int Run(const std::string& checkpoint, int prompt_tokens, int output_tokens,
   auto& queue = resources.queue;
   auto& backend = vt::GetBackend(queue.device);
   const auto config = vllm::LoadHfConfig(checkpoint + "/config.json");
+  const std::string max_context_arg = Env("VT_B70_BENCH_MAX_CONTEXT");
+  const int64_t max_context = max_context_arg.empty()
+      ? config.max_position_embeddings : std::stoll(max_context_arg);
+  const int64_t total_context = static_cast<int64_t>(prompt_tokens) +
+      output_tokens - 1;
+  if (max_context < 1 || max_context > config.max_position_embeddings ||
+      max_context > std::numeric_limits<int32_t>::max() ||
+      total_context > max_context)
+    throw std::invalid_argument("prompt + generated - 1 exceeds benchmark or model context limit");
+  if (config.vocab_size <= 300)
+    throw std::invalid_argument("benchmark synthetic token stream needs vocabulary > 300");
   std::vector<vllm::SafetensorsFile> shards;
   for (int index = 1; index <= 5; ++index)
     shards.push_back(vllm::SafetensorsFile::Open(
@@ -122,8 +142,31 @@ int Run(const std::string& checkpoint, int prompt_tokens, int output_tokens,
 
   std::vector<vllm::PagedKvCache> attn_kv;
   std::vector<vllm::GdnStateCache> gdn_state;
-  const int blocks = (prompt_tokens + output_tokens + block_size - 2) /
-                         block_size + 2;
+  const int blocks = static_cast<int>((total_context + block_size - 1) /
+                                      block_size + 2);
+  const size_t attention_layers = static_cast<size_t>(std::count_if(
+      config.layer_types.begin(), config.layer_types.end(),
+      [](const std::string& type) { return type != "linear_attention"; }));
+  const size_t gdn_layers = config.layer_types.size() - attention_layers;
+  const uint64_t kv_bytes = static_cast<uint64_t>(attention_layers) * blocks *
+      2 * block_size * config.num_key_value_heads * config.head_dim *
+      (fp8_kv ? 1 : 2);
+  const uint64_t conv_dim = 2 * config.linear_num_key_heads *
+      config.linear_key_head_dim + config.linear_num_value_heads *
+      config.linear_value_head_dim;
+  const uint64_t gdn_bytes = static_cast<uint64_t>(gdn_layers) * 2 *
+      (config.linear_num_value_heads * config.linear_value_head_dim *
+           config.linear_key_head_dim * 4 +
+       conv_dim * (config.linear_conv_kernel_dim - 1) * 2);
+  const auto before_cache = vt::xpu::GetMemoryInfo(queue.device.index);
+  const uint64_t budget_free = before_cache.budget_bytes > before_cache.allocated_bytes
+      ? before_cache.budget_bytes - before_cache.allocated_bytes : 0;
+  const uint64_t available = before_cache.free_known
+      ? std::min<uint64_t>(budget_free, before_cache.free_bytes) : budget_free;
+  constexpr uint64_t kWorkspaceReserve = 1ull << 30;
+  if (kv_bytes + gdn_bytes > available ||
+      kWorkspaceReserve > available - (kv_bytes + gdn_bytes))
+    throw std::runtime_error("benchmark KV/state cache does not fit measured GPU budget with 1 GiB workspace reserve");
   for (const std::string& type : config.layer_types) {
     if (type == "linear_attention") {
       const int64_t hv = config.linear_num_value_heads;
@@ -142,9 +185,8 @@ int Run(const std::string& checkpoint, int prompt_tokens, int output_tokens,
     } else {
       vllm::PagedKvCache cache;
       cache.num_blocks = blocks;
-      cache.data = resources.Zero(static_cast<size_t>(
-          blocks * 2 * block_size * config.num_key_value_heads *
-          config.head_dim) * (fp8_kv ? 1 : 2));
+      cache.data = resources.Zero(static_cast<size_t>(blocks) * 2 * block_size *
+          config.num_key_value_heads * config.head_dim * (fp8_kv ? 1 : 2));
       cache.dtype = fp8_kv ? vt::DType::kI8 : vt::DType::kF16;
       if (fp8_kv) {
         cache.fp8_kind = vt::Fp8KVCacheDataType::kFp8E4M3;
@@ -179,8 +221,9 @@ int Run(const std::string& checkpoint, int prompt_tokens, int output_tokens,
     prompt_ids = ids;
   }
   for (int step = 0; step < output_tokens - 1; ++step)
-    decode_ids[step] = 300 + step;
-  if (const char* first = std::getenv("VT_B70_BENCH_DECODE_FIRST_TOKEN"))
+    decode_ids[step] = 300 + step % (config.vocab_size - 300);
+  if (const char* first = std::getenv("VT_B70_BENCH_DECODE_FIRST_TOKEN");
+      first && !decode_ids.empty())
     decode_ids[0] = std::stoi(first);
   const std::string decode_ids_file = Env("VT_B70_BENCH_DECODE_IDS_FILE");
   if (!decode_ids_file.empty()) {
@@ -242,8 +285,10 @@ int Run(const std::string& checkpoint, int prompt_tokens, int output_tokens,
     backend.Synchronize(queue);
     if (capture) capture_logits(result, "prefill");
   };
-  const auto decode = [&](bool capture = false) {
+  const auto decode = [&](bool capture = false,
+                          std::vector<DecodeStepTiming>* steps = nullptr) {
     for (int step = 0; step < output_tokens - 1; ++step) {
+      const auto step_start = Clock::now();
       const std::vector<int32_t> ids{decode_ids[step]};
       const std::vector<int32_t> positions{prompt_tokens + step};
       const auto meta = gptq4_model_bench::AttentionMetadata(
@@ -262,6 +307,10 @@ int Run(const std::string& checkpoint, int prompt_tokens, int output_tokens,
           result.vocab != config.vocab_size)
         throw std::runtime_error("invalid decode output");
       backend.Synchronize(queue);
+      const auto step_end = Clock::now();
+      if (steps != nullptr)
+        steps->push_back({prompt_tokens + step, decode_ids[step],
+                          Seconds(step_start, step_end)});
       if (capture && step == 0) capture_logits(result, "decode");
     }
   };
@@ -293,10 +342,16 @@ int Run(const std::string& checkpoint, int prompt_tokens, int output_tokens,
         {"model_dtype", "f16"}, {"kv_dtype", kv_dtype},
         {"weights", "gptq4-g128 with dense BA/head"},
         {"prompt_tokens", prompt_tokens}, {"output_tokens", output_tokens},
+        {"generated_tokens", output_tokens},
+        {"decode_forward_steps", output_tokens - 1},
+        {"max_context", max_context},
+        {"kv_cache_bytes", kv_bytes}, {"gdn_state_bytes", gdn_bytes},
+        {"available_gpu_bytes_before_cache", available},
         {"prompt_ids_fnv1a64", TokenHash(prompt_ids)},
         {"decode_ids_fnv1a64", TokenHash(decode_ids)},
         {"decode_ids_file", decode_ids_file},
-        {"decode_first_token", decode_ids[0]},
+        {"decode_first_token", decode_ids.empty()
+            ? nlohmann::json(nullptr) : nlohmann::json(decode_ids[0])},
         {"quality_capture", !quality_dir.empty()},
         {"rounds", rounds}, {"warm_blocks", 1},
         {"gdn_chunk_size", 64}, {"kv_block_size", block_size},
@@ -314,6 +369,8 @@ int Run(const std::string& checkpoint, int prompt_tokens, int output_tokens,
 
   for (int round = 0; round < rounds; ++round) {
     reset();
+    std::vector<DecodeStepTiming> decode_steps;
+    decode_steps.reserve(static_cast<size_t>(output_tokens - 1));
     const auto captures_before = backend.GraphsCaptured();
     const auto replays_before = backend.GraphReplays();
     const auto start = Clock::now();
@@ -327,7 +384,7 @@ int Run(const std::string& checkpoint, int prompt_tokens, int output_tokens,
       prefill_host_spans = SummarizeHostSpans(
           vt::xpu::DrainHostProfileRecords(queue.device.index));
     const auto decode_start = Clock::now();
-    decode(!quality_dir.empty());
+    decode(!quality_dir.empty(), &decode_steps);
     const auto decode_end = Clock::now();
     if (stage_profile)
       Emit({{"event", "gptq4_stage_trace"}, {"phase", "decode"}, {"round", round},
@@ -337,6 +394,7 @@ int Run(const std::string& checkpoint, int prompt_tokens, int output_tokens,
     const uint64_t replays = backend.GraphReplays() - replays_before;
     const double prefill_seconds = Seconds(start, prefill_end);
     const double decode_seconds = Seconds(decode_start, decode_end);
+    const int decode_forwards = output_tokens - 1;
     nlohmann::json graph_timeline = nullptr;
     if (graph_profile) {
       graph_timeline = nlohmann::json::object();
@@ -364,19 +422,38 @@ int Run(const std::string& checkpoint, int prompt_tokens, int output_tokens,
     Emit({{"event", "gptq4_benchmark_round"}, {"round", round},
           {"prefill_seconds", prefill_seconds},
           {"prefill_tokens_per_second", prompt_tokens / prefill_seconds},
-          {"decode_seconds", decode_seconds},
-          {"decode_tokens_per_second", (output_tokens - 1) / decode_seconds},
-          {"decode_forwards", output_tokens - 1},
+          {"decode_seconds", decode_forwards ? nlohmann::json(decode_seconds)
+                                               : nlohmann::json(nullptr)},
+          {"decode_tokens_per_second", decode_forwards
+              ? nlohmann::json(decode_forwards / decode_seconds)
+              : nlohmann::json(nullptr)},
+          {"decode_forwards", decode_forwards},
+          {"decode_forward_steps", decode_forwards},
+          {"generated_tokens", output_tokens},
           {"graph_captures", backend.GraphsCaptured() - captures_before},
           {"graph_replays", replays},
-          {"decode_replay_fraction", static_cast<double>(replays) /
-                                         (output_tokens - 1)},
+          {"decode_replay_fraction", decode_forwards
+              ? nlohmann::json(static_cast<double>(replays) / decode_forwards)
+              : nlohmann::json(nullptr)},
           {"primitive_count", stats.primitive_count},
           {"scratch_allocations", stats.scratchpad_allocation_count},
           {"scratch_capacity_bytes", stats.scratchpad_capacity_bytes},
           {"allocated_bytes", memory.allocated_bytes},
           {"peak_allocated_bytes", memory.peak_allocated_bytes},
           {"graph_device_bytes", memory.graph_device_bytes}});
+    Emit({{"event", "gptq4_benchmark_step"}, {"round", round},
+          {"phase", "prefill"}, {"query_tokens", prompt_tokens},
+          {"context_before", 0}, {"context_after", prompt_tokens},
+          {"seconds", prefill_seconds}});
+    for (size_t step = 0; step < decode_steps.size(); ++step) {
+      const auto& timing = decode_steps[step];
+      Emit({{"event", "gptq4_benchmark_step"}, {"round", round},
+            {"phase", "decode"}, {"decode_forward_index", step},
+            {"query_tokens", 1}, {"context_before", timing.context_before},
+            {"context_after", timing.context_before + 1},
+            {"input_token", timing.input_token},
+            {"seconds", timing.seconds}});
+    }
     if (graph_profile)
       Emit({{"event", "gptq4_graph_timeline"}, {"round", round},
             {"stages", graph_timeline},
@@ -393,7 +470,7 @@ int Run(const std::string& checkpoint, int prompt_tokens, int output_tokens,
 
 int main(int argc, char** argv) {
   if (argc != 2 && argc != 5) {
-    std::cerr << "usage: bench_gptq4_model CHECKPOINT [PROMPT OUTPUT ROUNDS]\n";
+    std::cerr << "usage: bench_gptq4_model CHECKPOINT [PROMPT GENERATED ROUNDS]\n";
     return 2;
   }
   try {
