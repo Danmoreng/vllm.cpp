@@ -125,10 +125,11 @@ int Run(const std::string& checkpoint, int prompt_tokens, int output_tokens,
       ? config.max_position_embeddings : std::stoll(max_context_arg);
   const int64_t total_context = static_cast<int64_t>(prompt_tokens) +
       output_tokens - 1;
+  const int64_t required_model_len = total_context + 1;
   if (max_context < 1 || max_context > config.max_position_embeddings ||
       max_context > std::numeric_limits<int32_t>::max() ||
-      total_context > max_context)
-    throw std::invalid_argument("prompt + generated - 1 exceeds benchmark or model context limit");
+      required_model_len > max_context)
+    throw std::invalid_argument("prompt + generated exceeds benchmark or model context limit");
   if (config.vocab_size <= 300)
     throw std::invalid_argument("benchmark synthetic token stream needs vocabulary > 300");
   std::vector<vllm::SafetensorsFile> shards;
@@ -345,6 +346,7 @@ int Run(const std::string& checkpoint, int prompt_tokens, int output_tokens,
         {"generated_tokens", output_tokens},
         {"decode_forward_steps", output_tokens - 1},
         {"max_context", max_context},
+        {"required_model_len", required_model_len},
         {"kv_cache_bytes", kv_bytes}, {"gdn_state_bytes", gdn_bytes},
         {"available_gpu_bytes_before_cache", available},
         {"prompt_ids_fnv1a64", TokenHash(prompt_ids)},
@@ -361,7 +363,7 @@ int Run(const std::string& checkpoint, int prompt_tokens, int output_tokens,
         {"graph_profile", graph_profile},
         {"host_profile", host_profile},
         {"measurement_scope", quality_dir.empty()
-            ? "synchronized full-model forward; load, JIT and warm block excluded"
+            ? "synchronized forward including host input/metadata preparation and upload; load, JIT, reset excluded"
             : "quality logits capture included; timing invalid"},
         {"warm_primitive_count", warm_stats.primitive_count},
         {"warm_scratch_allocations", warm_stats.scratchpad_allocation_count},

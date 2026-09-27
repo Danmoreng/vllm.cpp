@@ -1,0 +1,532 @@
+{
+  "schema_version": "1.0",
+  "document_kind": "implementation_specification_not_an_existing_runner_configuration",
+  "created": "2026-09-27",
+  "purpose": "Vergleichbare B70-Benchmarks implementieren; diese JSON-Datei ist ohne Harness-Anpassung nicht direkt ausführbar.",
+  "notation": {
+    "P": "Prompt-Tokenanzahl vor neuem Prefill",
+    "D": "Zusätzliche autoregressive Decode-Forwards nach dem ersten Prefill-Logit",
+    "O": "Generierte Tokens im End-to-End-Test; O=D+1 ohne Speculation",
+    "current_4k64_anchor": "P=4096,D=64,O=65; O=64 ist ein eigener D=63-Fall"
+  },
+  "baseline": {
+    "cpp_commit": "b83d7812a7450e9f405d05a33e77686ba7fcfc79",
+    "python_vllm_commit": "ced6857afa0ea7b2e3f0846a62e1394e90f15607",
+    "python_local_diff_required": true,
+    "xpu_kernel_wheel": "0.1.15.4",
+    "exact_native_source_verified": false,
+    "model_revision": "a47b0c6f0d756bc394c4cc629d5b0ded1acc7001",
+    "weight_quantization": "GPTQ INT4 symmetric group_size=128 desc_act=false",
+    "activation_dtype": "float16",
+    "persistent_ssm_dtype": "float32",
+    "kv_dtype": "fp8_e4m3",
+    "effective_kv_page_tokens": 1600,
+    "prefix_cache": false,
+    "speculative_decoding": false,
+    "execution": "eager",
+    "gpu_count": 1,
+    "concurrency": 1
+  },
+  "scopes": {
+    "device_model_core": {
+      "includes": [
+        "embedding and complete model trunk",
+        "selection of logits rows",
+        "lm_head",
+        "required output cast",
+        "inner model glue and checks"
+      ],
+      "excludes": [
+        "tokenization",
+        "external input materialization and upload",
+        "scheduler",
+        "sampling",
+        "IPC"
+      ],
+      "precondition": "Beide Engines starten mit identischen vorbereiteten Device-Eingaben/-Metadaten; C++-Messadapter ggf. innerhalb Forward nötig. Alle erzeugten Device-Ausgaben müssen am Endpunkt fertig sein."
+    },
+    "worker_step": {
+      "includes": [
+        "per-step input and metadata preparation",
+        "upload",
+        "device_model_core"
+      ],
+      "excludes": [
+        "tokenization",
+        "scheduler",
+        "sampling",
+        "IPC"
+      ],
+      "precondition": "Gleicher Start-/Endvertrag in beiden Adaptern, inklusive Logits. Nicht nur Python _model_forward stoppen."
+    },
+    "end_to_end": {
+      "includes": [
+        "scheduler",
+        "worker/model",
+        "sampling",
+        "IPC",
+        "streaming path if configured"
+      ],
+      "tokenization": "separately measured or identically included",
+      "metrics": [
+        "TTFT_ms",
+        "TPOT_ms",
+        "request_latency_ms",
+        "output_tokens_per_second",
+        "aggregate_tokens_per_second"
+      ]
+    }
+  },
+  "classification": {
+    "phase_source": "actual scheduled q lengths and first-output timestamp, not engine-step ordinal",
+    "record_every_model_call": [
+      "request_id",
+      "phase",
+      "q_tokens_per_sequence",
+      "context_before_per_sequence",
+      "context_after_per_sequence",
+      "cache_hits",
+      "computed_prompt_tokens",
+      "is_final_prefill_chunk",
+      "logits_rows"
+    ],
+    "prefill_total": "sum/wall span of all actual prefill chunks; do not label all steps after first as decode"
+  },
+  "measurement": {
+    "warmup": "shape-specific, until compilation/primitive creation and workspace growth settle; cold-start separate",
+    "measured_repetitions_minimum": 5,
+    "independent_session_repetitions_recommended": 3,
+    "order": "ABBA or randomized paired runs; never run the competing engines concurrently on the GPU",
+    "profiling": "separate from scored timing runs",
+    "timing": "synchronized phase/step endpoints; GPU events or trace for diagnosis; no new per-operator wait in scored runs",
+    "report": [
+      "raw_per_request_and_per_step_latencies",
+      "median",
+      "dispersion",
+      "paired_ratio_with_session_aware_uncertainty",
+      "peak_device_memory",
+      "GPU_frequency_power_temperature",
+      "host_wait_exclusive_time",
+      "kernel_route_histogram"
+    ],
+    "p95": "Only report after collecting enough independent requests; a few rounds are not a robust p95."
+  },
+  "cases": [
+    {
+      "id": "smoke_p128_d32",
+      "tier": "smoke",
+      "prompt_tokens": 128,
+      "decode_forward_steps": 32,
+      "generated_tokens_e2e": 33,
+      "concurrency": 1,
+      "input_mode": "identical_token_id_replay",
+      "max_model_len_minimum": 161,
+      "memory_feasibility_required": true
+    },
+    {
+      "id": "smoke_p512_d64",
+      "tier": "smoke",
+      "prompt_tokens": 512,
+      "decode_forward_steps": 64,
+      "generated_tokens_e2e": 65,
+      "concurrency": 1,
+      "input_mode": "identical_token_id_replay",
+      "max_model_len_minimum": 577,
+      "memory_feasibility_required": true
+    },
+    {
+      "id": "smoke_p4096_d64",
+      "tier": "smoke",
+      "prompt_tokens": 4096,
+      "decode_forward_steps": 64,
+      "generated_tokens_e2e": 65,
+      "concurrency": 1,
+      "input_mode": "identical_token_id_replay",
+      "max_model_len_minimum": 4161,
+      "memory_feasibility_required": true
+    },
+    {
+      "id": "smoke_p8192_d64",
+      "tier": "smoke",
+      "prompt_tokens": 8192,
+      "decode_forward_steps": 64,
+      "generated_tokens_e2e": 65,
+      "concurrency": 1,
+      "input_mode": "identical_token_id_replay",
+      "max_model_len_minimum": 8257,
+      "memory_feasibility_required": true
+    },
+    {
+      "id": "smoke_p4096_d1024",
+      "tier": "smoke",
+      "prompt_tokens": 4096,
+      "decode_forward_steps": 1024,
+      "generated_tokens_e2e": 1025,
+      "concurrency": 1,
+      "input_mode": "identical_token_id_replay",
+      "max_model_len_minimum": 5121,
+      "memory_feasibility_required": true
+    },
+    {
+      "id": "scaling_p128_d64",
+      "tier": "scaling",
+      "prompt_tokens": 128,
+      "decode_forward_steps": 64,
+      "generated_tokens_e2e": 65,
+      "concurrency": 1,
+      "input_mode": "identical_token_id_replay",
+      "max_model_len_minimum": 193,
+      "memory_feasibility_required": true
+    },
+    {
+      "id": "scaling_p512_d64",
+      "tier": "scaling",
+      "prompt_tokens": 512,
+      "decode_forward_steps": 64,
+      "generated_tokens_e2e": 65,
+      "concurrency": 1,
+      "input_mode": "identical_token_id_replay",
+      "max_model_len_minimum": 577,
+      "memory_feasibility_required": true
+    },
+    {
+      "id": "scaling_p2048_d64",
+      "tier": "scaling",
+      "prompt_tokens": 2048,
+      "decode_forward_steps": 64,
+      "generated_tokens_e2e": 65,
+      "concurrency": 1,
+      "input_mode": "identical_token_id_replay",
+      "max_model_len_minimum": 2113,
+      "memory_feasibility_required": true
+    },
+    {
+      "id": "scaling_p4096_d64",
+      "tier": "scaling",
+      "prompt_tokens": 4096,
+      "decode_forward_steps": 64,
+      "generated_tokens_e2e": 65,
+      "concurrency": 1,
+      "input_mode": "identical_token_id_replay",
+      "max_model_len_minimum": 4161,
+      "memory_feasibility_required": true
+    },
+    {
+      "id": "scaling_p8192_d64",
+      "tier": "scaling",
+      "prompt_tokens": 8192,
+      "decode_forward_steps": 64,
+      "generated_tokens_e2e": 65,
+      "concurrency": 1,
+      "input_mode": "identical_token_id_replay",
+      "max_model_len_minimum": 8257,
+      "memory_feasibility_required": true
+    },
+    {
+      "id": "scaling_p16384_d64",
+      "tier": "scaling",
+      "prompt_tokens": 16384,
+      "decode_forward_steps": 64,
+      "generated_tokens_e2e": 65,
+      "concurrency": 1,
+      "input_mode": "identical_token_id_replay",
+      "max_model_len_minimum": 16449,
+      "memory_feasibility_required": true
+    },
+    {
+      "id": "scaling_p32768_d64",
+      "tier": "scaling",
+      "prompt_tokens": 32768,
+      "decode_forward_steps": 64,
+      "generated_tokens_e2e": 65,
+      "concurrency": 1,
+      "input_mode": "identical_token_id_replay",
+      "max_model_len_minimum": 32833,
+      "memory_feasibility_required": true
+    },
+    {
+      "id": "long_decode_p128_d1024",
+      "tier": "long_decode",
+      "prompt_tokens": 128,
+      "decode_forward_steps": 1024,
+      "generated_tokens_e2e": 1025,
+      "concurrency": 1,
+      "input_mode": "identical_token_id_replay",
+      "max_model_len_minimum": 1153,
+      "memory_feasibility_required": true
+    },
+    {
+      "id": "long_decode_p4096_d2048",
+      "tier": "long_decode",
+      "prompt_tokens": 4096,
+      "decode_forward_steps": 2048,
+      "generated_tokens_e2e": 2049,
+      "concurrency": 1,
+      "input_mode": "identical_token_id_replay",
+      "max_model_len_minimum": 6145,
+      "memory_feasibility_required": true
+    },
+    {
+      "id": "long_decode_p16384_d512",
+      "tier": "long_decode",
+      "prompt_tokens": 16384,
+      "decode_forward_steps": 512,
+      "generated_tokens_e2e": 513,
+      "concurrency": 1,
+      "input_mode": "identical_token_id_replay",
+      "max_model_len_minimum": 16897,
+      "memory_feasibility_required": true
+    },
+    {
+      "id": "long_decode_p32768_d256",
+      "tier": "long_decode",
+      "prompt_tokens": 32768,
+      "decode_forward_steps": 256,
+      "generated_tokens_e2e": 257,
+      "concurrency": 1,
+      "input_mode": "identical_token_id_replay",
+      "max_model_len_minimum": 33025,
+      "memory_feasibility_required": true
+    },
+    {
+      "id": "exact_64_generated_tokens_p4096_d63",
+      "tier": "exact_64_generated_tokens",
+      "prompt_tokens": 4096,
+      "decode_forward_steps": 63,
+      "generated_tokens_e2e": 64,
+      "concurrency": 1,
+      "input_mode": "identical_token_id_replay",
+      "max_model_len_minimum": 4160,
+      "memory_feasibility_required": true
+    }
+  ],
+  "boundary_suites": {
+    "prefill_tokens_operator_first": [
+      63,
+      64,
+      65,
+      127,
+      128,
+      129,
+      511,
+      512,
+      513,
+      1599,
+      1600,
+      1601,
+      3199,
+      3200,
+      3201,
+      4095,
+      4096,
+      4097,
+      4799,
+      4800,
+      4801,
+      6655,
+      6656,
+      6657
+    ],
+    "paged_decode_query_tokens": [
+      19,
+      20,
+      21
+    ],
+    "gdn_sequence_counts": [
+      1,
+      4,
+      5
+    ],
+    "decode_crossing": {
+      "cases": [
+        {
+          "P": 1590,
+          "D": 32
+        },
+        {
+          "P": 3190,
+          "D": 32
+        },
+        {
+          "P": 4090,
+          "D": 32
+        },
+        {
+          "P": 4790,
+          "D": 32
+        },
+        {
+          "P": 4096,
+          "D": 1024
+        }
+      ],
+      "checkpoint_rule": "Compare before, at and after context crosses every page/dispatch boundary. Derive position from context length, not a guessed step index."
+    },
+    "scope": "operator correctness + route traces first; representative boundaries promoted to full-model runs"
+  },
+  "chunked_prefill_suite": {
+    "prompt_tokens": [
+      8192,
+      16384,
+      32768
+    ],
+    "max_batched_token_budgets": [
+      512,
+      1024,
+      4096,
+      8192
+    ],
+    "include_single_full_prefill": true,
+    "record_resolved_chunks": true,
+    "hold_total_prompt_ids_constant": true,
+    "validate": [
+      "nonzero-prefix attention positions",
+      "persistent GDN state",
+      "internal checkpoints",
+      "ragged final chunk",
+      "same final logits within fixed tolerance"
+    ]
+  },
+  "decode_windows_inclusive": [
+    [
+      1,
+      16
+    ],
+    [
+      17,
+      64
+    ],
+    [
+      65,
+      256
+    ],
+    [
+      257,
+      1024
+    ],
+    [
+      1025,
+      2048
+    ]
+  ],
+  "quality": {
+    "existing_evidence_scope": "Two prompts, prefill + first decode only",
+    "required_corpora": [
+      "existing periodic prompt",
+      "fixed German/English natural text token arrays",
+      "fixed code token arrays"
+    ],
+    "teacher_forcing": true,
+    "same_logical_prefix_required": true,
+    "checkpoints_decode": [
+      1,
+      64,
+      256,
+      1024,
+      2048
+    ],
+    "also_check_context_boundaries": true,
+    "metrics": [
+      "finite outputs",
+      "TV distance",
+      "KL divergence with documented direction",
+      "top-k overlap",
+      "top1 and logit margin",
+      "per-layer recurrent state error on selected diagnostic cases"
+    ],
+    "thresholds": null,
+    "threshold_policy": "Calibrate from baseline and fixed goldens before optimizing; commit explicit thresholds; never relax to accept a candidate."
+  },
+  "later_serving_suite": {
+    "concurrency": [
+      2,
+      4,
+      8
+    ],
+    "include_mixed_prefill_decode": true,
+    "include_unequal_sequence_lengths": true,
+    "memory_admission_required": true,
+    "separate_experiments": [
+      "graphs",
+      "prefix caching",
+      "speculation"
+    ],
+    "matched_settings_required": true
+  },
+  "projection_replay": {
+    "M_cases": [
+      1,
+      16,
+      64,
+      512,
+      4096
+    ],
+    "note": "Use actual scheduled M per projection; lm_head is normally M=1 for this single-request benchmark. Replay real distinct layer weights, not the same hot matrix repeatedly.",
+    "shapes": [
+      {
+        "projection": "gdn_qkvz",
+        "layers": 48,
+        "K": 5120,
+        "N": 16384,
+        "weights": "W4"
+      },
+      {
+        "projection": "gdn_ba",
+        "layers": 48,
+        "K": 5120,
+        "N": 96,
+        "weights": "F16"
+      },
+      {
+        "projection": "gdn_out",
+        "layers": 48,
+        "K": 6144,
+        "N": 5120,
+        "weights": "W4"
+      },
+      {
+        "projection": "attention_qkv_gated",
+        "layers": 16,
+        "K": 5120,
+        "N": 14336,
+        "weights": "W4"
+      },
+      {
+        "projection": "attention_out",
+        "layers": 16,
+        "K": 6144,
+        "N": 5120,
+        "weights": "W4"
+      },
+      {
+        "projection": "mlp_gate_up",
+        "layers": 64,
+        "K": 5120,
+        "N": 34816,
+        "weights": "W4"
+      },
+      {
+        "projection": "mlp_down",
+        "layers": 64,
+        "K": 17408,
+        "N": 5120,
+        "weights": "W4"
+      },
+      {
+        "projection": "lm_head",
+        "layers": 1,
+        "K": 5120,
+        "N": 248320,
+        "weights": "F16"
+      }
+    ]
+  },
+  "promotion_policy": {
+    "quality_pass_required": true,
+    "no_unexplained_route_changes": true,
+    "candidate_improvement": "Must exceed measured run-to-run uncertainty on its target workloads",
+    "proposed_regression_guard_percent": 3,
+    "guard_note": "Proposed engineering policy, not a measured property. Evaluate statistically and do not mask individual regressions with an aggregate score.",
+    "parity_target": "C++ no slower than Python on each agreed primary workload under the identical scope; indistinguishable confidence intervals mean parity-compatible, not proof of superiority."
+  }
+}

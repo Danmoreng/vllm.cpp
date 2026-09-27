@@ -13,6 +13,9 @@ no prefix cache, and no speculation.
 decode forwards after prefill, and `O` the number of generated tokens. Without
 speculation, `O = D + 1`. The historical anchor is `P=4096, D=64, O=65`;
 `P=4096, D=63, O=64` is a distinct case.
+For an end-to-end request, reserve a model-length limit of at least `P+O`:
+the final emitted token is not fed to the C++ forward benchmark, but Python
+serving still checks the full requested output length.
 
 For each *actual* model invocation record request ID, query-token count,
 context length before and after, cache hit count, and whether it produced a
@@ -57,6 +60,27 @@ chunked path; the 8192/16384/32768 cases in the plan remain unsupported here.
 The focused functional checks in `harness_checks.json` cover pure prefill,
 one context above 4096, and 65 decode forwards. Their single-run durations
 must not be used for performance decisions.
+
+The pinned Python image supports `SamplingParams.trace_decode_token_ids` when
+`enable_trace_replay=True`. `tools/bench/b70_gptq_fp8_python_replay.py` uses
+that feature to feed the same first `D` output IDs into later Python forwards
+as the C++ decode-ID file. The diagnostic scheduler hook in
+`tools/bench/b70_scheduler_trace/` records actual query lengths and contexts;
+it writes synchronously and must be disabled for scored runs. Its corrected
+4096/2 trace contains exactly one 4096-token prefill call and two one-token
+decode calls, with zero cache-restored tokens. The Python runner records
+whole-engine step durations only. `LLM.generate` buffered all three outputs
+until the final step in this short diagnostic, so its first nonempty API result
+is **not** a streaming TTFT. A streaming request path remains necessary for
+end-to-end TTFT and TPOT qualification.
+
+At `P=4097, D=0, O=1`, the same Python settings schedule **two prefill model
+calls** (`4096` then `1` query token), although the outer `LLMEngine.step`
+wrapper sees only one call. The current C++ harness runs one unchunked
+4097-token forward. Those are different schedules and must be compared only
+after a corresponding C++ chunked replay exists or after a clearly labeled
+operator-level decomposition. The raw diagnostic and exact call counts are in
+`python_harness_checks.json`.
 
 Teacher-forced differential tests use identical prompt and decode token-ID
 files with recorded hashes. Free-running generation is a separate end-to-end
