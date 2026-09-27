@@ -1,0 +1,60 @@
+{
+  "checks": [
+    {
+      "case": "pure_prefill_63",
+      "P": 63,
+      "D": 0,
+      "O": 1,
+      "exit_code": 0,
+      "step_records": 0,
+      "raw_path": "raw/cpp_pure_prefill_63.log.gz",
+      "raw_sha256": "fc26bf9ffbe81fb2ceb4997f2c3e3f0fc0a00ecb6f4eed4304b1bd34b932266d",
+      "purpose": "functional_harness_check_not_performance_score"
+    },
+    {
+      "case": "pure_prefill_4096",
+      "P": 4096,
+      "D": 0,
+      "O": 1,
+      "exit_code": 0,
+      "step_records": 0,
+      "raw_path": "raw/cpp_pure_prefill_4096.log.gz",
+      "raw_sha256": "329c71c898e032e1de40699a6388f74956b28f23caf581f9d450957a33a11cfe",
+      "purpose": "functional_harness_check_not_performance_score"
+    },
+    {
+      "case": "step_trace_128",
+      "P": 128,
+      "D": 2,
+      "O": 3,
+      "exit_code": 0,
+      "step_records": 3,
+      "raw_path": "raw/cpp_step_trace_128.log.gz",
+      "raw_sha256": "57938b2e1a4f9c4103b032f3c6a208e0eb24e22c3d8fe8eaadc2e53067d23779",
+      "purpose": "functional_harness_check_not_performance_score"
+    },
+    {
+      "case": "prompt_4097",
+      "P": 4097,
+      "D": 0,
+      "O": 1,
+      "exit_code": 0,
+      "step_records": 1,
+      "raw_path": "raw/cpp_prompt_4097.log.gz",
+      "raw_sha256": "85d11b90ccc1435ea5dcc59891f1db44bcc8dbf5059d7fbdab3f8ca682dc342e",
+      "purpose": "functional_harness_check_not_performance_score"
+    },
+    {
+      "case": "decode_65",
+      "P": 128,
+      "D": 65,
+      "O": 66,
+      "exit_code": 0,
+      "step_records": 66,
+      "raw_path": "raw/cpp_decode_65.log.gz",
+      "raw_sha256": "cce647e91b8e84d4bf014effabd0ce24f5dc2f4b7dbf6719aa5e1b593a1c0998",
+      "purpose": "functional_harness_check_not_performance_score"
+    }
+  ],
+  "measurement_status": "not_matched_to_python"
+}
