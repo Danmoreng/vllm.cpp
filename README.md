@@ -37,6 +37,12 @@
 
 ## News
 
+- **2026-09** **More decision models and a C API for scoring.**
+  [CLM](docs/models/clm.md), [GLiNER2.5-Decide](docs/models/gliner25-decide.md),
+  and [xor](docs/models/xor.md) use `/v1/systemone` and ABI 29's
+  [`vllm_decide`](docs/reference/c-api.md#decisions-and-option-scoring).
+  [Tev1](docs/models/tev1.md) selects options through `/v1/chat/completions`.
+
 - **2026-09** **Quantized Qwen completes smoke runs on Tenstorrent.** Qwen3.8-27B and
   Qwen3.5-0.8B Q4_K_M completed two prompts each on a Blackhole P150 with
   `VT_TT_KEEPQUANT_INT8DOT=1`. These runs establish completion only.
