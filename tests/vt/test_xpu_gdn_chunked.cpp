@@ -112,6 +112,18 @@ TEST_CASE("XPU GDN chunk64: F16 XMX output and F32 state match sequential CPU") 
   CHECK(vt::GetReferenceTierHits() == 0);
 }
 
+TEST_CASE("XPU GDN chunk64: F16 long continuation and zero decay") {
+  Queue cpu(vt::DeviceType::kCPU), gpu(vt::DeviceType::kXPU);
+  for (const auto [length, zero_decay] : {std::pair{4097, false}, std::pair{1025, true}}) {
+    const auto ref = Run(cpu.q, {0, length}, 6, DType::kF32, true,
+                         0, false, zero_decay, DType::kF16);
+    const auto got = Run(gpu.q, {0, length}, 6, DType::kF16, true,
+                         0, false, zero_decay, DType::kF16);
+    Accuracy(got.output, ref.output, true);
+    Accuracy(got.state, ref.state);
+  }
+}
+
 TEST_CASE("XPU GDN short F16 prefill selects chunked kernel"
           * doctest::skip(!std::getenv("VT_XPU_PROFILE"))) {
   Queue cpu(vt::DeviceType::kCPU), gpu(vt::DeviceType::kXPU);
@@ -123,13 +135,20 @@ TEST_CASE("XPU GDN short F16 prefill selects chunked kernel"
   Accuracy(got.output, ref.output, true);
   Accuracy(got.state, ref.state);
   const auto records = vt::xpu::DrainProfileEvents();
-  size_t dots = 0, recurrence = 0;
+  size_t dots = 0, recurrence = 0, wu_xmx = 0, wu_xmx_prepare = 0;
   for (const auto& record : records) {
     dots += record.stage == "gdn_chunk_dots_qk";
     recurrence += record.stage == "gdn_prefill_recurrence";
+    wu_xmx += record.stage == "gdn_chunk_wu_xmx";
+    wu_xmx_prepare += record.stage == "gdn_chunk_wu_xmx_prepare";
   }
   CHECK(dots == 1);
   CHECK(recurrence == 0);
+  const char* requested = std::getenv("VT_XPU_GDN_WU");
+  const std::string_view wu = requested ? requested : "auto";
+  const bool expect_xmx = wu == "auto" || wu == "xmx";
+  CHECK(wu_xmx == static_cast<size_t>(expect_xmx));
+  CHECK(wu_xmx_prepare == static_cast<size_t>(expect_xmx));
 }
 
 TEST_CASE("XPU GDN chunk64: full output and F32 state against sequential CPU") {
@@ -228,9 +247,12 @@ TEST_CASE("XPU GDN chunk64: timing" * doctest::skip(!std::getenv("VT_B70_GDN_BEN
   Queue gpu(vt::DeviceType::kXPU); auto& queue = gpu.q;
   auto& backend = vt::GetBackend(queue.device);
   constexpr int heads = 48, kh = 16;
+  const char* bench_f16 = std::getenv("VT_B70_GDN_BENCH_F16");
+  const DType bench_type = bench_f16 && std::string_view(bench_f16) == "1"
+      ? DType::kF16 : DType::kBF16;
   for (int tokens : {128, 512, 2048, 4096}) {
-    Buffer q(queue, DType::kBF16, {tokens, kh, D}), k(queue, DType::kBF16, {tokens, kh, D});
-    Buffer v(queue, DType::kBF16, {tokens, heads, D}), out(queue, DType::kBF16, {tokens, heads, D});
+    Buffer q(queue, bench_type, {tokens, kh, D}), k(queue, bench_type, {tokens, kh, D});
+    Buffer v(queue, bench_type, {tokens, heads, D}), out(queue, bench_type, {tokens, heads, D});
     Buffer g(queue, DType::kF32, {tokens, heads}), beta(queue, DType::kF32, {tokens, heads});
     Buffer state(queue, DType::kF32, {1, heads, D, D}), qsl(queue, DType::kI32, {2});
     q.put(Normalized(tokens * kh * D, 1)); k.put(Normalized(tokens * kh * D, 2));
@@ -256,7 +278,8 @@ TEST_CASE("XPU GDN chunk64: timing" * doctest::skip(!std::getenv("VT_B70_GDN_BEN
         times.push_back(std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count());
       }
       std::sort(times.begin(), times.end());
-      std::cout << nlohmann::json{{"tokens", tokens}, {"chunked", chunked}, {"median_ms", times[2]},
+      std::cout << nlohmann::json{{"tokens", tokens}, {"dtype", bench_type == DType::kF16 ? "f16" : "bf16"},
+          {"chunked", chunked}, {"median_ms", times[2]},
           {"samples_ms", times}, {"workspace_bytes", vt::xpu::GetMemoryInfo().gdn_workspace_bytes}}.dump() << std::endl;
       Result got{out.floats(), state.floats()};
       if (!chunked) reference = got;
