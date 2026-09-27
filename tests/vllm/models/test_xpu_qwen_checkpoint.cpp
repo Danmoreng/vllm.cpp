@@ -71,7 +71,9 @@ void CheckBatch(vllm_engine* engine) {
     // Leave enough decode steps to warm and capture both slots at B=4, then
     // exercise condensation into the smaller buckets as requests complete.
     settings[i].ignore_eos = 1;
-    settings[i].max_tokens = 3 + i + (Setting("VT_XPU_GRAPH", 0) == 1 ? 6 : 0);
+    const bool long_outputs = Setting("VT_XPU_GRAPH", 0) == 1 ||
+                              Setting("VT_B70_BATCH_LONG_OUTPUTS", 0) == 1;
+    settings[i].max_tokens = 3 + i + (long_outputs ? 6 : 0);
     vllm_completion result{};
     REQUIRE_MESSAGE(vllm_complete(engine, prompts[i].c_str(), &settings[i], &result) == VLLM_OK, std::string(vllm_last_error()));
     CHECK(result.completion_tokens == settings[i].max_tokens);
@@ -121,6 +123,82 @@ void CheckBatch(vllm_engine* engine) {
   REQUIRE_MESSAGE(vllm_complete(engine, prompts[3].c_str(), &settings[3], &resumed) == VLLM_OK, std::string(vllm_last_error()));
   CHECK(std::string(resumed.text ? resumed.text : "") == expected[3]); vllm_completion_free(&resumed);
   CHECK(vt::xpu::GetMemoryInfo().allocated_bytes <= baseline + 64 * 1024 * 1024);
+}
+void CheckBatchEight(vllm_engine* engine) {
+  struct Result {
+    std::string text;
+    std::vector<std::string> chunks;
+    static bool Callback(const char* text, bool, void* opaque) {
+      auto& result = *static_cast<Result*>(opaque);
+      if (text && text[0]) {
+        result.text += text;
+        result.chunks.emplace_back(text);
+      }
+      return true;
+    }
+  };
+  std::array<std::string, 8> prompts;
+  std::array<Result, 8> expected;
+  std::array<vllm_sampling_params, 8> settings;
+  const bool delayed_graph = Setting("VT_B70_BATCH_GRAPH_AFTER_BASELINE", 0) == 1;
+  if (delayed_graph) REQUIRE(::setenv("VT_GPTQ4_GRAPH", "0", 1) == 0);
+  for (int i = 0; i < 8; ++i) {
+    prompts[i] = RepeatedPrompt(24 + 8 * i) +
+                 " The capital of country " + std::to_string(i) + " is";
+    settings[i] = vllm_sampling_params_default();
+    settings[i].temperature = 0;
+    settings[i].ignore_eos = 1;
+    settings[i].max_tokens = 7 + 2 * i;
+    REQUIRE_MESSAGE(vllm_complete_stream(engine, prompts[i].c_str(),
+                    &settings[i], Result::Callback, &expected[i]) == VLLM_OK,
+                    std::string(vllm_last_error()));
+    CHECK(expected[i].chunks.size() ==
+          static_cast<size_t>(settings[i].max_tokens));
+  }
+  if (delayed_graph) REQUIRE(::setenv("VT_GPTQ4_GRAPH", "1", 1) == 0);
+  using Request = std::unique_ptr<vllm_request, decltype(&vllm_request_free)>;
+  std::array<Result, 8> results;
+  std::vector<Request> requests;
+  auto& backend = vt::GetBackend(vt::DeviceType::kXPU);
+  const auto baseline = vt::xpu::GetMemoryInfo().allocated_bytes;
+  const auto captures_before = backend.GraphsCaptured();
+  const auto replays_before = backend.GraphReplays();
+  for (int i : {7, 0, 5, 2, 6, 1, 4, 3}) {
+    vllm_request* raw = nullptr;
+    REQUIRE_MESSAGE(vllm_request_submit(engine, prompts[i].c_str(),
+                    &settings[i], Result::Callback, &results[i], &raw) == VLLM_OK,
+                    std::string(vllm_last_error()));
+    requests.emplace_back(raw, vllm_request_free);
+  }
+  for (auto& request : requests)
+    REQUIRE_MESSAGE(vllm_request_wait(request.get()) == VLLM_OK,
+                    std::string(vllm_request_error(request.get())));
+  for (int i = 0; i < 8; ++i) {
+    CAPTURE(i);
+    if (results[i].text != expected[i].text) {
+      size_t first = 0;
+      while (first < results[i].chunks.size() &&
+             first < expected[i].chunks.size() &&
+             results[i].chunks[first] == expected[i].chunks[first]) ++first;
+      std::cout << "BATCH8_MISMATCH case=" << i << " first_chunk=" << first
+                << " expected=" << nlohmann::json(expected[i].text).dump()
+                << " actual=" << nlohmann::json(results[i].text).dump()
+                << std::endl;
+    }
+    CHECK(results[i].text == expected[i].text);
+    CHECK(results[i].chunks.size() == expected[i].chunks.size());
+    std::cout << "BATCH8 case=" << i << " answer="
+              << nlohmann::json(results[i].text).dump() << std::endl;
+  }
+  const auto captures = backend.GraphsCaptured() - captures_before;
+  const auto replays = backend.GraphReplays() - replays_before;
+  std::cout << "BATCH8_GRAPH captures=" << captures << " replays=" << replays
+            << std::endl;
+  if (Setting("VT_XPU_GRAPH", 0) == 1) CHECK(replays > 0);
+  requests.clear();
+  const auto memory = vt::xpu::GetMemoryInfo();
+  CHECK(memory.allocated_bytes <= baseline + 64 * 1024 * 1024);
+  CHECK(memory.graph_count <= 8);
 }
 void CheckPrefix(vllm_engine* engine) {
   const std::array<std::string, 2> prompts = {
@@ -538,6 +616,9 @@ TEST_CASE("XPU Qwen checkpoint: native text prefill and repeated greedy decode t
   const bool profile = Setting("VT_B70_PROFILE", 0) != 0;
   const bool quality = Setting("VT_B70_QUALITY", 0) != 0;
   const bool batch = Setting("VT_B70_BATCH", 0) != 0;
+  const bool batch_eight = Setting("VT_B70_BATCH_EIGHT", 0) != 0;
+  const bool missing_batch_for_eight = batch_eight && !batch;
+  REQUIRE_FALSE(missing_batch_for_eight);
   const bool prefix = Setting("VT_B70_PREFIX", 0) != 0;
   const char* teacher_mode = std::getenv("VT_B70_TEACHER_FORCED");
   const bool teacher = teacher_mode != nullptr;
@@ -589,20 +670,24 @@ TEST_CASE("XPU Qwen checkpoint: native text prefill and repeated greedy decode t
   params.language_model_only = 1;
   params.speculative_config = nullptr;
   params.enable_prefix_caching = prefix ? 1 : 2;
-  params.max_num_seqs = batch ? 4 : 1;
+  params.max_num_seqs = batch_eight ? 8 : batch ? 4 : 1;
   params.max_num_batched_tokens = teacher ? 512 : Setting("VT_B70_BATCH_TOKENS", quality_context ? 4096 : quality ? 512 : requested_prompt ? requested_prompt : timing ? 32 : 16);
   REQUIRE(params.max_num_batched_tokens > 0); REQUIRE(params.max_num_batched_tokens <= 6656);
   params.max_model_len = teacher ? 1024 : quality ? quality_context + 640 :
       std::max(128, requested_prompt + std::max({tokens, timing_outputs, profile_outputs, 32}));
   if (batch) { params.max_model_len = 512; params.max_num_batched_tokens = 128; }
   if (prefix) { params.max_num_batched_tokens = 128; params.max_model_len = std::max(params.max_model_len, 512); }
-  params.block_size = 16;
+  const int block_size = Setting("VT_B70_BLOCK_SIZE", 16);
+  REQUIRE((block_size == 16 || block_size == 1600));
+  params.block_size = block_size;
   // Hybrid attention/GDN pools also reserve a sentinel block per group.
-  params.num_blocks = std::max(32, 2 * ((params.max_model_len + 15) / 16 + 1));
-  if (batch) params.num_blocks *= 4;
+  params.num_blocks = std::max(block_size == 1600 ? 8 : 32,
+      2 * ((params.max_model_len + block_size - 1) / block_size + 1));
+  if (batch) params.num_blocks *= batch_eight ? 8 : 4;
   const char* kv_dtype = std::getenv("VT_B70_KV_DTYPE");
   params.kv_cache_dtype = kv_dtype ? kv_dtype : "bfloat16";
   std::cout << "LOAD " << model << " device=xpu kv_dtype=" << params.kv_cache_dtype
+            << " block_size=" << block_size
             << " max_context=" << params.max_model_len
             << " batch_tokens=" << params.max_num_batched_tokens << std::endl;
   vllm_engine* raw = nullptr;
@@ -613,7 +698,8 @@ TEST_CASE("XPU Qwen checkpoint: native text prefill and repeated greedy decode t
             << " rss_bytes=" << ResidentBytes() << " initialization_reference_hits=" << vt::GetReferenceTierHits() << std::endl;
   const auto initialization_hits = vt::GetReferenceTierHits();
   if (batch) {
-    CheckBatch(engine.get());
+    if (batch_eight) CheckBatchEight(engine.get());
+    else CheckBatch(engine.get());
     CHECK(vt::GetReferenceTierHits() == initialization_hits);
     return;
   }
