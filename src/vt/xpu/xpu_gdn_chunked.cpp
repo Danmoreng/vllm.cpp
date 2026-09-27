@@ -185,7 +185,7 @@ void System(Queue& queue, ChunkScratch<Input> s, View beta, const int32_t* offse
         : mode == "slm" ? InverseMode::kSlm : InverseMode::kReference;
   }();
   if (inverse_mode == InverseMode::kBlocked) {
-    constexpr int block = 16, wg = 128;
+    constexpr int block = 8, wg = 128;
     const auto inverse_event = q.submit([&](sycl::handler& handler) {
       sycl::local_accessor<float> lower(C * C, handler), inverse(C * C, handler);
       sycl::local_accessor<float> product(block * C, handler);
