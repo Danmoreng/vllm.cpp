@@ -78,3 +78,53 @@ or Tev1 is accepted by `vllm_decide`. Stop if a claim cannot be grounded in code
 ## Owed
 
 - ISSUE-LOCAL-01M3GD47P0MQRSHRCN8AP1NEXA: repair the public decision API documentation.
+
+## Outcome
+
+Implementation `49cdde49f325c2f4bc088de192cfc28f7ec9d777` updates the four
+public documents in scope. The C API reference describes the adapter's six
+accepted architectures, JSON ownership, and errors. Tev1 remains on chat
+generation. The usage guide distinguishes binary decisions from NER. Kev has
+one public entry with its existing results and unverified arms retained.
+README news names the newly shipped interfaces without a performance claim.
+
+CPU-only verification on the implementation commit:
+
+- `python3 scripts/check-readme-structure.py`: PASS.
+- `python3 scripts/check-benchmark-index.py`: PASS.
+- `python3 scripts/check-site.py`: PASS.
+- `python3 -m unittest tests.scripts.test_check_readme_structure tests.scripts.test_check_benchmark_index`: 25 tests PASS.
+- `python3 scripts/check-supported-models.py`: the same missing MiMoV2 entry
+  as the untouched base. The captured before/after diagnostics are identical.
+- `python3 scripts/check-tree-compiles.py --base upstream/main`: no C++ source,
+  header, or build file in scope.
+- Commit style, trailers, and `git diff --check` against `upstream/main`: PASS.
+- Source-to-prose review covers `include/vllm.h:372`,
+  `src/capi/vllm_c.cpp:1695-1903`, and the System-1 parser and answer builders.
+- Scoped link checks validate eight local links and heading anchors. Both
+  linked HTTP request bodies parse as JSON. Scratch mutations of a link,
+  an anchor, and JSON syntax each fail. Every restoration is byte-exact.
+
+The initial full `scripts/agent-preflight.sh --quiet` run exits 1 with
+28 failed checks and 14 skips. Its record failures include two missing issue
+references, the MiMoV2 model-list/checklist gap, and stale oracle-pin projections.
+The Alpine container lacks build tools, binary-inspection tools, and NumPy.
+Some tests clear the temporary Python runtime's library environment and fail
+before executing their assertions. The initial missing PyYAML dependency was
+resolved, and the release-workflow checker then passed.
+
+The wrapper hardcodes stale `origin/main` at `c2bac9ebf`, so its range checks
+include unrelated upstream source and commits. The actual base for this work
+is `upstream/main` at `8205abd17`. The separately scoped compilation, trailer,
+and style checks above use that base. No full-preflight success, model run,
+GPU execution, new parity result, or benchmark is claimed.
+
+The implementation worktree's complete preflight exits 1 with 27 failures
+and 14 skips. Its failure and skip sets add nothing to the initial baseline.
+The only resolved failure is the release-workflow check after PyYAML setup.
+
+The fresh reviewer inspected immutable `49cdde49f` and found no defects.
+Its full preflight also exits 1 with 27 failures and 14 skips, exactly matching
+the implementation run. The operator independently compared the failure and
+skip sets, reran the focused checks, and repeated the scoped link/JSON check.
+The public diff remains byte-identical to the reviewed commit.
