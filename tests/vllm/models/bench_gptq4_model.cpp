@@ -104,11 +104,11 @@ nlohmann::json StageTrace(const std::vector<vt::xpu::ProfileRecord>& records) {
 
 int Run(const std::string& checkpoint, int prompt_tokens, int output_tokens,
         int rounds) {
-  // The unchunked native GDN prefill currently supports at most 6656 tokens.
-  // Longer prompts need an explicit scheduler-chunked benchmark path.
-  if (prompt_tokens < 1 || prompt_tokens > 6656 || output_tokens < 1 ||
+  // The native Xe2 GDN route splits 8K/16K prefill into bounded 4K macros.
+  // Larger prompts still need an explicit scheduler-chunked benchmark path.
+  if (prompt_tokens < 1 || prompt_tokens > 16384 || output_tokens < 1 ||
       rounds < 1 || rounds > 20)
-    throw std::invalid_argument("expected 1<=prompt<=6656, generated>=1, 1<=rounds<=20");
+    throw std::invalid_argument("expected 1<=prompt<=16384, generated>=1, 1<=rounds<=20");
   const std::string_view kv_dtype = Env("VT_B70_BENCH_KV_DTYPE", "f16");
   if (kv_dtype != "f16" && kv_dtype != "fp8_e4m3")
     throw std::invalid_argument("VT_B70_BENCH_KV_DTYPE must be f16 or fp8_e4m3");
