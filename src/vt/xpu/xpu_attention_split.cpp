@@ -16,12 +16,24 @@ bool PagedAttentionSplitKernel(Queue& q, Tensor& out, const Tensor& query, const
   const int64_t kvheads = key_cache.shape[2], ratio = heads / kvheads;
   const int64_t page = key_cache.shape[1], capacity = block_table.shape[1] * page;
   const auto sizes = NativeQueue(q).get_device().get_info<sycl::info::device::sub_group_sizes>();
-  if (tokens < 1 || tokens > 20 || heads > 24 || dim > SG * Components ||
-      std::find(sizes.begin(), sizes.end(), SG) == sizes.end()) return false;
   const auto device = NativeQueue(q).get_device();
   const bool b70_fp8 = key_cache.dtype == DType::kI8 &&
+      args.kv_cache_dtype == Fp8KVCacheDataType::kFp8E4M3 &&
       device.has(sycl::aspect::ext_intel_device_id) &&
       device.get_info<sycl::ext::intel::info::device::device_id>() == 57891;
+  // Q32 prefill needs at least 32 packed queries. Keep the 21..31 gap on
+  // Split-K for the qualified model shape instead of falling to the generic
+  // per-head reference kernel.
+  const char* extended_setting = std::getenv("VT_XPU_ATTN_SPLIT_EXTENDED");
+  const bool extended_queries = (!extended_setting ||
+      std::string_view(extended_setting) == "1") &&
+      b70_fp8 && heads == 24 && kvheads == 4 &&
+      dim == 256 && page == 1600 && args.causal && !args.window_size &&
+      args.logits_soft_cap == 0 && args.k_scale == 1.0f &&
+      args.v_scale == 1.0f;
+  if (tokens < 1 || tokens > (extended_queries ? 31 : 20) ||
+      heads > 24 || dim > SG * Components ||
+      std::find(sizes.begin(), sizes.end(), SG) == sizes.end()) return false;
   // Short E4M3 contexts need more independent page slices to occupy the B70.
   // F16/BF16 and other devices retain the original 256-token partitioning.
   int span = b70_fp8 ? 32 : 256;
