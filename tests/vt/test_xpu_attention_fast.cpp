@@ -126,6 +126,40 @@ TEST_CASE("XPU split-KV: E4M3 quantization against BF16 at 32k") {
   Accuracy(fp8.result(), bf16.result(), true);
   CHECK(fp8.cache.bytes * 2 == bf16.cache.bytes);
 }
+TEST_CASE("XPU FP8 split-K: padded block tables retain active-page plan"
+          * doctest::skip(!std::getenv("VT_XPU_PROFILE"))) {
+  Queue gpu(vt::DeviceType::kXPU);
+  Fixture f(gpu.q, 1, 1, 4096, true, false, 1600,
+            DType::kF16, DType::kF16, DType::kF16, true);
+  for (int cols : {3, 6, 164}) {
+    CAPTURE(cols);
+    Buffer table(gpu.q, DType::kI32, {1, cols});
+    std::vector<int32_t> ids(cols, 0);
+    ids[0] = 2; ids[1] = 1; ids[2] = 0;
+    table.upload(ids.data());
+    auto run = [&](const char* mode) {
+      setenv("VT_XPU_ATTENTION", mode, 1);
+      vt::PagedAttention(gpu.q, f.out.tensor, f.query.tensor, f.kc, f.vc,
+                         table.tensor, f.lens.tensor, f.offsets.tensor, f.args);
+      vt::GetBackend(gpu.q.device).Synchronize(gpu.q);
+    };
+    run("reference");
+    const auto expected = f.result();
+    (void)vt::xpu::DrainProfileEvents();
+    run("auto");
+    Accuracy(f.result(), expected, false, true);
+    int split = 0;
+    for (const auto& event : vt::xpu::DrainProfileEvents())
+      split += event.stage == "attention_split_partial";
+    CHECK(split == 1);
+    if (cols == 164) {
+      setenv("VT_XPU_ATTN_SPLIT_ACTIVE_PAGE_CAP", "0", 1);
+      run("auto");
+      Accuracy(f.result(), expected, false, true);
+      unsetenv("VT_XPU_ATTN_SPLIT_ACTIVE_PAGE_CAP");
+    }
+  }
+}
 TEST_CASE("XPU FP8 attention: 20-query split boundary at 4K context"
           * doctest::skip(!std::getenv("VT_XPU_PROFILE"))) {
   Queue gpu(vt::DeviceType::kXPU);

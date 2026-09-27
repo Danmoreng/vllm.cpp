@@ -1,6 +1,7 @@
 #include "xpu_common.h"
 #include "xpu_fp8.h"
 #include "xpu_kernels.h"
+#include <cstdio>
 #include <cstdlib>
 #include <limits>
 #include <string_view>
@@ -54,8 +55,31 @@ bool PagedAttentionSplitKernel(Queue& q, Tensor& out, const Tensor& query, const
   const int64_t stride = dim + 2, pairs = (ratio + Reuse - 1) / Reuse;
   const int64_t budget_parts = Workspace / (tokens * heads * stride * sizeof(float));
   if (budget_parts < 1) return false;
+  // The block table may reserve pages beyond the active sequence. Plan from
+  // the active length rounded to a KV page so a padded table cannot inflate
+  // Split-K work, while retaining the occupancy of the compact table path.
+  const char* active_page_setting = std::getenv("VT_XPU_ATTN_SPLIT_ACTIVE_PAGE_CAP");
+  const bool active_page_cap = (!active_page_setting ||
+      std::string_view(active_page_setting) == "1") &&
+      b70_fp8 && heads == 24 && kvheads == 4 && dim == 256 &&
+      page == 1600 && args.max_seq_len > 0 && args.causal &&
+      !args.window_size && args.logits_soft_cap == 0 &&
+      args.k_scale == 1.0f && args.v_scale == 1.0f;
+  const int64_t planned_capacity = active_page_cap ?
+      std::min(capacity, ((context + page - 1) / page) * page) : capacity;
   const int64_t parts = std::min({int64_t{max_parts}, budget_parts,
-      std::max(int64_t{1}, (capacity + span - 1) / span)});
+      std::max(int64_t{1}, (planned_capacity + span - 1) / span)});
+  if (const char* trace = std::getenv("VT_XPU_TRACE_SPLIT_PLAN");
+      trace && std::string_view(trace) == "1")
+    std::fprintf(stderr,
+        "{\"event\":\"xpu_split_plan\",\"tokens\":%lld,"
+        "\"active_context\":%lld,\"page\":%lld,"
+        "\"block_table_capacity\":%lld,\"planned_capacity\":%lld,"
+        "\"span\":%d,\"parts\":%lld}\n",
+        static_cast<long long>(tokens), static_cast<long long>(context),
+        static_cast<long long>(page), static_cast<long long>(capacity),
+        static_cast<long long>(planned_capacity), span,
+        static_cast<long long>(parts));
   const View qs(query), kc(key_cache), vc(value_cache), dst(out), bt(block_table);
   const auto* table = static_cast<const int32_t*>(bt.data);
   const auto* lengths = static_cast<const int32_t*>(seq_lens.data);

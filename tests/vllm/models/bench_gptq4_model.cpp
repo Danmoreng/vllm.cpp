@@ -135,6 +135,15 @@ int Run(const std::string& checkpoint, int prompt_tokens, int output_tokens,
       max_context > std::numeric_limits<int32_t>::max() ||
       required_model_len > max_context)
     throw std::invalid_argument("prompt + generated exceeds benchmark or model context limit");
+  const std::string table_cols_arg = Env("VT_B70_BENCH_BLOCK_TABLE_COLS");
+  const int reserved_table_cols = table_cols_arg.empty() ? 0 :
+      std::stoi(table_cols_arg);
+  const int required_table_cols =
+      static_cast<int>((total_context + block_size - 1) / block_size);
+  if (reserved_table_cols < 0 ||
+      (reserved_table_cols && (reserved_table_cols < required_table_cols ||
+          reserved_table_cols > (max_context + block_size - 1) / block_size)))
+    throw std::invalid_argument("VT_B70_BENCH_BLOCK_TABLE_COLS must cover all active tokens and fit max context");
   if (config.vocab_size <= 300)
     throw std::invalid_argument("benchmark synthetic token stream needs vocabulary > 300");
   std::vector<vllm::SafetensorsFile> shards;
@@ -310,7 +319,7 @@ int Run(const std::string& checkpoint, int prompt_tokens, int output_tokens,
       const std::vector<int32_t> ids(prompt_ids.begin() + context,
                                      prompt_ids.begin() + context + query_len);
       const auto meta = gptq4_model_bench::AttentionMetadata(
-          query_len, context, block_size);
+          query_len, context, block_size, reserved_table_cols);
       const auto gdn = gptq4_model_bench::GdnMetadata(
           query_len, false, context > 0);
       const std::vector<int32_t> logits_index{query_len - 1};
@@ -338,7 +347,7 @@ int Run(const std::string& checkpoint, int prompt_tokens, int output_tokens,
       const std::vector<int32_t> ids{decode_ids[step]};
       const std::vector<int32_t> positions{prompt_tokens + step};
       const auto meta = gptq4_model_bench::AttentionMetadata(
-          1, prompt_tokens + step, block_size);
+          1, prompt_tokens + step, block_size, reserved_table_cols);
       const auto gdn = gptq4_model_bench::GdnMetadata(1, true);
       const std::vector<int32_t> logits_index{0};
       vllm::ModelForwardInput input{
@@ -396,6 +405,8 @@ int Run(const std::string& checkpoint, int prompt_tokens, int output_tokens,
         {"generated_tokens", output_tokens},
         {"decode_forward_steps", output_tokens - 1},
         {"max_context", max_context},
+        {"reserved_block_table_cols", reserved_table_cols},
+        {"final_active_block_table_cols", required_table_cols},
         {"required_model_len", required_model_len},
         {"kv_cache_bytes", kv_bytes}, {"gdn_state_bytes", gdn_bytes},
         {"available_gpu_bytes_before_cache", available},
