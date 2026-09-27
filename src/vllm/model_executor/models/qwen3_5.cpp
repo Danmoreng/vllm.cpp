@@ -12196,6 +12196,73 @@ ForwardLogits Qwen3_5DenseDecodeGraph::Step(
   const int64_t vocab = impl_->config.vocab_size;
   const int64_t H = impl_->config.hidden_size;
 
+  // TT-GDN-REGION-REPLAY attribution instrument (VT_TT_GDN_REPLAY_TAP): when
+  // set, print — after every decode-graph step completes, between steps and
+  // never during capture — a state-slot checksum per GDN cache (vt::tenstorrent
+  //::GdnShadowProbe, the VT_TT_GDN_STATE_PROBE pattern extended to the replay
+  // step) and the step's logits argmax/zero-count/first-five. The per-layer
+  // residual-stream taps were attempted through the SPEC-DSPARK W8 aux buffer
+  // and are NOT usable on this lane: the TT Backend::Copy D2D arm re-shadows
+  // the aux slot with each tap's [1,H] clone instead of writing the [S,H*taps]
+  // buffer (CopyDeviceDeviceIfCapture, tenstorrent_residency.cpp:1260-1280),
+  // so the columns read back are pool residue — a pre-existing defect of the
+  // aux seam on TT (no DFlash drafter runs here), recorded in the row's
+  // evidence, not printed as if it were data. The state slots + logits carry
+  // the attribution: slots whose step-N checksum was sane while the step-N+1
+  // replay wrote all-zero logits were not read — the trace's baked state-read
+  // address was freed by the out-of-place commit that produced the step-N
+  // state. Inert (one getenv) when unset.
+  const char* tap_knob = std::getenv("VT_TT_GDN_REPLAY_TAP");
+  const bool tap_on = tap_knob != nullptr && tap_knob[0] != '\0';
+  // The probe print, called at every step's return. `logits_ptr` is the step's
+  // [S,vocab] f32 logits buffer (null on arms that never materialize one
+  // here). All reads are D2H between steps, never during capture.
+  const auto tap_emit = [&](const char* kind, const void* logits_ptr) {
+    if (!tap_on) return;
+    static std::atomic<int64_t> tap_steps{0};
+    const int64_t step = tap_steps.fetch_add(1, std::memory_order_relaxed);
+    for (size_t e = 0; e < gdn_state.size(); ++e) {
+      char what[48];
+      std::snprintf(what, sizeof what, "step=%lld ssm[%zu]",
+                    static_cast<long long>(step), e);
+      vt::tenstorrent::GdnShadowProbe(gdn_state[e].ssm_state.data, what);
+      std::snprintf(what, sizeof what, "step=%lld conv[%zu]",
+                    static_cast<long long>(step), e);
+      vt::tenstorrent::GdnShadowProbe(gdn_state[e].conv_state.data, what);
+    }
+    if (logits_ptr != nullptr) {
+      std::vector<float> lg(static_cast<size_t>(vocab));
+      d.b.Copy(d.q, lg.data(), logits_ptr,
+               static_cast<size_t>(vocab) * sizeof(float));
+      d.b.Synchronize(d.q);
+      int64_t am = 0;
+      int64_t zeros = 0;
+      for (int64_t i = 0; i < vocab; ++i) {
+        if (lg[static_cast<size_t>(i)] == 0.0f) ++zeros;
+        if (lg[static_cast<size_t>(i)] > lg[static_cast<size_t>(am)]) am = i;
+      }
+      // The top-2 margin: a discrete selection's error is bimodal (the
+      // VT_GLM5_DIAG precedent). A near-tie (margin ~0) is the alternate-greedy
+      // path class; a different distribution (the top-2 far apart and neither
+      // near the reference) is a stale binding. This is what adjudicates the
+      // 9B's single-token coherent divergence.
+      int64_t am2 = am == 0 ? 1 : 0;
+      for (int64_t i = 0; i < vocab; ++i)
+        if (i != am && lg[static_cast<size_t>(i)] > lg[static_cast<size_t>(am2)])
+          am2 = i;
+      std::fprintf(stderr,
+                   "[GDN-TAP] kind=%s step=%lld LOGITS argmax=%lld(%a) top2=%lld(%a) "
+                   "margin=%a zeros=%lld/%lld first5=[%a,%a,%a,%a,%a]\n",
+                   kind, static_cast<long long>(step),
+                   static_cast<long long>(am), lg[static_cast<size_t>(am)],
+                   static_cast<long long>(am2), lg[static_cast<size_t>(am2)],
+                   lg[static_cast<size_t>(am)] - lg[static_cast<size_t>(am2)],
+                   static_cast<long long>(zeros), static_cast<long long>(vocab),
+                   lg[0], lg[1], lg[2], lg[3], lg[4]);
+      std::fflush(stderr);
+    }
+  };
+
   // Returns the [B,vocab] real-row logits ON DEVICE (no D2H). The captured/warm
   // paths return a NON-owning view over the slot's persistent [S,vocab] logits
   // (first B rows are the real requests). Stream ordering guarantees the sampler
@@ -12239,9 +12306,12 @@ ForwardLogits Qwen3_5DenseDecodeGraph::Step(
       // back to the EAGER multi-tap forward, which fills aux_out itself. Without
       // this the drafter sees no taps at all.
       StepPhaseEmit(sph, "eager-mtap");
-      return Qwen3_5DenseModel::ForwardDeviceMultiTap(
+      ForwardLogits fl = Qwen3_5DenseModel::ForwardDeviceMultiTap(
           token_ids, positions, attn_meta, gdn_meta, attn_kv, gdn_state,
           impl_->weights, impl_->config, impl_->queue, aux_out, {});
+      tap_emit("eager-mtap",
+               fl.device_tensor.data == nullptr ? nullptr : fl.device_tensor.data);
+      return fl;
     }
     const StepPhaseClk::time_point sph_tb0 =
         sph.on ? StepPhaseClk::now() : sph.t0;
@@ -12544,6 +12614,7 @@ ForwardLogits Qwen3_5DenseDecodeGraph::Step(
     ++s.expected_cur_pos;  // the replay's in-trace plus_one advanced cur_pos
     ++impl_->replays;
     publish_aux();
+    tap_emit("replay", s.logits->ptr());
     return ViewDeviceLogits(s.logits->ptr(), d.q.device, B, vocab);
   }
 
@@ -12797,6 +12868,10 @@ ForwardLogits Qwen3_5DenseDecodeGraph::Step(
         drained.device_tensor = MakeTensor(drained.device_storage.get(), DType::kF32,
                                            d.q.device, {B, vocab});
       }
+      tap_emit("capture-eager",
+               drained.device_tensor.data == nullptr
+                   ? nullptr
+                   : drained.device_tensor.data);
       return drained;
     }
     // #2274 THE FIX. The capture succeeded, so from here the graph's replays
@@ -12844,6 +12919,7 @@ ForwardLogits Qwen3_5DenseDecodeGraph::Step(
     ++s.expected_cur_pos;  // the capture step's launch ran the trace once
     ++impl_->replays;
     publish_aux();
+    tap_emit("capture", s.logits->ptr());
     return ViewDeviceLogits(s.logits->ptr(), d.q.device, B, vocab);
   }
 
@@ -12900,6 +12976,8 @@ ForwardLogits Qwen3_5DenseDecodeGraph::Step(
         MakeTensor(fl.device_storage.get(), DType::kF32, d.q.device, {B, vocab});
   }
   if (sph.on) StepPhaseEmit(sph, "cold");
+  tap_emit("cold", fl.device_tensor.data == nullptr ? nullptr
+                                                    : fl.device_tensor.data);
   return fl;
 }
 

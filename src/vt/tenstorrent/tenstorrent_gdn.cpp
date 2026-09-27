@@ -919,27 +919,113 @@ void GdnDecodeKernel(Queue&, Tensor& out, const Tensor& q_in, const Tensor& k,
     rows2d = ttnn::typecast(ttnn::typecast(rows2d, ttnn::DataType::BFLOAT16),
                             ttnn::DataType::FLOAT32);
   }
-  if (oh.has_value()) {
-    // Exact scatter (last-writer-wins on duplicate slots, NULL rows write
-    // nothing) — the state bytes never round through tf32 on the way back.
-    // In-region the block ids come from the warmed entry (the per-call
-    // upload would be the enqueue_write the trace refuses; the entry's
-    // content match plus the NULL refusal above make it the all-live form
-    // ScatterRowsExact would build); eager keeps the per-call path, NULL
-    // compaction included.
-    // Use ScatterRowsDevice for BOTH eager and capture: the committed state
-    // must have the same properties in both passes, so EnsureGdnCacheDevice
-    // takes the same branch in the next layer. The eager warmup warms the
-    // untilize/indexed_fill programs that capture needs.
-    ttnn::Tensor newc =
-        ScatterRowsDevice(cache2d, sentry.scatter_bid, rows2d, slots,
-                            hv * dv * dk, sf);
-    CommitDeviceLogical2D(state, std::move(newc), static_cast<uint32_t>(slots),
-                          static_cast<uint32_t>(hv * dv * dk));
+  // Exact scatter (last-writer-wins on duplicate slots, NULL rows write
+  // nothing) — the state bytes never round through tf32 on the way back.
+  // In-region the block ids come from the warmed entry (the per-call
+  // upload would be the enqueue_write the trace refuses; the entry's
+  // content match plus the NULL refusal above make it the all-live form
+  // ScatterRowsExact would build); eager keeps the per-call path, NULL
+  // compaction included. Use ScatterRowsDevice for BOTH eager and capture:
+  // the committed state must have the same properties in both passes, so
+  // EnsureGdnCacheDevice takes the same branch in the next layer. The eager
+  // warmup warms the untilize/indexed_fill programs that capture needs.
+  //
+  // TT-GDN-REGION-REPLAY: commit the state IN PLACE — into the SAME device
+  // shadow the captured trace reads (ttnn::copy into the served buffer: the
+  // preallocated-destination in-region write the RAC lane proves
+  // capture-safe, tenstorrent_paged.cpp:826) — and publish THAT buffer as
+  // the slot's shadow. The commit this replaces installed a FRESH device
+  // tensor every step, so the address a captured trace baked at capture time
+  // was freed by the very commit that produced it — the allocator recycled
+  // the block — and every replay re-read that capture-time buffer (recycled
+  // garbage: the anchor's first served replay wrote 248,320/248,320 zero
+  // logits; the bf16 9B's coherent-wrong stream) and re-scattered the result
+  // over the LIVE slot, corrupting the committed state process-permanently.
+  // In place, the trace's next gather reads the state its own scatter
+  // wrote: the recurrence advances at every replay. The identical op
+  // sequence runs in the eager warmup and the captured pass (the W4
+  // discipline), so the copy's program is program-cache-warm before the
+  // capture; a pure copy keeps the eager values byte-identical. The shape
+  // guard falls back to the replacing commit on any geometry the update did
+  // not reproduce exactly.
+  const auto same_spec = [](const ttnn::Tensor& a, const ttnn::Tensor& b) {
+    if (a.dtype() != b.dtype() || a.layout() != b.layout()) return false;
+    const auto sa = a.logical_shape(), sb = b.logical_shape();
+    if (sa.rank() != sb.rank()) return false;
+    for (uint32_t r = 0; r < sa.rank(); ++r)
+      if (sa[r] != sb[r]) return false;
+    return true;
+  };
+  ttnn::Tensor next = oh.has_value()
+                           ? ScatterRowsDevice(cache2d, sentry.scatter_bid,
+                                               rows2d, slots, hv * dv * dk, sf)
+                           : rows2d;
+  if (same_spec(next, cache2d)) {
+    ttnn::copy(next, cache2d);
+    CommitDeviceLogical2D(
+        state, std::move(cache2d),
+        static_cast<uint32_t>(oh.has_value() ? slots : ub),
+        static_cast<uint32_t>(hv * dv * dk));
   } else {
-    CommitDeviceLogical2D(state, std::move(rows2d), ub,
-                          static_cast<uint32_t>(hv * dv * dk));
+    CommitDeviceLogical2D(
+        state, std::move(next),
+        static_cast<uint32_t>(oh.has_value() ? slots : ub),
+        static_cast<uint32_t>(hv * dv * dk));
   }
+}
+
+// TT-GDN-REGION-REPLAY attribution instrument: the state-slot probe, the
+// driver-side extension of the VT_TT_GDN_STATE_PROBE pattern to the REPLAY
+// step. The in-kernel probe cannot print at replay (a replay runs no host
+// code, and a download is the read a trace capture refuses), so the decode
+// graph driver calls this BETWEEN steps — outside capture, with the trace
+// merely instantiated — to checksum what a GDN state cache's CURRENT device
+// shadow holds. The captured trace's state reads are baked to the address
+// served at capture time; the run's log of this probe therefore answers the
+// spec's discriminating question directly: slots that ADVANCE across replays
+// print changing checksums, slots frozen at the capture-time values print one
+// identical checksum at every replay (the stale-binding signature), and slots
+// collapsed to recycled memory print garbage or zeros. Read-only; unset runs
+// never reach the call site.
+void GdnShadowProbe(const void* host_ptr, const char* what) {
+  if (host_ptr == nullptr) return;
+  if (tt_capture_active()) return;  // the read the trace refuses
+  std::lock_guard<std::mutex> g(SlotMutex());
+  BufferSlot* s = FindSlot(const_cast<void*>(host_ptr));
+  if (s == nullptr || !s->device_current || !s->device.has_value()) {
+    std::fprintf(stderr, "[GDN-SHADOW-PROBE] %s no-device-shadow\n", what);
+    return;
+  }
+  // The structural half of the probe lives in the tree, not the log: the
+  // out-of-place state commits (CommitDeviceLogical2D / CommitConvTransposed)
+  // install a FRESH device tensor every step, so the address a captured trace
+  // baked at capture time is freed by the very commit that produced it. The
+  // CONTENT columns below carry the observable: slots whose step-N checksum
+  // was sane and whose step-N+1 replay produced zero logits were not read —
+  // the trace read the freed pre-capture buffer instead.
+  std::vector<float> v = s->device->to_vector<float>();
+  uint64_t fnv = 1469598103934665603ULL;
+  double acc = 0.0;
+  double tmin = 0.0, tmax = 0.0;
+  bool first = true;
+  int64_t zeros = 0;
+  for (float f : v) {
+    uint32_t bits;
+    std::memcpy(&bits, &f, sizeof(bits));
+    fnv = (fnv ^ bits) * 1099511628211ULL;
+    acc += f > 0.0 ? f : -static_cast<double>(f);
+    if (f == 0.0f) ++zeros;
+    if (first || static_cast<double>(f) < tmin) tmin = f;
+    if (first || static_cast<double>(f) > tmax) tmax = f;
+    first = false;
+  }
+  std::fprintf(stderr,
+               "[GDN-SHADOW-PROBE] %s rows=%ux%u n=%zu fnv=%016llx asum=%a "
+               "tmin=%a tmax=%a zeros=%lld/%zu\n",
+               what, s->dev_rows, s->dev_cols, v.size(),
+               static_cast<unsigned long long>(fnv), acc, tmin, tmax,
+               static_cast<long long>(zeros), v.size());
+  std::fflush(stderr);
 }
 
 // kGdnStateGather (cpu_ops.cpp GdnStateGatherKernel): the indexed
@@ -2122,7 +2208,15 @@ void CausalConv1dUpdateKernel(Queue&, Tensor& out, const Tensor& x, const Tensor
         ttnn::Shape({1, R}), device);
   }
 
-  ttnn::Tensor T = EnsureConvStateTransposed(conv_state, uslots, uc, usl, device);
+  // TT-GDN-REGION-REPLAY: hold the PERSISTENT shadow's handle. `T` is
+  // reassigned below (the [window | x] concat), but the transposed shadow
+  // `EnsureConvStateTransposed` served is the buffer the captured trace's
+  // slice reads, and the tail commit below writes the rolled window back
+  // INTO it (the same in-place fix GdnDecodeKernel's state commit carries)
+  // so the trace's next slice reads the advanced window instead of the
+  // freed capture-time buffer.
+  ttnn::Tensor T0 = EnsureConvStateTransposed(conv_state, uslots, uc, usl, device);
+  ttnn::Tensor T = T0;
 
   // x into the scratch row sl: indexed_fill (exact row write). Non-batch
   // columns are zero — they are masked out of the roll and never read.
@@ -2327,6 +2421,27 @@ void CausalConv1dUpdateKernel(Queue&, Tensor& out, const Tensor& x, const Tensor
   if (conv_state.dtype == DType::kBF16) {
     rolled = ttnn::typecast(ttnn::typecast(rolled, ttnn::DataType::BFLOAT16),
                             ttnn::DataType::FLOAT32);
+  }
+  // TT-GDN-REGION-REPLAY: commit the rolled window back INTO the persistent
+  // transposed shadow (ttnn::copy — the RAC lane's proven capture-safe
+  // preallocated-destination write) and publish THAT buffer, so the captured
+  // trace's next slice reads the advanced window at the SAME address. The
+  // replacing commit this fix removed churned the shadow's device buffer
+  // every step, which freed the address the trace's slice had baked at
+  // capture time — the recycled-garbage read and the clobbered live slot of
+  // the served-replay defect (see GdnDecodeKernel's state commit for the
+  // full chain). The shape guard keeps the replacing commit on any geometry
+  // the roll did not reproduce exactly (the degenerate usl==0 arm).
+  if (rolled.dtype() == T0.dtype() && rolled.layout() == T0.layout()) {
+    const auto sr = rolled.logical_shape(), s0 = T0.logical_shape();
+    bool same = sr.rank() == s0.rank();
+    for (uint32_t r = 0; same && r < sr.rank(); ++r)
+      same = sr[r] == s0[r];
+    if (same) {
+      ttnn::copy(rolled, T0);
+      CommitConvTransposed(conv_state, std::move(T0), uslots, uc, usl);
+      return;
+    }
   }
   CommitConvTransposed(conv_state, std::move(rolled), uslots, uc, usl);
 }
