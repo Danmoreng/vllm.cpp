@@ -44,8 +44,8 @@ int main(void) {
 }
 ```
 
-The ABI covers engine lifecycle, completion, chat, embeddings, transcription,
-media generation, speech generation, decisions, option scoring, memory helpers,
+The ABI covers engine lifecycle, completion, chat, embeddings, entity extraction,
+transcription, media generation, speech generation, decisions, option scoring, memory helpers,
 and diagnostics. It also exposes blocking, streaming, and concurrent request
 interfaces. The current version is `VLLM_ABI_VERSION 29`.
 
@@ -74,6 +74,14 @@ individual fields.
   `1` disables the model-level window, and `2` explicitly enables it.
   Other values return `VLLM_ERR_INVALID_ARGUMENT` during loading.
   Per-layer windows take precedence. Models without a window ignore this control.
+- **ABI 27: `vllm_gliner_ner()`.** Run blocking named entity recognition on a
+  GLiNER2.5 engine with text, entity labels, a threshold, and a maximum span width.
+  Each result contains the label, text, confidence, and token and character offsets.
+  The caller owns the result struct. The library allocates its entity array and strings.
+  Call `vllm_ner_result_free()` to release those allocations and zero the struct.
+  A non-GLiNER2 engine returns `VLLM_ERR_INVALID_ARGUMENT`.
+  On failure, the function zeroes a non-null output and sets `vllm_last_error()`.
+  See the [GLiNER C API example](../USAGE.md#through-the-c-abi-v27) for loading, calling, and cleanup.
 
 ## Decisions and option scoring
 
