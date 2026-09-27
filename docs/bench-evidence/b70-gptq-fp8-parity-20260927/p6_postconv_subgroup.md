@@ -57,3 +57,32 @@ Compact raw A/B, profile, quality and focused-test logs are under
 Further P6 work includes proving whether prefill-state
 copies are removable and examining actual oneDNN primitive costs; neither
 is changed here.
+
+## P6 follow-up: actual oneDNN route and state-copy budget
+
+An `ONEDNN_VERBOSE=all` P4096/O2 warmup plus measured request with the pinned
+oneDNN 3.13 build recorded 13 matmul shapes. All 1,220 executions were
+`gpu,matmul,jit:gemm:any`: GPTQ weights were U4 with `ba` layout, FP16
+activations/output used `ab`, group scales used FP16 `128x1` with mask 3,
+the scalar weight zero point was S8, and the GPTQ FP math mode was F16.
+The dense BA and LM-head weights were FP16 `ba`. The trace contained no
+separate reorder execution. Six first-use GEMM kernels missed the kernel
+cache and seven hit it; the warmed model held 13 primitives, with no
+subsequent creation in the scored request. All reported scratch sizes in
+the C++ stage profile were zero. The compressed verbose trace is
+`raw/p6_onednn_verbose_4096_o2.log.gz` (source SHA-256
+`aa75f6a6dc7fa9cbf4b2d48bc53432e86fbdd8132bbe52816fa6ae1cc6e2e988`).
+The verbose queue was not profiling-enabled, so its execution time field is
+zero and cannot be used as a latency measurement.
+
+The separate P4096/O2 stage profile above measured 256 GPTQ stream spans:
+1936.475 ms during prefill and 24.482 ms for one decode forward. Dense
+FP16 spans totalled 9.720 and 4.612 ms respectively (49 invocations in
+each phase, including one M=1 LM head). It also measured 96 state gathers
+and 96 scatters in prefill, totalling 1.288 and 1.349 ms of GPU event time.
+Their combined event duration is under 0.1% of the 2.854 s profiled
+prefill wall time; those event durations are not exclusive wall-clock
+savings. The gather also applies `has_initial_state` zeroing, and both
+operations honor indexed cache slots. Direct cache access would need to
+preserve those contracts. These observations do not justify a state-copy
+removal or a new GEMM; P6 keeps both unchanged pending a stronger candidate.
