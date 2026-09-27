@@ -48,6 +48,8 @@ def main():
     parser.add_argument("--max-model-len", type=int, default=8192)
     parser.add_argument("--prompt-ids-file", type=Path)
     parser.add_argument("--decode-ids-file", type=Path)
+    parser.add_argument("--profile-dir", type=Path,
+                        help="capture a torch CPU/XPU worker profile; timing invalid")
     args = parser.parse_args()
 
     p, o = args.prompt_tokens, args.generated_tokens
@@ -57,6 +59,13 @@ def main():
         parser.error("require P>=1, O>=1, rounds>=1, warmup-runs>=0, P+O<=max-model-len")
     prompt_ids = load_ids(args.prompt_ids_file, p, 100, 11)
     decode_ids = load_ids(args.decode_ids_file, d, 300, 248020)
+    profile_options = {}
+    if args.profile_dir is not None:
+        from vllm.config import ProfilerConfig
+        args.profile_dir.mkdir(parents=True, exist_ok=True)
+        profile_options["profiler_config"] = ProfilerConfig(
+            profiler="torch", torch_profiler_dir=str(args.profile_dir.resolve()),
+            torch_profiler_with_stack=False)
     llm = LLM(
         model=args.model,
         tokenizer=args.model,
@@ -73,6 +82,7 @@ def main():
         enforce_eager=True,
         mamba_cache_mode="align",
         enable_trace_replay=d > 0,
+        **profile_options,
     )
     config = llm.llm_engine.vllm_config
     print("B70_CONFIG " + json.dumps({
@@ -85,7 +95,8 @@ def main():
         "prompt_ids_fnv1a64": hash_ids(prompt_ids),
         "decode_ids_fnv1a64": hash_ids(decode_ids),
         "trace_replay": d > 0,
-        "timing_scope": "full engine step with scheduler, sampling and IPC",
+        "timing_scope": ("profiled request; timing invalid" if args.profile_dir
+                         else "full engine step with scheduler, sampling and IPC"),
     }), flush=True)
 
     # Trace replay includes the final emitted token; only its first D tokens
@@ -119,33 +130,45 @@ def main():
         return result
 
     engine.step = timed_step
-    for request_index in range(args.warmup_runs + args.rounds):
-        step_seconds.clear()
-        step_events.clear()
-        start = request_start = time.perf_counter()
-        result = llm.generate([prompt], sampling, use_tqdm=False)[0]
-        elapsed = time.perf_counter() - start
-        output_ids = list(result.outputs[0].token_ids)
-        if len(output_ids) != o or (trace_ids is not None and output_ids != trace_ids):
-            raise RuntimeError("reference did not emit the requested trace IDs")
-        first_api_output = next((event["elapsed_from_request_start"]
-                                 for event in step_events
-                                 if event["cumulative_output_tokens"] > 0), None)
-        print("B70_RUN " + json.dumps({
-            "round": request_index - args.warmup_runs,
-            "warmup": request_index < args.warmup_runs,
-            "P": p, "D": d, "O": o,
-            "engine_steps": len(step_seconds),
-            "engine_step_seconds": step_seconds,
-            "engine_step_events": step_events,
-            "first_nonempty_api_output_seconds": first_api_output,
-            "ttft_seconds": None,
-            "ttft_status": "not measured by the LLM.generate batch API",
-            "request_wall_seconds": elapsed,
-            "request_id": result.request_id,
-            "output_ids_fnv1a64": hash_ids(output_ids),
-            "phase_classification": "requires scheduler trace; engine ordinal is insufficient",
-        }), flush=True)
+
+    def run_requests():
+        nonlocal request_start
+        for request_index in range(args.warmup_runs + args.rounds):
+            step_seconds.clear()
+            step_events.clear()
+            start = request_start = time.perf_counter()
+            result = llm.generate([prompt], sampling, use_tqdm=False)[0]
+            elapsed = time.perf_counter() - start
+            output_ids = list(result.outputs[0].token_ids)
+            if len(output_ids) != o or (trace_ids is not None and output_ids != trace_ids):
+                raise RuntimeError("reference did not emit the requested trace IDs")
+            first_api_output = next((event["elapsed_from_request_start"]
+                                     for event in step_events
+                                     if event["cumulative_output_tokens"] > 0), None)
+            print("B70_RUN " + json.dumps({
+                "round": request_index - args.warmup_runs,
+                "warmup": request_index < args.warmup_runs,
+                "P": p, "D": d, "O": o,
+                "engine_steps": len(step_seconds),
+                "engine_step_seconds": step_seconds,
+                "engine_step_events": step_events,
+                "first_nonempty_api_output_seconds": first_api_output,
+                "ttft_seconds": None,
+                "ttft_status": "not measured by the LLM.generate batch API",
+                "request_wall_seconds": elapsed,
+                "request_id": result.request_id,
+                "output_ids_fnv1a64": hash_ids(output_ids),
+                "phase_classification": "requires scheduler trace; engine ordinal is insufficient",
+            }), flush=True)
+
+    if args.profile_dir is None:
+        run_requests()
+    else:
+        llm.start_profile("b70-p2-replay")
+        try:
+            run_requests()
+        finally:
+            llm.stop_profile()
 
 
 if __name__ == "__main__":

@@ -1,0 +1,863 @@
+{
+  "status": "diagnostic_profile_only_not_scored_throughput",
+  "scope": "pinned GPTQ FP8 E4M3 KV, eager batch 1, P4096, effective page 1600; token hashes matched for each D",
+  "time_warning": "Device kernel sums, host spans, CPU enqueues and wall durations have distinct and sometimes overlapping scopes. Never add nested spans or read these profiled times as throughput.",
+  "raw_archive": {
+    "path": "/home/sebastian/LocalLLM/b70-gptq-fp8-p2-profiler-traces-20260927.tar.zst",
+    "sha256": "43fcd64e4714de84e9ef202d0328c90951278fc3190579f651bb1e8da4c24f78",
+    "bytes": 94596004
+  },
+  "cases": {
+    "D64": {
+      "replay": {
+        "P": 4096,
+        "D": 64,
+        "O": 65,
+        "page_tokens": 1600,
+        "prompt_ids_fnv1a64": "9705ea213a213545",
+        "decode_ids_fnv1a64": "6ec3b01cb7f65be5"
+      },
+      "cpp": {
+        "prefill": {
+          "event_count": 26979,
+          "device_span_ms": 3381.656042,
+          "device_interval_union_ms": 3061.218135,
+          "device_gap_within_span_ms": 320.437907,
+          "families": {
+            "norm_rope_glue": {
+              "event_count": 130,
+              "device_event_sum_ms": 65.873961,
+              "stream_span_count": 0
+            },
+            "gptq_int4": {
+              "event_count": 256,
+              "device_event_sum_ms": 1773.715928,
+              "stream_span_count": 256
+            },
+            "dense_fp16_and_head": {
+              "event_count": 49,
+              "device_event_sum_ms": 9.372605,
+              "stream_span_count": 49
+            },
+            "gdn_norm_state_io": {
+              "event_count": 240,
+              "device_event_sum_ms": 29.466871,
+              "stream_span_count": 0
+            },
+            "gdn_conv": {
+              "event_count": 96,
+              "device_event_sum_ms": 123.503749,
+              "stream_span_count": 0
+            },
+            "gdn_postconv": {
+              "event_count": 48,
+              "device_event_sum_ms": 113.59833,
+              "stream_span_count": 0
+            },
+            "gdn_core_state": {
+              "event_count": 26112,
+              "device_event_sum_ms": 778.485544,
+              "stream_span_count": 0
+            },
+            "attention": {
+              "event_count": 32,
+              "device_event_sum_ms": 134.920002,
+              "stream_span_count": 0
+            },
+            "kv_write": {
+              "event_count": 16,
+              "device_event_sum_ms": 32.281145,
+              "stream_span_count": 0
+            }
+          },
+          "host_spans": {
+            "alloc_device": {
+              "count": 321,
+              "host_ms": 0.12600100000000006
+            },
+            "alloc_pinned": {
+              "count": 335,
+              "host_ms": 0.11936000000000005
+            },
+            "free_device_drain": {
+              "count": 321,
+              "host_ms": 0.04548000000000003
+            },
+            "free_pinned_drain": {
+              "count": 335,
+              "host_ms": 0.13971000000000003
+            },
+            "metadata_d2h_wait": {
+              "count": 321,
+              "host_ms": 2548.5075709999996
+            },
+            "staged_d2h_wait": {
+              "count": 321,
+              "host_ms": 2547.9001509999985
+            },
+            "staged_h2d_wait": {
+              "count": 14,
+              "host_ms": 1.2732530000000006
+            },
+            "workspace_wait_gdn": {
+              "count": 48,
+              "host_ms": 701.8328789999999
+            }
+          },
+          "forward_wall_ms": 3387.27402
+        },
+        "decode": {
+          "event_count": 44224,
+          "device_span_ms": 2699.174687,
+          "device_interval_union_ms": 2512.713169,
+          "device_gap_within_span_ms": 186.461518,
+          "families": {
+            "norm_rope_glue": {
+              "event_count": 8320,
+              "device_event_sum_ms": 196.863582,
+              "stream_span_count": 0
+            },
+            "gptq_int4": {
+              "event_count": 16384,
+              "device_event_sum_ms": 1473.844115,
+              "stream_span_count": 16384
+            },
+            "dense_fp16_and_head": {
+              "event_count": 3136,
+              "device_event_sum_ms": 286.745395,
+              "stream_span_count": 3136
+            },
+            "gdn_conv": {
+              "event_count": 3072,
+              "device_event_sum_ms": 10.501464,
+              "stream_span_count": 0
+            },
+            "gdn_postconv": {
+              "event_count": 3072,
+              "device_event_sum_ms": 191.045761,
+              "stream_span_count": 0
+            },
+            "gdn_core_state": {
+              "event_count": 3072,
+              "device_event_sum_ms": 42.901157,
+              "stream_span_count": 0
+            },
+            "gdn_norm_state_io": {
+              "event_count": 3072,
+              "device_event_sum_ms": 11.786356,
+              "stream_span_count": 0
+            },
+            "attention": {
+              "event_count": 3072,
+              "device_event_sum_ms": 292.397735,
+              "stream_span_count": 0
+            },
+            "kv_write": {
+              "event_count": 1024,
+              "device_event_sum_ms": 6.627604,
+              "stream_span_count": 0
+            }
+          },
+          "host_spans": {
+            "alloc_device": {
+              "count": 8256,
+              "host_ms": 2.7042350000000215
+            },
+            "alloc_pinned": {
+              "count": 8704,
+              "host_ms": 2.5046920000000035
+            },
+            "free_device_drain": {
+              "count": 8256,
+              "host_ms": 1.1655799999999952
+            },
+            "free_pinned_drain": {
+              "count": 8704,
+              "host_ms": 3.2314649999999907
+            },
+            "metadata_d2h_wait": {
+              "count": 8256,
+              "host_ms": 1695.8613099999977
+            },
+            "staged_d2h_wait": {
+              "count": 8256,
+              "host_ms": 1682.564258000004
+            },
+            "staged_h2d_wait": {
+              "count": 448,
+              "host_ms": 4.927534999999995
+            },
+            "workspace_wait_attention": {
+              "count": 1024,
+              "host_ms": 283.8780429999999
+            }
+          },
+          "forward_wall_ms": 2700.1783800000003
+        }
+      },
+      "python": {
+        "prefill": {
+          "worker_annotations": 1,
+          "worker_annotation_us": 209980.446,
+          "families": {
+            "other_glue": {
+              "kernel_count": 597,
+              "kernel_us": 29914.543000000045,
+              "enqueue_cpu_us": 22052.796000000002
+            },
+            "norm_activation": {
+              "kernel_count": 224,
+              "kernel_us": 93593.65899999997,
+              "enqueue_cpu_us": 6624.786000000003
+            },
+            "gptq_int4": {
+              "kernel_count": 255,
+              "kernel_us": 2060237.1800000016,
+              "enqueue_cpu_us": 7737.629999999999
+            },
+            "dense_fp16": {
+              "kernel_count": 48,
+              "kernel_us": 5598.727000000002,
+              "enqueue_cpu_us": 1767.7310000000007
+            },
+            "gdn_core_state": {
+              "kernel_count": 336,
+              "kernel_us": 160993.82100000008,
+              "enqueue_cpu_us": 7346.052000000009
+            },
+            "kv_write": {
+              "kernel_count": 16,
+              "kernel_us": 1216.556,
+              "enqueue_cpu_us": 510.56499999999994
+            },
+            "attention": {
+              "kernel_count": 32,
+              "kernel_us": 162652.489,
+              "enqueue_cpu_us": 727.9960000000003
+            },
+            "post_execute_dense_head": {
+              "kernel_count": 1,
+              "kernel_us": 4323.333,
+              "enqueue_cpu_us": 30.159
+            }
+          },
+          "memcpy": {
+            "Memcpy H2D (HOST -> DEVICE)": {
+              "count": 18,
+              "bytes": 13944,
+              "device_us": 32.44
+            },
+            "Memcpy D2D (DEVICE -> DEVICE)": {
+              "count": 1,
+              "bytes": 41943040,
+              "device_us": 168.437
+            }
+          }
+        },
+        "decode": {
+          "worker_annotations": 64,
+          "worker_annotation_us": 4137475.6109999996,
+          "families": {
+            "norm_activation": {
+              "kernel_count": 14313,
+              "kernel_us": 31660.717000000033,
+              "enqueue_cpu_us": 394652.1589999999
+            },
+            "other_glue": {
+              "kernel_count": 10506,
+              "kernel_us": 13671.115000000018,
+              "enqueue_cpu_us": 280717.6429999999
+            },
+            "gptq_int4": {
+              "kernel_count": 16282,
+              "kernel_us": 1446418.281000001,
+              "enqueue_cpu_us": 473168.7270000001
+            },
+            "dense_fp16": {
+              "kernel_count": 3053,
+              "kernel_us": 12631.945000000007,
+              "enqueue_cpu_us": 89065.64900000002
+            },
+            "gdn_conv": {
+              "kernel_count": 3051,
+              "kernel_us": 15459.821000000009,
+              "enqueue_cpu_us": 71304.57699999999
+            },
+            "gdn_core_state": {
+              "kernel_count": 3050,
+              "kernel_us": 42291.46400000002,
+              "enqueue_cpu_us": 71280.24699999999
+            },
+            "kv_write": {
+              "kernel_count": 1018,
+              "kernel_us": 4222.633999999998,
+              "enqueue_cpu_us": 32379.358
+            },
+            "attention": {
+              "kernel_count": 2038,
+              "kernel_us": 135484.13099999996,
+              "enqueue_cpu_us": 46653.01200000001
+            },
+            "post_execute_dense_head": {
+              "kernel_count": 65,
+              "kernel_us": 267938.41200000007,
+              "enqueue_cpu_us": 1954.8429999999998
+            }
+          },
+          "memcpy": {
+            "Memcpy H2D (HOST -> DEVICE)": {
+              "count": 128,
+              "bytes": 1024,
+              "device_us": 252.454
+            },
+            "Memcpy D2D (DEVICE -> DEVICE)": {
+              "count": 63,
+              "bytes": 645120,
+              "device_us": 101.6349999999999
+            }
+          },
+          "decode_windows": [
+            {
+              "decode_forwards": [
+                1,
+                16
+              ],
+              "families": {
+                "norm_activation": {
+                  "kernel_count": 3517,
+                  "kernel_us": 8788.42000000001,
+                  "enqueue_cpu_us": 99687.11399999999
+                },
+                "other_glue": {
+                  "kernel_count": 2583,
+                  "kernel_us": 3691.9910000000036,
+                  "enqueue_cpu_us": 71300.52900000001
+                },
+                "gptq_int4": {
+                  "kernel_count": 3997,
+                  "kernel_us": 360430.53100000013,
+                  "enqueue_cpu_us": 120257.01199999997
+                },
+                "dense_fp16": {
+                  "kernel_count": 747,
+                  "kernel_us": 3416.1950000000015,
+                  "enqueue_cpu_us": 22337.968999999997
+                },
+                "gdn_conv": {
+                  "kernel_count": 749,
+                  "kernel_us": 4132.049000000001,
+                  "enqueue_cpu_us": 17919.975
+                },
+                "gdn_core_state": {
+                  "kernel_count": 748,
+                  "kernel_us": 11104.071000000004,
+                  "enqueue_cpu_us": 17895.645
+                },
+                "kv_write": {
+                  "kernel_count": 251,
+                  "kernel_us": 1155.841,
+                  "enqueue_cpu_us": 8271.667
+                },
+                "attention": {
+                  "kernel_count": 502,
+                  "kernel_us": 37182.38,
+                  "enqueue_cpu_us": 11739.102
+                },
+                "post_execute_dense_head": {
+                  "kernel_count": 17,
+                  "kernel_us": 64035.72099999999,
+                  "enqueue_cpu_us": 511.159
+                }
+              }
+            },
+            {
+              "decode_forwards": [
+                17,
+                64
+              ],
+              "families": {
+                "norm_activation": {
+                  "kernel_count": 10796,
+                  "kernel_us": 22872.297000000024,
+                  "enqueue_cpu_us": 294965.045
+                },
+                "gptq_int4": {
+                  "kernel_count": 12285,
+                  "kernel_us": 1085987.7500000007,
+                  "enqueue_cpu_us": 352911.715
+                },
+                "dense_fp16": {
+                  "kernel_count": 2306,
+                  "kernel_us": 9215.750000000004,
+                  "enqueue_cpu_us": 66727.68000000001
+                },
+                "other_glue": {
+                  "kernel_count": 7923,
+                  "kernel_us": 9979.124000000014,
+                  "enqueue_cpu_us": 209417.11399999994
+                },
+                "gdn_conv": {
+                  "kernel_count": 2302,
+                  "kernel_us": 11327.772000000008,
+                  "enqueue_cpu_us": 53384.601999999984
+                },
+                "gdn_core_state": {
+                  "kernel_count": 2302,
+                  "kernel_us": 31187.39300000002,
+                  "enqueue_cpu_us": 53384.601999999984
+                },
+                "kv_write": {
+                  "kernel_count": 767,
+                  "kernel_us": 3066.7929999999997,
+                  "enqueue_cpu_us": 24107.691000000006
+                },
+                "attention": {
+                  "kernel_count": 1536,
+                  "kernel_us": 98301.75099999999,
+                  "enqueue_cpu_us": 34913.91000000001
+                },
+                "post_execute_dense_head": {
+                  "kernel_count": 48,
+                  "kernel_us": 203902.69100000008,
+                  "enqueue_cpu_us": 1443.684
+                }
+              }
+            }
+          ]
+        }
+      },
+      "python_unassigned": {
+        "missing_correlated_enqueue": 5121,
+        "missing_correlated_enqueue_us": 40758.741999991405,
+        "outside_worker_annotation": 409,
+        "outside_worker_annotation_us": 9050.760000000002,
+        "copy_missing_correlated_enqueue": 1,
+        "copy_outside_worker_annotation": 130,
+        "copy_outside_worker_bytes": 780
+      },
+      "cpp_host_spans_available": true
+    },
+    "D256": {
+      "replay": {
+        "P": 4096,
+        "D": 256,
+        "O": 257,
+        "page_tokens": 1600,
+        "prompt_ids_fnv1a64": "9705ea213a213545",
+        "decode_ids_fnv1a64": "c31c438813d4ba49"
+      },
+      "cpp": {
+        "prefill": {
+          "event_count": 26979,
+          "device_span_ms": 3378.160416,
+          "device_interval_union_ms": 3062.244366,
+          "device_gap_within_span_ms": 315.91605,
+          "families": {
+            "norm_rope_glue": {
+              "event_count": 130,
+              "device_event_sum_ms": 65.946555,
+              "stream_span_count": 0
+            },
+            "gptq_int4": {
+              "event_count": 256,
+              "device_event_sum_ms": 1774.879693,
+              "stream_span_count": 256
+            },
+            "dense_fp16_and_head": {
+              "event_count": 49,
+              "device_event_sum_ms": 9.427294,
+              "stream_span_count": 49
+            },
+            "gdn_norm_state_io": {
+              "event_count": 240,
+              "device_event_sum_ms": 29.493321,
+              "stream_span_count": 0
+            },
+            "gdn_conv": {
+              "event_count": 96,
+              "device_event_sum_ms": 123.658123,
+              "stream_span_count": 0
+            },
+            "gdn_postconv": {
+              "event_count": 48,
+              "device_event_sum_ms": 112.360101,
+              "stream_span_count": 0
+            },
+            "gdn_core_state": {
+              "event_count": 26112,
+              "device_event_sum_ms": 779.143756,
+              "stream_span_count": 0
+            },
+            "attention": {
+              "event_count": 32,
+              "device_event_sum_ms": 135.056874,
+              "stream_span_count": 0
+            },
+            "kv_write": {
+              "event_count": 16,
+              "device_event_sum_ms": 32.278649,
+              "stream_span_count": 0
+            }
+          },
+          "host_spans": null,
+          "forward_wall_ms": 3384.058826
+        },
+        "decode": {
+          "event_count": 176896,
+          "device_span_ms": 10799.19875,
+          "device_interval_union_ms": 10060.911857,
+          "device_gap_within_span_ms": 738.286893,
+          "families": {
+            "norm_rope_glue": {
+              "event_count": 33280,
+              "device_event_sum_ms": 785.590345,
+              "stream_span_count": 0
+            },
+            "gptq_int4": {
+              "event_count": 65536,
+              "device_event_sum_ms": 5893.485426,
+              "stream_span_count": 65536
+            },
+            "dense_fp16_and_head": {
+              "event_count": 12544,
+              "device_event_sum_ms": 1145.933574,
+              "stream_span_count": 12544
+            },
+            "gdn_conv": {
+              "event_count": 12288,
+              "device_event_sum_ms": 42.049642,
+              "stream_span_count": 0
+            },
+            "gdn_postconv": {
+              "event_count": 12288,
+              "device_event_sum_ms": 762.253966,
+              "stream_span_count": 0
+            },
+            "gdn_core_state": {
+              "event_count": 12288,
+              "device_event_sum_ms": 171.357993,
+              "stream_span_count": 0
+            },
+            "gdn_norm_state_io": {
+              "event_count": 12288,
+              "device_event_sum_ms": 47.015093,
+              "stream_span_count": 0
+            },
+            "attention": {
+              "event_count": 12288,
+              "device_event_sum_ms": 1186.90974,
+              "stream_span_count": 0
+            },
+            "kv_write": {
+              "event_count": 4096,
+              "device_event_sum_ms": 26.316078,
+              "stream_span_count": 0
+            }
+          },
+          "host_spans": null,
+          "forward_wall_ms": 10802.589281999999
+        }
+      },
+      "python": {
+        "prefill": {
+          "worker_annotations": 1,
+          "worker_annotation_us": 164704.968,
+          "families": {
+            "other_glue": {
+              "kernel_count": 597,
+              "kernel_us": 29889.546000000035,
+              "enqueue_cpu_us": 18742.266999999993
+            },
+            "norm_activation": {
+              "kernel_count": 224,
+              "kernel_us": 93474.59400000001,
+              "enqueue_cpu_us": 6665.941999999999
+            },
+            "gptq_int4": {
+              "kernel_count": 255,
+              "kernel_us": 2061521.134000002,
+              "enqueue_cpu_us": 7770.011000000001
+            },
+            "dense_fp16": {
+              "kernel_count": 48,
+              "kernel_us": 5570.292999999998,
+              "enqueue_cpu_us": 1817.741
+            },
+            "gdn_core_state": {
+              "kernel_count": 336,
+              "kernel_us": 161367.15300000028,
+              "enqueue_cpu_us": 7575.518999999993
+            },
+            "kv_write": {
+              "kernel_count": 16,
+              "kernel_us": 1228.328,
+              "enqueue_cpu_us": 513.507
+            },
+            "attention": {
+              "kernel_count": 32,
+              "kernel_us": 162746.65400000007,
+              "enqueue_cpu_us": 750.8960000000001
+            },
+            "post_execute_dense_head": {
+              "kernel_count": 1,
+              "kernel_us": 4283.333,
+              "enqueue_cpu_us": 30.79
+            }
+          },
+          "memcpy": {
+            "Memcpy H2D (HOST -> DEVICE)": {
+              "count": 18,
+              "bytes": 13944,
+              "device_us": 39.943
+            },
+            "Memcpy D2D (DEVICE -> DEVICE)": {
+              "count": 1,
+              "bytes": 41943040,
+              "device_us": 168.125
+            }
+          }
+        },
+        "decode": {
+          "worker_annotations": 256,
+          "worker_annotation_us": 16533960.128999991,
+          "families": {
+            "norm_activation": {
+              "kernel_count": 57572,
+              "kernel_us": 122524.76300000018,
+              "enqueue_cpu_us": 1601690.2560000003
+            },
+            "other_glue": {
+              "kernel_count": 42221,
+              "kernel_us": 54034.24200000014,
+              "enqueue_cpu_us": 1136097.324
+            },
+            "gptq_int4": {
+              "kernel_count": 65481,
+              "kernel_us": 5798260.6290000025,
+              "enqueue_cpu_us": 1912432.9219999998
+            },
+            "dense_fp16": {
+              "kernel_count": 12282,
+              "kernel_us": 58164.866000000045,
+              "enqueue_cpu_us": 363161.8920000002
+            },
+            "gdn_conv": {
+              "kernel_count": 12280,
+              "kernel_us": 61070.565000000046,
+              "enqueue_cpu_us": 288587.07199999987
+            },
+            "gdn_core_state": {
+              "kernel_count": 12280,
+              "kernel_us": 167349.44899999994,
+              "enqueue_cpu_us": 288587.07199999987
+            },
+            "kv_write": {
+              "kernel_count": 4092,
+              "kernel_us": 16587.891,
+              "enqueue_cpu_us": 131850.76499999996
+            },
+            "attention": {
+              "kernel_count": 8190,
+              "kernel_us": 492857.4710000003,
+              "enqueue_cpu_us": 187663.22000000018
+            },
+            "post_execute_dense_head": {
+              "kernel_count": 262,
+              "kernel_us": 1079939.5830000013,
+              "enqueue_cpu_us": 8017.413999999996
+            }
+          },
+          "memcpy": {
+            "Memcpy H2D (HOST -> DEVICE)": {
+              "count": 512,
+              "bytes": 4096,
+              "device_us": 991.8320000000008
+            },
+            "Memcpy D2D (DEVICE -> DEVICE)": {
+              "count": 256,
+              "bytes": 2621440,
+              "device_us": 400.81200000000075
+            }
+          },
+          "decode_windows": [
+            {
+              "decode_forwards": [
+                1,
+                16
+              ],
+              "families": {
+                "norm_activation": {
+                  "kernel_count": 3595,
+                  "kernel_us": 8918.115000000009,
+                  "enqueue_cpu_us": 104371.85200000003
+                },
+                "other_glue": {
+                  "kernel_count": 2633,
+                  "kernel_us": 3785.086000000005,
+                  "enqueue_cpu_us": 74626.46400000002
+                },
+                "gptq_int4": {
+                  "kernel_count": 4085,
+                  "kernel_us": 368431.62900000025,
+                  "enqueue_cpu_us": 125553.44899999998
+                },
+                "dense_fp16": {
+                  "kernel_count": 766,
+                  "kernel_us": 3529.5110000000013,
+                  "enqueue_cpu_us": 23425.752999999993
+                },
+                "gdn_conv": {
+                  "kernel_count": 768,
+                  "kernel_us": 4230.285000000001,
+                  "enqueue_cpu_us": 18818.965
+                },
+                "gdn_core_state": {
+                  "kernel_count": 768,
+                  "kernel_us": 11346.364000000003,
+                  "enqueue_cpu_us": 18818.965
+                },
+                "kv_write": {
+                  "kernel_count": 256,
+                  "kernel_us": 1216.7719999999997,
+                  "enqueue_cpu_us": 8745.982
+                },
+                "attention": {
+                  "kernel_count": 510,
+                  "kernel_us": 37523.944,
+                  "enqueue_cpu_us": 12143.852000000003
+                },
+                "post_execute_dense_head": {
+                  "kernel_count": 16,
+                  "kernel_us": 68254.68099999998,
+                  "enqueue_cpu_us": 496.94699999999995
+                }
+              }
+            },
+            {
+              "decode_forwards": [
+                17,
+                64
+              ],
+              "families": {
+                "other_glue": {
+                  "kernel_count": 7918,
+                  "kernel_us": 10030.266000000014,
+                  "enqueue_cpu_us": 211534.082
+                },
+                "norm_activation": {
+                  "kernel_count": 10782,
+                  "kernel_us": 22650.954000000027,
+                  "enqueue_cpu_us": 297512.952
+                },
+                "gptq_int4": {
+                  "kernel_count": 12273,
+                  "kernel_us": 1085165.4160000007,
+                  "enqueue_cpu_us": 355063.85900000005
+                },
+                "dense_fp16": {
+                  "kernel_count": 2303,
+                  "kernel_us": 13443.797000000006,
+                  "enqueue_cpu_us": 67023.131
+                },
+                "attention": {
+                  "kernel_count": 1536,
+                  "kernel_us": 97854.142,
+                  "enqueue_cpu_us": 34925.013999999996
+                },
+                "gdn_conv": {
+                  "kernel_count": 2298,
+                  "kernel_us": 11325.993000000002,
+                  "enqueue_cpu_us": 53674.12699999999
+                },
+                "gdn_core_state": {
+                  "kernel_count": 2298,
+                  "kernel_us": 31187.47900000001,
+                  "enqueue_cpu_us": 53674.12699999999
+                },
+                "kv_write": {
+                  "kernel_count": 766,
+                  "kernel_us": 3060.3390000000004,
+                  "enqueue_cpu_us": 24399.324000000004
+                },
+                "post_execute_dense_head": {
+                  "kernel_count": 48,
+                  "kernel_us": 199820.18800000005,
+                  "enqueue_cpu_us": 1426.043
+                }
+              }
+            },
+            {
+              "decode_forwards": [
+                65,
+                256
+              ],
+              "families": {
+                "norm_activation": {
+                  "kernel_count": 43195,
+                  "kernel_us": 90955.69400000015,
+                  "enqueue_cpu_us": 1199805.4519999993
+                },
+                "gptq_int4": {
+                  "kernel_count": 49123,
+                  "kernel_us": 4344663.584000001,
+                  "enqueue_cpu_us": 1431815.6140000008
+                },
+                "kv_write": {
+                  "kernel_count": 3070,
+                  "kernel_us": 12310.779999999992,
+                  "enqueue_cpu_us": 98705.459
+                },
+                "other_glue": {
+                  "kernel_count": 31670,
+                  "kernel_us": 40218.89000000009,
+                  "enqueue_cpu_us": 849936.7779999999
+                },
+                "dense_fp16": {
+                  "kernel_count": 9213,
+                  "kernel_us": 41191.55800000004,
+                  "enqueue_cpu_us": 272713.0079999999
+                },
+                "gdn_conv": {
+                  "kernel_count": 9214,
+                  "kernel_us": 45514.28700000002,
+                  "enqueue_cpu_us": 216093.98000000013
+                },
+                "gdn_core_state": {
+                  "kernel_count": 9214,
+                  "kernel_us": 124815.60599999996,
+                  "enqueue_cpu_us": 216093.98000000013
+                },
+                "attention": {
+                  "kernel_count": 6144,
+                  "kernel_us": 357479.385,
+                  "enqueue_cpu_us": 140594.3539999999
+                },
+                "post_execute_dense_head": {
+                  "kernel_count": 198,
+                  "kernel_us": 811864.7140000007,
+                  "enqueue_cpu_us": 6094.423999999999
+                }
+              }
+            }
+          ]
+        }
+      },
+      "python_unassigned": {
+        "missing_correlated_enqueue": 19026,
+        "missing_correlated_enqueue_us": 55912.06199998396,
+        "outside_worker_annotation": 1668,
+        "outside_worker_annotation_us": 16811.748999999967,
+        "copy_outside_worker_annotation": 514,
+        "copy_outside_worker_bytes": 3084
+      },
+      "cpp_host_spans_available": false
+    }
+  },
+  "failed_attempts": [
+    {
+      "case": "C++ P4096/D256 with host profiler",
+      "exit_code": 139,
+      "reason": "XPU host profile record limit 100000 exceeded during warmup; device-only rerun succeeded"
+    }
+  ]
+}
