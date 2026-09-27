@@ -13,6 +13,15 @@ using vt::DType;
 using xpu_test::Buffer;
 using xpu_test::Queue;
 constexpr int D = 128;
+size_t ExpectedWorkspaceBytes() {
+  const char* requested = std::getenv("VT_XPU_GDN_BATCH");
+  const char* qk = std::getenv("VT_XPU_GDN_QK");
+  const char* inverse = std::getenv("VT_XPU_GDN_INVERSE");
+  const bool compatible = (!qk || std::string_view(qk) == "xmx") &&
+      (!inverse || std::string_view(inverse) == "blocked");
+  return (compatible && (!requested || std::string_view(requested) == "2")
+      ? 32u : 16u) * 1024 * 1024;
+}
 
 std::vector<float> Values(int count, int salt, float scale = 0.01f) {
   std::vector<float> data(count);
@@ -161,6 +170,26 @@ TEST_CASE("XPU GDN short F16 prefill selects chunked kernel"
   CHECK(state_tile4 == static_cast<size_t>(!expect_state_xmx));
 }
 
+TEST_CASE("XPU GDN F16 batch-two prefill groups independent stages"
+          * doctest::skip(!std::getenv("VT_XPU_PROFILE"))) {
+  if (ExpectedWorkspaceBytes() != 32u * 1024 * 1024) return;
+  Queue cpu(vt::DeviceType::kCPU), gpu(vt::DeviceType::kXPU);
+  const auto ref = Run(cpu.q, {0, 128}, 6, DType::kF32, true,
+                       0, false, false, DType::kF16);
+  (void)vt::xpu::DrainProfileEvents();
+  const auto got = Run(gpu.q, {0, 128}, 6, DType::kF16, true,
+                       0, false, false, DType::kF16);
+  Accuracy(got.output, ref.output, true);
+  Accuracy(got.state, ref.state);
+  std::map<std::string, size_t> counts;
+  for (const auto& record : vt::xpu::DrainProfileEvents()) ++counts[record.stage];
+  for (const char* stage : {"gdn_chunk_prepare_pair", "gdn_chunk_dots_qk_pair",
+                            "gdn_chunk_system_pair", "gdn_chunk_inverse_blocked_pair",
+                            "gdn_chunk_state_transpose"}) CHECK(counts[stage] == 1);
+  CHECK(counts["gdn_chunk_prepare"] == 0);
+  CHECK(vt::xpu::GetMemoryInfo().gdn_workspace_bytes == ExpectedWorkspaceBytes());
+}
+
 TEST_CASE("XPU GDN chunk64: full output and F32 state against sequential CPU") {
   Queue cpu(vt::DeviceType::kCPU), gpu(vt::DeviceType::kXPU);
   for (bool initial : {false, true}) for (int length : {1, 63, 64, 65, 127, 128, 129}) {
@@ -175,7 +204,7 @@ TEST_CASE("XPU GDN chunk64: full output and F32 state against sequential CPU") {
     const auto got = Run(gpu.q, {0, 129}, 48, dtype, true);
     Accuracy(got.output, ref.output, dtype == DType::kBF16); Accuracy(got.state, ref.state);
   }
-  CHECK(vt::xpu::GetMemoryInfo().gdn_workspace_bytes == 16 * 1024 * 1024);
+  CHECK(vt::xpu::GetMemoryInfo().gdn_workspace_bytes == ExpectedWorkspaceBytes());
   CHECK(vt::GetReferenceTierHits() == 0);
 }
 
@@ -217,7 +246,7 @@ TEST_CASE("XPU GDN chunk64: empty and unequal sequences, long drift, decode cont
   const auto ref = Run(cpu.q, {0, 145}, 6, DType::kF32, true);
   const auto got = Run(gpu.q, {0, 145}, 6, DType::kF32, true, 79);
   Accuracy(got.output, ref.output); Accuracy(got.state, ref.state);
-  CHECK(vt::xpu::GetMemoryInfo().allocated_bytes == 16 * 1024 * 1024);
+  CHECK(vt::xpu::GetMemoryInfo().allocated_bytes == ExpectedWorkspaceBytes());
   CHECK(vt::GetReferenceTierHits() == 0);
 }
 
@@ -235,7 +264,7 @@ TEST_CASE("XPU GDN chunk64: workspace reuse after queue replacement") {
     const auto got = Run(gpu.q, {0, 65}, 6, DType::kF32, true);
     if (!repeat) first = got;
     else { CHECK(got.output == first.output); CHECK(got.state == first.state); }
-    CHECK(vt::xpu::GetMemoryInfo().allocated_bytes == 16 * 1024 * 1024);
+    CHECK(vt::xpu::GetMemoryInfo().allocated_bytes == ExpectedWorkspaceBytes());
   }
 }
 
