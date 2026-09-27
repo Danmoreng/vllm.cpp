@@ -4,6 +4,7 @@
 #include <cstdlib>
 #include <iostream>
 #include <chrono>
+#include <fstream>
 #include <map>
 #include <string_view>
 #include <nlohmann/json.hpp>
@@ -56,6 +57,18 @@ void Accuracy(const std::vector<float>& actual, const std::vector<float>& expect
   CHECK(peak_error <= 2e-6 + (bf16 ? 0.008 : 3e-5) * peak);
 }
 struct Result { std::vector<float> output, state; };
+std::vector<unsigned char> ReplayBytes(const std::string& dir,
+                                       const char* stage, size_t expected) {
+  const std::string path = dir + "/s-1_l0_" + stage + ".bin";
+  std::ifstream file(path, std::ios::binary | std::ios::ate);
+  REQUIRE_MESSAGE(file.is_open(), "missing real GDN replay: ", path);
+  REQUIRE(static_cast<size_t>(file.tellg()) == expected);
+  std::vector<unsigned char> bytes(expected);
+  file.seekg(0);
+  REQUIRE(static_cast<bool>(file.read(reinterpret_cast<char*>(bytes.data()),
+                                      static_cast<std::streamsize>(expected))));
+  return bytes;
+}
 Result Run(vt::Queue& queue, const std::vector<int32_t>& offsets, int heads, DType output_type,
            bool initial, int split = 0, bool public_call = false, bool zero_decay = false,
            DType input_type = DType::kBF16) {
@@ -106,6 +119,62 @@ Result Run(vt::Queue& queue, const std::vector<int32_t>& offsets, int heads, DTy
   }
   return {out.floats(), state.floats()};
 }
+}
+
+TEST_CASE("XPU GDN P4 real GPTQ layer-0 prefill replay"
+          * doctest::skip(!std::getenv("VT_B70_GDN_REPLAY_DIR"))) {
+  const std::string dir = std::getenv("VT_B70_GDN_REPLAY_DIR");
+  Queue gpu(vt::DeviceType::kXPU);
+  auto& q = gpu.q;
+  constexpr int tokens = 4096, key_heads = 16, heads = 48;
+  Buffer qi(q, DType::kF16, {tokens, key_heads, D});
+  Buffer ki(q, DType::kF16, {tokens, key_heads, D});
+  Buffer vi(q, DType::kF16, {tokens, heads, D});
+  Buffer g(q, DType::kF32, {tokens, heads});
+  Buffer beta(q, DType::kF32, {tokens, heads});
+  Buffer state(q, DType::kF32, {1, heads, D, D});
+  Buffer qsl(q, DType::kI32, {2});
+  Buffer out(q, DType::kF16, {tokens, heads, D});
+  qi.upload(ReplayBytes(dir, "q", qi.bytes).data());
+  ki.upload(ReplayBytes(dir, "k", ki.bytes).data());
+  vi.upload(ReplayBytes(dir, "v", vi.bytes).data());
+  g.upload(ReplayBytes(dir, "g", g.bytes).data());
+  beta.upload(ReplayBytes(dir, "beta", beta.bytes).data());
+  state.upload(ReplayBytes(dir, "ssm_state_before", state.bytes).data());
+  qsl.upload(ReplayBytes(dir, "query_start_loc", qsl.bytes).data());
+  vt::GdnPrefill(q, out.tensor, qi.tensor, ki.tensor, vi.tensor, g.tensor,
+                 beta.tensor, state.tensor, qsl.tensor, {0.0883883476f});
+  xpu_test::SameBytes(out.download(), ReplayBytes(dir, "core_out", out.bytes));
+  xpu_test::SameBytes(state.download(), ReplayBytes(dir, "ssm_state_after", state.bytes));
+
+  // The second half starts from the actual state produced by the first half.
+  // A 2048-token split lands exactly on a 64-token GDN chunk boundary.
+  state.upload(ReplayBytes(dir, "ssm_state_before", state.bytes).data());
+  const int32_t half_offsets[2] = {0, tokens / 2};
+  qsl.upload(half_offsets);
+  auto rows = [](vt::Tensor tensor, int begin, int count) {
+    tensor.data = static_cast<char*>(tensor.data) +
+        begin * tensor.stride[0] * vt::SizeOf(tensor.dtype);
+    tensor.shape[0] = count;
+    return tensor;
+  };
+  auto run_half = [&](int begin) {
+    auto o = rows(out.tensor, begin, tokens / 2);
+    auto qh = rows(qi.tensor, begin, tokens / 2);
+    auto kh = rows(ki.tensor, begin, tokens / 2);
+    auto vh = rows(vi.tensor, begin, tokens / 2);
+    auto gh = rows(g.tensor, begin, tokens / 2);
+    auto bh = rows(beta.tensor, begin, tokens / 2);
+    vt::GdnPrefill(q, o, qh, kh, vh, gh, bh, state.tensor, qsl.tensor,
+                   {0.0883883476f});
+  };
+  run_half(0);
+  const auto intermediate = state.download();
+  REQUIRE(std::any_of(intermediate.begin(), intermediate.end(),
+                      [](unsigned char byte) { return byte != 0; }));
+  run_half(tokens / 2);
+  xpu_test::SameBytes(out.download(), ReplayBytes(dir, "core_out", out.bytes));
+  xpu_test::SameBytes(state.download(), ReplayBytes(dir, "ssm_state_after", state.bytes));
 }
 
 TEST_CASE("XPU GDN chunk64: F16 XMX output and F32 state match sequential CPU") {

@@ -1,0 +1,12 @@
+-1	0	conv_cache_before	f16	2	30720	122880	s-1_l0_conv_cache_before.bin
+-1	0	ssm_cache_before	f32	2	786432	6291456	s-1_l0_ssm_cache_before.bin
+-1	0	conv_cache_after	f16	2	30720	122880	s-1_l0_conv_cache_after.bin
+-1	0	q	f16	4096	2048	16777216	s-1_l0_q.bin
+-1	0	k	f16	4096	2048	16777216	s-1_l0_k.bin
+-1	0	v	f16	4096	6144	50331648	s-1_l0_v.bin
+-1	0	g	f32	4096	48	786432	s-1_l0_g.bin
+-1	0	beta	f32	4096	48	786432	s-1_l0_beta.bin
+-1	0	ssm_state_before	f32	1	786432	3145728	s-1_l0_ssm_state_before.bin
+-1	0	query_start_loc	i32	2	1	8	s-1_l0_query_start_loc.bin
+-1	0	core_out	f16	4096	6144	50331648	s-1_l0_core_out.bin
+-1	0	ssm_state_after	f32	1	786432	3145728	s-1_l0_ssm_state_after.bin
