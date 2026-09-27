@@ -40,9 +40,9 @@
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <map>
 #include <memory>
-#include <optional>
 #include <random>
 #include <stdexcept>
 #include <string>
@@ -54,9 +54,7 @@
 #include <nlohmann/json.hpp>
 
 #include "vllm/config/speculative.h"
-#include "vllm/entrypoints/chat_template.h"
 #include "vllm/entrypoints/model_loader.h"
-#include "vllm/entrypoints/openai/protocol.h"
 #include "vllm/model_executor/models/qwen3_5_weights.h"
 #include "vllm/outputs.h"
 #include "vllm/sampling_params.h"
@@ -65,12 +63,52 @@
 #include "vllm/transformers_utils/hf_config.h"
 #include "vllm/v1/engine/async_llm.h"
 #include "vllm/v1/engine/llm_engine.h"
-#include "vllm/v1/kv_cache_interface.h"
 #include "vt/dtype.h"
-#include "vt/fp8_kv.h"
 #include "vt/tensor.h"
 
 namespace vllm::bench {
+
+enum class OutputWaitMode {
+  kPoll,
+  kBlockingC1,
+};
+
+#ifdef VLLM_BENCH_TEST_OUTPUT_WAIT_TRACE
+// Test-only observation seam. Production benchmark translation units do not
+// define VLLM_BENCH_TEST_OUTPUT_WAIT_TRACE, so tracing adds no state or work to
+// the measured loop.
+enum class OutputWaitTestEvent {
+  kNowaitReady,
+  kNowaitEmpty,
+  kBlockingWait,
+};
+
+// Runtime probe controls used only by test_bench. The seeded collector value is
+// input to the real AsyncLLM method; the observer below runs only after that
+// method has returned, so neither control can replace the production call.
+struct OutputWaitTestProbe {
+  bool seed_first_collector = false;
+  bool stop_after_first_nowait = false;
+};
+#endif
+
+inline const char* OutputWaitModeName(OutputWaitMode mode) {
+  switch (mode) {
+    case OutputWaitMode::kPoll:
+      return "poll";
+    case OutputWaitMode::kBlockingC1:
+      return "blocking-c1";
+  }
+  throw std::invalid_argument("unknown benchmark output wait mode");
+}
+
+inline OutputWaitMode ParseOutputWaitMode(std::string_view name) {
+  if (name == "poll") return OutputWaitMode::kPoll;
+  if (name == "blocking-c1") return OutputWaitMode::kBlockingC1;
+  throw std::invalid_argument("unknown benchmark output wait '" +
+                              std::string(name) +
+                              "' (expected poll or blocking-c1)");
+}
 
 // ── Config (mirrors the `vllm bench throughput` / `serve` knobs we support) ────
 struct BenchConfig {
@@ -81,6 +119,10 @@ struct BenchConfig {
   std::string dataset_path;
   // Optional JSON output path containing generated IDs in submission order.
   std::string output_token_ids_path;
+  // Optional structured result artifact. This is separate from
+  // output_token_ids_path so the established array-only token fixture stays
+  // byte-compatible.
+  std::string output_json_path;
   // Optional speculative-decoding config JSON, e.g.
   // '{"method":"mtp","num_speculative_tokens":1}'. Empty => spec decode OFF
   // (production non-spec path, byte-identical to pre-existing runs). Parsed via
@@ -91,6 +133,14 @@ struct BenchConfig {
   int input_len = 16;      // L: target prompt tokens per request.
   int output_len = 16;     // O: max_tokens per request (greedy => exactly O).
   int concurrency = 4;     // C: max in-flight requests admitted to the engine.
+  // `poll` preserves the production benchmark's scan+yield loop. The
+  // concurrency-1-only `blocking-c1` control performs the same nowait probe,
+  // then blocks on the sole collector so Pi measurements can isolate polling.
+  OutputWaitMode output_wait = OutputWaitMode::kPoll;
+#ifdef VLLM_BENCH_TEST_OUTPUT_WAIT_TRACE
+  std::vector<OutputWaitTestEvent>* output_wait_test_trace = nullptr;
+  OutputWaitTestProbe output_wait_test_probe;
+#endif
   uint64_t seed = 0;       // prompt-generation RNG seed.
   double temperature = 0;  // <= 0 => greedy (deterministic).
   bool quiet = false;      // suppress per-progress logging to stderr.
@@ -106,43 +156,6 @@ struct BenchConfig {
   // (chunked-prefill-bounded) per-step activation. Setting it to just enough for
   // C concurrent (input+output)-long sequences keeps peak RAM bounded.
   int num_blocks = 0;
-  // KV-FP8 W7 (#2619): vLLM's `CacheConfig.cache_dtype` (config/cache.py:19-36,76),
-  // spelled `--kv-cache-dtype` on this harness exactly as on `vllm-server` and
-  // `vllm-cli`. "auto" is the default and is byte-identical to before the flag
-  // existed. The string is passed to the engine VERBATIM: `vllm::v1::
-  // ParseCacheDType` is the one place a CacheDType name is accepted or refused,
-  // and a benchmark client that re-listed the legal names would be a second
-  // spelling of that contract, free to drift from it.
-  std::string kv_cache_dtype = "auto";
-  // #2759: EOS polarity. `MakeSampling` hardcoded `sp.ignore_eos = true`, so no
-  // request this harness has ever admitted could terminate naturally, and no
-  // report said so. Spelled `--ignore-eos` exactly as vLLM's own benchmark
-  // client (`vllm/benchmarks/serve.py:1757-1762` @ `e126687a9`) and negated as
-  // `--no-ignore-eos` under this tree's own convention (`server_main.cpp`'s
-  // `--no-enable-thinking`; `scripts/nemotron-h-oracle-capture.py:617` already
-  // spells this exact pair). The DEFAULT is true, which is the previous
-  // behavior byte for byte: every landed figure was measured with EOS
-  // suppressed, and flipping the default would change what those numbers mean
-  // without re-measuring one of them.
-  bool ignore_eos = true;
-  // #2759: chat-template polarity. `--skip-chat-template` from
-  // `vllm/benchmarks/datasets/datasets.py:1654-1658`, same negation, same
-  // default-preserving polarity: true sends the raw prompt string, which is
-  // what this harness has always done. The comparator for
-  // `BENCH-QWEN38-27B-SOTA` posts to `/v1/chat/completions`, so its protocol
-  // cannot be matched without the other setting.
-  bool skip_chat_template = true;
-  // #2759: the template SOURCE -- a file path, or the template itself in
-  // single-line form. `vllm/entrypoints/launchers/cli_args.py:80-82` verbatim.
-  // Empty selects the model's own template through `LoadChatTemplateForModel`,
-  // the identical selection path `server_main.cpp` uses.
-  std::string chat_template;
-  // #2759: the SERVER-level `chat_template_kwargs` default, spelled
-  // `--enable-thinking` / `--no-enable-thinking` exactly as `server_main.cpp`
-  // and resolved by the same rule (`DefaultChatTemplateKwargs`). Unset leaves
-  // `enable_thinking` Jinja-undefined, which is NOT the same as false (#1681),
-  // and the comparator sends false.
-  std::optional<bool> enable_thinking;
 };
 
 // ── Per-request timing record (client-side, exactly what serve.py records). ────
@@ -171,6 +184,10 @@ struct BenchResult {
   // result so a benchmark artifact cannot silently mix frontend modes.
   bool pretokenized_admission = false;
   int max_concurrent_batches = 1;
+  OutputWaitMode output_wait = OutputWaitMode::kPoll;
+  // Number of calls made to AsyncLLM::get_output after a failed nowait probe.
+  // This proves a blocking-c1 artifact actually exercised its control path.
+  int64_t blocking_wait_calls = 0;
   int completed = 0;
   double duration_s = 0.0;
   int64_t total_input = 0;
@@ -204,47 +221,7 @@ struct BenchResult {
   bool spec_on = false;
   int64_t spec_proposed = 0;
   int64_t spec_accepted = 0;
-  // KV-FP8 W7 (#2619): the KV storage dtype the loader ACTUALLY sized blocks
-  // from, read back out of `LoadedEngine::kv_cache_config()` rather than echoed
-  // from the flag. The two differ whenever the checkpoint declares
-  // `kv_cache_quant_algo` and no flag was typed -- `FromModelDir` honours the
-  // declaration, so a report that echoed the flag would print "auto" over an
-  // fp8 measurement. Reading the spec back means this line cannot drift from
-  // the allocation, because it IS the allocation.
-  std::string resolved_kv_cache_dtype = "unknown";
-  // #2759: what the run actually did, beside what it was asked to do. The EOS
-  // value is read back out of the `SamplingParams` object `MakeSampling` builds
-  // for an admitted request rather than copied from the config, for the same
-  // reason `resolved_kv_cache_dtype` is read back out of the cache the loader
-  // sized: a report that echoes the request cannot detect a flag that parses
-  // and is then dropped, which is exactly the defect #2759 names.
-  bool resolved_ignore_eos = true;
-  std::string resolved_chat_template = "skipped (raw prompt)";
-  std::string resolved_chat_template_kwargs = "{}";
 };
-
-// KV-FP8 W7 (#2619): name the KV storage dtype of a RESOLVED KV cache config.
-// `vt::Name` alone would print "i8" for an fp8 page, which is the storage width
-// and not the thing a published number has to state; the fp8 interpretation on
-// the same spec is what says which fp8. Returns "unknown" for a config with no
-// attention group (a pure recurrent model allocates no paged KV).
-inline std::string ResolvedKvCacheDTypeName(const vllm::v1::KVCacheConfig& cfg) {
-  for (const auto& group : cfg.kv_cache_groups) {
-    const auto* attn =
-        dynamic_cast<const vllm::v1::AttentionSpec*>(group.kv_cache_spec.get());
-    if (attn == nullptr) continue;
-    switch (attn->fp8_kind) {
-      case vt::Fp8KVCacheDataType::kFp8E4M3:
-        return "fp8_e4m3 (1-byte pages)";
-      case vt::Fp8KVCacheDataType::kFp8E5M2:
-        return "fp8_e5m2 (1-byte pages)";
-      case vt::Fp8KVCacheDataType::kAuto:
-        break;
-    }
-    return vt::Name(attn->dtype);
-  }
-  return "unknown (no attention KV group)";
-}
 
 // ── numpy-style linear-interpolation percentile (matches np.percentile). ───────
 inline double Percentile(std::vector<double> v, double p) {
@@ -592,66 +569,16 @@ inline SamplingParams MakeSampling(const BenchConfig& cfg, int req_index) {
   SamplingParams sp;
   sp.temperature = cfg.temperature;  // <= 0 => greedy.
   sp.max_tokens = cfg.output_len;
-  // #2759: the EOS polarity is now a SETTING, and its default is the fixed-length
-  // workload this line used to hardcode: generate EXACTLY output_len tokens
-  // (never stop early on EOS), so throughput/latency are measured on the
-  // intended token budget and match `vllm bench serve --ignore-eos`
-  // apples-to-apples, and the documented "greedy => exactly O" contract holds.
-  // `--no-ignore-eos` gives up that contract deliberately, which is what a
-  // chat-completions comparator's protocol requires
-  // (`vllm/benchmarks/serve.py:1757-1762`, default false upstream).
-  sp.ignore_eos = cfg.ignore_eos;
+  // Fixed-length workload: generate EXACTLY output_len tokens (never stop early
+  // on EOS), so throughput/latency are measured on the intended token budget and
+  // match `vllm bench serve --ignore-eos` apples-to-apples. This makes the
+  // harness's documented "greedy => exactly O" contract actually hold.
+  sp.ignore_eos = true;
   sp.output_kind = RequestOutputKind::kDelta;  // observe TTFT/ITL like a client.
   if (cfg.temperature > 0.0) {
     sp.seed = static_cast<int64_t>(cfg.seed + static_cast<uint64_t>(req_index));
   }
   return sp;
-}
-
-// #2759: resolve the chat-template SOURCE the way the server does, and say
-// where it came from. `--chat-template` names a file OR carries the template
-// itself in single-line form (`vllm/entrypoints/launchers/cli_args.py:80-82` @
-// `e126687a9`); with neither, the model's own template is loaded through
-// `LoadChatTemplateForModel`, the identical selection path `server_main.cpp`
-// uses (tokenizer_config.json first, then a `.gguf`'s `tokenizer.chat_template`
-// metadata).
-//
-// Every failure here THROWS rather than falling back to the role-join prompt
-// the server falls back to. A served model must answer something. A benchmark
-// that silently measured a different prompt shape than the one requested is
-// worse than one that stops, because the number it prints is publishable and
-// wrong.
-inline std::string ResolveBenchChatTemplate(const BenchConfig& cfg,
-                                            std::string& source) {
-  if (!cfg.chat_template.empty()) {
-    std::error_code ec;
-    if (std::filesystem::is_regular_file(cfg.chat_template, ec)) {
-      std::ifstream in(cfg.chat_template, std::ios::binary);
-      if (!in) {
-        throw std::runtime_error("cannot read the chat template file: " +
-                                 cfg.chat_template);
-      }
-      const std::string body((std::istreambuf_iterator<char>(in)),
-                             std::istreambuf_iterator<char>());
-      source = "--chat-template file " + cfg.chat_template;
-      return body;
-    }
-    source = "--chat-template literal";
-    return cfg.chat_template;
-  }
-  if (cfg.model_path.empty()) {
-    throw std::runtime_error(
-        "--no-skip-chat-template needs a chat template, and the synthetic "
-        "engine (no --model) ships none: pass --chat-template <file or "
-        "single-line template>, or --model a checkpoint that carries one");
-  }
-  const std::filesystem::path dir(cfg.model_path);
-  std::string template_source;
-  std::string body = vllm::entrypoints::LoadChatTemplateForModel(
-      (dir / "tokenizer_config.json").string(), cfg.model_path,
-      template_source);
-  source = template_source;
-  return body;
 }
 
 // ─────────────────────────────── The harness ──────────────────────────────────
@@ -664,14 +591,9 @@ inline std::string ResolveBenchChatTemplate(const BenchConfig& cfg,
 inline BenchResult RunBench(const BenchConfig& cfg) {
   using Clock = std::chrono::steady_clock;
 
-  // #2759: refuse a flag that would be silently ignored. Accepting
-  // `--chat-template` while the template is skipped would reproduce, inside the
-  // fix, the exact defect the issue names: a setting that parses, is dropped,
-  // and leaves a report that looks like it was honoured.
-  if (cfg.skip_chat_template && !cfg.chat_template.empty()) {
-    throw std::runtime_error(
-        "--chat-template was given but the chat template is skipped; pass "
-        "--no-skip-chat-template to apply it");
+  if (cfg.output_wait == OutputWaitMode::kBlockingC1 && cfg.concurrency != 1) {
+    throw std::invalid_argument(
+        "benchmark output wait 'blocking-c1' requires --concurrency 1");
   }
 
   std::unique_ptr<vllm::entrypoints::LoadedEngine> loaded;
@@ -697,22 +619,11 @@ inline BenchResult RunBench(const BenchConfig& cfg) {
           std::max(max_prompt, static_cast<int>(tok.Encode(prompt).size()));
     }
     const int seq_budget = max_prompt + cfg.output_len + 4;
-    // The engine-level attention backends (FLASH_ATTN / ROCM_ATTN
-    // get_kv_cache_shape) enforce block_size % 16 == 0 and the runner
-    // validates at init, so round the unified block up to a multiple of 16 —
-    // one block must still fit a full sequence (block >= seq_budget).
-    const int block = (seq_budget + 15) / 16 * 16;
     vllm::entrypoints::EngineParams params;
-    params.block_size = block;   // unified block (hybrid-KV constraint), %16.
+    params.block_size = seq_budget;   // unified block (hybrid-KV constraint).
     params.max_model_len = seq_budget;
     params.max_num_seqs = std::max(cfg.concurrency, 1);
     params.num_blocks = std::max(cfg.concurrency * 4, 16);
-    // KV-FP8 W7 (#2619): the synthetic arm takes the flag too. Not symmetry --
-    // the synthetic model is a Qwen3.5-MoE, whose attention block W3 routed, so
-    // this is what lets `--kv-cache-dtype fp8` allocate 1-byte pages and decode
-    // through them with no checkpoint and no device. The direct constructor
-    // takes the value verbatim: there is no model directory to resolve against.
-    params.kv_cache_dtype = cfg.kv_cache_dtype;
     HfConfig c = detail::MakeSyntheticConfig(seq_budget);
     vllm::Qwen3_5MoeWeights w = detail::MakeSyntheticWeights(c);
     loaded = std::make_unique<vllm::entrypoints::LoadedEngine>(
@@ -729,12 +640,6 @@ inline BenchResult RunBench(const BenchConfig& cfg) {
                             : std::max(cfg.concurrency * seq_blocks * 2, 256);
     // Chunked-prefill per-step budget (0 => engine bounded default).
     params.max_num_batched_tokens = cfg.max_num_batched_tokens;
-    // KV-FP8 W7 (#2619): `--kv-cache-dtype` reaches the engine. FromModelDir
-    // resolves it against the checkpoint's own `kv_cache_quant_algo` before any
-    // consumer reads it, and an explicit value always wins (torch_utils.py:
-    // 380-381), so the harness hands over the raw string and reads the OUTCOME
-    // back out of kv_cache_config() below.
-    params.kv_cache_dtype = cfg.kv_cache_dtype;
     // Speculative decoding (MTP): OFF unless a config JSON is supplied. When
     // set, resolve the CLI method here; FromModelDir loads the mtp.* head and
     // wires the verify/propose loop (spec-OFF path is byte-unchanged).
@@ -750,40 +655,6 @@ inline BenchResult RunBench(const BenchConfig& cfg) {
             cfg.seed + static_cast<uint64_t>(i)));
       }
     }
-  }
-
-  // #2759: the chat-template render, in ONE place and BEFORE any tokenization,
-  // so both admission paths -- the pretokenized default and the
-  // `VT_BENCH_PRETOKENIZE=0` timed-string path -- carry the identical rendered
-  // prompt and the prompt-token accounting reflects it. One user message,
-  // `add_generation_prompt=true`, no tools:
-  // `vllm/benchmarks/datasets/datasets.py:2610-2615` @ `e126687a9` exactly. The
-  // per-request kwargs object is empty because a benchmark has no per-request
-  // kwargs; `enable_thinking` rides the SERVER-level default, which is where
-  // `server_main.cpp` puts it too.
-  std::string resolved_chat_template = "skipped (raw prompt)";
-  const nlohmann::ordered_json chat_template_kwargs =
-      vllm::entrypoints::DefaultChatTemplateKwargs(cfg.enable_thinking);
-  if (!cfg.skip_chat_template) {
-    std::string source;
-    const std::string template_str = ResolveBenchChatTemplate(cfg, source);
-    const tok::Tokenizer& tokenizer = loaded->tokenizer();
-    const std::string bos =
-        tokenizer.BosId() >= 0 ? tokenizer.Decode({tokenizer.BosId()}) : "";
-    const std::string eos =
-        tokenizer.EosId() >= 0 ? tokenizer.Decode({tokenizer.EosId()}) : "";
-    const vllm::entrypoints::openai::ChatPromptFn prompt_fn =
-        vllm::entrypoints::MakeChatTemplatePromptFn(template_str, bos, eos,
-                                                    chat_template_kwargs);
-    for (std::string& prompt : prompts) {
-      prompt = prompt_fn(
-          {vllm::entrypoints::openai::ChatMessage{"user", prompt}},
-          /*add_generation_prompt=*/true, /*tools=*/{},
-          nlohmann::ordered_json::object());
-    }
-    resolved_chat_template = "applied (" +
-                             std::to_string(template_str.size()) +
-                             " chars) from " + source;
   }
 
   vllm::v1::AsyncLLM& engine = loaded->async_engine();
@@ -809,6 +680,7 @@ inline BenchResult RunBench(const BenchConfig& cfg) {
   int next = 0;       // next prompt index to submit.
   int in_flight = 0;  // requests currently admitted + unfinished.
   int done = 0;
+  int64_t blocking_wait_calls = 0;
 
   auto admit = [&]() {
     const int available = cfg.concurrency - in_flight;
@@ -863,53 +735,100 @@ inline BenchResult RunBench(const BenchConfig& cfg) {
     in_flight += wave_size;
   };
 
+  auto consume_output = [&](auto it, RequestOutput out) {
+    RequestRecord& rec = records[out.request_id];
+    if (rec.prompt_tokens == 0 && !out.prompt_token_ids.empty()) {
+      rec.prompt_tokens = static_cast<int>(out.prompt_token_ids.size());
+      rec.prompt_token_ids = out.prompt_token_ids;
+    }
+    if (!out.outputs.empty() && !out.outputs[0].token_ids.empty()) {
+      const double t = now_s();
+      const int n_new = static_cast<int>(out.outputs[0].token_ids.size());
+      if (rec.first_token_s < 0.0) {
+        rec.first_token_s = t;  // TTFT reference.
+      } else {
+        rec.itls.push_back(t - rec.last_token_s);  // one ITL per chunk.
+      }
+      rec.last_token_s = t;
+      rec.output_tokens += n_new;
+      rec.output_token_ids.insert(rec.output_token_ids.end(),
+                                  out.outputs[0].token_ids.begin(),
+                                  out.outputs[0].token_ids.end());
+    }
+    if (out.finished && !rec.finished) {
+      rec.finished = true;
+      rec.completion_s = now_s();
+      --in_flight;
+      ++done;
+      return active.erase(it);
+    }
+    return std::next(it);
+  };
+
   admit();
+#ifdef VLLM_BENCH_TEST_OUTPUT_WAIT_TRACE
+  if (cfg.output_wait_test_probe.seed_first_collector) {
+    if (active.size() != 1 || active.begin()->second.collector == nullptr) {
+      throw std::logic_error(
+          "nowait runtime probe requires exactly one active collector");
+    }
+    RequestOutput seeded;
+    seeded.request_id = active.begin()->first;
+    active.begin()->second.collector->put(std::move(seeded));
+  }
+#endif
   while (done < cfg.num_prompts) {
     bool observed_output = false;
     for (auto it = active.begin(); it != active.end();) {
-      std::optional<RequestOutput> ready = engine.get_output_nowait(it->second);
+      // Keep this evaluation unconditional: test instrumentation observes the
+      // already-evaluated value below and cannot replace the production call.
+      std::optional<RequestOutput> ready =
+          engine.get_output_nowait(it->second);
+#ifdef VLLM_BENCH_TEST_OUTPUT_WAIT_TRACE
+      if (cfg.output_wait_test_trace != nullptr) {
+        cfg.output_wait_test_trace->push_back(
+            ready.has_value() ? OutputWaitTestEvent::kNowaitReady
+                              : OutputWaitTestEvent::kNowaitEmpty);
+      }
+      if (cfg.output_wait_test_probe.stop_after_first_nowait) {
+        throw std::logic_error(
+            ready.has_value() ? "nowait runtime probe observed seeded output"
+                              : "nowait runtime probe missed seeded output");
+      }
+#endif
       if (!ready.has_value()) {
         ++it;
         continue;
       }
       observed_output = true;
-      RequestOutput& out = *ready;
-      RequestRecord& rec = records[out.request_id];
-      if (rec.prompt_tokens == 0 && !out.prompt_token_ids.empty()) {
-        rec.prompt_tokens = static_cast<int>(out.prompt_token_ids.size());
-        rec.prompt_token_ids = out.prompt_token_ids;
-      }
-      if (!out.outputs.empty() && !out.outputs[0].token_ids.empty()) {
-        const double t = now_s();
-        const int n_new = static_cast<int>(out.outputs[0].token_ids.size());
-        if (rec.first_token_s < 0.0) {
-          rec.first_token_s = t;  // TTFT reference.
-        } else {
-          rec.itls.push_back(t - rec.last_token_s);  // one ITL per chunk.
+      it = consume_output(it, std::move(*ready));
+    }
+    if (!observed_output) {
+      if (cfg.output_wait == OutputWaitMode::kBlockingC1) {
+        // Validation above guarantees the sole active collector is also the
+        // sole admitted request. The scan already performed the required
+        // nowait probe, matching AsyncLLM::generate before this blocking wait.
+        if (active.size() != 1) {
+          throw std::logic_error(
+              "blocking-c1 benchmark must have exactly one active request");
         }
-        rec.last_token_s = t;
-        rec.output_tokens += n_new;
-        rec.output_token_ids.insert(rec.output_token_ids.end(),
-                                    out.outputs[0].token_ids.begin(),
-                                    out.outputs[0].token_ids.end());
-      }
-      if (out.finished && !rec.finished) {
-        rec.finished = true;
-        rec.completion_s = now_s();
-        --in_flight;
-        ++done;
-        it = active.erase(it);
+        auto it = active.begin();
+#ifdef VLLM_BENCH_TEST_OUTPUT_WAIT_TRACE
+        if (cfg.output_wait_test_trace != nullptr) {
+          cfg.output_wait_test_trace->push_back(
+              OutputWaitTestEvent::kBlockingWait);
+        }
+#endif
+        ++blocking_wait_calls;
+        it = consume_output(it, engine.get_output(it->second));
+        (void)it;
       } else {
-        ++it;
+        // Exact historical policy: yield rather than block on an arbitrary
+        // request, which could delay a ready peer at concurrency greater than 1.
+        std::this_thread::yield();
       }
     }
     admit();  // keep C in flight as requests finish.
-    if (!observed_output) {
-      // The output-handler thread will publish the next per-request DELTA.
-      // Yield rather than block on an arbitrary request: blocking on one
-      // collector can delay ready outputs for other requests and distort ITL.
-      std::this_thread::yield();
-    }
   }
 
   const double dur_s = now_s();
@@ -941,14 +860,8 @@ inline BenchResult RunBench(const BenchConfig& cfg) {
   res.async_scheduling_enabled = loaded->async_scheduling_enabled();
   res.pretokenized_admission = pretokenized_admission;
   res.max_concurrent_batches = loaded->max_concurrent_batches();
-  res.resolved_kv_cache_dtype = ResolvedKvCacheDTypeName(loaded->kv_cache_config());
-  // #2759: read the EOS setting back out of `MakeSampling`, the one function
-  // both admission paths call to build a request's `SamplingParams`. Reading
-  // `cfg.ignore_eos` here instead would make the report a transcription of the
-  // request and blind to the pass-through being deleted.
-  res.resolved_ignore_eos = MakeSampling(cfg, 0).ignore_eos;
-  res.resolved_chat_template = resolved_chat_template;
-  res.resolved_chat_template_kwargs = chat_template_kwargs.dump();
+  res.output_wait = cfg.output_wait;
+  res.blocking_wait_calls = blocking_wait_calls;
   res.prompt_token_ids.resize(static_cast<size_t>(cfg.num_prompts));
   res.output_token_ids.resize(static_cast<size_t>(cfg.num_prompts));
   res.completed = done;
@@ -1008,6 +921,32 @@ inline void WriteOutputTokenIds(const std::string& path,
   out << nlohmann::json(result.output_token_ids).dump() << '\n';
 }
 
+inline nlohmann::json ResultJson(const BenchConfig& cfg,
+                                 const BenchResult& result) {
+  return {{"output_wait", OutputWaitModeName(result.output_wait)},
+          {"blocking_wait_calls", result.blocking_wait_calls},
+          {"concurrency", cfg.concurrency},
+          {"completed", result.completed},
+          {"duration_s", result.duration_s},
+          {"total_input", result.total_input},
+          {"total_output", result.total_output},
+          {"request_throughput", result.request_throughput},
+          {"output_throughput", result.output_throughput},
+          {"prefill_throughput", result.prefill_throughput},
+          {"mean_per_stream_decode", result.mean_per_stream_decode},
+          {"mean_ttft_ms", result.mean_ttft_ms},
+          {"mean_tpot_ms", result.mean_tpot_ms},
+          {"mean_e2el_ms", result.mean_e2el_ms},
+          {"output_token_ids", result.output_token_ids}};
+}
+
+inline void WriteResultJson(const std::string& path, const BenchConfig& cfg,
+                            const BenchResult& result) {
+  std::ofstream out(path);
+  if (!out) throw std::runtime_error("cannot write benchmark JSON: " + path);
+  out << ResultJson(cfg, result).dump() << '\n';
+}
+
 // Print the summary table, mirroring serve.py's "Serving Benchmark Result"
 // block + our prefill/decode split. Fixed-width columns like serve.py
 // ("{:<40} {:<10.2f}").
@@ -1019,9 +958,6 @@ inline void PrintReport(const BenchConfig& cfg, const BenchResult& r,
   auto line_f = [&](const char* label, double v) {
     std::fprintf(out, "%-42s %-12.2f\n", label, v);
   };
-  auto line_s = [&](const char* label, const char* v) {
-    std::fprintf(out, "%-42s %s\n", label, v);
-  };
   auto sep = [&](const char* title) {
     std::fprintf(out, "%.*s %s %.*s\n", 8,
                  "----------------------------------------", title, 8,
@@ -1031,25 +967,12 @@ inline void PrintReport(const BenchConfig& cfg, const BenchResult& r,
   std::fprintf(out, "\n============= vllm.cpp Benchmark Result =============\n");
   std::fprintf(out, "%-42s %-12s\n", "Engine frontend:",
                r.async_frontend ? "AsyncLLM" : "LLMEngine");
+  std::fprintf(out, "%-42s %-12s\n", "Output wait:",
+               OutputWaitModeName(r.output_wait));
+  line_i("Blocking wait calls:",
+         static_cast<long long>(r.blocking_wait_calls));
   line_i("Async scheduling enabled:", r.async_scheduling_enabled ? 1 : 0);
   line_i("Pretokenized prompt admission:", r.pretokenized_admission ? 1 : 0);
-  // KV-FP8 W7 (#2619): a published number states the KV dtype it was measured
-  // on. Two lines, because they answer different questions and can disagree:
-  // the first is what the operator asked for, the second is what the loader
-  // sized -- and a checkpoint declaring kv_cache_quant_algo makes the second
-  // fp8 while the first still reads "auto".
-  line_s("KV cache dtype (requested):", cfg.kv_cache_dtype.c_str());
-  line_s("KV cache dtype (resolved storage):", r.resolved_kv_cache_dtype.c_str());
-  // #2759: a benchmark that does not say whether it stopped on EOS is not
-  // reproducible, and every figure this harness published before now was taken
-  // with EOS suppressed without saying so. Two lines for the same reason the KV
-  // pair above has two: the first is what the operator asked for, the second is
-  // read back out of the `SamplingParams` the admission path builds, and only
-  // the second can disagree with the flag.
-  line_i("Ignore EOS (requested):", cfg.ignore_eos ? 1 : 0);
-  line_i("Ignore EOS (resolved sampling):", r.resolved_ignore_eos ? 1 : 0);
-  line_s("Chat template:", r.resolved_chat_template.c_str());
-  line_s("Chat template kwargs:", r.resolved_chat_template_kwargs.c_str());
   line_i("Maximum concurrent batches:", r.max_concurrent_batches);
   line_i("Successful requests:", r.completed);
   line_i("Maximum request concurrency:", cfg.concurrency);

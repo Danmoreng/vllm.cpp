@@ -12,12 +12,8 @@
 //   vllm-bench [--model <dir|.gguf>] [--dataset-path <sharegpt.json>]
 //              [--num-prompts N] [--input-len L]
 //              [--output-len O] [--concurrency C] [--seed S]
-//              [--temperature T] [--output-token-ids <json>]
-//              [--kv-cache-dtype auto|bfloat16|fp8|fp8_e4m3]
-//              [--ignore-eos | --no-ignore-eos]
-//              [--skip-chat-template | --no-skip-chat-template]
-//              [--chat-template <file or single-line template>]
-//              [--enable-thinking | --no-enable-thinking]
+//              [--temperature T] [--output-wait poll|blocking-c1]
+//              [--output-token-ids <json>] [--output-json <json>]
 //
 // With NO --model it builds a SYNTHETIC tiny CPU engine so the harness runs on
 // the dev box (toy weights => meaningless numbers; the point is the harness).
@@ -51,29 +47,15 @@ void Usage(const char* argv0, std::FILE* out) {
       "          [--output-len O] [--concurrency C] [--seed S]\n"
       "          [--temperature T] [--max-num-batched-tokens B]\n"
       "          [--output-token-ids <json>]\n"
+      "          [--output-json <json>]\n"
+      "          [--output-wait poll|blocking-c1]\n"
       "          [--speculative-config <json>]\n"
-      "          [--kv-cache-dtype auto|bfloat16|fp8|fp8_e4m3]\n"
-      "          [--ignore-eos | --no-ignore-eos]\n"
-      "          [--skip-chat-template | --no-skip-chat-template]\n"
-      "          [--chat-template <file or single-line template>]\n"
-      "          [--enable-thinking | --no-enable-thinking]\n"
       "\n"
       "Throughput/latency benchmark over the vllm.cpp V1 AsyncLLM, mirroring\n"
       "`vllm bench serve` metrics. With no --model, a synthetic CPU engine runs\n"
       "(numbers meaningless; smoke only). Defaults: --num-prompts 8 "
       "--input-len 16\n"
-      "--output-len 16 --concurrency 4 --seed 0 --temperature 0 (greedy)\n"
-      "--kv-cache-dtype auto. The KV dtype is printed in the report header, so a\n"
-      "published number states the cache it was measured on.\n"
-      "\n"
-      "#2759: --ignore-eos (default) runs every request to exactly --output-len,\n"
-      "which is what every landed figure was measured with; --no-ignore-eos lets\n"
-      "a request stop where the model would have stopped, which is what a\n"
-      "/v1/chat/completions comparator measures. --skip-chat-template (default)\n"
-      "sends the raw prompt; --no-skip-chat-template renders one user message\n"
-      "through the model's own template, or through --chat-template. Both\n"
-      "settings are printed in the report header, so a published number states\n"
-      "its stopping rule and its prompt shape.\n",
+      "--output-len 16 --concurrency 4 --seed 0 --temperature 0 (greedy).\n",
       argv0);
 }
 
@@ -107,45 +89,23 @@ bool ParseArgs(int argc, char** argv, BenchConfig& cfg, int& exit_code) {
       cfg.temperature = std::atof(NextArg(argc, argv, i));
     } else if (flag == "--output-token-ids") {
       cfg.output_token_ids_path = NextArg(argc, argv, i);
+    } else if (flag == "--output-json") {
+      cfg.output_json_path = NextArg(argc, argv, i);
+    } else if (flag == "--output-wait") {
+      try {
+        cfg.output_wait =
+            vllm::bench::ParseOutputWaitMode(NextArg(argc, argv, i));
+      } catch (const std::invalid_argument& e) {
+        std::fprintf(stderr, "vllm-bench: %s\n", e.what());
+        exit_code = 2;
+        return false;
+      }
     } else if (flag == "--max-num-batched-tokens") {
       cfg.max_num_batched_tokens = std::atoi(NextArg(argc, argv, i));
     } else if (flag == "--num-blocks") {
       cfg.num_blocks = std::atoi(NextArg(argc, argv, i));
     } else if (flag == "--speculative-config") {
       cfg.speculative_config = NextArg(argc, argv, i);
-    } else if (flag == "--ignore-eos") {
-      // #2759. The NAME is vLLM's (`vllm/benchmarks/serve.py:1757-1762`, where
-      // it is `store_true`); the `--no-` negation is this tree's
-      // (`server_main.cpp` `--no-enable-thinking`). Both arms exist even though
-      // one restates the default, because a recipe that states its stopping
-      // rule explicitly is the point of the flag.
-      cfg.ignore_eos = true;
-    } else if (flag == "--no-ignore-eos") {
-      cfg.ignore_eos = false;
-    } else if (flag == "--skip-chat-template") {
-      // #2759. Name from `vllm/benchmarks/datasets/datasets.py:1654-1658`.
-      cfg.skip_chat_template = true;
-    } else if (flag == "--no-skip-chat-template") {
-      cfg.skip_chat_template = false;
-    } else if (flag == "--chat-template") {
-      // #2759. "The file path to the chat template, or the template in
-      // single-line form" -- `vllm/entrypoints/launchers/cli_args.py:80-82`.
-      // Taken VERBATIM: `ResolveBenchChatTemplate` owns the file-or-literal
-      // decision, and a second copy of it here could only ever drift.
-      cfg.chat_template = NextArg(argc, argv, i);
-    } else if (flag == "--enable-thinking") {
-      // #2759. `server_main.cpp`'s spelling and `DefaultChatTemplateKwargs`'s
-      // rule: UNSET is not false, and only unset leaves `enable_thinking`
-      // Jinja-undefined (#1681).
-      cfg.enable_thinking = true;
-    } else if (flag == "--no-enable-thinking") {
-      cfg.enable_thinking = false;
-    } else if (flag == "--kv-cache-dtype") {
-      // KV-FP8 W7 (#2619). Mirrors server_main.cpp and examples/cli/main.cpp:
-      // take the raw string, validate NOTHING here. `vllm::v1::ParseCacheDType`
-      // owns the accepted set and refuses an unknown name BY NAME; a second
-      // copy of that list in a benchmark client could only ever drift from it.
-      cfg.kv_cache_dtype = NextArg(argc, argv, i);
     } else if (flag == "-h" || flag == "--help") {
       Usage(argv[0], stdout);
       exit_code = 0;
@@ -165,6 +125,14 @@ bool ParseArgs(int argc, char** argv, BenchConfig& cfg, int& exit_code) {
     exit_code = 2;
     return false;
   }
+  if (cfg.output_wait == vllm::bench::OutputWaitMode::kBlockingC1 &&
+      cfg.concurrency != 1) {
+    std::fprintf(stderr,
+                 "vllm-bench: benchmark output wait 'blocking-c1' requires "
+                 "--concurrency 1\n");
+    exit_code = 2;
+    return false;
+  }
   return true;
 }
 
@@ -180,23 +148,22 @@ int main(int argc, char** argv) {
   std::fprintf(stderr,
                "vllm-bench: %s engine | num_prompts=%d input_len=%d "
                "output_len=%d concurrency=%d seed=%llu temp=%.2f dataset=%s "
-               "kv_cache_dtype=%s ignore_eos=%d chat_template=%s\n",
+               "output_wait=%s\n",
                cfg.model_path.empty() ? "SYNTHETIC (no --model)"
                                        : cfg.model_path.c_str(),
                cfg.num_prompts, cfg.input_len, cfg.output_len, cfg.concurrency,
                static_cast<unsigned long long>(cfg.seed), cfg.temperature,
                cfg.dataset_path.empty() ? "generated" : cfg.dataset_path.c_str(),
-               cfg.kv_cache_dtype.c_str(), cfg.ignore_eos ? 1 : 0,
-               cfg.skip_chat_template
-                   ? "skipped"
-                   : (cfg.chat_template.empty() ? "the model's own"
-                                                : cfg.chat_template.c_str()));
+               vllm::bench::OutputWaitModeName(cfg.output_wait));
 
   try {
     const vllm::bench::BenchResult res = vllm::bench::RunBench(cfg);
     vllm::bench::PrintReport(cfg, res, stdout);
     if (!cfg.output_token_ids_path.empty()) {
       vllm::bench::WriteOutputTokenIds(cfg.output_token_ids_path, res);
+    }
+    if (!cfg.output_json_path.empty()) {
+      vllm::bench::WriteResultJson(cfg.output_json_path, cfg, res);
     }
     if (res.completed != cfg.num_prompts) {
       std::fprintf(stderr,
