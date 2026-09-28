@@ -52,7 +52,7 @@ bool PagedAttentionXe2PrefillKernel(Queue& q, Tensor& out, const Tensor& query,
       key_cache.shape[1] != value_cache.shape[1] ||
       key_cache.shape[2] != kv_heads || value_cache.shape[2] != kv_heads ||
       key_cache.shape[3] != dim || value_cache.shape[3] != dim ||
-      (page != 64 && page != 1600) ||
+      (page != 64 && page != 1600 && page != 1664) ||
       key_cache.stride[1] != kv_heads * dim ||
       value_cache.stride[1] != kv_heads * dim ||
       key_cache.stride[2] != dim || value_cache.stride[2] != dim ||

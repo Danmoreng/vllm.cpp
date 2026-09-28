@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <climits>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -2128,6 +2129,44 @@ static std::unique_ptr<DflashDraft> BindSharedEmbed(
   return draft;
 }
 
+// XPU FlashAttention starts with a 64-token block. Python then grows its
+// attention page until it can hold one Qwen Mamba state page. Derive the same
+// size from the resolved KV dtype and speculative depth, before sizing the
+// pool or constructing the runner. A larger caller override is retained.
+static int ResolvePythonXpuHybridBlockSize(
+    const LoadedModel& model, const HfConfig& config,
+    const EngineParams& params,
+    const std::optional<vllm::SpeculativeConfig>& spec) {
+  const int requested = params.block_size > 0 ? params.block_size : 32;
+  const int base = ModelRegistry::ResolveKVBlockSize(model.registration(), requested);
+  if (model.registration().architecture != "Qwen3_5ForConditionalGeneration" ||
+      params.device == vllm::Device::kCPU ||
+      vllm::platforms::CurrentPlatform().device_type() != vt::DeviceType::kXPU) {
+    return base;
+  }
+  constexpr int kXpuAttentionAlignment = 64;
+  const int depth = spec.has_value() ? spec->ResolvedNumSpeculativeTokens() : 0;
+  auto probe = vllm::MakeQwen3_5KVCacheSpec(
+      config, kXpuAttentionAlignment, /*num_blocks=*/1, depth);
+  const auto dtype = vllm::v1::ParseCacheDType(
+      params.kv_cache_dtype, vllm::v1::ResolveKvCacheDType());
+  vllm::v1::ApplyCacheDType(probe, dtype, /*k_scale=*/1.0F, /*v_scale=*/1.0F);
+  const auto geometry = vllm::v1::ComputeHybridKvBudget(
+      probe, kXpuAttentionAlignment);
+  VT_CHECK(geometry.unified_block_tokens > 0 &&
+               geometry.unified_block_tokens <= INT_MAX,
+           "Qwen XPU hybrid attention page does not fit in int");
+  const int resolved = std::max(base, static_cast<int>(geometry.unified_block_tokens));
+  if (resolved != base) {
+    std::cerr << "[vllm] kv-cache: XPU Qwen hybrid attention page " << base
+              << " -> " << resolved << " tokens (Mamba page "
+              << geometry.mamba_page_bytes << " B, attention token "
+              << geometry.attn_bytes_per_token << " B, MTP depth " << depth
+              << ")\n";
+  }
+  return resolved;
+}
+
 LoadedEngine::LoadedEngine(HfConfig config, Qwen3_5MoeWeights weights,
                            tok::Tokenizer tokenizer, const EngineParams& params,
                            std::optional<Qwen3_5MTPWeights> mtp_weights)
@@ -2193,11 +2232,11 @@ LoadedEngine::LoadedEngine(HfConfig config,
       // (num_blocks override > kv_cache_memory_bytes > util fallback) against the
       // model's own per-block byte geometry. FIRST, because max_model_len_ is
       // resolved against this pool.
-      // Resolved ONCE, against the model's declared floor, before anything reads
-      // it. `ResolveKVBlockSize` is idempotent, so the funnel below re-resolving
-      // it is a guarantee for direct callers rather than a second policy.
-      block_size_(ModelRegistry::ResolveKVBlockSize(
-          model_->registration(), params.block_size > 0 ? params.block_size : 32)),
+      // Resolved ONCE before anything reads it. On XPU Qwen, the hybrid page
+      // grows to the Python Mamba/attention geometry; the registry floor still
+      // applies. The funnel below re-resolves only for direct callers.
+      block_size_(ResolvePythonXpuHybridBlockSize(
+          *model_, config_, params, resolved_spec_config_)),
       kv_cfg_(MakeKVCacheResolved(*model_, config_, block_size_, params,
                                   resolved_spec_config_)),
       // The serving length, checked (pinned) or auto-fitted (unpinned) against
