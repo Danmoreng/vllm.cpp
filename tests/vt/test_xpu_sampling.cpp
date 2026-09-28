@@ -1,6 +1,9 @@
 #include "xpu_test_helpers.h"
+#include <array>
 #include <limits>
 #include "vt/xpu.h"
+#include "vt/xpu_sampling.h"
+#include "vt/sample_common.h"
 #include "vllm/v1/sample/sampler.h"
 
 namespace {
@@ -228,5 +231,102 @@ TEST_CASE("XPU sampling: workspace admission fails without modifying logits"
   CHECK_THROWS_AS(vt::ApplyTopKTopP(gpu.q, logits.tensor, nullptr, &p.tensor), std::runtime_error);
   CHECK(logits.floats() == original);
   CHECK(vt::xpu::GetMemoryInfo().sampling_workspace_bytes == 0);
+  CHECK(vt::GetReferenceTierHits() == 0);
+}
+
+TEST_CASE("XPU sampled rejection preserves the target distribution for one-hot drafts") {
+  Queue gpu(vt::DeviceType::kXPU);
+  constexpr int N = 2048, R = 2 * N, V = 3;
+  Buffer probs(gpu.q, DType::kF32, {R, V});
+  Buffer proposal(gpu.q, DType::kI32, {R}), offsets(gpu.q, DType::kI32, {N + 1});
+  Buffer seeds(gpu.q, DType::kI64, {R});
+  Buffer greedy(gpu.q, DType::kI8, {R});
+  Buffer choices(gpu.q, DType::kI32, {R}), accepted(gpu.q, DType::kI32, {R});
+  Buffer sampled(gpu.q, DType::kI32, {N, 2}), counts(gpu.q, DType::kI32, {N});
+  std::vector<float> p(size_t(R * V));
+  std::vector<int32_t> d(static_cast<size_t>(R)), cu(static_cast<size_t>(N + 1));
+  std::vector<int64_t> s(static_cast<size_t>(R));
+  std::vector<int8_t> g(static_cast<size_t>(R), 0);
+  for (int r = 0; r < N; ++r) {
+    cu[size_t(r)] = 2 * r;
+    for (int j = 0; j < 2; ++j) {
+      const int row = 2 * r + j;
+      p[size_t(row * V + 0)] = .2f;
+      p[size_t(row * V + 1)] = .3f;
+      p[size_t(row * V + 2)] = .5f;
+      d[size_t(row)] = j == 0 ? 2 : -1;
+      s[size_t(row)] = static_cast<int64_t>(vt::sample::SplitMix64(711 + 2 * r + j));
+    }
+  }
+  cu.back() = R;
+  probs.put(p); proposal.upload(d.data()); offsets.upload(cu.data()); seeds.upload(s.data());
+  greedy.upload(g.data());
+  vt::xpu::SampleOneHotRejection(gpu.q, sampled.tensor, counts.tensor,
+                                 choices.tensor, accepted.tensor, probs.tensor,
+                                 proposal.tensor, offsets.tensor, seeds.tensor, greedy.tensor);
+  const auto read_i32 = [](const Buffer& buffer) {
+    const auto bytes = buffer.download();
+    std::vector<int32_t> out(bytes.size() / sizeof(int32_t));
+    std::memcpy(out.data(), bytes.data(), bytes.size());
+    return out;
+  };
+  const auto tokens = read_i32(sampled), lengths = read_i32(counts);
+  std::array<int, V> frequencies{};
+  int accepted_drafts = 0;
+  for (int r = 0; r < N; ++r) {
+    const int n = lengths[size_t(r)], first = tokens[size_t(2 * r)];
+    REQUIRE((n == 1 || n == 2));
+    REQUIRE((first >= 0 && first < V));
+    ++frequencies[size_t(first)];
+    if (n == 2) {
+      ++accepted_drafts;
+      CHECK(first == 2);
+      CHECK(tokens[size_t(2 * r + 1)] >= 0);
+    } else {
+      CHECK(first != 2);  // residual has zero support at the proposal id
+      CHECK(tokens[size_t(2 * r + 1)] == -1);
+    }
+  }
+  CHECK(std::abs(double(frequencies[0]) / N - .2) < .035);
+  CHECK(std::abs(double(frequencies[1]) / N - .3) < .035);
+  CHECK(std::abs(double(frequencies[2]) / N - .5) < .035);
+  CHECK(std::abs(double(accepted_drafts) / N - .5) < .035);
+  CHECK(vt::GetReferenceTierHits() == 0);
+}
+
+TEST_CASE("XPU one-hot rejection handles mixed greedy and sampled requests") {
+  Queue gpu(vt::DeviceType::kXPU);
+  constexpr int N = 3, R = 6, V = 3;
+  Buffer probs(gpu.q, DType::kF32, {R, V});
+  Buffer proposal(gpu.q, DType::kI32, {R}), offsets(gpu.q, DType::kI32, {N + 1});
+  Buffer seeds(gpu.q, DType::kI64, {R}), greedy(gpu.q, DType::kI8, {R});
+  Buffer choices(gpu.q, DType::kI32, {R}), accepted(gpu.q, DType::kI32, {R});
+  Buffer sampled(gpu.q, DType::kI32, {N, 2}), counts(gpu.q, DType::kI32, {N});
+  std::vector<float> p(R * V);
+  for (int row = 0; row < R; ++row) {
+    p[size_t(row * V)] = .2f;
+    p[size_t(row * V + 1)] = .3f;
+    p[size_t(row * V + 2)] = .5f;
+  }
+  const int32_t d[R] = {0, -1, 0, -1, 2, -1};
+  const int32_t cu[N + 1] = {0, 2, 4, 6};
+  const int64_t keys[R] = {1, 2, 3, 4, 5, 6};
+  const int8_t modes[R] = {1, 1, 0, 0, 1, 1};
+  probs.put(p); proposal.upload(d); offsets.upload(cu); seeds.upload(keys);
+  greedy.upload(modes);
+  vt::xpu::SampleOneHotRejection(gpu.q, sampled.tensor, counts.tensor,
+                                 choices.tensor, accepted.tensor, probs.tensor,
+                                 proposal.tensor, offsets.tensor, seeds.tensor,
+                                 greedy.tensor);
+  const auto token_bytes = sampled.download(), count_bytes = counts.download();
+  std::vector<int32_t> tokens(R), lengths(N);
+  std::memcpy(tokens.data(), token_bytes.data(), token_bytes.size());
+  std::memcpy(lengths.data(), count_bytes.data(), count_bytes.size());
+  CHECK(lengths[0] == 1);  // greedy proposal 0 rejected for argmax 2
+  CHECK(tokens[0] == 2); CHECK(tokens[1] == -1);
+  CHECK((lengths[1] == 1 || lengths[1] == 2));
+  CHECK((tokens[2] >= 0 && tokens[2] < V));
+  CHECK(lengths[2] == 2);  // greedy proposal 2 accepted; bonus is argmax 2
+  CHECK(tokens[4] == 2); CHECK(tokens[5] == 2);
   CHECK(vt::GetReferenceTierHits() == 0);
 }

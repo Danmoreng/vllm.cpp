@@ -15,9 +15,11 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <functional>
 #include <iostream>
 #include <numeric>
 #include <optional>
+#include <random>
 #include <set>
 #include <stdexcept>
 #include <string>
@@ -35,6 +37,7 @@
 #include "vllm/v1/kv_cache_dtype.h"  // ResolveKvCacheDType (VT_KV_CACHE_F32 A/B)
 #include "vllm/v1/kv_offload/lmcache/lmcache_connector.h"  // KV-EXTERNAL-CACHE worker store/load
 #include "vllm/v1/sample/ops/bad_words.h"  // apply_allowed_token_ids (-inf mask)
+#include "vllm/v1/sample/device_scratch.h"
 #include "vllm/v1/worker/gpu/async_runner_flag.h"  // VT_ASYNC_RUNNER predicate
 #include "vllm/v1/worker/gpu/cudagraph_dispatch.h"  // W6 (#1374) the graph-eligibility predicate
 #include "vllm/v1/spec_decode/rejection_sampler.h"  // SPEC-REJECTION I3 verify half
@@ -46,6 +49,10 @@
 #include "vt/backend.h"  // vt::Backend / GetBackend (VT_GPU_SAMPLE=0 download)
 #include "vt/dtype.h"  // VT_CHECK
 #include "vt/tensor.h"
+#include "vt/sample_common.h"
+#ifdef VLLM_CPP_XPU
+#include "vt/xpu_sampling.h"
+#endif
 #ifdef VLLM_CPP_CUDA
 #include "vt/cuda/combine_tokens.h"  // W3 device combine/scatter (removes the sync)
 #endif
@@ -3529,7 +3536,121 @@ ModelRunnerOutput GPUModelRunner::sample_tokens_with_rejection(
   // outputs. kMainQueueDrain goes through `forward`, which is byte-for-byte the
   // pre-split behaviour.
   RejectionSamplerOutput rs;
-  if (download == VerifyDownload::kMainQueueDrain) {
+  const SamplingMetadata sm = input_batch_.make_sampling_metadata();
+  if (!sm.all_greedy) {
+#ifdef VLLM_CPP_XPU
+    VT_CHECK(logits.device.type == vt::DeviceType::kXPU &&
+                 sm.temperature.has_value() &&
+                 sm.temperature->size() == static_cast<size_t>(num_reqs),
+             "sampled speculative decoding currently requires all-random XPU requests");
+    VT_CHECK(sm.no_penalties && !sm.allowed_token_ids_mask.has_value() &&
+                 sm.bad_words_token_ids.empty() && sm.min_tokens.empty() &&
+                 sm.logit_bias.empty() && sm.logits_processors.empty() &&
+                 !sm.max_num_logprobs.has_value() &&
+                 (!sm.logprob_token_ids.has_value() || sm.logprob_token_ids->empty()),
+             "sampled speculative decoding does not yet support prefix-dependent processors or logprobs");
+    const int64_t rows = logits.shape[0], vocab = logits.shape[1];
+    vt::Backend& backend = vt::GetBackend(logits.device.type);
+    // Keep every queued input/output alive through the single download drain.
+    // The destructor also drains on exception before it frees any allocation.
+    struct Scratch {
+      vt::Backend& backend;
+      vt::Queue& q;
+      std::vector<void*> allocations;
+      ~Scratch() {
+        backend.Synchronize(q);
+        for (void* ptr : allocations) backend.Free(ptr);
+      }
+      vt::Tensor alloc(vt::DType dtype, std::initializer_list<int64_t> shape) {
+        int64_t count = 1;
+        for (int64_t dim : shape) count *= dim;
+        void* ptr = backend.Alloc(std::max<size_t>(1, size_t(count) * vt::SizeOf(dtype)));
+        allocations.push_back(ptr);
+        return vt::Tensor::Contiguous(ptr, dtype, q.device, shape);
+      }
+    } scratch{backend, queue_, {}};
+    vt::Tensor processed = scratch.alloc(vt::DType::kF32, {rows, vocab});
+    vt::Tensor probs = scratch.alloc(vt::DType::kF32, {rows, vocab});
+    backend.Copy(queue_, processed.data, logits.data, size_t(rows * vocab) * sizeof(float));
+
+    std::vector<float> temperatures(static_cast<size_t>(rows));
+    std::vector<int32_t> ks, proposals(static_cast<size_t>(rows));
+    std::vector<int8_t> greedy_rows(static_cast<size_t>(rows));
+    std::vector<float> ps, min_ps;
+    if (sm.top_k) ks.resize(size_t(rows));
+    if (sm.top_p) ps.resize(size_t(rows));
+    if (!sm.min_p.empty()) min_ps.resize(size_t(rows));
+    std::vector<int64_t> seeds(static_cast<size_t>(rows));
+    // The unseeded stream is private to this process. Explicit request seeds
+    // depend only on accepted output position, not batch row or MTP depth.
+    static const uint64_t default_seed = [] {
+      std::random_device entropy;
+      return (uint64_t(entropy()) << 32) ^ uint64_t(entropy());
+    }();
+    for (int r = 0; r < num_reqs; ++r) {
+      const int32_t begin = step.cu_num_logits[size_t(r)];
+      const int32_t end = step.cu_num_logits[size_t(r + 1)];
+      const auto seeded = sm.generators.find(r);
+      const uint64_t request_seed = seeded == sm.generators.end()
+          ? vt::sample::SplitMix64(default_seed ^
+              std::hash<std::string>{}(exec_state_.req_ids[size_t(r)]))
+          : seeded->second;
+      const uint64_t position = sm.output_token_positions.empty()
+          ? 0 : sm.output_token_positions[size_t(r)];
+      for (int32_t row = begin; row < end; ++row) {
+        const size_t i = size_t(row);
+        const int32_t depth = row - begin;
+        temperatures[i] = (*sm.temperature)[size_t(r)];
+        greedy_rows[i] = temperatures[i] < vt::kSamplingEps;
+        if (!ks.empty()) ks[i] = (*sm.top_k)[size_t(r)];
+        if (!ps.empty()) ps[i] = (*sm.top_p)[size_t(r)];
+        if (!min_ps.empty()) min_ps[i] = sm.min_p[size_t(r)];
+        proposals[i] = row + 1 < end ? draft_sampled[size_t(row + 1)] : -1;
+        seeds[i] = static_cast<int64_t>(vt::sample::SplitMix64(
+            request_seed + position + uint64_t(depth)));
+      }
+    }
+    DeviceScratch t(logits.device, queue_, temperatures.data(), vt::DType::kF32, {rows});
+    vt::ApplyTemperature(queue_, processed, t.tensor(), sm.all_random);
+    if (!min_ps.empty()) {
+      DeviceScratch mp(logits.device, queue_, min_ps.data(), vt::DType::kF32, {rows});
+      vt::ApplyMinP(queue_, processed, mp.tensor());
+      backend.Synchronize(queue_);  // mp must survive its queued kernel
+    }
+    std::unique_ptr<DeviceScratch> k, p;
+    if (!ks.empty()) k = std::make_unique<DeviceScratch>(
+        logits.device, queue_, ks.data(), vt::DType::kI32, std::initializer_list<int64_t>{rows});
+    if (!ps.empty()) p = std::make_unique<DeviceScratch>(
+        logits.device, queue_, ps.data(), vt::DType::kF32, std::initializer_list<int64_t>{rows});
+    if (k || p) vt::ApplyTopKTopP(queue_, processed,
+                                   k ? &k->tensor() : nullptr,
+                                   p ? &p->tensor() : nullptr);
+    vt::ComputeProbs(queue_, probs, processed);
+    DeviceScratch proposal_t(logits.device, queue_, proposals.data(), vt::DType::kI32, {rows});
+    DeviceScratch cu_t(logits.device, queue_, step.cu_num_logits.data(),
+                       vt::DType::kI32, {num_reqs + 1});
+    DeviceScratch seed_t(logits.device, queue_, seeds.data(), vt::DType::kI64, {rows});
+    DeviceScratch greedy_t(logits.device, queue_, greedy_rows.data(), vt::DType::kI8, {rows});
+    vt::Tensor choices = scratch.alloc(vt::DType::kI32, {rows});
+    vt::Tensor accepted = scratch.alloc(vt::DType::kI32, {rows});
+    vt::Tensor sampled = scratch.alloc(vt::DType::kI32, {num_reqs, max_k + 1});
+    vt::Tensor num_sampled = scratch.alloc(vt::DType::kI32, {num_reqs});
+    vt::xpu::SampleOneHotRejection(queue_, sampled, num_sampled, choices,
+                                    accepted, probs, proposal_t.tensor(),
+                                    cu_t.tensor(), seed_t.tensor(), greedy_t.tensor());
+    std::vector<int32_t> host_sampled(static_cast<size_t>(num_reqs * (max_k + 1)));
+    std::vector<int32_t> host_num_sampled(static_cast<size_t>(num_reqs));
+    backend.Copy(queue_, host_sampled.data(), sampled.data,
+                 host_sampled.size() * sizeof(int32_t));
+    backend.Copy(queue_, host_num_sampled.data(), num_sampled.data,
+                 host_num_sampled.size() * sizeof(int32_t));
+    backend.Synchronize(queue_);
+    rs = RejectionSampler::finalize(host_sampled, max_k + 1, host_num_sampled,
+                                    step.cu_num_logits, chunked_prefilling);
+#else
+    VT_CHECK(false, "sampled speculative decoding needs the native XPU verifier");
+#endif
+  } else if (download == VerifyDownload::kMainQueueDrain) {
     rs = rejection_sampler.forward(queue_, logits, draft_sampled, step.cu_num_logits,
                                    chunked_prefilling);
   } else {

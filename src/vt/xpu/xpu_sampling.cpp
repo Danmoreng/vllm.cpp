@@ -1,6 +1,7 @@
 #include "xpu_common.h"
 #include "xpu_kernels.h"
 #include "vt/sample_common.h"
+#include "vt/xpu_sampling.h"
 #include <limits>
 namespace vt::xpu {
 namespace {
@@ -291,5 +292,234 @@ void GreedyArgmaxKernel(Queue& q, Tensor& token_ids, const Tensor& logits) {
     });
   });
   RecordProfileEvent(q, "greedy_argmax", event);
+}
+void GreedyRejectionSampleKernel(Queue& q, Tensor& sampled,
+                                 Tensor& num_sampled, Tensor& target_argmax,
+                                 const Tensor& logits,
+                                 const Tensor& draft_sampled,
+                                 const Tensor& cu_num_logits) {
+  TraceXpuOp(OpId::kGreedyRejectionSample, q,
+             {&sampled, &num_sampled, &target_argmax, &logits,
+              &draft_sampled, &cu_num_logits});
+  const int64_t rows = logits.shape[0], vocab = logits.shape[1];
+  const int64_t requests = cu_num_logits.shape[0] - 1;
+  const int64_t width = sampled.shape[1];
+  const auto* offsets = static_cast<const int32_t*>(cu_num_logits.data);
+  const auto* draft = static_cast<const int32_t*>(draft_sampled.data);
+  const auto* values = static_cast<const float*>(logits.data);
+  auto* argmax = static_cast<int32_t*>(target_argmax.data);
+  auto* tokens = static_cast<int32_t*>(sampled.data);
+  auto* counts = static_cast<int32_t*>(num_sampled.data);
+  CheckDeviceMetadata(q, [=] {
+    if (offsets[0] != 0 || offsets[requests] != rows) return false;
+    for (int64_t r = 0; r < requests; ++r)
+      if (offsets[r + 1] <= offsets[r] ||
+          offsets[r + 1] - offsets[r] > width) return false;
+    return true;
+  }, "XPU greedy rejection invalid logits offsets or output width",
+      {&cu_num_logits});
+
+  // Target decisions for all expanded rows. The lowest token id wins ties,
+  // including an all -inf row; a NaN in column zero follows the CPU oracle.
+  constexpr size_t lanes = 128;
+  const auto argmax_event = NativeQueue(q).submit([&](sycl::handler& h) {
+    sycl::local_accessor<float> best_values(lanes, h);
+    sycl::local_accessor<int32_t> best_ids(lanes, h);
+    h.parallel_for(sycl::nd_range<1>(rows * lanes, lanes),
+                   [=](sycl::nd_item<1> item) {
+      const int64_t row = item.get_group(0), lane = item.get_local_id(0);
+      if (sycl::isnan(values[row * vocab])) {
+        if (lane == 0) argmax[row] = 0;
+        return;
+      }
+      float best = NegInf;
+      int32_t index = std::numeric_limits<int32_t>::max();
+      for (int64_t col = lane; col < vocab; col += lanes) {
+        const float value = values[row * vocab + col];
+        if (value > best || (value == best && col < index)) {
+          best = value;
+          index = static_cast<int32_t>(col);
+        }
+      }
+      best_values[lane] = best;
+      best_ids[lane] = index;
+      item.barrier(sycl::access::fence_space::local_space);
+      for (int64_t step = lanes / 2; step; step /= 2) {
+        if (lane < step) {
+          const float value = best_values[lane + step];
+          const int32_t id = best_ids[lane + step];
+          if (value > best_values[lane] ||
+              (value == best_values[lane] && id < best_ids[lane])) {
+            best_values[lane] = value;
+            best_ids[lane] = id;
+          }
+        }
+        item.barrier(sycl::access::fence_space::local_space);
+      }
+      if (lane == 0) argmax[row] = best_ids[0];
+    });
+  });
+  RecordProfileEvent(q, "greedy_rejection_argmax", argmax_event);
+
+  // One independent sequential acceptance walk per request. The caller owns
+  // argmax scratch until this queued kernel completes.
+  const auto accept_event = NativeQueue(q).parallel_for(
+      sycl::range<1>(requests), [=](sycl::id<1> item) {
+    const int64_t req = item[0], begin = offsets[req];
+    const int64_t drafts = offsets[req + 1] - begin - 1;
+    const int64_t base = req * width;
+    for (int64_t j = 0; j < width; ++j) tokens[base + j] = -1;
+    int64_t accepted = 0;
+    for (int64_t j = 0; j < drafts; ++j) {
+      const int32_t target = argmax[begin + j];
+      const int32_t proposal = draft[begin + j + 1];
+      if (target != proposal) {
+        tokens[base + j] = target;
+        break;
+      }
+      tokens[base + j] = proposal;
+      ++accepted;
+    }
+    if (accepted == drafts) tokens[base + accepted] = argmax[begin + accepted];
+    counts[req] = static_cast<int32_t>(accepted + 1);
+  });
+  RecordProfileEvent(q, "greedy_rejection_accept", accept_event);
+}
+
+void SampleOneHotRejection(Queue& q, Tensor& sampled, Tensor& num_sampled,
+                           Tensor& choices, Tensor& accepted,
+                           const Tensor& probs, const Tensor& proposal,
+                           const Tensor& cu_num_logits, const Tensor& seeds,
+                           const Tensor& greedy) {
+  const int64_t rows = probs.shape[0], vocab = probs.shape[1];
+  const int64_t requests = cu_num_logits.shape[0] - 1;
+  const int64_t width = sampled.shape[1];
+  VT_CHECK(probs.rank == 2 && probs.dtype == DType::kF32 && probs.IsContiguous() &&
+               probs.device == q.device && vocab > 0,
+           "XPU sampled rejection requires contiguous f32 probabilities");
+  const auto vector_ok = [&](const Tensor& t, DType dtype) {
+    return t.rank == 1 && t.shape[0] == rows && t.dtype == dtype &&
+           t.IsContiguous() && t.device == q.device;
+  };
+  VT_CHECK(vector_ok(proposal, DType::kI32) &&
+               vector_ok(seeds, DType::kI64) &&
+               vector_ok(greedy, DType::kI8) &&
+               vector_ok(choices, DType::kI32) &&
+               vector_ok(accepted, DType::kI32),
+           "XPU sampled rejection requires one proposal, seed and scratch pair per row");
+  VT_CHECK(cu_num_logits.rank == 1 && requests >= 0 &&
+               cu_num_logits.dtype == DType::kI32 && cu_num_logits.IsContiguous() &&
+               cu_num_logits.device == q.device &&
+               sampled.rank == 2 && sampled.shape[0] == requests &&
+               sampled.dtype == DType::kI32 && sampled.IsContiguous() &&
+               sampled.device == q.device &&
+               num_sampled.rank == 1 && num_sampled.shape[0] == requests &&
+               num_sampled.dtype == DType::kI32 && num_sampled.IsContiguous() &&
+               num_sampled.device == q.device,
+           "XPU sampled rejection offsets and outputs have incompatible shapes");
+  if (!requests) return;
+  const auto* offsets = static_cast<const int32_t*>(cu_num_logits.data);
+  const auto* proposed = static_cast<const int32_t*>(proposal.data);
+  const auto* keys = static_cast<const int64_t*>(seeds.data);
+  const auto* greedy_rows = static_cast<const int8_t*>(greedy.data);
+  const auto* distribution = static_cast<const float*>(probs.data);
+  auto* chosen = static_cast<int32_t*>(choices.data);
+  auto* accept = static_cast<int32_t*>(accepted.data);
+  auto* tokens = static_cast<int32_t*>(sampled.data);
+  auto* counts = static_cast<int32_t*>(num_sampled.data);
+  CheckDeviceMetadata(q, [=] {
+    if (offsets[0] != 0 || offsets[requests] != rows) return false;
+    for (int64_t r = 0; r < requests; ++r) {
+      if (offsets[r + 1] <= offsets[r] || offsets[r + 1] - offsets[r] > width)
+        return false;
+      for (int64_t row = offsets[r]; row < offsets[r + 1]; ++row) {
+        const int32_t id = proposed[row];
+        if (id < -1 || id >= vocab || (row == offsets[r + 1] - 1) != (id == -1))
+          return false;
+      }
+    }
+    return true;
+  }, "XPU sampled rejection invalid offsets or proposal", {&cu_num_logits, &proposal});
+
+  // Each verification row independently draws its corrected token. The
+  // sequential per-request accept walk below uses only the prefix through the
+  // first rejection; generating unused later-row draws does not change their
+  // distributions because each row owns a separate seed.
+  constexpr size_t lanes = 128;
+  const auto row_event = NativeQueue(q).submit([&](sycl::handler& h) {
+    sycl::local_accessor<float> best_values(lanes, h);
+    sycl::local_accessor<int32_t> best_ids(lanes, h);
+    h.parallel_for(sycl::nd_range<1>(rows * lanes, lanes),
+                   [=](sycl::nd_item<1> item) {
+      const int64_t row = item.get_group(0), lane = item.get_local_id(0);
+      const int32_t draft_id = proposed[row];
+      const bool deterministic = greedy_rows[row] != 0;
+      const uint64_t key = static_cast<uint64_t>(keys[row]);
+      if (lane == 0 && !deterministic) {
+        const uint64_t bits = sample::SplitMix64(key ^ 0xA0761D6478BD642FULL);
+        const double u = static_cast<double>(bits >> 11) * 0x1p-53;
+        accept[row] = draft_id >= 0 &&
+                      u < static_cast<double>(distribution[row * vocab + draft_id]);
+      }
+      float best = NegInf;
+      int32_t best_id = std::numeric_limits<int32_t>::max();
+      const uint64_t draw_key = sample::SplitMix64(key ^ 0xE7037ED1A0B428DBULL);
+      for (int64_t col = lane; col < vocab; col += lanes) {
+        if (!deterministic && col == draft_id) continue;
+        const float p = distribution[row * vocab + col];
+        if (!(p > 0)) continue;
+        float score = p;
+        if (!deterministic) {
+          const uint64_t bits = (sample::SplitMix64(draw_key + uint64_t(col)) >> 11) + 1;
+          const float noise = bits > (1ULL << 52)
+              ? -sycl::log1p(-float((1ULL << 53) - bits) * 0x1p-53f)
+              : -sycl::log(float(bits) * 0x1p-53f);
+          score = p / noise;
+        }
+        if (score > best || (score == best && col < best_id)) {
+          best = score;
+          best_id = static_cast<int32_t>(col);
+        }
+      }
+      best_values[lane] = best;
+      best_ids[lane] = best_id;
+      item.barrier(sycl::access::fence_space::local_space);
+      for (int64_t step = lanes / 2; step; step /= 2) {
+        if (lane < step &&
+            (best_values[lane + step] > best_values[lane] ||
+             (best_values[lane + step] == best_values[lane] &&
+              best_ids[lane + step] < best_ids[lane]))) {
+          best_values[lane] = best_values[lane + step];
+          best_ids[lane] = best_ids[lane + step];
+        }
+        item.barrier(sycl::access::fence_space::local_space);
+      }
+      if (lane == 0) {
+        chosen[row] = best_ids[0];
+        if (deterministic) accept[row] = draft_id >= 0 && draft_id == best_ids[0];
+      }
+    });
+  });
+  RecordProfileEvent(q, "sampled_rejection_rows", row_event);
+
+  const auto walk_event = NativeQueue(q).parallel_for(
+      sycl::range<1>(requests), [=](sycl::id<1> item) {
+    const int64_t req = item[0], begin = offsets[req];
+    const int64_t drafts = offsets[req + 1] - begin - 1;
+    const int64_t base = req * width;
+    for (int64_t i = 0; i < width; ++i) tokens[base + i] = -1;
+    int64_t n_accepted = 0;
+    for (int64_t i = 0; i < drafts; ++i) {
+      if (!accept[begin + i]) {
+        tokens[base + i] = chosen[begin + i];
+        break;
+      }
+      tokens[base + i] = proposed[begin + i];
+      ++n_accepted;
+    }
+    if (n_accepted == drafts) tokens[base + n_accepted] = chosen[begin + drafts];
+    counts[req] = static_cast<int32_t>(n_accepted + 1);
+  });
+  RecordProfileEvent(q, "sampled_rejection_walk", walk_event);
 }
 }  // namespace vt::xpu

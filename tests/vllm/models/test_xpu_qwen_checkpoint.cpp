@@ -49,6 +49,30 @@ std::string RepeatedPrompt(int count) {
   for (int i = 0; i < count; ++i) text += " Hello";
   return text;
 }
+std::string LongRetrievalPrompt(const std::string& model, int target_tokens) {
+  const std::string prefix =
+      "Records: Alice has a green bicycle; Bruno has a yellow bicycle; "
+      "Clara has a blue bicycle. The following repeated greeting is irrelevant "
+      "to these records.\n";
+  const std::string suffix =
+      "\nEnd of irrelevant greetings. Using the records at the beginning, "
+      "who has the yellow bicycle? Return only the person's first name.";
+  const auto tokenizer = vllm::tok::Tokenizer::FromHfJson(
+      (std::filesystem::path(model) / "tokenizer.json").string());
+  int filler = target_tokens - static_cast<int>(
+      tokenizer.EncodeWithSpecialTokens(prefix + suffix).size());
+  REQUIRE(filler >= 0);
+  for (int attempt = 0; attempt < 4; ++attempt) {
+    const std::string prompt = prefix + RepeatedPrompt(filler) + suffix;
+    const int actual = static_cast<int>(
+        tokenizer.EncodeWithSpecialTokens(prompt).size());
+    if (actual == target_tokens) return prompt;
+    filler += target_tokens - actual;
+    REQUIRE(filler >= 0);
+  }
+  FAIL("long retrieval prompt could not reach requested token count");
+  return {};
+}
 void CheckBatch(vllm_engine* engine) {
   struct Result {
     std::string text;
@@ -124,6 +148,57 @@ void CheckBatch(vllm_engine* engine) {
   CHECK(std::string(resumed.text ? resumed.text : "") == expected[3]); vllm_completion_free(&resumed);
   CHECK(vt::xpu::GetMemoryInfo().allocated_bytes <= baseline + 64 * 1024 * 1024);
 }
+void CheckMixedMtpBatch(vllm_engine* engine, const std::string& model,
+                        int prompt_tokens) {
+  REQUIRE(prompt_tokens == 4096);
+  const std::string prompt = LongRetrievalPrompt(model, prompt_tokens);
+  struct Result {
+    std::string text;
+    int chunks = 0;
+    bool finished = false;
+    static bool Callback(const char* chunk, bool done, void* opaque) {
+      auto& result = *static_cast<Result*>(opaque);
+      result.text += chunk ? chunk : "";
+      ++result.chunks;
+      result.finished = done;
+      return true;
+    }
+  };
+  std::array<Result, 2> results;
+  std::array<vllm_sampling_params, 2> settings;
+  for (int i = 0; i < 2; ++i) {
+    settings[i] = vllm_sampling_params_default();
+    settings[i].temperature = i == 0 ? 0.0f : 1.0f;
+    settings[i].top_p = .95f;
+    settings[i].top_k = 20;
+    settings[i].seed = 42 + i;
+    settings[i].has_seed = 1;
+    settings[i].max_tokens = 8;
+    settings[i].ignore_eos = 1;
+  }
+  using Request = std::unique_ptr<vllm_request, decltype(&vllm_request_free)>;
+  std::vector<Request> requests;
+  for (int i = 0; i < 2; ++i) {
+    vllm_request* raw = nullptr;
+    REQUIRE_MESSAGE(vllm_request_submit(engine, prompt.c_str(), &settings[i],
+                                        Result::Callback, &results[i], &raw) == VLLM_OK,
+                    std::string(vllm_last_error()));
+    requests.emplace_back(raw, vllm_request_free);
+  }
+  for (auto& request : requests) {
+    REQUIRE_MESSAGE(vllm_request_wait(request.get()) == VLLM_OK,
+                    std::string(vllm_request_error(request.get())));
+  }
+  for (int i = 0; i < 2; ++i) {
+    CAPTURE(i);
+    CHECK(results[i].finished);
+    CHECK(results[i].chunks > 0);
+    CHECK_FALSE(results[i].text.empty());
+  }
+  std::cout << "MTP_MIXED_BATCH prompt_tokens=" << prompt_tokens
+            << " greedy_chunks=" << results[0].chunks
+            << " sampled_chunks=" << results[1].chunks << std::endl;
+}
 void CheckBatchEight(vllm_engine* engine) {
   struct Result {
     std::string text;
@@ -140,7 +215,16 @@ void CheckBatchEight(vllm_engine* engine) {
   std::array<std::string, 8> prompts;
   std::array<Result, 8> expected;
   std::array<vllm_sampling_params, 8> settings;
-  const bool delayed_graph = Setting("VT_B70_BATCH_GRAPH_AFTER_BASELINE", 0) == 1;
+  // Keep the serial expected output on the eager route even when the mixed
+  // batch is testing graphs. Otherwise a bad serial graph result becomes the
+  // oracle and makes an eager mixed-batch result look wrong. The opt-in below
+  // preserves the original graph-serial history for W1 reproduction.
+  const bool graph_candidate = Setting("VT_XPU_GRAPH", 0) == 1 &&
+                               Setting("VT_GPTQ4_GRAPH", 0) == 1;
+  const bool delayed_graph = Setting("VT_B70_BATCH_GRAPH_AFTER_BASELINE", 0) == 1 ||
+      (graph_candidate && Setting("VT_B70_BATCH_SERIAL_GRAPH_BASELINE", 0) != 1);
+  std::cout << "BATCH8_BASELINE route=" << (delayed_graph ? "eager" : "configured")
+            << std::endl;
   if (delayed_graph) REQUIRE(::setenv("VT_GPTQ4_GRAPH", "0", 1) == 0);
   for (int i = 0; i < 8; ++i) {
     prompts[i] = RepeatedPrompt(24 + 8 * i) +
@@ -199,6 +283,28 @@ void CheckBatchEight(vllm_engine* engine) {
   const auto memory = vt::xpu::GetMemoryInfo();
   CHECK(memory.allocated_bytes <= baseline + 64 * 1024 * 1024);
   CHECK(memory.graph_count <= 8);
+}
+void CheckBatchEightCaseFiveOnly(vllm_engine* engine) {
+  const std::string prompt = RepeatedPrompt(24 + 8 * 5) +
+                             " The capital of country 5 is";
+  auto settings = vllm_sampling_params_default();
+  settings.temperature = 0;
+  settings.ignore_eos = 1;
+  settings.max_tokens = 7 + 2 * 5;
+  vllm_completion result{};
+  auto& backend = vt::GetBackend(vt::DeviceType::kXPU);
+  const auto captures_before = backend.GraphsCaptured();
+  const auto replays_before = backend.GraphReplays();
+  REQUIRE_MESSAGE(vllm_complete(engine, prompt.c_str(), &settings, &result) == VLLM_OK,
+                  std::string(vllm_last_error()));
+  CHECK(result.completion_tokens == settings.max_tokens);
+  std::cout << "BATCH8_CASE5_C1 route="
+            << (Setting("VT_GPTQ4_GRAPH", 0) == 1 ? "graph" : "eager")
+            << " answer=" << nlohmann::json(result.text ? result.text : "").dump()
+            << " captures=" << backend.GraphsCaptured() - captures_before
+            << " replays=" << backend.GraphReplays() - replays_before
+            << std::endl;
+  vllm_completion_free(&result);
 }
 void CheckPrefix(vllm_engine* engine) {
   const std::array<std::string, 2> prompts = {
@@ -601,6 +707,66 @@ void MeasureWarm(vllm_engine* engine, int requested_prompt, int requested_output
     }
   }
 }
+
+void MeasureSampledMtp(vllm_engine* engine, const std::string& model,
+                       int prompt_tokens, int output_tokens) {
+  REQUIRE(prompt_tokens == 4096);
+  REQUIRE(output_tokens == 1024);
+  const std::string prompt = LongRetrievalPrompt(model, prompt_tokens);
+  const auto tokenizer = vllm::tok::Tokenizer::FromHfJson(
+      (std::filesystem::path(model) / "tokenizer.json").string());
+  const auto ids = tokenizer.EncodeWithSpecialTokens(prompt);
+  REQUIRE(ids.size() == size_t(prompt_tokens));
+  auto sampling = vllm_sampling_params_default();
+  sampling.temperature = 1;
+  sampling.top_p = .95f;
+  sampling.top_k = 20;
+  sampling.ignore_eos = 1;
+  sampling.seed = 42;
+  sampling.has_seed = 1;
+  std::vector<int32_t> generated(static_cast<size_t>(output_tokens));
+  int32_t count = 0;
+  vllm_completion result{};
+  const auto run = [&](int cap) {
+    sampling.max_tokens = cap;
+    const auto start = std::chrono::steady_clock::now();
+    const auto status = vllm_complete_tokens(
+        engine, ids.data(), static_cast<int32_t>(ids.size()), &sampling,
+        generated.data(), output_tokens, &count, &result);
+    const double seconds = std::chrono::duration<double>(
+        std::chrono::steady_clock::now() - start).count();
+    REQUIRE_MESSAGE(status == VLLM_OK, std::string(vllm_last_error()));
+    CHECK(count == cap);
+    CHECK(result.completion_tokens == cap);
+    CHECK(result.prompt_tokens == prompt_tokens);
+    vllm_completion_free(&result);
+    return seconds;
+  };
+  run(8);  // warm the same model, sampler and speculative route
+  const double ttft = run(1);
+  const int32_t first_token = generated[0];
+  vllm_spec_acceptance before{};
+  REQUIRE(vllm_engine_spec_acceptance(engine, &before) == VLLM_OK);
+  const double wall = run(output_tokens);
+  CHECK(generated[0] == first_token);
+  vllm_spec_acceptance after{};
+  REQUIRE(vllm_engine_spec_acceptance(engine, &after) == VLLM_OK);
+  const auto memory = vt::xpu::GetMemoryInfo();
+  REQUIRE(wall > ttft);
+  std::cout << "MTP_SAMPLED_BENCH prompt_tokens=" << prompt_tokens
+            << " output_tokens=" << output_tokens << " k=4 temperature=1"
+            << " top_p=0.95 top_k=20 seed=42"
+            << " ttft_separate_request_seconds=" << ttft
+            << " full_request_seconds=" << wall
+            << " prefill_client_tokens_per_second=" << prompt_tokens / ttft
+            << " decode_tokens_per_second_derived=" << (output_tokens - 1) / (wall - ttft)
+            << " emitted_tokens_per_second_full=" << output_tokens / wall
+            << " drafts_proposed=" << (after.drafts_proposed - before.drafts_proposed)
+            << " drafts_accepted=" << (after.drafts_accepted - before.drafts_accepted)
+            << " draft_steps=" << (after.drafted_request_steps - before.drafted_request_steps)
+            << " gpu_bytes=" << memory.allocated_bytes
+            << " gpu_peak_bytes=" << memory.peak_allocated_bytes << std::endl;
+}
 }
 
 TEST_CASE("XPU Qwen checkpoint: native text prefill and repeated greedy decode through the public engine") {
@@ -613,6 +779,8 @@ TEST_CASE("XPU Qwen checkpoint: native text prefill and repeated greedy decode t
   // Smaller explicit values are development probes, not the PR06 acceptance.
   const int tokens = Setting("VT_B70_MAX_TOKENS", 65), repeats = Setting("VT_B70_REPEATS", 2);
   const bool timing = Setting("VT_B70_TIMING", 0) != 0;
+  const bool sampled_mtp_bench = Setting("VT_B70_SAMPLED_MTP_BENCH", 0) != 0;
+  const bool mixed_mtp_batch = Setting("VT_B70_MIXED_MTP_BATCH", 0) != 0;
   const bool profile = Setting("VT_B70_PROFILE", 0) != 0;
   const bool quality = Setting("VT_B70_QUALITY", 0) != 0;
   const bool batch = Setting("VT_B70_BATCH", 0) != 0;
@@ -645,7 +813,7 @@ TEST_CASE("XPU Qwen checkpoint: native text prefill and repeated greedy decode t
   if (profile) { REQUIRE(profile_outputs >= 2); REQUIRE(profile_outputs <= 100); }
   const int requested_prompt = Setting("VT_B70_PROMPT_TOKENS", 0);
   REQUIRE(requested_prompt >= 0); REQUIRE(requested_prompt <= 6656);
-  REQUIRE(tokens > 0); REQUIRE(tokens <= 100); REQUIRE(repeats > 0);
+  REQUIRE(tokens > 0); REQUIRE(tokens <= (sampled_mtp_bench ? 1024 : 100)); REQUIRE(repeats > 0);
   struct GraphCoverage {
     bool enabled;
     int64_t captures, replays;
@@ -668,9 +836,16 @@ TEST_CASE("XPU Qwen checkpoint: native text prefill and repeated greedy decode t
   params.model_path = model;
   params.device = 0;  // auto must resolve to native XPU for this architecture.
   params.language_model_only = 1;
-  params.speculative_config = nullptr;
+  const int mtp_k = Setting("VT_B70_MTP_K", 0);
+  const bool valid_mtp_k = mtp_k == 0 || mtp_k == 1 ||
+                           mtp_k == 2 || mtp_k == 4;
+  REQUIRE(valid_mtp_k);
+  const std::string mtp_json = mtp_k == 0 ? std::string() :
+      "{\"method\":\"mtp\",\"num_speculative_tokens\":" +
+      std::to_string(mtp_k) + "}";
+  params.speculative_config = mtp_json.empty() ? nullptr : mtp_json.c_str();
   params.enable_prefix_caching = prefix ? 1 : 2;
-  params.max_num_seqs = batch_eight ? 8 : batch ? 4 : 1;
+  params.max_num_seqs = batch_eight ? 8 : batch ? 4 : mixed_mtp_batch ? 2 : 1;
   params.max_num_batched_tokens = teacher ? 512 : Setting("VT_B70_BATCH_TOKENS", quality_context ? 4096 : quality ? 512 : requested_prompt ? requested_prompt : timing ? 32 : 16);
   REQUIRE(params.max_num_batched_tokens > 0); REQUIRE(params.max_num_batched_tokens <= 6656);
   params.max_model_len = teacher ? 1024 : quality ? quality_context + 640 :
@@ -678,12 +853,14 @@ TEST_CASE("XPU Qwen checkpoint: native text prefill and repeated greedy decode t
   if (batch) { params.max_model_len = 512; params.max_num_batched_tokens = 128; }
   if (prefix) { params.max_num_batched_tokens = 128; params.max_model_len = std::max(params.max_model_len, 512); }
   const int block_size = Setting("VT_B70_BLOCK_SIZE", 16);
-  REQUIRE((block_size == 16 || block_size == 1600));
+  REQUIRE((block_size == 16 || block_size == 1600 || block_size == 1664));
   params.block_size = block_size;
   // Hybrid attention/GDN pools also reserve a sentinel block per group.
-  params.num_blocks = std::max(block_size == 1600 ? 8 : 32,
+  params.num_blocks = std::max(block_size >= 1600 ? 8 : 32,
       2 * ((params.max_model_len + block_size - 1) / block_size + 1));
   if (batch) params.num_blocks *= batch_eight ? 8 : 4;
+  params.num_blocks = Setting("VT_B70_NUM_BLOCKS", params.num_blocks);
+  REQUIRE(params.num_blocks > 0);
   const char* kv_dtype = std::getenv("VT_B70_KV_DTYPE");
   params.kv_cache_dtype = kv_dtype ? kv_dtype : "bfloat16";
   std::cout << "LOAD " << model << " device=xpu kv_dtype=" << params.kv_cache_dtype
@@ -697,8 +874,24 @@ TEST_CASE("XPU Qwen checkpoint: native text prefill and repeated greedy decode t
   std::cout << "LOADED gpu_bytes=" << vt::xpu::GetMemoryInfo().allocated_bytes
             << " rss_bytes=" << ResidentBytes() << " initialization_reference_hits=" << vt::GetReferenceTierHits() << std::endl;
   const auto initialization_hits = vt::GetReferenceTierHits();
+  if (sampled_mtp_bench) {
+    REQUIRE(mtp_k == 4);
+    REQUIRE(std::string(params.kv_cache_dtype) == "fp8");
+    MeasureSampledMtp(engine.get(), model, requested_prompt, tokens);
+    CHECK(vt::GetReferenceTierHits() == initialization_hits);
+    return;
+  }
+  if (mixed_mtp_batch) {
+    REQUIRE(mtp_k == 4);
+    REQUIRE(std::string(params.kv_cache_dtype) == "fp8");
+    CheckMixedMtpBatch(engine.get(), model, requested_prompt);
+    CHECK(vt::GetReferenceTierHits() == initialization_hits);
+    return;
+  }
   if (batch) {
-    if (batch_eight) CheckBatchEight(engine.get());
+    if (batch_eight && Setting("VT_B70_BATCH_CASE5_ONLY", 0) == 1)
+      CheckBatchEightCaseFiveOnly(engine.get());
+    else if (batch_eight) CheckBatchEight(engine.get());
     else CheckBatch(engine.get());
     CHECK(vt::GetReferenceTierHits() == initialization_hits);
     return;
@@ -730,39 +923,102 @@ TEST_CASE("XPU Qwen checkpoint: native text prefill and repeated greedy decode t
     return;
   }
   auto sampling = vllm_sampling_params_default();
-  sampling.temperature = 0;
+  const char* temperature = std::getenv("VT_B70_TEMPERATURE");
+  sampling.temperature = temperature ? std::stof(temperature) : 0;
+  const char* top_p = std::getenv("VT_B70_TOP_P");
+  if (top_p != nullptr) sampling.top_p = std::stof(top_p);
+  sampling.top_k = Setting("VT_B70_TOP_K", sampling.top_k);
+  const char* seed = std::getenv("VT_B70_SEED");
+  if (seed != nullptr) {
+    sampling.seed = std::stoull(seed);
+    sampling.has_seed = 1;
+  }
   sampling.max_tokens = tokens;
-  sampling.ignore_eos = 1;
+  sampling.ignore_eos = Setting("VT_B70_IGNORE_EOS", 1);
+  const char* stop_text = std::getenv("VT_B70_STOP_TEXT");
+  const char* stop_values[] = {stop_text};
+  if (stop_text != nullptr) {
+    sampling.stop = stop_values;
+    sampling.n_stop = 1;
+  }
+  const bool dump_ids = Setting("VT_B70_TOKEN_IDS", 0) == 1;
+  const bool long_retrieval = Setting("VT_B70_RETRIEVAL_PROMPT", 0) == 1;
+  if (long_retrieval) REQUIRE(requested_prompt >= 256);
+  const std::string retrieval_prompt = long_retrieval ?
+      LongRetrievalPrompt(model, requested_prompt) : std::string();
   size_t warm_gpu = 0, warm_rss = 0;
   std::string first;
+  std::vector<int32_t> first_ids;
   for (int round = 0; round < repeats; ++round) {
     const auto start = std::chrono::steady_clock::now();
     vllm_completion result{};
-    const std::string prompt = requested_prompt ? RepeatedPrompt(requested_prompt) : "The capital of France is";
-    status = vllm_complete(engine.get(), prompt.c_str(), &sampling, &result);
+    const char* prompt_override = std::getenv("VT_B70_PROMPT_TEXT");
+    const std::string prompt = long_retrieval ? retrieval_prompt :
+        prompt_override ? prompt_override :
+        requested_prompt ? RepeatedPrompt(requested_prompt) :
+                           "The capital of France is";
+    std::vector<int32_t> output_ids;
+    if (dump_ids) {
+      const auto tokenizer = vllm::tok::Tokenizer::FromHfJson(
+          (std::filesystem::path(model) / "tokenizer.json").string());
+      const auto prompt_ids = tokenizer.EncodeWithSpecialTokens(prompt);
+      output_ids.resize(static_cast<size_t>(tokens));
+      int32_t received = 0;
+      status = vllm_complete_tokens(
+          engine.get(), prompt_ids.data(), static_cast<int32_t>(prompt_ids.size()),
+          &sampling, output_ids.data(), tokens, &received, &result);
+      REQUIRE_MESSAGE(status == VLLM_OK, std::string(vllm_last_error()));
+      REQUIRE(received > 0);
+      CHECK(received <= tokens);
+      if (stop_text == nullptr) CHECK(received == tokens);
+      output_ids.resize(static_cast<size_t>(received));
+    } else {
+      status = vllm_complete(engine.get(), prompt.c_str(), &sampling, &result);
+    }
     REQUIRE_MESSAGE(status == VLLM_OK, std::string(vllm_last_error()));
-    CHECK(result.completion_tokens == tokens);
+    CHECK(result.completion_tokens <= tokens);
+    if (stop_text == nullptr) CHECK(result.completion_tokens == tokens);
     const std::string text = result.text ? result.text : "";
+    const std::string finish = result.finish_reason ? result.finish_reason : "none";
+    const int generated = result.completion_tokens;
     vllm_completion_free(&result);
     REQUIRE_FALSE(text.empty());
     const auto memory = vt::xpu::GetMemoryInfo();
     const auto rss = ResidentBytes();
     const double elapsed = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
-    std::cout << "ROUND " << round << " generated=" << tokens << " seconds=" << elapsed
+    std::cout << "ROUND " << round << " generated=" << generated << " seconds=" << elapsed
               << " gpu_bytes=" << memory.allocated_bytes << " rss_bytes=" << rss
               << " forward_reference_hits=" << vt::GetReferenceTierHits() - initialization_hits
+              << " finish=" << finish
               << "\nTEXT " << text << std::endl;
+    if (dump_ids) {
+      std::cout << "TOKEN_IDS";
+      for (const int32_t id : output_ids) std::cout << ' ' << id;
+      std::cout << std::endl;
+    }
     CHECK(vt::GetReferenceTierHits() == initialization_hits);
     REQUIRE(memory.allocated_bytes > size_t{1024} * 1024 * 1024);
-    if (round == 0) { first = text; warm_gpu = memory.allocated_bytes; warm_rss = rss; }
+    if (round == 0) {
+      first = text; first_ids = output_ids;
+      warm_gpu = memory.allocated_bytes; warm_rss = rss;
+    }
     else {
       CHECK(text == first);
+      if (dump_ids) CHECK(output_ids == first_ids);
       CHECK(memory.allocated_bytes <= warm_gpu + size_t{64} * 1024 * 1024);
       CHECK(rss <= warm_rss + size_t{256} * 1024 * 1024);
     }
   }
   vllm_spec_acceptance spec{};
   REQUIRE(vllm_engine_spec_acceptance(engine.get(), &spec) == VLLM_OK);
-  CHECK(spec.drafts_proposed == 0);
-  CHECK(spec.drafted_request_steps == 0);
+  if (mtp_k == 0) {
+    CHECK(spec.drafts_proposed == 0);
+    CHECK(spec.drafted_request_steps == 0);
+  } else {
+    MESSAGE("MTP k=" << mtp_k << " proposed=" << spec.drafts_proposed
+            << " accepted=" << spec.drafts_accepted
+            << " draft_steps=" << spec.drafted_request_steps);
+    CHECK(spec.drafts_proposed > 0);
+    CHECK(spec.drafted_request_steps > 0);
+  }
 }
