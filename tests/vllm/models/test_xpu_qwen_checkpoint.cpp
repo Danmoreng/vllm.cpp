@@ -176,6 +176,10 @@ void CheckMixedMtpBatch(vllm_engine* engine, const std::string& model,
     settings[i].max_tokens = 8;
     settings[i].ignore_eos = 1;
   }
+  if (std::getenv("VT_B70_MIXED_MTP_MIN_TOKENS")) {
+    settings[1].min_tokens = 8;
+    settings[1].ignore_eos = 0;
+  }
   using Request = std::unique_ptr<vllm_request, decltype(&vllm_request_free)>;
   std::vector<Request> requests;
   for (int i = 0; i < 2; ++i) {
