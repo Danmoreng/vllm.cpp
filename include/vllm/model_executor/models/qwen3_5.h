@@ -82,6 +82,10 @@ struct PagedKvCache {
   int64_t block_size = 0;
   int64_t num_kv_heads = 0;
   int64_t head_size = 0;
+  // MiMoV2: V head dim can differ from K head dim (v_head_dim=128 vs
+  // head_dim=192). When 0, the V slice falls back to `head_size` — the
+  // byte-identical legacy path every existing model takes.
+  int64_t head_size_v = 0;
   // KV-FP8 W3 — carried straight from the layer's `AttentionSpec` by the runner
   // and consumed by `dense_attn::WriteKvCache` / `dense_attn::ApplyKvCacheQuant`.
   // ADDITIVE and default-inert: `kAuto` means `dtype` is a float cache and the

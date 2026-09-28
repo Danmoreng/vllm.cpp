@@ -59,7 +59,7 @@ HfConfig MakeMiMoV2Config() {
   j["hybrid_layer_pattern"] = pattern;
 
   // MoE: layer 0 dense, layers 1-47 MoE.
-  j["num_experts"] = 256;
+  j["n_routed_experts"] = 256;
   j["num_experts_per_tok"] = 8;
   j["moe_intermediate_size"] = 2048;
   j["moe_router_dtype"] = "bfloat16";

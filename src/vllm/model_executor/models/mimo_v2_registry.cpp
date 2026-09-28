@@ -1,16 +1,10 @@
 // MiMoV2 (`MiMoV2ForCausalLM`) registry TU — the additive self-registration
-// seam for the MiMoV2 bring-up (MODEL-TEXT-mimo-v2, W1+W2). Follows the
+// seam for the MiMoV2 bring-up (MODEL-TEXT-mimo-v2, W1+W2+W3). Follows the
 // deepseek_v4_registry.cpp / dots3_note_registry.cpp seam exactly: a NEW
 // translation unit with ONE REGISTER_VLLM_MODEL line and ZERO edit to any
 // shared array. It owns the arch entry points: the config hook (config-descent
 // validation), the KV-cache spec (two groups: full-attention + sliding-window),
-// the weight loader (W2), and stub prepare/forward functions.
-//
-// SCOPE HONESTY: registering this arch makes it RESOLVE + parse config +
-// build the hybrid KV-cache spec + load weights. The forward pass (W3) is
-// still a stub that VT_CHECK(false, ...) — so the W2 gate is: the model is
-// discoverable, the config parses, the KV-cache spec builds, and all weights
-// load and account cleanly.
+// the weight loader (W2), and the forward pass (W3, delegated to mimo_v2.cpp).
 //
 // The KV-cache has two groups:
 //   1. FullAttentionSpec for full-attention layers (0,5,11,17,23,29,35,41,47):
@@ -23,10 +17,15 @@
 
 #include "vllm/model_executor/models/mimo_v2.h"
 #include "vllm/model_executor/models/mimo_v2_weights.h"
+#include "vllm/model_executor/models/dense_attn_block.h"  // StepInputs, BuildStepInputs
+#include "vllm/model_executor/models/dense_device_glue.h"  // Dev, DBuf
+#include "vllm/model_executor/models/host_token_ids.h"  // ResolveHostTokenIds
 #include "vllm/model_executor/models/model_registry.h"
-#include "vllm/model_executor/models/qwen3_5.h"  // ForwardLogits carrier
+#include "vllm/model_executor/models/qwen3_5.h"  // ForwardLogits, PagedKvCache
+#include "vllm/model_executor/models/qwen3_5_common.h"  // HostLogits
 #include "vllm/v1/kv_cache_dtype.h"
 #include "vllm/v1/kv_cache_interface.h"
+#include "vllm/v1/attention/backend.h"  // CommonAttentionMetadata
 #include "vt/dtype.h"
 
 #include <memory>
@@ -111,12 +110,19 @@ MiMoV2Params ParseMiMoV2Params(const HfConfig& config) {
     p.rotary_dim = static_cast<int64_t>(p.head_dim * prf);
   }
 
-  // Per-layer KV head counts
+  // Per-layer KV head counts. The checkpoint config uses "num_key_value_heads"
+  // for full-attention layers and "swa_num_key_value_heads" for SWA layers.
   p.num_kv_heads_full = GetInt(raw, "num_kv_heads_full", 0);
+  if (p.num_kv_heads_full == 0)
+    p.num_kv_heads_full = GetInt(raw, "num_key_value_heads", 0);
   p.num_kv_heads_swa = GetInt(raw, "num_kv_heads_swa", 0);
+  if (p.num_kv_heads_swa == 0)
+    p.num_kv_heads_swa = GetInt(raw, "swa_num_key_value_heads", 0);
 
-  // RoPE
+  // RoPE: "rope_theta" for full-attention, "swa_rope_theta" for SWA.
   p.rope_theta_full = GetDouble(raw, "rope_theta_full", 0.0);
+  if (p.rope_theta_full == 0.0)
+    p.rope_theta_full = GetDouble(raw, "rope_theta", 0.0);
   p.rope_theta_swa = GetDouble(raw, "rope_theta_swa", 0.0);
 
   // Attention sink bias
@@ -128,11 +134,24 @@ MiMoV2Params ParseMiMoV2Params(const HfConfig& config) {
   p.hybrid_layer_pattern = GetIntArray(raw, "hybrid_layer_pattern");
 
   // MoE
-  p.num_experts = GetInt(raw, "num_experts", 0);
+  p.num_experts = GetInt(raw, "n_routed_experts", 0);
   p.num_experts_per_tok = GetInt(raw, "num_experts_per_tok", 0);
   p.moe_intermediate_size = GetInt(raw, "moe_intermediate_size", 0);
   p.moe_router_dtype = GetString(raw, "moe_router_dtype", "bfloat16");
   p.n_shared_experts = GetBool(raw, "n_shared_experts", false);
+  p.n_group = GetInt(raw, "n_group", 1);
+  p.topk_group = GetInt(raw, "topk_group", 1);
+  p.norm_topk_prob = GetBool(raw, "norm_topk_prob", true);
+  // routed_scaling_factor is None in the config → 1.0
+  if (auto it = raw.find("routed_scaling_factor"); it != raw.end()) {
+    if (it->is_number()) {
+      p.routed_scaling_factor = it->get<double>();
+    } else {
+      p.routed_scaling_factor = 1.0;
+    }
+  } else {
+    p.routed_scaling_factor = 1.0;
+  }
   p.moe_layer_freq = GetIntArray(raw, "moe_layer_freq");
 
   // Norm
@@ -253,15 +272,35 @@ void PrepareMiMoV2ForCausalLM(LoadedModel& model, const HfConfig& config,
   (void)queue;
 }
 
+// ---- Forward (delegated to mimo_v2.cpp) ----
+
+// ForwardMiMoV2Device is defined in mimo_v2.cpp.
+ForwardLogits ForwardMiMoV2Device(
+    const std::vector<int32_t>& token_ids,
+    const std::vector<int32_t>& positions,
+    const v1::CommonAttentionMetadata& attn_meta,
+    const std::vector<PagedKvCache>& attn_kv,
+    const MiMoV2Weights& weights,
+    const MultiKvCacheIndex* multi_kv,
+    vt::Queue& queue,
+    const std::vector<int32_t>& logits_indices);
+
 ForwardLogits ForwardMiMoV2ForCausalLM(LoadedModel& model,
                                         const ModelForwardInput& input) {
-  (void)model;
-  (void)input;
-  VT_CHECK(false,
-           "MiMoV2ForCausalLM: the forward pass is not ported. W3 owes "
-           "the hybrid attention (sink_bias, v_head_dim != head_dim, "
-           "partial RoPE) and the MoE routing. Row MODEL-TEXT-mimo-v2, "
-           "issue ISSUE-LOCAL-01M3F82S8ZYCTTDSKPFF5PGAH7.");
+  auto& mv = ModelAs<MiMoV2LoadedModel>(model, "MiMoV2ForCausalLM");
+  const MiMoV2Weights& weights = mv.weights();
+
+  // Resolve host token ids (handles async device-token-id path).
+  std::vector<int32_t> device_ids;
+  const std::vector<int32_t>& ids =
+      ResolveHostTokenIds(input, &device_ids, "MiMoV2ForCausalLM");
+
+  VT_CHECK(input.multi_kv != nullptr,
+           "MiMoV2ForCausalLM: requires multi_kv (hybrid KV cache topology)");
+
+  return ForwardMiMoV2Device(
+      ids, input.positions, input.attn_meta, input.attn_kv, weights,
+      input.multi_kv, input.queue, input.logits_indices);
 }
 
 // ---- ModelInfo ----

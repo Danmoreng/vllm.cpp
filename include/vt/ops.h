@@ -2061,6 +2061,13 @@ struct PagedAttentionArgs {
   // verify (q <= 1 + 2K) on the split-KV DECODE lane instead of the
   // num_splits=1 prefill ladder (`include/vt/paged_attn_route.h`).
   int32_t uniform_spec_query_len = 0;
+  // OPTIONAL attention-sink bias (gpt-oss / MiMoV2 SWA layers). A 1-D per-head
+  // scalar tensor [num_q_heads] that is appended as an extra key column BEFORE
+  // the softmax: the score for sink head h at position p is attn_sink[h]. The
+  // softmax probability mass assigned to the sink column is DISCARDED after the
+  // softmax (the output is renormalised over the real keys only). This mirrors
+  // the gpt-oss sink mechanism. nullptr => no sink (every model before MiMoV2).
+  const Tensor* attn_sink = nullptr;
 };
 
 // Arguments for vt::MlaDecodeAttention (MLA campaign W4). Mirrors the scalar
