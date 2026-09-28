@@ -8,6 +8,7 @@
 #include "vt/xpu_sampling.h"
 #include "vt/sample_common.h"
 #include "vllm/v1/sample/sampler.h"
+#include "vllm/v1/sample/logits_processor/builtin.h"
 
 namespace {
 using xpu_test::Buffer;
@@ -145,6 +146,28 @@ TEST_CASE("XPU sampling: exact top-20 route and stable-sort fallback") {
   boundary_p.put({.05f, .37f, .95f, 1.0f, .999f});
   CHECK_FALSE(vt::xpu::ApplyTopK20TopP(gpu.q, boundary.tensor, boundary_p.tensor));
   CHECK(boundary.floats() == nearly_equal);
+  CHECK(vt::GetReferenceTierHits() == 0);
+}
+TEST_CASE("XPU sampling: speculative bias and min-token positions") {
+  Queue gpu(vt::DeviceType::kXPU);
+  Buffer logits(gpu.q, DType::kF32, {5, 7});
+  std::vector<float> values(35);
+  for (size_t i = 0; i < values.size(); ++i) values[i] = float(i);
+  logits.put(values);
+  vllm::v1::SamplingMetadata metadata;
+  metadata.logit_bias[0] = {{1, 2.0f}};
+  metadata.logit_bias[1] = {{3, 3.0f}};
+  metadata.min_tokens[0] = {4, {1}};
+  metadata.min_tokens[1] = {1, {3}};
+  metadata.output_token_positions = {2, 0};
+  vllm::v1::apply_speculative_bias_and_min_tokens(
+      gpu.q, logits.tensor, metadata, {0, 3, 5});
+  values[1] = -std::numeric_limits<float>::infinity();
+  values[8] = -std::numeric_limits<float>::infinity();
+  values[15] += 2.0f;
+  values[24] = -std::numeric_limits<float>::infinity();
+  values[31] += 3.0f;
+  Compare(logits.floats(), values, 0);
   CHECK(vt::GetReferenceTierHits() == 0);
 }
 TEST_CASE("XPU sampling: five-row production top-20 timing"

@@ -32,8 +32,9 @@ The public engine routes sampled and mixed greedy/random XPU speculative
 batches through this kernel. It expands temperature, top-k and top-p to every
 verification row and uses existing native XPU transforms. Greedy rows use
 deterministic argmax acceptance, correction and bonus inside the same native
-accept walk. Prefix-dependent processors, custom processors, penalties and
-logprobs remain unsupported until their rowwise semantics are implemented.
+accept walk. Allowed-token restrictions, bad words, custom processors,
+penalties and logprobs remain unsupported until their rowwise semantics are
+implemented.
 Greedy-only MTP and ordinary non-speculative sampling continue through their
 existing routes. Python is not used at runtime.
 
@@ -99,10 +100,10 @@ The Python `/metrics` counters after warm O8, O1 and O1024 showed 1319 draft
 tokens and 700 accepted tokens across those three requests. The C++ scored
 O1024 request reported 1012/770. Because the Python counters include warmup
 and the two engines use different request-local RNG streams, this is a
-diagnostic difference, not a same-prefix acceptance comparison. Next inspect
-per-depth draft/target probabilities at matched prefixes, then implement
-prefix-dependent sampling processors. W5 still
-owes exact small-top-k sampling and faster verification.
+diagnostic difference, not a same-prefix acceptance comparison. Per-depth
+draft/target probabilities at matched prefixes and the remaining rowwise
+processors still need qualification. W2's exact top-20 path is recorded in
+`w2_topk20_ab.md`; W5 still owes faster verification.
 
 ## After Python page parity and mixed-mode support
 
@@ -116,3 +117,28 @@ consistent with the preceding 1664-page 41.5738 decode tokens/s; it does not
 establish a speed gain from mixed-mode support. The Python 1664-page eager
 reference remains 71.8318 derived decode tokens/s under the matched client
 recipe.
+
+## Expanded logit bias and min-tokens (2026-09-28)
+
+The active Python GPU sampler applies allowed-token restrictions, additive
+logit bias and the min-token stop mask before penalties and temperature. Its
+min-token predicate uses each expanded row's model position:
+`pos + 1 < prompt_len + min_tokens`. For a completed prompt, the equivalent
+C++ quantity is the accepted output count plus that row's draft depth. The
+native C++ verification path now expands additive logit bias onto each row,
+then masks stop tokens only while that provisional count is below the floor.
+It uses the existing native XPU sparse bias and mask kernels. These processors
+are absent from the production T1/p.95/k20 benchmark, so this is a correctness
+increment, not a claimed speed gain.
+
+The focused five-row XPU test covers two requests, rowwise bias, the
+min-token boundary inside a draft span and the Python bias-before-mask order:
+3/3 assertions, zero reference-tier hits. A real mixed C2 P4096/O8 FP8/MTP4
+run, with one greedy request and one sampled request using `min_tokens=8`,
+passed 42/42 assertions; both finished in four output bursts. The unchanged
+production C1 P4096/O1024 route passed 50/50 assertions and retained the
+same output-ID FNV64 `6972477010856893408`, 1012 drafts proposed, 770
+accepted and 253 draft steps. Its derived decode rate was 42.1777 tok/s,
+consistent with the W2 top-20 candidate series. The active Python sampler
+source establishes the transformation order; a same-prefix Python/C++
+probability comparison for these additional controls remains to be done.

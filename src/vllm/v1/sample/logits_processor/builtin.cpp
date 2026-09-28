@@ -64,6 +64,60 @@ void apply_logit_bias(vt::Queue& q, vt::Tensor& logits,
   vt::ApplyLogitBias(q, logits, r.tensor(), c.tensor(), b.tensor());
 }
 
+void apply_speculative_bias_and_min_tokens(
+    vt::Queue& q, vt::Tensor& logits, const SamplingMetadata& metadata,
+    const std::vector<int32_t>& cu_num_logits) {
+  if (metadata.logit_bias.empty() && metadata.min_tokens.empty()) return;
+  VT_CHECK(logits.rank == 2 && logits.dtype == vt::DType::kF32,
+           "speculative logit processors require [rows, vocab] F32 logits");
+  VT_CHECK(cu_num_logits.size() >= 2 && cu_num_logits.front() == 0 &&
+               cu_num_logits.back() == logits.shape[0],
+           "speculative logit processors require valid row offsets");
+  const size_t num_reqs = cu_num_logits.size() - 1;
+  VT_CHECK(metadata.min_tokens.empty() ||
+               metadata.output_token_positions.size() == num_reqs,
+           "speculative min-tokens requires accepted output positions");
+  std::vector<int32_t> bias_rows, bias_cols, mask_rows, mask_cols;
+  std::vector<float> biases;
+  for (size_t req = 0; req < num_reqs; ++req) {
+    const int32_t begin = cu_num_logits[req], end = cu_num_logits[req + 1];
+    VT_CHECK(begin >= 0 && end >= begin && end <= logits.shape[0],
+             "speculative logit row offsets must be monotonic");
+    const auto bias = metadata.logit_bias.find(static_cast<int>(req));
+    const auto floor = metadata.min_tokens.find(static_cast<int>(req));
+    for (int32_t row = begin; row < end; ++row) {
+      if (bias != metadata.logit_bias.end()) {
+        for (const auto& [token, value] : bias->second) {
+          bias_rows.push_back(row);
+          bias_cols.push_back(token);
+          biases.push_back(value);
+        }
+      }
+      if (floor != metadata.min_tokens.end() &&
+          metadata.output_token_positions[req] + uint64_t(row - begin) <
+              static_cast<uint64_t>(floor->second.min_tokens)) {
+        for (int32_t token : floor->second.stop_token_ids) {
+          mask_rows.push_back(row);
+          mask_cols.push_back(token);
+        }
+      }
+    }
+  }
+  if (!bias_rows.empty()) {
+    const int64_t count = static_cast<int64_t>(bias_rows.size());
+    DeviceScratch r(logits.device, q, bias_rows.data(), vt::DType::kI32, {count});
+    DeviceScratch c(logits.device, q, bias_cols.data(), vt::DType::kI32, {count});
+    DeviceScratch b(logits.device, q, biases.data(), vt::DType::kF32, {count});
+    vt::ApplyLogitBias(q, logits, r.tensor(), c.tensor(), b.tensor());
+  }
+  if (!mask_rows.empty()) {
+    const int64_t count = static_cast<int64_t>(mask_rows.size());
+    DeviceScratch r(logits.device, q, mask_rows.data(), vt::DType::kI32, {count});
+    DeviceScratch c(logits.device, q, mask_cols.data(), vt::DType::kI32, {count});
+    vt::ApplyTokenMask(q, logits, r.tensor(), c.tensor());
+  }
+}
+
 void apply_min_p(vt::Queue& q, vt::Tensor& logits, const std::vector<float>& min_p) {
   const int64_t n = logits.shape[0];
   VT_CHECK(logits.rank == 2, "apply_min_p: logits must be [num_reqs, vocab]");

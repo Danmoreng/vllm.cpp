@@ -37,6 +37,7 @@
 #include "vllm/v1/kv_cache_dtype.h"  // ResolveKvCacheDType (VT_KV_CACHE_F32 A/B)
 #include "vllm/v1/kv_offload/lmcache/lmcache_connector.h"  // KV-EXTERNAL-CACHE worker store/load
 #include "vllm/v1/sample/ops/bad_words.h"  // apply_allowed_token_ids (-inf mask)
+#include "vllm/v1/sample/logits_processor/builtin.h"
 #include "vllm/v1/sample/device_scratch.h"
 #include "vllm/v1/worker/gpu/async_runner_flag.h"  // VT_ASYNC_RUNNER predicate
 #include "vllm/v1/worker/gpu/cudagraph_dispatch.h"  // W6 (#1374) the graph-eligibility predicate
@@ -3542,13 +3543,12 @@ ModelRunnerOutput GPUModelRunner::sample_tokens_with_rejection(
     VT_CHECK(logits.device.type == vt::DeviceType::kXPU &&
                  sm.temperature.has_value() &&
                  sm.temperature->size() == static_cast<size_t>(num_reqs),
-             "sampled speculative decoding currently requires all-random XPU requests");
+             "sampled speculative decoding requires XPU logits and per-request temperatures");
     VT_CHECK(sm.no_penalties && !sm.allowed_token_ids_mask.has_value() &&
-                 sm.bad_words_token_ids.empty() && sm.min_tokens.empty() &&
-                 sm.logit_bias.empty() && sm.logits_processors.empty() &&
+                 sm.bad_words_token_ids.empty() && sm.logits_processors.empty() &&
                  !sm.max_num_logprobs.has_value() &&
                  (!sm.logprob_token_ids.has_value() || sm.logprob_token_ids->empty()),
-             "sampled speculative decoding does not yet support prefix-dependent processors or logprobs");
+             "sampled speculative decoding does not yet support penalties, allowed ids, bad words, custom processors or logprobs");
     const int64_t rows = logits.shape[0], vocab = logits.shape[1];
     vt::Backend& backend = vt::GetBackend(logits.device.type);
     // Keep every queued input/output alive through the single download drain.
@@ -3572,6 +3572,8 @@ ModelRunnerOutput GPUModelRunner::sample_tokens_with_rejection(
     vt::Tensor processed = scratch.alloc(vt::DType::kF32, {rows, vocab});
     vt::Tensor probs = scratch.alloc(vt::DType::kF32, {rows, vocab});
     backend.Copy(queue_, processed.data, logits.data, size_t(rows * vocab) * sizeof(float));
+    apply_speculative_bias_and_min_tokens(queue_, processed, sm,
+                                           step.cu_num_logits);
 
     std::vector<float> temperatures(static_cast<size_t>(rows));
     std::vector<int32_t> ks, proposals(static_cast<size_t>(rows));
