@@ -32,9 +32,8 @@ The public engine routes sampled and mixed greedy/random XPU speculative
 batches through this kernel. It expands temperature, top-k and top-p to every
 verification row and uses existing native XPU transforms. Greedy rows use
 deterministic argmax acceptance, correction and bonus inside the same native
-accept walk. Allowed-token restrictions, bad words, custom processors,
-penalties and logprobs remain unsupported until their rowwise semantics are
-implemented.
+accept walk. Bad words, custom processors, penalties and logprobs remain
+unsupported until their rowwise semantics are implemented.
 Greedy-only MTP and ordinary non-speculative sampling continue through their
 existing routes. Python is not used at runtime.
 
@@ -142,3 +141,16 @@ accepted and 253 draft steps. Its derived decode rate was 42.1777 tok/s,
 consistent with the W2 top-20 candidate series. The active Python sampler
 source establishes the transformation order; a same-prefix Python/C++
 probability comparison for these additional controls remains to be done.
+
+## Expanded allowed-token mask (2026-09-28)
+
+The C++ verification path now expands each request's allowed-token mask to
+its speculative rows and applies the existing native XPU vocabulary mask
+before logit bias and min-tokens, matching the active Python GPU sampler's
+order. A focused five-row, two-request XPU test checks that one request's
+restriction applies to every draft depth while the other request stays
+unrestricted; it also checks bias and min-token masking on the same rows.
+Result: 3/3 assertions, zero reference-tier hits. This feature is absent from
+the production T1/p.95/k20 benchmark and from the C ABI's sampling-parameter
+surface. A real 4096-token OpenAI request with allowed IDs, and a same-prefix
+Python probability comparison, remain to be qualified before W4 closes.

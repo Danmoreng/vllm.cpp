@@ -42,10 +42,10 @@ void apply_min_tokens(vt::Queue& q, vt::Tensor& logits,
 void apply_logit_bias(vt::Queue& q, vt::Tensor& logits,
                       const std::map<int, std::map<int32_t, float>>& logit_bias);
 
-// Active GPU sampler's expanded verification rows: logit bias precedes the
-// min-token stop mask. `cu_num_logits` maps each request to its rows;
+// Active GPU sampler's expanded verification rows: allowed-token masking,
+// logit bias, then the min-token stop mask. `cu_num_logits` maps requests to rows;
 // `output_token_positions[r] + row_depth` is the provisional output length.
-void apply_speculative_bias_and_min_tokens(
+void apply_speculative_logit_filters(
     vt::Queue& q, vt::Tensor& logits, const SamplingMetadata& metadata,
     const std::vector<int32_t>& cu_num_logits);
 

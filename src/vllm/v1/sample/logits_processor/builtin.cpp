@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "vllm/v1/sample/device_scratch.h"
+#include "vllm/v1/sample/ops/bad_words.h"
 #include "vt/backend.h"
 #include "vt/dtype.h"
 #include "vt/ops.h"
@@ -64,19 +65,26 @@ void apply_logit_bias(vt::Queue& q, vt::Tensor& logits,
   vt::ApplyLogitBias(q, logits, r.tensor(), c.tensor(), b.tensor());
 }
 
-void apply_speculative_bias_and_min_tokens(
+void apply_speculative_logit_filters(
     vt::Queue& q, vt::Tensor& logits, const SamplingMetadata& metadata,
     const std::vector<int32_t>& cu_num_logits) {
-  if (metadata.logit_bias.empty() && metadata.min_tokens.empty()) return;
+  if (!metadata.allowed_token_ids_mask.has_value() &&
+      metadata.logit_bias.empty() && metadata.min_tokens.empty()) return;
   VT_CHECK(logits.rank == 2 && logits.dtype == vt::DType::kF32,
            "speculative logit processors require [rows, vocab] F32 logits");
   VT_CHECK(cu_num_logits.size() >= 2 && cu_num_logits.front() == 0 &&
                cu_num_logits.back() == logits.shape[0],
            "speculative logit processors require valid row offsets");
   const size_t num_reqs = cu_num_logits.size() - 1;
+  VT_CHECK(!metadata.allowed_token_ids_mask.has_value() ||
+               metadata.allowed_token_ids_mask->size() == num_reqs,
+           "speculative allowed-token mask requires one row per request");
   VT_CHECK(metadata.min_tokens.empty() ||
                metadata.output_token_positions.size() == num_reqs,
            "speculative min-tokens requires accepted output positions");
+  std::vector<std::vector<uint8_t>> allowed_rows;
+  if (metadata.allowed_token_ids_mask.has_value())
+    allowed_rows.reserve(static_cast<size_t>(logits.shape[0]));
   std::vector<int32_t> bias_rows, bias_cols, mask_rows, mask_cols;
   std::vector<float> biases;
   for (size_t req = 0; req < num_reqs; ++req) {
@@ -86,6 +94,8 @@ void apply_speculative_bias_and_min_tokens(
     const auto bias = metadata.logit_bias.find(static_cast<int>(req));
     const auto floor = metadata.min_tokens.find(static_cast<int>(req));
     for (int32_t row = begin; row < end; ++row) {
+      if (metadata.allowed_token_ids_mask.has_value())
+        allowed_rows.push_back((*metadata.allowed_token_ids_mask)[req]);
       if (bias != metadata.logit_bias.end()) {
         for (const auto& [token, value] : bias->second) {
           bias_rows.push_back(row);
@@ -103,6 +113,8 @@ void apply_speculative_bias_and_min_tokens(
       }
     }
   }
+  if (!allowed_rows.empty())
+    apply_allowed_token_ids(q, logits, allowed_rows);
   if (!bias_rows.empty()) {
     const int64_t count = static_cast<int64_t>(bias_rows.size());
     DeviceScratch r(logits.device, q, bias_rows.data(), vt::DType::kI32, {count});
