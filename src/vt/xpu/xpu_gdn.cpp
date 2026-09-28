@@ -513,10 +513,11 @@ void GdnSpecDecodeKernel(Queue& q, Tensor& out, const Tensor& qi,
     const View dst(target), qs(qi), ks(ki), vs(vi), gs(g), bs(beta);
     auto* cache = static_cast<float*>(state.data);
     const float scale = args.scale;
-    const auto event = NativeQueue(q).parallel_for(
-        sycl::range<1>(requests * hv * dv), [=](sycl::id<1> item) {
-      const int64_t request = item[0] / (hv * dv);
-      const int64_t head = (item[0] / dv) % hv, value = item[0] % dv;
+    const int64_t items = requests * hv * dv;
+    if (!items) return;
+    const auto work = [=](int64_t index) {
+      const int64_t request = index / (hv * dv);
+      const int64_t head = (index / dv) % hv, value = index % dv;
       const int64_t first = offsets[request], last = offsets[request + 1];
       const int32_t initial = ids[request * cols + nat[request] - 1];
       const int64_t out_channel = head * dv + value;
@@ -553,8 +554,28 @@ void GdnSpecDecodeKernel(Queue& q, Tensor& out, const Tensor& qi,
           for (int64_t j = 0; j < dk; ++j) cache[base + j] = s[j];
         }
       }
-    });
-    RecordProfileEvent(q, "gdn_spec_decode", event);
+    };
+    const char* setting = std::getenv("VT_XPU_GDN_SPEC_WG");
+    // The 27B MTP verification shape benefits from explicit B70 workgroups.
+    // Keep other shapes on the existing range launch until they are measured.
+    const int wg = setting ? std::atoi(setting) :
+        requests == 1 && hk == 16 && hv == 48 && dk == 128 && dv == 128 &&
+                tokens <= 5 ? 64 : 0;
+    VT_CHECK(wg == 0 || wg == 32 || wg == 64 || wg == 128 || wg == 256,
+             "VT_XPU_GDN_SPEC_WG must be 0, 32, 64, 128 or 256");
+    sycl::event event;
+    if (wg == 0) {
+      event = NativeQueue(q).parallel_for(sycl::range<1>(items),
+          [=](sycl::id<1> item) { work(item[0]); });
+    } else {
+      const int64_t rounded = ((items + wg - 1) / wg) * wg;
+      event = NativeQueue(q).parallel_for(
+          sycl::nd_range<1>(rounded, wg), [=](sycl::nd_item<1> item) {
+            const int64_t index = static_cast<int64_t>(item.get_global_id(0));
+            if (index < items) work(index);
+          });
+    }
+    RecordProfileEvent(q, wg ? "gdn_spec_decode_wg" : "gdn_spec_decode", event);
   });
 }
 void RmsNormGatedKernel(Queue& q, Tensor& out, const Tensor& x, const Tensor& gate,
