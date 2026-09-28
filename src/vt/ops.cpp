@@ -5163,12 +5163,16 @@ void PagedAttention(Queue& q, Tensor& out, const Tensor& query, const Tensor& k_
            "[num_blocks,block_size,num_kv_heads,head_size]");
   const int64_t num_tokens = query.shape[0], hq = query.shape[1], d = query.shape[2];
   const int64_t num_kv_heads = k_cache.shape[2], head_size = k_cache.shape[3];
-  VT_CHECK(out.shape[0] == num_tokens && out.shape[1] == hq && out.shape[2] == d,
-           "paged_attention: out must match query shape");
-  VT_CHECK(d == head_size, "paged_attention: query head_size must match the cache head_size");
+  // MiMoV2: V head dim can differ from K head dim (v_head_dim=128 vs
+  // head_dim=192). The query's d == K head dim (QK dot-product width); V is
+  // read from v_cache.shape[3].
+  const int64_t head_size_v = v_cache.shape[3];
+  VT_CHECK(out.shape[0] == num_tokens && out.shape[1] == hq && out.shape[2] == head_size_v,
+           "paged_attention: out must match [num_tokens, num_q_heads, head_size_v]");
+  VT_CHECK(d == head_size, "paged_attention: query head_size must match the K cache head_size");
   VT_CHECK(v_cache.shape[0] == k_cache.shape[0] && v_cache.shape[1] == k_cache.shape[1] &&
-               v_cache.shape[2] == num_kv_heads && v_cache.shape[3] == head_size,
-           "paged_attention: k_cache and v_cache must share shape");
+               v_cache.shape[2] == num_kv_heads,
+           "paged_attention: k_cache and v_cache must share shape except head_size_v");
   VT_CHECK(hq >= 1 && num_kv_heads >= 1 && hq % num_kv_heads == 0,
            "paged_attention: num_q_heads must be a positive multiple of num_kv_heads (GQA)");
   VT_CHECK(args.scale > 0.0f, "paged_attention: scale must be set (> 0), e.g. head_size^-0.5");

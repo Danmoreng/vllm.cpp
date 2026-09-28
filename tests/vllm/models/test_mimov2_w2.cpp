@@ -66,7 +66,7 @@ HfConfig MakeMiMoV2Config() {
   for (int i = 5; i < 48; i += 6) pattern[i] = 0;
   j["hybrid_layer_pattern"] = pattern;
 
-  j["num_experts"] = 256;
+  j["n_routed_experts"] = 256;
   j["num_experts_per_tok"] = 8;
   j["moe_intermediate_size"] = 2048;
   j["moe_router_dtype"] = "bfloat16";

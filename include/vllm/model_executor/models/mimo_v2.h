@@ -52,11 +52,15 @@ struct MiMoV2Params {
   std::vector<int> hybrid_layer_pattern;
 
   // MoE
-  int64_t num_experts = 0;              // 256
+  int64_t num_experts = 0;              // n_routed_experts = 256
   int64_t num_experts_per_tok = 0;      // 8
   int64_t moe_intermediate_size = 0;   // 2048
   std::string moe_router_dtype;         // "bfloat16" (but gate forces fp32)
   bool n_shared_experts = false;       // false — no shared expert
+  int64_t n_group = 1;                 // 1 (ungrouped)
+  int64_t topk_group = 1;              // 1
+  bool norm_topk_prob = true;          // true
+  double routed_scaling_factor = 1.0;  // None → 1.0
 
   // Layer 0 is dense, layers 1..N-1 are MoE
   // moe_layer_freq is a per-layer list: 0 = dense, 1 = MoE

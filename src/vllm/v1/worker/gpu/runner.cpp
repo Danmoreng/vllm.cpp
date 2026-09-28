@@ -1148,13 +1148,11 @@ void GPUModelRunner::initialize_kv_cache(const KVCacheConfig& kv_cache_config) {
     kv_k_scale = attn_spec->k_scale;
     kv_v_scale = attn_spec->v_scale;
     fa_page_bytes = attn_spec->page_size_bytes();
-    // The PagedKvCache view carries ONE head_size, so an asymmetric-V full
-    // attention layer cannot be viewed by it. MLA's own view (a later W) is a
-    // sibling struct; until then, refuse rather than mis-view.
+    // MiMoV2: asymmetric V head dim is now carried through PagedKvCache's
+    // `head_size_v` field, so the guard that refused it is removed.
+    [[maybe_unused]] int64_t Dh_v = attn_spec->head_size;  // default: symmetric
     if (const auto* full_spec = dynamic_cast<const FullAttentionSpec*>(fa_spec)) {
-      VT_CHECK(full_spec->head_size_v == full_spec->head_size,
-               "runner: asymmetric head_size_v is not expressible in the "
-               "PagedKvCache view");
+      Dh_v = full_spec->head_size_v;
     }
     VT_CHECK(fa_page_bytes > 0,
              "runner: full-attention spec reported a non-positive page size");
@@ -1313,6 +1311,10 @@ void GPUModelRunner::initialize_kv_cache(const KVCacheConfig& kv_cache_config) {
   struct FaDims {
     int64_t num_kv_heads;
     int64_t head_size;
+    // MiMoV2: V head dim can differ from K head dim. 0 means
+    // `head_size` (the byte-identical legacy path every existing model
+    // takes).
+    int64_t head_size_v;
     vt::DType dtype;
     // KV-DSV4-MULTICACHE W3 (#2068): the entry's OWN page geometry. On the
     // legacy path every entry gets the single `fa_block_size` this loop already
@@ -1447,6 +1449,13 @@ void GPUModelRunner::initialize_kv_cache(const KVCacheConfig& kv_cache_config) {
             static_cast<size_t>(num_blocks_) * static_cast<size_t>(page),
             kv_cache_backend_resident_));
         fa_dims.push_back(FaDims{spec->num_kv_heads, spec->head_size,
+                                 [&]() -> int64_t {
+                                   if (const auto* fs = dynamic_cast<const FullAttentionSpec*>(spec))
+                                     return static_cast<int64_t>(fs->head_size_v);
+                                   if (const auto* sw = dynamic_cast<const SlidingWindowSpec*>(spec))
+                                     return static_cast<int64_t>(sw->head_size_v);
+                                   return static_cast<int64_t>(spec->head_size);
+                                 }(),
                                  spec->dtype, spec->block_size, spec->fp8_kind,
                                  spec->k_scale, spec->v_scale, page});
         mla_layer_mask.push_back(static_cast<char>(fused));
@@ -1578,6 +1587,7 @@ void GPUModelRunner::initialize_kv_cache(const KVCacheConfig& kv_cache_config) {
         // to `{Hkv,Dh,kv_dtype}` when `has_per_layer` is false — byte-identical.
         int64_t l_Hkv = Hkv;
         int64_t l_Dh = Dh;
+        int64_t l_Dh_v = Dh;  // MiMoV2: asymmetric V head dim (default = symmetric)
         int64_t l_page = fa_page_bytes;
         vt::DType l_dtype = kv_dtype;
         vt::Fp8KVCacheDataType l_fp8_kind = kv_fp8_kind;
@@ -1595,12 +1605,11 @@ void GPUModelRunner::initialize_kv_cache(const KVCacheConfig& kv_cache_config) {
           l_k_scale = sp->k_scale;
           l_v_scale = sp->v_scale;
           l_page = sp->page_size_bytes();
-          // Same guard as the group spec: the PagedKvCache view carries ONE
-          // head_size, so an asymmetric-V layer is not expressible in it.
+          // MiMoV2: asymmetric V head dim is now carried through
+          // PagedKvCache's `head_size_v` field, so the guard that refused
+          // it is removed.
           if (const auto* full_sp = dynamic_cast<const FullAttentionSpec*>(sp.get())) {
-            VT_CHECK(full_sp->head_size_v == full_sp->head_size,
-                     "runner: asymmetric head_size_v is not expressible in the "
-                     "per-layer PagedKvCache view");
+            l_Dh_v = full_sp->head_size_v;
           }
           VT_CHECK(l_page > 0,
                    "runner: per-layer attention spec reported a non-positive page");
@@ -1609,7 +1618,7 @@ void GPUModelRunner::initialize_kv_cache(const KVCacheConfig& kv_cache_config) {
             dev, queue_,
             static_cast<size_t>(num_blocks_) * static_cast<size_t>(l_page),
             kv_cache_backend_resident_));
-        fa_dims.push_back(FaDims{l_Hkv, l_Dh, l_dtype, fa_block_size, l_fp8_kind,
+        fa_dims.push_back(FaDims{l_Hkv, l_Dh, l_Dh_v, l_dtype, fa_block_size, l_fp8_kind,
                                  l_k_scale, l_v_scale, l_page});
         // Per-layer MLA flag, parallel to fa_dims: the view loop picks the right
         // backend name (TRITON_MLA for an MLA group) and the right expected KV
@@ -1659,6 +1668,9 @@ void GPUModelRunner::initialize_kv_cache(const KVCacheConfig& kv_cache_config) {
     kv.block_size = fa_dims[i].block_size;
     kv.num_kv_heads = fa_dims[i].num_kv_heads;
     kv.head_size = fa_dims[i].head_size;
+    // MiMoV2: carry the V head dim when it differs from K. 0 means
+    // `head_size` (the byte-identical legacy path every existing model takes).
+    kv.head_size_v = fa_dims[i].head_size_v;
     // KV-FP8 W3: the fp8 interpretation + scales reach the model's attention
     // block ONLY through this view, which is what makes `--kv-cache-dtype fp8`
     // a served capability rather than a resized allocation.

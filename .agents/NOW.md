@@ -59,9 +59,13 @@ unanchored by design, and whoever takes it files the issue then. Also at
 5. **Restore `local-ai-worker`** on dgx at campaign end (`--restart=always`).
 6. **MiMoV2 port + EXL3 generalisation** (C13, 2026-09-25): specs filed
    ([mimov2.md](specs/mimov2.md) + [quant-exl3-generalise.md](specs/quant-exl3-generalise.md)),
-   local issues created. Ready to start implementation: W1 (registry +
-   config + KV-cache spec) first. The EXL3 generalisation can proceed in
-   parallel — it does not depend on the model port.
+   local issues created. **W1+W2+W3 DONE and PUSHED.** The device forward
+   computes through all 48 layers (hybrid full/SWA attention with sink bias,
+   partial RoPE, asymmetric V head dim, attention_value_scale; layer 0 dense
+   MLP, layers 1-47 MoE with sigmoid + noaux_tc routing). The EXL3
+   generalisation is DONE and PUSHED. **REMAINING:** W4 (MTP, deferred),
+   W5 (parity gate — no token emitted yet), and wiring EXL3 into the MiMoV2
+   forward (EXL3 W3/W4).
 7. **Protocol substrate — partly done.** Triage/audit + `STATUS.md` ratchet +
    `AGENTS.md` tiering DONE. REMAINING: anchor backfill (6 model rows need a
    DECISION); record-era rollover BLOCKED on `DONE` rows bound to
