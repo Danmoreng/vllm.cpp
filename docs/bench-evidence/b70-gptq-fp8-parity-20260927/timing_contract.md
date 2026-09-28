@@ -48,15 +48,21 @@ The C++ harness now emits `gptq4_benchmark_step` records after each measured
 round. They contain the actual query-token count, context before and after,
 input token for decode, and synchronized forward duration. Output is deferred
 until the round ends so JSON serialization is outside the timed loop. The
-current single-request unchunked harness records one prefill followed by `D`
-one-token decode calls. `O=1` has `D=0` and null decode metrics. This does not
-establish how many prefill calls the Python scheduler makes.
+single-request harness records one prefill if `VT_B70_BENCH_PREFILL_CHUNK` is
+unset. With that setting it records multiple bounded prefill calls, followed
+by `D` one-token decode calls. `O=1` has `D=0` and null decode metrics. This
+does not establish how many prefill calls the Python scheduler makes, or make
+its chunk boundaries match by default.
 
-The harness accepts `1<=P<=6656` on the present unchunked native GDN path and
-`O>=1`, subject to the model position limit, optional
-`VT_B70_BENCH_MAX_CONTEXT`, and a measured GPU cache/state budget with a 1 GiB
-workspace reserve. Cases above 6656 prompt tokens need a separately validated
-chunked path; the 8192/16384/32768 cases in the plan remain unsupported here.
+The harness now accepts `1<=P<=16384` and `O>=1`. Native Xe2 GDN splits
+8K/16K prefill into bounded 4K macros; optional
+`VT_B70_BENCH_PREFILL_CHUNK` also controls outer prefill calls. These are
+subject to the model position limit, optional `VT_B70_BENCH_MAX_CONTEXT`,
+and a measured GPU cache/state budget with a 1 GiB workspace reserve.
+Selected 8K cases have been measured and quality checked; 16K is a supported
+harness limit, not full Python-parity qualification. 32K and longer prompts
+remain unsupported by this harness. Different Python/C++ chunk schedules
+must still be matched before a timing-parity claim.
 The focused functional checks in `harness_checks.json` cover pure prefill,
 one context above 4096, and 65 decode forwards. Their single-run durations
 must not be used for performance decisions.
@@ -76,10 +82,11 @@ end-to-end TTFT and TPOT qualification.
 
 At `P=4097, D=0, O=1`, the same Python settings schedule **two prefill model
 calls** (`4096` then `1` query token), although the outer `LLMEngine.step`
-wrapper sees only one call. The current C++ harness runs one unchunked
-4097-token forward. Those are different schedules and must be compared only
-after a corresponding C++ chunked replay exists or after a clearly labeled
-operator-level decomposition. The raw diagnostic and exact call counts are in
+wrapper sees only one call. The default C++ harness runs one unchunked
+4097-token forward. It can be configured to use chunks, but the same 4096+1
+schedule and metadata must be selected explicitly before comparing these
+cases. Otherwise use a clearly labeled operator-level decomposition. The raw
+diagnostic and exact call counts are in
 `python_harness_checks.json`.
 
 Teacher-forced differential tests use identical prompt and decode token-ID
