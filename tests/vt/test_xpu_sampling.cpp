@@ -148,7 +148,7 @@ TEST_CASE("XPU sampling: exact top-20 route and stable-sort fallback") {
   CHECK(boundary.floats() == nearly_equal);
   CHECK(vt::GetReferenceTierHits() == 0);
 }
-TEST_CASE("XPU sampling: speculative bias and min-token positions") {
+TEST_CASE("XPU sampling: speculative allowed tokens and bias with min-token positions") {
   Queue gpu(vt::DeviceType::kXPU);
   Buffer logits(gpu.q, DType::kF32, {5, 7});
   std::vector<float> values(35);
@@ -160,8 +160,18 @@ TEST_CASE("XPU sampling: speculative bias and min-token positions") {
   metadata.min_tokens[0] = {4, {1}};
   metadata.min_tokens[1] = {1, {3}};
   metadata.output_token_positions = {2, 0};
-  vllm::v1::apply_speculative_bias_and_min_tokens(
+  metadata.allowed_token_ids_mask = std::vector<std::vector<uint8_t>>(
+      2, std::vector<uint8_t>(7, 0));
+  std::fill((*metadata.allowed_token_ids_mask)[0].begin(),
+            (*metadata.allowed_token_ids_mask)[0].end(), 1);
+  (*metadata.allowed_token_ids_mask)[0][1] = 0;
+  (*metadata.allowed_token_ids_mask)[0][5] = 0;
+  vllm::v1::apply_speculative_logit_filters(
       gpu.q, logits.tensor, metadata, {0, 3, 5});
+  for (int row = 0; row < 3; ++row)
+    for (int token = 0; token < 7; ++token)
+      if (token != 1 && token != 5)
+        values[size_t(row * 7 + token)] = -std::numeric_limits<float>::infinity();
   values[1] = -std::numeric_limits<float>::infinity();
   values[8] = -std::numeric_limits<float>::infinity();
   values[15] += 2.0f;

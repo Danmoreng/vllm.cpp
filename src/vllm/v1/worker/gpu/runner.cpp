@@ -3544,11 +3544,11 @@ ModelRunnerOutput GPUModelRunner::sample_tokens_with_rejection(
                  sm.temperature.has_value() &&
                  sm.temperature->size() == static_cast<size_t>(num_reqs),
              "sampled speculative decoding requires XPU logits and per-request temperatures");
-    VT_CHECK(sm.no_penalties && !sm.allowed_token_ids_mask.has_value() &&
-                 sm.bad_words_token_ids.empty() && sm.logits_processors.empty() &&
+    VT_CHECK(sm.no_penalties && sm.bad_words_token_ids.empty() &&
+                 sm.logits_processors.empty() &&
                  !sm.max_num_logprobs.has_value() &&
                  (!sm.logprob_token_ids.has_value() || sm.logprob_token_ids->empty()),
-             "sampled speculative decoding does not yet support penalties, allowed ids, bad words, custom processors or logprobs");
+             "sampled speculative decoding does not yet support penalties, bad words, custom processors or logprobs");
     const int64_t rows = logits.shape[0], vocab = logits.shape[1];
     vt::Backend& backend = vt::GetBackend(logits.device.type);
     // Keep every queued input/output alive through the single download drain.
@@ -3572,8 +3572,8 @@ ModelRunnerOutput GPUModelRunner::sample_tokens_with_rejection(
     vt::Tensor processed = scratch.alloc(vt::DType::kF32, {rows, vocab});
     vt::Tensor probs = scratch.alloc(vt::DType::kF32, {rows, vocab});
     backend.Copy(queue_, processed.data, logits.data, size_t(rows * vocab) * sizeof(float));
-    apply_speculative_bias_and_min_tokens(queue_, processed, sm,
-                                           step.cu_num_logits);
+    apply_speculative_logit_filters(queue_, processed, sm,
+                                    step.cu_num_logits);
 
     std::vector<float> temperatures(static_cast<size_t>(rows));
     std::vector<int32_t> ks, proposals(static_cast<size_t>(rows));
