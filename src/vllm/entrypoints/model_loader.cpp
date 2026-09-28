@@ -3395,7 +3395,26 @@ std::unique_ptr<LoadedEngine> LoadedEngine::FromModelDir(
     const Qwen3_5MTPKind kind = registration.factory->is_dense_model
                                     ? Qwen3_5MTPKind::kDense
                                     : Qwen3_5MTPKind::kMoe;
-    loaded.AttachMtpDraftWeights(vllm::LoadQwen3_5MTP(*shards, config, kind));
+    Qwen3_5MTPWeights draft = vllm::LoadQwen3_5MTP(*shards, config, kind);
+    const bool gptq4 = config.raw.contains("quantization_config") &&
+        config.raw.at("quantization_config").is_object() &&
+        config.raw.at("quantization_config").value("quant_method", std::string()) ==
+            "gptq";
+    if (gptq4 && kind == Qwen3_5MTPKind::kDense &&
+        ResolveModelDeviceType(registration.architecture, params.device) ==
+            vt::DeviceType::kXPU) {
+      const StTensor* head = nullptr;
+      for (const SafetensorsFile& shard : *shards) {
+        if (std::find(shard.Names().begin(), shard.Names().end(),
+                      "lm_head.weight") != shard.Names().end()) {
+          VT_CHECK(head == nullptr, "qwen3_5 MTP: duplicate lm_head.weight");
+          head = &shard.Get("lm_head.weight");
+        }
+      }
+      VT_CHECK(head != nullptr, "qwen3_5 MTP: missing FP16 target lm_head.weight");
+      PackQwen3_5MTPGptqDraft(draft, *head);
+    }
+    loaded.AttachMtpDraftWeights(std::move(draft));
   };
 
   // SPEC-DFLASH D5: when a dflash config is set, load the SEPARATE z-lab draft

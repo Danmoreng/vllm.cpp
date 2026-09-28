@@ -1,6 +1,8 @@
 #include "vllm/model_executor/model_loader/gptq4_weight.h"
 
+#include <algorithm>
 #include <cstring>
+#include <cmath>
 #include <limits>
 #include <string>
 
@@ -127,6 +129,87 @@ Gptq4Weight LoadGptq4Weight(const TensorResolver& get,
                             const std::string& projection, int64_t k,
                             int64_t n) {
   return LoadMergedGptq4Weight(get, {projection}, k, {n});
+}
+
+Gptq4Weight QuantizeMergedGptq4Weight(
+    const std::vector<StTensor>& sources, int64_t k) {
+  VT_CHECK(!sources.empty() && k > 0 && k % kGroupSize == 0,
+           "gptq4: dense source K must be positive and divisible by 128");
+  int64_t n_total = 0;
+  for (const StTensor& source : sources) {
+    VT_CHECK((source.dtype == "BF16" || source.dtype == "F16") &&
+                 source.shape.size() == 2 && source.shape[0] > 0 &&
+                 source.shape[1] == k && source.data != nullptr &&
+                 source.nbytes == CheckedBytes(source.shape[0], k, 2) &&
+                 n_total <= std::numeric_limits<int64_t>::max() - source.shape[0],
+             "gptq4: dense source must be finite BF16/F16 Linear [N,K]");
+    n_total += source.shape[0];
+  }
+  VT_CHECK(n_total % 8 == 0,
+           "gptq4: merged dense output width must be divisible by 8");
+  CheckedBytes(n_total, k / 8, 4);
+  CheckedBytes(k / kGroupSize, n_total, 2);
+  Gptq4Weight result;
+  result.k = k;
+  result.n = n_total;
+  result.qweight = dense_loaders::MakeOwned(vt::DType::kI32,
+                                            {n_total, k / 8});
+  result.scales = dense_loaders::MakeOwned(vt::DType::kF16,
+                                           {k / kGroupSize, n_total});
+  result.zero_point = dense_loaders::MakeOwned(vt::DType::kI8, {1});
+  result.zero_point.bytes.data()[0] = 8;
+  int64_t output_offset = 0;
+  for (const StTensor& source : sources) {
+    for (int64_t row = 0; row < source.shape[0]; ++row) {
+      const int64_t out_row = output_offset + row;
+      for (int64_t group = 0; group < k / kGroupSize; ++group) {
+        float values[kGroupSize];
+        float maxabs = 0.0F;
+        for (int64_t i = 0; i < kGroupSize; ++i) {
+          const size_t index = static_cast<size_t>(row * k +
+                                                   group * kGroupSize + i);
+          const uint16_t bits = vt::LoadUnaligned<uint16_t>(source.data + 2 * index);
+          const float value = source.dtype == "F16" ? vt::F16ToF32(bits)
+                                                       : vt::BF16ToF32(bits);
+          VT_CHECK(std::isfinite(value), "gptq4: non-finite dense source weight");
+          values[i] = value;
+          maxabs = std::max(maxabs, std::abs(value));
+        }
+        // The production recipe uses maxabs/7 in FP32 and stores FP16 scales.
+        // An all-zero group has no defined division; encode exact zero with a
+        // positive FP16 scale so oneDNN still accepts the packed owner.
+        const float scale = maxabs == 0.0F ? 0x1p-24F : maxabs / 7.0F;
+        const uint16_t scale_bits = vt::F32ToF16(scale);
+        VT_CHECK(vt::F16ToF32(scale_bits) > 0.0F &&
+                     std::isfinite(vt::F16ToF32(scale_bits)),
+                 "gptq4: dense source scale is outside FP16 range");
+        std::memcpy(result.scales.bytes.data() +
+                        2 * static_cast<size_t>(group * n_total + out_row),
+                    &scale_bits, sizeof(scale_bits));
+        for (int64_t word = 0; word < kGroupSize / 8; ++word) {
+          uint32_t packed = 0;
+          for (int nibble = 0; nibble < 8; ++nibble) {
+            const float value = values[word * 8 + nibble];
+            const int quantized = maxabs == 0.0F
+                                      ? 0
+                                      : std::clamp(static_cast<int>(std::nearbyint(value / scale)),
+                                                   -8, 7);
+            packed |= static_cast<uint32_t>(quantized + 8) << (4 * nibble);
+          }
+          const size_t word_offset = static_cast<size_t>(out_row * (k / 8) +
+                                                          group * (kGroupSize / 8) + word);
+          std::memcpy(result.qweight.bytes.data() + 4 * word_offset,
+                      &packed, sizeof(packed));
+        }
+      }
+    }
+    output_offset += source.shape[0];
+  }
+  return result;
+}
+
+Gptq4Weight QuantizeGptq4Weight(const StTensor& source, int64_t k) {
+  return QuantizeMergedGptq4Weight({source}, k);
 }
 
 size_t Gptq4Weight::ResidentBytes() const {

@@ -155,8 +155,8 @@ void Matmul(Queue& q, Tensor& out, const Tensor& a, const Tensor& b) {
   VT_CHECK(a.shape[1] == b.shape[0], "matmul: inner dims mismatch");
   VT_CHECK(out.shape[0] == a.shape[0] && out.shape[1] == b.shape[1],
            "matmul: output shape mismatch");
-  VT_CHECK(IsFloat(a.dtype) && IsFloat(b.dtype) && IsOutFloat(out.dtype),
-           "matmul: float inputs and f32/bf16 output required");
+  VT_CHECK(IsFloat(a.dtype) && IsFloat(b.dtype) && IsXpuF16Out(q, out.dtype),
+           "matmul: float inputs and f32/bf16 output required (f16 on XPU)");
   VT_CHECK(a.IsContiguous() && b.IsContiguous() && out.IsContiguous(),
            "matmul: contiguous tensors required");
   VT_CHECK(a.device == b.device && a.device == out.device && a.device == q.device,
@@ -204,8 +204,8 @@ void MatmulBT(Queue& q, Tensor& out, const Tensor& a, const Tensor& b) {
   VT_CHECK(a.shape[1] == b.shape[1], "matmul_bt: inner dims mismatch (b is [N,K])");
   VT_CHECK(out.shape[0] == a.shape[0] && out.shape[1] == b.shape[0],
            "matmul_bt: output shape mismatch");
-  VT_CHECK(IsFloat(a.dtype) && IsFloat(b.dtype) && IsOutFloat(out.dtype),
-           "matmul_bt: float inputs and f32/bf16 output required");
+  VT_CHECK(IsFloat(a.dtype) && IsFloat(b.dtype) && IsXpuF16Out(q, out.dtype),
+           "matmul_bt: float inputs and f32/bf16 output required (f16 on XPU)");
   // The ACTIVATION may be ROW-STRIDED (relaxed at MLA campaign W6): upstream's
   // `kv_b_proj(kv_c)` inside `_compute_prefill_context`
   // (mla_attention.py:2141-2160) is applied to a COLUMN SLICE of the 576-wide
@@ -2446,11 +2446,12 @@ void CausalConv1dSpecUpdate(Queue& q, Tensor& out, const Tensor& x, const Tensor
   VT_CHECK(k >= 2, std::string(name) + ": kernel width must be >= 2");
   VT_CHECK(conv_state.shape[1] == c && state_len >= k - 1,
            std::string(name) + ": conv_state must be [N,C,state_len>=K-1]");
-  VT_CHECK(IsFloat(x.dtype) && IsFloat(weight.dtype) && IsOutFloat(out.dtype),
-           std::string(name) + ": float x/weight, f32/bf16 out");
+  VT_CHECK(IsFloat(x.dtype) && IsFloat(weight.dtype) && IsXpuF16Out(q, out.dtype),
+           std::string(name) + ": float x/weight, f32/bf16 out (f16 on XPU)");
   VT_CHECK(conv_state.dtype == DType::kF32 ||
+               (conv_state.dtype == DType::kF16 && q.device.type == DeviceType::kXPU) ||
                (conv_state.dtype == DType::kBF16 && q.device.type == DeviceType::kCUDA),
-           std::string(name) + ": conv_state must be f32, or bf16 on CUDA");
+           std::string(name) + ": conv_state must be f32, f16 on XPU, or bf16 on CUDA");
   VT_CHECK(x.stride[1] == 1 && x.stride[0] >= c && out.IsContiguous() &&
                weight.IsContiguous() && conv_state.IsContiguous(),
            std::string(name) +

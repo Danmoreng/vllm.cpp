@@ -115,6 +115,309 @@ TEST_CASE("XPU conv decode: permuted/null slots, wider history, in-place output 
   CHECK(vt::xpu::GetMemoryInfo().allocated_bytes == 0);
 }
 
+TEST_CASE("XPU speculative conv preserves accepted-prefix windows and rejects bad metadata") {
+  Queue cpu(vt::DeviceType::kCPU), gpu(vt::DeviceType::kXPU);
+  constexpr int channels = 7, rows = 7, taps = 4, state_len = 6;
+  const std::vector<int32_t> offsets{0, 4, 6, 7};
+  const std::vector<int32_t> slots{2, 0, -1};
+  const auto inputs = Values(rows * (channels + 2), 3);
+  const auto weights = Values(channels * taps, 4);
+  const auto initial_state = Values(3 * channels * state_len, 5);
+  const std::vector<float> initial_output(rows * channels, -1.0f);
+  const auto biases = Values(channels, 7);
+  for (auto dtype : {DType::kF32, DType::kF16})
+    for (int accepted0 = 1; accepted0 <= 4; ++accepted0) {
+      CAPTURE(dtype);
+      CAPTURE(accepted0);
+      const std::vector<int32_t> accepted{accepted0, 2, 1};
+      std::vector<float> expected_output;
+      std::vector<unsigned char> expected_state;
+      for (auto* q : {&cpu.q, &gpu.q}) {
+        Buffer x(*q, dtype, {rows, channels + 2});
+        Buffer w(*q, dtype, {channels, taps});
+        Buffer out(*q, q == &cpu.q ? DType::kF32 : dtype, {rows, channels});
+        Buffer state(*q, DType::kF32, {3, channels, state_len});
+        Buffer bias(*q, DType::kF32, {channels});
+        Buffer cu(*q, DType::kI32, {4});
+        Buffer idx(*q, DType::kI32, {3});
+        Buffer nat(*q, DType::kI32, {3});
+        x.put(inputs); x.tensor.shape[1] = channels;
+        w.put(weights); out.put(initial_output); state.put(initial_state);
+        bias.put(biases); cu.upload(offsets.data());
+        idx.upload(slots.data()); nat.upload(accepted.data());
+        vt::CausalConv1dSpecUpdate(*q, out.tensor, x.tensor, w.tensor,
+                                   &bias.tensor, state.tensor, idx.tensor,
+                                   nat.tensor, cu.tensor, {true});
+        if (q == &cpu.q) {
+          expected_output = out.floats();
+          expected_state = state.download();
+        } else {
+          Close(out.floats(), expected_output,
+                dtype == DType::kF16 ? 2e-3f : 2e-6f, 1e-4f);
+          SameBytes(state.download(), expected_state);
+          const auto unchanged = state.download();
+          const std::vector<int32_t> bad_accepted{0, 2, 1};
+          nat.upload(bad_accepted.data());
+          CHECK_THROWS(vt::CausalConv1dSpecUpdate(*q, out.tensor, x.tensor,
+              w.tensor, &bias.tensor, state.tensor, idx.tensor, nat.tensor,
+              cu.tensor, {true}));
+          SameBytes(state.download(), unchanged);
+          nat.upload(accepted.data());
+          const std::vector<int32_t> bad_slots{2, 2, -1};
+          idx.upload(bad_slots.data());
+          CHECK_THROWS(vt::CausalConv1dSpecUpdate(*q, out.tensor, x.tensor,
+              w.tensor, &bias.tensor, state.tensor, idx.tensor, nat.tensor,
+              cu.tensor, {true}));
+          SameBytes(state.download(), unchanged);
+        }
+      }
+    }
+}
+
+TEST_CASE("XPU speculative conv supports GPTQ FP16 persistent state") {
+  Queue cpu(vt::DeviceType::kCPU), gpu(vt::DeviceType::kXPU);
+  constexpr int channels = 5, rows = 3, taps = 4, state_len = 5;
+  std::vector<float> inputs(rows * channels), weights(channels * taps);
+  std::vector<float> initial_state(channels * state_len);
+  for (size_t i = 0; i < inputs.size(); ++i) inputs[i] = static_cast<float>(i % 7) / 8.0f;
+  for (size_t i = 0; i < weights.size(); ++i) weights[i] = static_cast<float>(i % 5) / 4.0f;
+  for (size_t i = 0; i < initial_state.size(); ++i)
+    initial_state[i] = static_cast<float>(i % 9) / 8.0f;
+  const int32_t offsets[] = {0, rows}, slots[] = {0};
+  for (int32_t accepted_count : {1, 2, 3}) {
+    std::vector<float> expected_output, expected_state;
+    for (auto* q : {&cpu.q, &gpu.q}) {
+      Buffer x(*q, DType::kF16, {rows, channels});
+      Buffer w(*q, DType::kF16, {channels, taps});
+      Buffer out(*q, q == &cpu.q ? DType::kF32 : DType::kF16,
+                 {rows, channels});
+      Buffer state(*q, q == &cpu.q ? DType::kF32 : DType::kF16,
+                   {1, channels, state_len});
+      Buffer cu(*q, DType::kI32, {2}), idx(*q, DType::kI32, {1});
+      Buffer accepted(*q, DType::kI32, {1});
+      x.put(inputs); w.put(weights); state.put(initial_state);
+      cu.upload(offsets); idx.upload(slots); accepted.upload(&accepted_count);
+      vt::CausalConv1dSpecUpdate(*q, out.tensor, x.tensor, w.tensor, nullptr,
+                                 state.tensor, idx.tensor, accepted.tensor,
+                                 cu.tensor, {});
+      if (q == &cpu.q) {
+        expected_output = out.floats();
+        expected_state = state.floats();
+      } else {
+        Close(out.floats(), expected_output, 0.002f);
+        Close(state.floats(), expected_state, 0.002f);
+      }
+    }
+  }
+  CHECK(vt::GetReferenceTierHits() == 0);
+  CHECK(vt::xpu::GetMemoryInfo().allocated_bytes == 0);
+}
+
+TEST_CASE("XPU speculative GDN snapshots match CPU for every accepted prefix") {
+  Queue cpu(vt::DeviceType::kCPU), gpu(vt::DeviceType::kXPU);
+  constexpr int tokens = 5, hk = 2, hv = 4, dk = 8, dv = 8;
+  const std::vector<int32_t> offsets{0, tokens};
+  const std::vector<int32_t> slots{0, 1, 2, 3, 4};
+  std::vector<float> initial(5 * hv * dv * dk, 0.0f);
+  const auto first_slot = Values(hv * dv * dk, 9, 0.02f);
+  std::copy(first_slot.begin(), first_slot.end(), initial.begin());
+  auto gate = Values(tokens * hv, 4, 0.01f);
+  auto beta = Values(tokens * hv, 5, 0.01f);
+  for (auto& x : gate) x -= 0.2f;
+  for (auto& x : beta) x += 0.5f;
+  for (auto dtype : {DType::kF32, DType::kF16})
+    for (int accepted_count = 1; accepted_count <= tokens; ++accepted_count) {
+      CAPTURE(dtype);
+      CAPTURE(accepted_count);
+      std::vector<float> expected_first, expected_second, expected_state_first,
+          expected_state_second;
+      for (auto* q : {&cpu.q, &gpu.q}) {
+        Buffer query(*q, dtype, {tokens, hk, dk});
+        Buffer key(*q, dtype, {tokens, hk, dk});
+        Buffer value(*q, dtype, {tokens, hv, dv});
+        Buffer g(*q, DType::kF32, {tokens, hv});
+        Buffer b(*q, DType::kF32, {tokens, hv});
+        Buffer out(*q, q == &cpu.q ? DType::kF32 : dtype,
+                   {tokens, hv, dv});
+        Buffer state(*q, DType::kF32, {tokens, hv, dv, dk});
+        Buffer cu(*q, DType::kI32, {2});
+        Buffer idx(*q, DType::kI32, {1, tokens});
+        Buffer nat(*q, DType::kI32, {1});
+        query.put(Values(tokens * hk * dk, 1, 0.1f));
+        key.put(Values(tokens * hk * dk, 2, 0.1f));
+        value.put(Values(tokens * hv * dv, 3, 0.1f));
+        g.put(gate); b.put(beta); state.put(initial);
+        cu.upload(offsets.data()); idx.upload(slots.data());
+        int32_t accepted = 1;
+        nat.upload(&accepted);
+        vt::GdnSpecDecode(*q, out.tensor, query.tensor, key.tensor,
+                          value.tensor, g.tensor, b.tensor, state.tensor,
+                          cu.tensor, idx.tensor, nat.tensor, {0.3535533906f});
+        if (q == &cpu.q) {
+          expected_first = out.floats();
+          expected_state_first = state.floats();
+        } else {
+          Close(out.floats(), expected_first,
+                dtype == DType::kF16 ? 2e-3f : 1e-4f, 1e-4f);
+          Close(state.floats(), expected_state_first, 1e-4f, 1e-5f);
+        }
+        accepted = accepted_count;
+        nat.upload(&accepted);
+        vt::GdnSpecDecode(*q, out.tensor, query.tensor, key.tensor,
+                          value.tensor, g.tensor, b.tensor, state.tensor,
+                          cu.tensor, idx.tensor, nat.tensor, {0.3535533906f});
+        if (q == &cpu.q) {
+          expected_second = out.floats();
+          expected_state_second = state.floats();
+        } else {
+          Close(out.floats(), expected_second,
+                dtype == DType::kF16 ? 2e-3f : 1e-4f, 1e-4f);
+          Close(state.floats(), expected_state_second, 1e-4f, 1e-5f);
+          const auto unchanged = state.download();
+          accepted = 0;
+          nat.upload(&accepted);
+          CHECK_THROWS(vt::GdnSpecDecode(*q, out.tensor, query.tensor,
+              key.tensor, value.tensor, g.tensor, b.tensor, state.tensor,
+              cu.tensor, idx.tensor, nat.tensor, {0.3535533906f}));
+          SameBytes(state.download(), unchanged);
+        }
+      }
+    }
+}
+
+TEST_CASE("XPU speculative GDN MTP1 uses 27B FP16 activations and FP32 snapshots") {
+  Queue cpu(vt::DeviceType::kCPU), gpu(vt::DeviceType::kXPU);
+  constexpr int tokens = 2, hk = 16, hv = 48, dk = 128, dv = 128;
+  const std::vector<int32_t> offsets{0, tokens};
+  const std::vector<int32_t> slots{0, 1};
+  const std::vector<int32_t> accepted{1};
+  std::vector<float> initial(tokens * hv * dv * dk, 0.0f);
+  const auto first_slot = Values(hv * dv * dk, 11, 0.002f);
+  std::copy(first_slot.begin(), first_slot.end(), initial.begin());
+  auto gate = Values(tokens * hv, 12, 0.01f);
+  auto beta = Values(tokens * hv, 13, 0.01f);
+  for (auto& x : gate) x -= 0.2f;
+  for (auto& x : beta) x += 0.5f;
+  std::vector<float> expected_output, expected_state;
+  for (auto* q : {&cpu.q, &gpu.q}) {
+    Buffer query(*q, DType::kF16, {tokens, hk, dk});
+    Buffer key(*q, DType::kF16, {tokens, hk, dk});
+    Buffer value(*q, DType::kF16, {tokens, hv, dv});
+    Buffer g(*q, DType::kF32, {tokens, hv});
+    Buffer b(*q, DType::kF32, {tokens, hv});
+    Buffer out(*q, q == &cpu.q ? DType::kF32 : DType::kF16,
+               {tokens, hv, dv});
+    Buffer state(*q, DType::kF32, {tokens, hv, dv, dk});
+    Buffer cu(*q, DType::kI32, {2});
+    Buffer idx(*q, DType::kI32, {1, tokens});
+    Buffer nat(*q, DType::kI32, {1});
+    query.put(Values(tokens * hk * dk, 1, 0.01f));
+    key.put(Values(tokens * hk * dk, 2, 0.01f));
+    value.put(Values(tokens * hv * dv, 3, 0.01f));
+    g.put(gate); b.put(beta); state.put(initial);
+    cu.upload(offsets.data()); idx.upload(slots.data());
+    nat.upload(accepted.data());
+    vt::GdnSpecDecode(*q, out.tensor, query.tensor, key.tensor,
+                      value.tensor, g.tensor, b.tensor, state.tensor,
+                      cu.tensor, idx.tensor, nat.tensor, {0.0883883476f});
+    if (q == &cpu.q) {
+      expected_output = out.floats();
+      expected_state = state.floats();
+    } else {
+      Close(out.floats(), expected_output, 2e-3f, 1e-4f);
+      Close(state.floats(), expected_state, 1e-4f, 1e-5f);
+    }
+  }
+}
+
+TEST_CASE("XPU speculative GDN MTP4 restores every accepted 27B snapshot") {
+  Queue cpu(vt::DeviceType::kCPU), gpu(vt::DeviceType::kXPU);
+  constexpr int rows = 6, first_rows = 5;
+  constexpr int hk = 16, hv = 48, dk = 128, dv = 128;
+  constexpr float scale = 0.0883883476f;
+  const auto q_values = Values(rows * hk * dk, 21, 0.01f);
+  const auto k_values = Values(rows * hk * dk, 22, 0.01f);
+  const auto v_values = Values(rows * hv * dv, 23, 0.01f);
+  auto g_values = Values(rows * hv, 24, 0.01f);
+  auto b_values = Values(rows * hv, 25, 0.01f);
+  for (auto& x : g_values) x -= 0.2f;
+  for (auto& x : b_values) x += 0.5f;
+  const auto initial_row = Values(hv * dv * dk, 26, 0.002f);
+  std::vector<float> initial(first_rows * hv * dv * dk, 0.0f);
+  std::copy(initial_row.begin(), initial_row.end(), initial.begin());
+  const int32_t slots[] = {0, 1, 2, 3, 4};
+
+  for (int32_t previous_accepted = 1; previous_accepted <= first_rows;
+       ++previous_accepted) {
+    CAPTURE(previous_accepted);
+    Buffer qg(gpu.q, DType::kF16, {rows, hk, dk});
+    Buffer kg(gpu.q, DType::kF16, {rows, hk, dk});
+    Buffer vg(gpu.q, DType::kF16, {rows, hv, dv});
+    Buffer gg(gpu.q, DType::kF32, {rows, hv});
+    Buffer bg(gpu.q, DType::kF32, {rows, hv});
+    Buffer og(gpu.q, DType::kF16, {first_rows, hv, dv});
+    Buffer last_gpu(gpu.q, DType::kF16, {1, hv, dv});
+    Buffer sg(gpu.q, DType::kF32, {first_rows, hv, dv, dk});
+    Buffer cu(gpu.q, DType::kI32, {2});
+    Buffer idx(gpu.q, DType::kI32, {1, first_rows});
+    Buffer nat(gpu.q, DType::kI32, {1});
+    qg.put(q_values); kg.put(k_values); vg.put(v_values);
+    gg.put(g_values); bg.put(b_values); sg.put(initial);
+    idx.upload(slots);
+    int32_t offsets[] = {0, first_rows};
+    int32_t accepted = 1;
+    cu.upload(offsets); nat.upload(&accepted);
+    auto q_first = Rows(qg.tensor, 0, first_rows);
+    auto k_first = Rows(kg.tensor, 0, first_rows);
+    auto v_first = Rows(vg.tensor, 0, first_rows);
+    auto g_first = Rows(gg.tensor, 0, first_rows);
+    auto b_first = Rows(bg.tensor, 0, first_rows);
+    vt::GdnSpecDecode(gpu.q, og.tensor, q_first, k_first, v_first,
+                      g_first, b_first, sg.tensor, cu.tensor, idx.tensor,
+                      nat.tensor, {scale});
+    offsets[1] = 1;
+    accepted = previous_accepted;
+    cu.upload(offsets); nat.upload(&accepted);
+    auto q_last = Rows(qg.tensor, first_rows, 1);
+    auto k_last = Rows(kg.tensor, first_rows, 1);
+    auto v_last = Rows(vg.tensor, first_rows, 1);
+    auto g_last = Rows(gg.tensor, first_rows, 1);
+    auto b_last = Rows(bg.tensor, first_rows, 1);
+    vt::GdnSpecDecode(gpu.q, last_gpu.tensor, q_last, k_last, v_last,
+                      g_last, b_last, sg.tensor, cu.tensor, idx.tensor,
+                      nat.tensor, {scale});
+
+    // Independent teacher-forced serial decode: consume only the committed
+    // prefix of the first verification, then the next anchor token.
+    Buffer qc(cpu.q, DType::kF16, {rows, hk, dk});
+    Buffer kc(cpu.q, DType::kF16, {rows, hk, dk});
+    Buffer vc(cpu.q, DType::kF16, {rows, hv, dv});
+    Buffer gc(cpu.q, DType::kF32, {rows, hv});
+    Buffer bc(cpu.q, DType::kF32, {rows, hv});
+    Buffer oc(cpu.q, DType::kF32, {1, hv, dv});
+    Buffer sc(cpu.q, DType::kF32, {1, hv, dv, dk});
+    qc.put(q_values); kc.put(k_values); vc.put(v_values);
+    gc.put(g_values); bc.put(b_values); sc.put(initial_row);
+    for (int t = 0; t <= previous_accepted; ++t) {
+      const int row = t == previous_accepted ? first_rows : t;
+      auto qr = Rows(qc.tensor, row, 1);
+      auto kr = Rows(kc.tensor, row, 1);
+      auto vr = Rows(vc.tensor, row, 1);
+      auto gr = Rows(gc.tensor, row, 1);
+      auto br = Rows(bc.tensor, row, 1);
+      vt::GdnDecode(cpu.q, oc.tensor, qr, kr, vr, gr, br, sc.tensor,
+                    {scale});
+    }
+    Close(last_gpu.floats(), oc.floats(), 2e-3f, 1e-4f);
+    const auto gpu_state = sg.floats();
+    Close(std::vector<float>(gpu_state.begin(),
+                             gpu_state.begin() + hv * dv * dk),
+          sc.floats(), 1e-4f, 1e-5f);
+  }
+  CHECK(vt::GetReferenceTierHits() == 0);
+  CHECK(vt::xpu::GetMemoryInfo().allocated_bytes == 0);
+}
+
 TEST_CASE("XPU conv full prefill and in-place prefill equal split prefill plus decode") {
   Queue gpu(vt::DeviceType::kXPU);
   for (int length : {1, 2, 3, 4, 63, 64, 65}) {

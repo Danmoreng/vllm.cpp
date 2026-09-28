@@ -13,6 +13,8 @@ void MatmulKernel(Queue&, Tensor&, const Tensor&, const Tensor&);
 void MatmulBTKernel(Queue&, Tensor&, const Tensor&, const Tensor&);
 void RmsNormKernel(Queue&, Tensor&, const Tensor&, const Tensor&, const RmsNormArgs&, Tensor*);
 void GreedyArgmaxKernel(Queue&, Tensor&, const Tensor&);
+void GreedyRejectionSampleKernel(Queue&, Tensor&, Tensor&, Tensor&, const Tensor&,
+                                 const Tensor&, const Tensor&);
 void ApplyTopKTopPKernel(Queue&, Tensor&, const Tensor*, const Tensor*);
 void RandomSampleKernel(Queue&, Tensor&, const Tensor&, const Tensor&);
 void ApplyTemperatureKernel(Queue&, Tensor&, const Tensor&, bool);
@@ -39,12 +41,18 @@ void CausalConv1dFwdKernel(Queue&, Tensor&, const Tensor&, const Tensor&, const 
                            Tensor&, const Tensor&, const Tensor&, const CausalConv1dArgs&);
 void CausalConv1dUpdateKernel(Queue&, Tensor&, const Tensor&, const Tensor&, const Tensor*,
                               Tensor&, const Tensor*, const CausalConv1dArgs&);
+void CausalConv1dSpecUpdateKernel(Queue&, Tensor&, const Tensor&, const Tensor&, const Tensor*,
+                                  Tensor&, const Tensor&, const Tensor&, const Tensor&,
+                                  const CausalConv1dArgs&);
 void GdnPostConvKernel(Queue&, Tensor&, Tensor&, Tensor&, Tensor&, Tensor&, const Tensor&,
                         const Tensor&, const Tensor&, const Tensor&, const Tensor&, const L2NormArgs&);
 void GdnPrefillKernel(Queue&, Tensor&, const Tensor&, const Tensor&, const Tensor&, const Tensor&,
                        const Tensor&, Tensor&, const Tensor&, const GdnArgs&);
 void GdnDecodeKernel(Queue&, Tensor&, const Tensor&, const Tensor&, const Tensor&, const Tensor&,
                       const Tensor&, Tensor&, const Tensor*, const GdnArgs&);
+void GdnSpecDecodeKernel(Queue&, Tensor&, const Tensor&, const Tensor&, const Tensor&,
+                         const Tensor&, const Tensor&, Tensor&, const Tensor&,
+                         const Tensor&, const Tensor&, const GdnArgs&);
 void RmsNormGatedKernel(Queue&, Tensor&, const Tensor&, const Tensor&, const Tensor&, const RmsNormGatedArgs&);
 void GdnStateGatherKernel(Queue&, Tensor&, const Tensor&, const Tensor&, const Tensor*);
 void GdnStateScatterKernel(Queue&, Tensor&, const Tensor&, const Tensor&);

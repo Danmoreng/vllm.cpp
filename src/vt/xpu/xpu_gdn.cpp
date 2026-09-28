@@ -140,6 +140,83 @@ void CausalConv1dUpdateKernel(Queue& q, Tensor& out, const Tensor& x, const Tens
     RecordProfileEvent(q, "conv1d_decode", event);
   }, true);
 }
+void CausalConv1dSpecUpdateKernel(Queue& q, Tensor& out, const Tensor& x,
+                                  const Tensor& weight, const Tensor* bias,
+                                  Tensor& state, const Tensor& indices,
+                                  const Tensor& accepted, const Tensor& qsl,
+                                  const CausalConv1dArgs& args) {
+  TraceXpuOp(OpId::kCausalConv1dSpecUpdate, q,
+             {&out, &x, &weight, bias, &state, &indices, &accepted, &qsl});
+  const int64_t requests = qsl.shape[0] - 1, channels = x.shape[1];
+  const int64_t taps = weight.shape[1], width = taps - 1;
+  const int64_t state_len = state.shape[2];
+  const int64_t max_query_len = state_len - width + 1;
+  FloatTensor(state);
+  VT_CHECK(!Overlap(state, x) && !Overlap(state, out) && !Overlap(state, weight) &&
+               (!bias || !Overlap(state, *bias)) && !Overlap(state, indices) &&
+               !Overlap(state, accepted) && !Overlap(state, qsl),
+           "XPU spec conv state must have separate storage");
+  const auto* offsets = static_cast<const int32_t*>(qsl.data);
+  const auto* ids = static_cast<const int32_t*>(indices.data);
+  const auto* num_accepted = static_cast<const int32_t*>(accepted.data);
+  const int64_t tokens = x.shape[0], slots = state.shape[0];
+  CheckDeviceMetadata(q, [=] {
+    if (offsets[0] != 0 || offsets[requests] != tokens) return false;
+    for (int64_t i = 0; i < requests; ++i) {
+      if (offsets[i] < 0 || offsets[i + 1] < offsets[i] ||
+          offsets[i + 1] > tokens ||
+          offsets[i + 1] - offsets[i] > max_query_len ||
+          num_accepted[i] < 1 || num_accepted[i] > max_query_len ||
+          ids[i] >= slots) return false;
+      if (ids[i] >= 0)
+        for (int64_t j = 0; j < i; ++j)
+          if (ids[j] == ids[i]) return false;
+    }
+    return true;
+  }, "XPU spec conv invalid offsets, accepted count or state slot",
+      {&qsl, &indices, &accepted});
+  WithOutput(q, out, {&x, &weight, bias, &indices, &accepted, &qsl},
+             [&](Tensor& target) {
+    const View src(x), dst(target), w(weight), b(bias ? *bias : weight);
+    const View cache(state);
+    const bool has_bias = bias != nullptr, activation = args.silu_activation;
+    const auto event = NativeQueue(q).parallel_for(
+        sycl::range<1>(requests * channels), [=](sycl::id<1> item) {
+      const int64_t request = item[0] / channels, channel = item[0] % channels;
+      const int64_t slot = ids[request];
+      if (slot < 0) return;
+      const int64_t begin = offsets[request], length = offsets[request + 1] - begin;
+      if (!length) return;
+      const int64_t off = static_cast<int64_t>(num_accepted[request]) - 1;
+      const int64_t base = (slot * channels + channel) * state_len;
+      for (int64_t t = 0; t < length; ++t) {
+        float acc = has_bias ? Load(b, channel) : 0.0f;
+        for (int64_t j = 0; j < taps; ++j) {
+          const int64_t pos = t + j;
+          const float value = pos < width
+              ? Load(cache, base + off + pos)
+              : Load(src, (begin + pos - width) * src.stride[0] + channel);
+          acc += Load(w, channel * taps + j) * value;
+        }
+        Store(dst, (begin + t) * channels + channel,
+              activation ? Silu(acc) : acc);
+      }
+      // Read from the right while copying left, so this needs no temporary.
+      // The one-tap shift plus next step's accepted-count offset selects the
+      // previous accepted prefix without committing rejected draft tokens.
+      const int64_t keep = state_len - length;
+      for (int64_t j = 0; j < keep; ++j) {
+        const int64_t source = off + j + 1;
+        Store(cache, base + j,
+              source < state_len ? Load(cache, base + source) : 0.0f);
+      }
+      for (int64_t t = 0; t < length; ++t)
+        Store(cache, base + keep + t,
+              Load(src, (begin + t) * src.stride[0] + channel));
+    });
+    RecordProfileEvent(q, "conv1d_spec_decode", event);
+  }, true);
+}
 void GdnPostConvKernel(Queue& q, Tensor& qo, Tensor& ko, Tensor& vo, Tensor& go, Tensor& bo,
                         const Tensor& conv, const Tensor& araw, const Tensor& braw,
                         const Tensor& alog, const Tensor& bias, const L2NormArgs& args) {
@@ -392,6 +469,93 @@ void GdnDecodeKernel(Queue& q, Tensor& out, const Tensor& qi, const Tensor& ki, 
                       const GdnArgs& args) {
   TraceXpuOp(OpId::kGdnDecode, q, {&out, &qi, &ki, &vi, &g, &beta, &state, indices});
   Recurrence(q, out, qi, ki, vi, g, beta, state, nullptr, indices, args.scale);
+}
+void GdnSpecDecodeKernel(Queue& q, Tensor& out, const Tensor& qi,
+                         const Tensor& ki, const Tensor& vi, const Tensor& g,
+                         const Tensor& beta, Tensor& state, const Tensor& qsl,
+                         const Tensor& indices, const Tensor& accepted,
+                         const GdnArgs& args) {
+  TraceXpuOp(OpId::kGdnSpecDecode, q,
+             {&out, &qi, &ki, &vi, &g, &beta, &state, &qsl, &indices, &accepted});
+  const int64_t requests = indices.shape[0], cols = indices.shape[1];
+  const int64_t tokens = qi.shape[0], slots = state.shape[0];
+  const int64_t hk = qi.shape[1], hv = state.shape[1];
+  const int64_t dv = state.shape[2], dk = state.shape[3];
+  VT_CHECK(state.dtype == DType::kF32, "XPU spec GDN requires F32 state");
+  VT_CHECK(dk > 0 && dk <= 128, "XPU spec GDN supports Dk <= 128");
+  for (const auto* operand :
+       std::initializer_list<const Tensor*>{&out, &qi, &ki, &vi, &g, &beta,
+                                            &qsl, &indices, &accepted})
+    VT_CHECK(!Overlap(state, *operand), "XPU spec GDN state must have separate storage");
+  const auto* offsets = static_cast<const int32_t*>(qsl.data);
+  const auto* ids = static_cast<const int32_t*>(indices.data);
+  const auto* nat = static_cast<const int32_t*>(accepted.data);
+  CheckDeviceMetadata(q, [=] {
+    if (offsets[0] != 0 || offsets[requests] != tokens) return false;
+    for (int64_t r = 0; r < requests; ++r) {
+      if (offsets[r] < 0 || offsets[r + 1] < offsets[r] ||
+          offsets[r + 1] > tokens || offsets[r + 1] - offsets[r] > cols ||
+          nat[r] < 1 || nat[r] > cols) return false;
+      for (int64_t c = 0; c < cols; ++c) {
+        const int32_t slot = ids[r * cols + c];
+        if (slot >= slots) return false;
+        if (slot < 0) continue;
+        for (int64_t prior = 0; prior < r; ++prior)
+          for (int64_t pc = 0; pc < cols; ++pc)
+            if (ids[prior * cols + pc] == slot) return false;
+      }
+    }
+    return true;
+  }, "XPU spec GDN invalid offsets, accepted count or state slot",
+      {&qsl, &indices, &accepted});
+  WithOutput(q, out, {&qi, &ki, &vi, &g, &beta, &qsl, &indices, &accepted},
+             [&](Tensor& target) {
+    const View dst(target), qs(qi), ks(ki), vs(vi), gs(g), bs(beta);
+    auto* cache = static_cast<float*>(state.data);
+    const float scale = args.scale;
+    const auto event = NativeQueue(q).parallel_for(
+        sycl::range<1>(requests * hv * dv), [=](sycl::id<1> item) {
+      const int64_t request = item[0] / (hv * dv);
+      const int64_t head = (item[0] / dv) % hv, value = item[0] % dv;
+      const int64_t first = offsets[request], last = offsets[request + 1];
+      const int32_t initial = ids[request * cols + nat[request] - 1];
+      const int64_t out_channel = head * dv + value;
+      if (initial < 0) {
+        for (int64_t token = first; token < last; ++token)
+          Store(dst, token * hv * dv + out_channel, 0.0f);
+        return;
+      }
+      if (first == last) return;
+      float s[128];
+      const int64_t initial_base = ((static_cast<int64_t>(initial) * hv + head) * dv + value) * dk;
+      for (int64_t j = 0; j < dk; ++j) s[j] = cache[initial_base + j];
+      const int64_t key_head = head / (hv / hk);
+      for (int64_t token = first; token < last; ++token) {
+        const int64_t key_base = (token * hk + key_head) * dk;
+        const float decay = sycl::exp(Load(gs, token * hv + head));
+        float prediction = 0.0f;
+        for (int64_t j = 0; j < dk; ++j) {
+          s[j] *= decay;
+          prediction += s[j] * Load(ks, key_base + j);
+        }
+        const float delta =
+            (Load(vs, token * hv * dv + out_channel) - prediction) *
+            Load(bs, token * hv + head);
+        float output = 0.0f;
+        for (int64_t j = 0; j < dk; ++j) {
+          s[j] += delta * Load(ks, key_base + j);
+          output += s[j] * (Load(qs, key_base + j) * scale);
+        }
+        Store(dst, token * hv * dv + out_channel, output);
+        const int32_t snapshot = ids[request * cols + token - first];
+        if (snapshot >= 0) {
+          const int64_t base = ((static_cast<int64_t>(snapshot) * hv + head) * dv + value) * dk;
+          for (int64_t j = 0; j < dk; ++j) cache[base + j] = s[j];
+        }
+      }
+    });
+    RecordProfileEvent(q, "gdn_spec_decode", event);
+  });
 }
 void RmsNormGatedKernel(Queue& q, Tensor& out, const Tensor& x, const Tensor& gate,
                          const Tensor& weight, const RmsNormGatedArgs& args) {

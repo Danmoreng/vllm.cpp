@@ -1,0 +1,138 @@
+{
+  "source": "local safetensors index and shard-5 header; no weight payload loaded",
+  "index_sha256": "d511a969b32a16f1890326dadd4d04039779cebce7458b8e5d2ce7f3ce2550ed",
+  "shard_5_header_sha256": "76a91b6e0b3c72c128d0509a611d59036a55adee3e48cbfa7f59587e17c98621",
+  "model_revision_declared_by_production_readme": "a47b0c6f0d756bc394c4cc629d5b0ded1acc7001",
+  "model_revision_verified_from_local_header": false,
+  "mtp_tensor_count": 15,
+  "mtp_tensors": [
+    {
+      "name": "mtp.fc.weight",
+      "shard": "model-00005-of-00005.safetensors",
+      "dtype": "BF16",
+      "shape": [
+        5120,
+        10240
+      ]
+    },
+    {
+      "name": "mtp.layers.0.input_layernorm.weight",
+      "shard": "model-00005-of-00005.safetensors",
+      "dtype": "BF16",
+      "shape": [
+        5120
+      ]
+    },
+    {
+      "name": "mtp.layers.0.mlp.down_proj.weight",
+      "shard": "model-00005-of-00005.safetensors",
+      "dtype": "BF16",
+      "shape": [
+        5120,
+        17408
+      ]
+    },
+    {
+      "name": "mtp.layers.0.mlp.gate_proj.weight",
+      "shard": "model-00005-of-00005.safetensors",
+      "dtype": "BF16",
+      "shape": [
+        17408,
+        5120
+      ]
+    },
+    {
+      "name": "mtp.layers.0.mlp.up_proj.weight",
+      "shard": "model-00005-of-00005.safetensors",
+      "dtype": "BF16",
+      "shape": [
+        17408,
+        5120
+      ]
+    },
+    {
+      "name": "mtp.layers.0.post_attention_layernorm.weight",
+      "shard": "model-00005-of-00005.safetensors",
+      "dtype": "BF16",
+      "shape": [
+        5120
+      ]
+    },
+    {
+      "name": "mtp.layers.0.self_attn.k_norm.weight",
+      "shard": "model-00005-of-00005.safetensors",
+      "dtype": "BF16",
+      "shape": [
+        256
+      ]
+    },
+    {
+      "name": "mtp.layers.0.self_attn.k_proj.weight",
+      "shard": "model-00005-of-00005.safetensors",
+      "dtype": "BF16",
+      "shape": [
+        1024,
+        5120
+      ]
+    },
+    {
+      "name": "mtp.layers.0.self_attn.o_proj.weight",
+      "shard": "model-00005-of-00005.safetensors",
+      "dtype": "BF16",
+      "shape": [
+        5120,
+        6144
+      ]
+    },
+    {
+      "name": "mtp.layers.0.self_attn.q_norm.weight",
+      "shard": "model-00005-of-00005.safetensors",
+      "dtype": "BF16",
+      "shape": [
+        256
+      ]
+    },
+    {
+      "name": "mtp.layers.0.self_attn.q_proj.weight",
+      "shard": "model-00005-of-00005.safetensors",
+      "dtype": "BF16",
+      "shape": [
+        12288,
+        5120
+      ]
+    },
+    {
+      "name": "mtp.layers.0.self_attn.v_proj.weight",
+      "shard": "model-00005-of-00005.safetensors",
+      "dtype": "BF16",
+      "shape": [
+        1024,
+        5120
+      ]
+    },
+    {
+      "name": "mtp.norm.weight",
+      "shard": "model-00005-of-00005.safetensors",
+      "dtype": "BF16",
+      "shape": [
+        5120
+      ]
+    },
+    {
+      "name": "mtp.pre_fc_norm_embedding.weight",
+      "shard": "model-00005-of-00005.safetensors",
+      "dtype": "BF16",
+      "shape": [
+        5120
+      ]
+    },
+    {
+      "name": "mtp.pre_fc_norm_hidden.weight",
+      "shard": "model-00005-of-00005.safetensors",
+      "dtype": "BF16",
+      "shape": [
+        5120
+      ]
+    }
+  ]
+}

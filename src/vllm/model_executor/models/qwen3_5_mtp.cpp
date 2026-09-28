@@ -451,4 +451,53 @@ Qwen3_5MTPWeights LoadQwen3_5MTP(
   return LoadQwen3_5MTP(get, has, config, kind);
 }
 
+void PackQwen3_5MTPGptqDraft(Qwen3_5MTPWeights& weights,
+                             const StTensor& target_head) {
+  VT_CHECK(weights.kind == Qwen3_5MTPKind::kDense && !weights.IsExl3() &&
+               !weights.IsGptq4Draft() && weights.fc.rank == 2 &&
+               weights.fc.nk && weights.fc.dtype == vt::DType::kBF16,
+           "qwen3_5 MTP: GPTQ draft packing requires dense BF16 source linears");
+  const auto view = [](const OwnedTensor& owned) {
+    VT_CHECK(owned.rank == 2 && owned.nk &&
+                 owned.dtype == vt::DType::kBF16 && !owned.bytes.empty(),
+             "qwen3_5 MTP: expected BF16 raw-NK draft Linear");
+    StTensor source;
+    source.dtype = "BF16";
+    source.shape = {owned.shape[0], owned.shape[1]};
+    source.data = owned.bytes.data();
+    source.nbytes = owned.bytes.size();
+    return source;
+  };
+  const int64_t hidden = weights.fc.shape[0];
+  VT_CHECK(weights.fc.shape[1] == 2 * hidden,
+           "qwen3_5 MTP: draft FC must be [H,2H]");
+  weights.fc_gptq4 = QuantizeGptq4Weight(view(weights.fc), 2 * hidden);
+  weights.fc = OwnedTensor{};
+  for (Qwen3_5DenseLayerWeights& layer : weights.dense_layers) {
+    VT_CHECK(!layer.attn.IsExl3() && !layer.mlp.IsExl3() &&
+                 layer.gptq4.Empty(),
+             "qwen3_5 MTP: draft GPTQ packing cannot replace another quantized arm");
+    layer.gptq4.attn_qkv = QuantizeMergedGptq4Weight(
+        {view(layer.attn.q_proj), view(layer.attn.k_proj),
+         view(layer.attn.v_proj)}, hidden);
+    layer.attn.q_proj = OwnedTensor{};
+    layer.attn.k_proj = OwnedTensor{};
+    layer.attn.v_proj = OwnedTensor{};
+    layer.gptq4.attn_out = QuantizeGptq4Weight(
+        view(layer.attn.o_proj), layer.attn.o_proj.shape[1]);
+    layer.attn.o_proj = OwnedTensor{};
+    layer.gptq4.mlp_gate_up = QuantizeMergedGptq4Weight(
+        {view(layer.mlp.gate_proj), view(layer.mlp.up_proj)}, hidden);
+    layer.mlp.gate_proj = OwnedTensor{};
+    layer.mlp.up_proj = OwnedTensor{};
+    layer.gptq4.mlp_down = QuantizeGptq4Weight(
+        view(layer.mlp.down_proj), layer.mlp.down_proj.shape[1]);
+    layer.mlp.down_proj = OwnedTensor{};
+  }
+  VT_CHECK(target_head.dtype == "F16" && target_head.shape.size() == 2 &&
+               target_head.shape[1] == hidden,
+           "qwen3_5 MTP: GPTQ draft head must come from target FP16 [vocab,H]");
+  weights.draft_lm_head_gptq4 = QuantizeGptq4Weight(target_head, hidden);
+}
+
 }  // namespace vllm

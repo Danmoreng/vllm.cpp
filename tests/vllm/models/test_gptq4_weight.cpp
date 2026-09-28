@@ -105,6 +105,33 @@ struct Fixture {
   }
 };
 
+TEST_CASE("dense BF16 and FP16 draft weights pack as symmetric GPTQ4 G128") {
+  Fixture fixture;
+  std::vector<uint16_t> bf16(8 * 128);
+  std::vector<uint16_t> f16(8 * 128);
+  for (int row = 0; row < 8; ++row) {
+    for (int col = 0; col < 128; ++col) {
+      const float value = col == 0 ? -7.0F : col == 1 ? 7.0F
+          : col == 2 ? 0.5F : col == 3 ? -0.5F : 0.0F;
+      bf16[row * 128 + col] = vt::F32ToBF16(value);
+      f16[row * 128 + col] = vt::F32ToF16(value);
+    }
+  }
+  fixture.Add("b", "BF16", {8, 128}, bf16);
+  fixture.Add("f", "F16", {8, 128}, f16);
+  const auto packed = vllm::QuantizeMergedGptq4Weight(
+      {fixture.tensors.at("b"), fixture.tensors.at("f")}, 128);
+  CHECK(packed.n == 16);
+  CHECK(packed.k == 128);
+  CHECK(packed.zero_point.bytes.data()[0] == 8);
+  CHECK(vt::LoadUnaligned<uint32_t>(packed.qweight.bytes.data()) ==
+        0x888888F1u);
+  CHECK(vt::LoadUnaligned<uint32_t>(packed.qweight.bytes.data() + 8 * 16 * 4) ==
+        0x888888F1u);
+  CHECK(vt::F16ToF32(vt::LoadUnaligned<uint16_t>(packed.scales.bytes.data())) ==
+        1.0F);
+}
+
 uint32_t Word(const vllm::OwnedTensor& tensor, size_t index) {
   return vt::LoadUnaligned<uint32_t>(tensor.bytes.data() + index * 4);
 }
@@ -880,7 +907,9 @@ TEST_CASE("GPTQ4 real 64-layer text prefill and decode use the packed XPU path")
   const auto attention_meta = [](int query_len, int context) {
     return gptq4_model_bench::AttentionMetadata(query_len, context, block_size);
   };
-  const auto gdn_meta = gptq4_model_bench::GdnMetadata;
+  const auto gdn_meta = [](int query_len, bool initial) {
+    return gptq4_model_bench::GdnMetadata(query_len, initial);
+  };
   const auto read_logits = [&](const vllm::ForwardLogits& logits,
                                 int expected_rows) {
     REQUIRE(logits.on_device());
@@ -1418,6 +1447,74 @@ TEST_CASE("GPTQ4 real 64-layer text prefill and decode use the packed XPU path")
       }
       return std::chrono::duration<double>(last_end - first_end).count();
     };
+    if (std::getenv("VLLM_CPP_GPTQ4_MTP_REAL_TAP") != nullptr) {
+      REQUIRE(bench_4k);
+      REQUIRE(prompt_tokens == 4096);
+      reset_state();
+      std::vector<vllm::PagedKvCache> fp8_target_kv;
+      fp8_target_kv.reserve(attn_kv.size());
+      for (const auto& cache : attn_kv) {
+        auto fp8_cache = cache;
+        fp8_cache.data = allocations.Zero(static_cast<size_t>(
+            cache.num_blocks * 2 * cache.block_size * cache.num_kv_heads *
+            cache.head_size));
+        fp8_cache.dtype = vt::DType::kI8;
+        fp8_cache.fp8_kind = vt::Fp8KVCacheDataType::kFp8E4M3;
+        fp8_cache.k_scale = 1.0f;
+        fp8_cache.v_scale = 1.0f;
+        fp8_target_kv.push_back(fp8_cache);
+      }
+      vllm::Qwen3_5MTPHiddenStates target_tap;
+      vllm::ModelForwardInput tap_input{
+          bench_ids, bench_positions, bench_am, bench_gm, fp8_target_kv,
+          gdn_state, config, queue, bench_indices};
+      tap_input.num_reqs = 1;
+      tap_input.hidden_tap = &target_tap;
+      (void)read_logits(vllm::ModelRegistry::Forward(*model, tap_input), 1);
+      REQUIRE(target_tap.tensor.dtype == vt::DType::kF16);
+      REQUIRE(target_tap.tensor.shape[0] == prompt_tokens);
+      vllm::PagedKvCache draft_kv;
+      draft_kv.num_blocks = 40;
+      draft_kv.block_size = block_size;
+      draft_kv.num_kv_heads = config.num_key_value_heads;
+      draft_kv.head_size = config.head_dim;
+      draft_kv.dtype = vt::DType::kI8;
+      draft_kv.fp8_kind = vt::Fp8KVCacheDataType::kFp8E4M3;
+      const size_t draft_kv_bytes = static_cast<size_t>(
+          draft_kv.num_blocks * 2 * block_size * draft_kv.num_kv_heads *
+          draft_kv.head_size);
+      draft_kv.data = allocations.Zero(draft_kv_bytes);
+      const auto draft_logits = [&](bool packed) {
+        auto mtp_weights = vllm::LoadQwen3_5MTP(
+            shards, config, vllm::Qwen3_5MTPKind::kDense);
+        if (packed) {
+          vllm::PackQwen3_5MTPGptqDraft(
+              mtp_weights, shards[1].Get("lm_head.weight"));
+        }
+        model->AttachMtpDraftWeights(std::move(mtp_weights));
+        auto draft = model->BuildMtpDraft(config);
+        REQUIRE(draft != nullptr);
+        backend.Memset(queue, draft_kv.data, 0, draft_kv_bytes);
+        const auto hidden = draft->ForwardPaged(
+            bench_ids, bench_positions, target_tap.tensor, bench_am,
+            draft_kv, queue);
+        const auto last = draft->GatherHiddenRows(hidden.tensor,
+                                                  {prompt_tokens - 1}, queue);
+        const auto logits = draft->ComputeLogits(last.tensor, queue);
+        return read_logits(logits, 1);
+      };
+      const auto dense_draft_logits = draft_logits(false);
+      const auto packed_draft_logits = draft_logits(true);
+      const auto best = [](const std::vector<float>& values) {
+        return static_cast<int64_t>(std::max_element(values.begin(), values.end()) -
+                                    values.begin());
+      };
+      MESSAGE("GPTQ4 MTP real 4K target tap dense/INT4 draft top1 "
+              << best(dense_draft_logits) << "/" << best(packed_draft_logits));
+      compare_distribution(packed_draft_logits, 0, dense_draft_logits,
+                           "real 4K target tap dense/INT4 draft", false);
+      return;
+    }
     reset_state();
     run_prefill(true);
     if (std::getenv("VLLM_CPP_GPTQ4_4K_ORACLE_ONLY") != nullptr) return;
