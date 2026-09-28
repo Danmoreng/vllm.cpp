@@ -901,3 +901,113 @@ TEST_CASE("XPU FP8 prefill: captured 4096-token Python operator replay"
     CHECK(fallback == 1);  // Nonunit scales retain the existing GPU implementation.
   }
 }
+
+TEST_CASE("XPU FP8 attention: captured Python M04 Q5 operator replay"
+          * doctest::skip(!std::getenv("VT_B70_M04_REPLAY_DIR"))) {
+  const std::string directory = std::getenv("VT_B70_M04_REPLAY_DIR");
+  auto read = [&](const std::string& name, size_t bytes) {
+    std::ifstream file(directory + "/" + name, std::ios::binary);
+    REQUIRE(file.good());
+    std::vector<unsigned char> data(bytes);
+    file.read(reinterpret_cast<char*>(data.data()), data.size());
+    REQUIRE(file.gcount() == static_cast<std::streamsize>(bytes));
+    REQUIRE(file.peek() == std::char_traits<char>::eof());
+    return data;
+  };
+  std::ifstream manifest(directory + "/metadata.json");
+  REQUIRE(manifest.good());
+  const auto meta = nlohmann::json::parse(manifest);
+  const int tokens = meta.at("q_shape").at(0).get<int>();
+  const int heads = meta.at("q_shape").at(1).get<int>();
+  const int dim = meta.at("q_shape").at(2).get<int>();
+  const int pages = meta.at("kv_shape").at(0).get<int>();
+  const int page = meta.at("kv_shape").at(1).get<int>();
+  const int kv_heads = meta.at("kv_shape").at(2).get<int>();
+  const int used = meta.at("used_k").get<int>();
+  REQUIRE(tokens == 5);
+  REQUIRE(heads == 24);
+  REQUIRE(dim == 256);
+  REQUIRE(page == 1664);
+  REQUIRE(kv_heads == 4);
+  REQUIRE(meta.at("kv_shape").at(3).get<int>() == dim);
+  REQUIRE(pages == (used + page - 1) / page);
+  REQUIRE(used >= 4096 + tokens);
+  REQUIRE(meta.at("cu_seqlens_q") == nlohmann::json::array({0, tokens}));
+  REQUIRE(meta.at("softmax_scale").get<float>() == 0.0625f);
+  REQUIRE(meta.at("causal").get<bool>());
+
+  const size_t q_bytes = size_t(tokens) * heads * dim * sizeof(uint16_t);
+  const size_t page_bytes = size_t(page) * kv_heads * dim;
+  const auto q_host = read("q.bin", q_bytes);
+  const auto k_host = read("k.bin", size_t(pages) * page_bytes);
+  const auto v_host = read("v.bin", size_t(pages) * page_bytes);
+  const auto expected_host = read("output.bin", q_bytes);
+  std::vector<unsigned char> cache_host(size_t(pages) * 2 * page_bytes);
+  for (int p = 0; p < pages; ++p) {
+    std::memcpy(cache_host.data() + size_t(2 * p) * page_bytes,
+                k_host.data() + size_t(p) * page_bytes, page_bytes);
+    std::memcpy(cache_host.data() + size_t(2 * p + 1) * page_bytes,
+                v_host.data() + size_t(p) * page_bytes, page_bytes);
+  }
+
+  Queue gpu(vt::DeviceType::kXPU);
+  Buffer query(gpu.q, DType::kF16, {tokens, heads, dim});
+  Buffer output(gpu.q, DType::kF16, {tokens, heads, dim});
+  Buffer cache(gpu.q, DType::kI8, {pages, 2 * page, kv_heads, dim});
+  Buffer table(gpu.q, DType::kI32, {1, pages});
+  Buffer lengths(gpu.q, DType::kI32, {1});
+  Buffer offsets(gpu.q, DType::kI32, {2});
+  query.upload(q_host.data());
+  cache.upload(cache_host.data());
+  std::vector<int32_t> ids(pages);
+  std::iota(ids.begin(), ids.end(), 0);
+  table.upload(ids.data());
+  const int32_t seq_len[] = {used}, q_offsets[] = {0, tokens};
+  lengths.upload(seq_len);
+  offsets.upload(q_offsets);
+  auto kc = vt::Tensor::Contiguous(cache.tensor.data, DType::kI8, gpu.q.device,
+                                    {pages, page, kv_heads, dim});
+  kc.stride[0] *= 2;
+  auto vc = kc;
+  vc.data = static_cast<char*>(kc.data) + page_bytes;
+  vt::PagedAttentionArgs args;
+  args.kv_cache_dtype = vt::Fp8KVCacheDataType::kFp8E4M3;
+  args.k_scale = meta.at("k_scale").get<float>();
+  args.v_scale = meta.at("v_scale").get<float>();
+  args.scale = meta.at("softmax_scale").get<float>();
+  args.max_seq_len = used;
+  args.causal = true;
+  if (std::getenv("VT_XPU_PROFILE")) (void)vt::xpu::DrainProfileEvents();
+  setenv("VT_XPU_ATTENTION", "split", 1);
+  vt::PagedAttention(gpu.q, output.tensor, query.tensor, kc, vc,
+                     table.tensor, lengths.tensor, offsets.tensor, args);
+  vt::GetBackend(gpu.q.device).Synchronize(gpu.q);
+  if (std::getenv("VT_XPU_PROFILE")) {
+    int split = 0;
+    for (const auto& event : vt::xpu::DrainProfileEvents())
+      split += event.stage == "attention_split_partial";
+    CHECK(split == 1);
+  }
+  std::vector<float> expected(q_bytes / sizeof(uint16_t));
+  for (size_t i = 0; i < expected.size(); ++i) {
+    uint16_t bits;
+    std::memcpy(&bits, expected_host.data() + i * sizeof(bits), sizeof(bits));
+    expected[i] = vt::F16ToF32(bits);
+  }
+  const auto actual = output.floats();
+  for (int row = 0; row < tokens; ++row) {
+    double delta2 = 0, norm2 = 0, maximum = 0;
+    for (int i = 0; i < heads * dim; ++i) {
+      const size_t index = size_t(row) * heads * dim + i;
+      const double delta = double(actual[index]) - expected[index];
+      delta2 += delta * delta;
+      norm2 += double(expected[index]) * expected[index];
+      maximum = std::max(maximum, std::abs(delta));
+    }
+    std::cout << "M04_REPLAY row=" << row
+              << " relative_rms=" << std::sqrt(delta2 / norm2)
+              << " max_abs=" << maximum << std::endl;
+  }
+  Accuracy(actual, expected, false, true);
+  CHECK(vt::GetReferenceTierHits() == 0);
+}
