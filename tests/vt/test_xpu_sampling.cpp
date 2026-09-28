@@ -1,5 +1,8 @@
 #include "xpu_test_helpers.h"
 #include <array>
+#include <chrono>
+#include <algorithm>
+#include <iostream>
 #include <limits>
 #include "vt/xpu.h"
 #include "vt/xpu_sampling.h"
@@ -102,6 +105,90 @@ TEST_CASE("XPU sampling: stable top-k/top-p, ties and uneven vocabularies") {
   }
   CHECK(vt::GetReferenceTierHits() == 0);
   CHECK(vt::xpu::GetMemoryInfo().sampling_workspace_bytes == 16 * 1024 * 1024);
+}
+TEST_CASE("XPU sampling: exact top-20 route and stable-sort fallback") {
+  Queue gpu(vt::DeviceType::kXPU);
+  constexpr int N = 5;
+  for (int vocab : {257, 1025, 248320}) {
+    CAPTURE(vocab);
+    Buffer reference(gpu.q, DType::kF32, {N, vocab});
+    Buffer selected(gpu.q, DType::kF32, {N, vocab});
+    Buffer ks(gpu.q, DType::kI32, {N}), ps(gpu.q, DType::kF32, {N});
+    std::vector<float> values(size_t(N * vocab));
+    for (size_t i = 0; i < values.size(); ++i)
+      values[i] = float((i * 2654435761ULL) % 1000003) * 0x1p-18f;
+    for (int row = 0; row < N; ++row)
+      for (int rank = 0; rank < 20; ++rank)
+        values[size_t(row * vocab + (rank * 997) % vocab)] =
+            20.0f - 0.35f * rank;
+    const int32_t k[N] = {20, 20, 20, 20, 20};
+    ks.upload(k);
+    ps.put({.05f, .37f, .95f, 1.0f, .999f});
+    reference.put(values); selected.put(values);
+    vt::ApplyTopKTopP(gpu.q, reference.tensor, &ks.tensor, &ps.tensor);
+    REQUIRE(vt::xpu::ApplyTopK20TopP(gpu.q, selected.tensor, ps.tensor));
+    Compare(selected.floats(), reference.floats(), 0);
+  }
+  Buffer tied(gpu.q, DType::kF32, {N, 257});
+  Buffer ps(gpu.q, DType::kF32, {N});
+  ps.put({.95f, .95f, .95f, .95f, .95f});
+  const std::vector<float> same(N * 257, 1.0f);
+  tied.put(same);
+  CHECK_FALSE(vt::xpu::ApplyTopK20TopP(gpu.q, tied.tensor, ps.tensor));
+  CHECK(tied.floats() == same);
+  Buffer boundary(gpu.q, DType::kF32, {N, 248320});
+  Buffer boundary_p(gpu.q, DType::kF32, {N});
+  std::vector<float> nearly_equal(size_t(N * 248320));
+  for (size_t i = 0; i < nearly_equal.size(); ++i)
+    nearly_equal[i] = float((i * 2654435761ULL) % 1000003) * 0x1p-18f;
+  boundary.put(nearly_equal);
+  boundary_p.put({.05f, .37f, .95f, 1.0f, .999f});
+  CHECK_FALSE(vt::xpu::ApplyTopK20TopP(gpu.q, boundary.tensor, boundary_p.tensor));
+  CHECK(boundary.floats() == nearly_equal);
+  CHECK(vt::GetReferenceTierHits() == 0);
+}
+TEST_CASE("XPU sampling: five-row production top-20 timing"
+          * doctest::skip(!std::getenv("VT_B70_SAMPLING_BENCH"))) {
+  Queue gpu(vt::DeviceType::kXPU);
+  constexpr int N = 5, V = 248320;
+  Buffer logits(gpu.q, DType::kF32, {N, V});
+  Buffer ks(gpu.q, DType::kI32, {N}), ps(gpu.q, DType::kF32, {N});
+  std::vector<float> values(size_t(N * V));
+  for (size_t i = 0; i < values.size(); ++i)
+    values[i] = float((i * 2654435761ULL) % 1000003) * 0x1p-18f;
+  for (int row = 0; row < N; ++row)
+    for (int rank = 0; rank < 20; ++rank)
+      values[size_t(row * V + rank * 997)] = 20.0f - 0.35f * rank;
+  const int32_t k[N] = {20, 20, 20, 20, 20};
+  ks.upload(k);
+  ps.put({.95f, .95f, .95f, .95f, .95f});
+  const char* top20_setting = std::getenv("VT_B70_FAST_TOPK20");
+  const bool fast = !top20_setting || std::strcmp(top20_setting, "0") != 0;
+  const auto apply = [&] {
+    if (fast) CHECK(vt::xpu::ApplyTopK20TopP(gpu.q, logits.tensor, ps.tensor));
+    else vt::ApplyTopKTopP(gpu.q, logits.tensor, &ks.tensor, &ps.tensor);
+  };
+  for (int warm = 0; warm < 2; ++warm) {
+    logits.put(values);
+    apply();
+    vt::GetBackend(gpu.q.device).Synchronize(gpu.q);
+  }
+  std::vector<double> ms;
+  for (int repeat = 0; repeat < 5; ++repeat) {
+    logits.put(values);
+    const auto start = std::chrono::steady_clock::now();
+    apply();
+    vt::GetBackend(gpu.q.device).Synchronize(gpu.q);
+    ms.push_back(std::chrono::duration<double, std::milli>(
+        std::chrono::steady_clock::now() - start).count());
+  }
+  std::sort(ms.begin(), ms.end());
+  std::cout << "SAMPLING_TOPK5 vocab=" << V << " k=20 top_p=0.95"
+            << " route=" << (fast ? "top20" : "full_sort")
+            << " wall_median_ms=" << ms[2] << " wall_samples_ms=";
+  for (double sample : ms) std::cout << sample << ',';
+  std::cout << std::endl;
+  CHECK(vt::GetReferenceTierHits() == 0);
 }
 TEST_CASE("XPU sampling: nucleus probability mass at the real vocabulary size") {
   Queue gpu(vt::DeviceType::kXPU);

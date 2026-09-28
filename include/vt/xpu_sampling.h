@@ -8,6 +8,11 @@ struct Queue;
 
 namespace vt::xpu {
 
+// Exact small-top-k candidate for the production k=20 path. Returns false
+// without changing logits when ties/non-finite values or a top-p boundary
+// require the general stable-sort route. `p` is one F32 value per row.
+bool ApplyTopK20TopP(Queue& q, Tensor& logits, const Tensor& p);
+
 // Greedy one-hot drafter, sampled target. All tensors live on the XPU.
 // `probs` is the target distribution after temperature and sampling processors
 // for every expanded verification row. `proposal[row]` is the draft id for that

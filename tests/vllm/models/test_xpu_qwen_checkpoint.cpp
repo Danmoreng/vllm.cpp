@@ -717,6 +717,11 @@ void MeasureSampledMtp(vllm_engine* engine, const std::string& model,
       (std::filesystem::path(model) / "tokenizer.json").string());
   const auto ids = tokenizer.EncodeWithSpecialTokens(prompt);
   REQUIRE(ids.size() == size_t(prompt_tokens));
+  uint64_t prompt_hash = 1469598103934665603ULL;
+  for (int32_t id : ids) {
+    prompt_hash ^= static_cast<uint32_t>(id);
+    prompt_hash *= 1099511628211ULL;
+  }
   auto sampling = vllm_sampling_params_default();
   sampling.temperature = 1;
   sampling.top_p = .95f;
@@ -753,7 +758,13 @@ void MeasureSampledMtp(vllm_engine* engine, const std::string& model,
   REQUIRE(vllm_engine_spec_acceptance(engine, &after) == VLLM_OK);
   const auto memory = vt::xpu::GetMemoryInfo();
   REQUIRE(wall > ttft);
+  uint64_t output_hash = 1469598103934665603ULL;
+  for (int32_t id : generated) {
+    output_hash ^= static_cast<uint32_t>(id);
+    output_hash *= 1099511628211ULL;
+  }
   std::cout << "MTP_SAMPLED_BENCH prompt_tokens=" << prompt_tokens
+            << " prompt_hash_fnv64=" << prompt_hash
             << " output_tokens=" << output_tokens << " k=4 temperature=1"
             << " top_p=0.95 top_k=20 seed=42"
             << " ttft_separate_request_seconds=" << ttft
@@ -764,6 +775,7 @@ void MeasureSampledMtp(vllm_engine* engine, const std::string& model,
             << " drafts_proposed=" << (after.drafts_proposed - before.drafts_proposed)
             << " drafts_accepted=" << (after.drafts_accepted - before.drafts_accepted)
             << " draft_steps=" << (after.drafted_request_steps - before.drafted_request_steps)
+            << " output_hash_fnv64=" << output_hash
             << " gpu_bytes=" << memory.allocated_bytes
             << " gpu_peak_bytes=" << memory.peak_allocated_bytes << std::endl;
 }

@@ -3622,9 +3622,15 @@ ModelRunnerOutput GPUModelRunner::sample_tokens_with_rejection(
         logits.device, queue_, ks.data(), vt::DType::kI32, std::initializer_list<int64_t>{rows});
     if (!ps.empty()) p = std::make_unique<DeviceScratch>(
         logits.device, queue_, ps.data(), vt::DType::kF32, std::initializer_list<int64_t>{rows});
-    if (k || p) vt::ApplyTopKTopP(queue_, processed,
-                                   k ? &k->tensor() : nullptr,
-                                   p ? &p->tensor() : nullptr);
+    if (k || p) {
+      const char* top20_setting = std::getenv("VT_B70_FAST_TOPK20");
+      const bool top20 = (!top20_setting || std::strcmp(top20_setting, "0") != 0) && k && p &&
+          std::all_of(ks.begin(), ks.end(), [](int32_t value) { return value == 20; });
+      if (!top20 || !vt::xpu::ApplyTopK20TopP(queue_, processed, p->tensor()))
+        vt::ApplyTopKTopP(queue_, processed,
+                          k ? &k->tensor() : nullptr,
+                          p ? &p->tensor() : nullptr);
+    }
     vt::ComputeProbs(queue_, probs, processed);
     DeviceScratch proposal_t(logits.device, queue_, proposals.data(), vt::DType::kI32, {rows});
     DeviceScratch cu_t(logits.device, queue_, step.cu_num_logits.data(),

@@ -2,6 +2,8 @@
 #include "xpu_kernels.h"
 #include "vt/sample_common.h"
 #include "vt/xpu_sampling.h"
+#include <cstdio>
+#include <cstdlib>
 #include <limits>
 namespace vt::xpu {
 namespace {
@@ -84,6 +86,180 @@ void ComputeLogprobsKernel(Queue& q, Tensor& probs, const Tensor& logits) {
 void ApplyMinPKernel(Queue& q, Tensor& logits, const Tensor& min_p) {
   TraceXpuOp(OpId::kApplyMinP, q, {&logits, &min_p});
   Normalize<2>(q, logits, logits, &min_p);
+}
+
+bool ApplyTopK20TopP(Queue& q, Tensor& logits, const Tensor& p) {
+  constexpr int64_t K = 20, Lanes = 128, Tile = 256;
+  const int64_t rows = logits.shape[0], vocab = logits.shape[1];
+  const int64_t tiles = (vocab + Tile - 1) / Tile;
+  if (rows < 1 || rows > 20 || vocab < K || tiles > Lanes * 16) return false;
+  VT_CHECK(logits.rank == 2 && logits.dtype == DType::kF32 &&
+               logits.IsContiguous() && logits.device == q.device &&
+               p.rank == 1 && p.shape[0] == rows && p.dtype == DType::kF32 &&
+               p.IsContiguous() && p.device == q.device,
+           "XPU top-20 requires contiguous F32 logits and per-row top-p");
+  auto* values = static_cast<float*>(logits.data);
+  const auto* ps = static_cast<const float*>(p.data);
+  const size_t candidate_count = size_t(rows * tiles * K);
+  Scratch scratch(q.device, (candidate_count + size_t(rows * K + 2 * rows)) * sizeof(int32_t));
+  auto* candidates = static_cast<int32_t*>(scratch.data);
+  auto* selected = candidates + candidate_count;
+  auto* fallback = selected + rows * K;
+  auto* cutoffs = fallback + rows;
+
+  const auto tile_event = NativeQueue(q).submit([&](sycl::handler& h) {
+    sycl::local_accessor<float> work_values(Lanes, h);
+    sycl::local_accessor<int32_t> work_ids(Lanes, h);
+    h.parallel_for(sycl::nd_range<1>(rows * tiles * Lanes, Lanes),
+                   [=](sycl::nd_item<1> item) {
+      const int64_t group = item.get_group(0), row = group / tiles;
+      const int64_t tile = group % tiles, lane = item.get_local_id(0);
+      const int32_t a = int32_t(tile * Tile + lane);
+      const int32_t b = int32_t(a + Lanes);
+      float av = a < vocab ? values[row * vocab + a] : NegInf;
+      float bv = b < vocab ? values[row * vocab + b] : NegInf;
+      for (int rank = 0; rank < K; ++rank) {
+        const bool first = av > bv || (av == bv && a < b);
+        work_values[lane] = first ? av : bv;
+        work_ids[lane] = first ? (a < vocab ? a : INT_MAX)
+                               : (b < vocab ? b : INT_MAX);
+        item.barrier(sycl::access::fence_space::local_space);
+        for (int step = Lanes / 2; step; step /= 2) {
+          if (lane < step &&
+              (work_values[lane + step] > work_values[lane] ||
+               (work_values[lane + step] == work_values[lane] &&
+                work_ids[lane + step] < work_ids[lane]))) {
+            work_values[lane] = work_values[lane + step];
+            work_ids[lane] = work_ids[lane + step];
+          }
+          item.barrier(sycl::access::fence_space::local_space);
+        }
+        const int32_t winner = work_ids[0];
+        if (lane == 0) candidates[group * K + rank] = winner;
+        item.barrier(sycl::access::fence_space::local_space);
+        if (winner == a) av = NegInf;
+        if (winner == b) bv = NegInf;
+      }
+    });
+  });
+  RecordProfileEvent(q, "topk20_tile", tile_event);
+
+  const auto merge_event = NativeQueue(q).submit([&](sycl::handler& h) {
+    sycl::local_accessor<float> work_values(Lanes, h);
+    sycl::local_accessor<int32_t> work_ids(Lanes, h);
+    h.parallel_for(sycl::nd_range<1>(rows * Lanes, Lanes),
+                   [=](sycl::nd_item<1> item) {
+      const int64_t row = item.get_group(0), lane = item.get_local_id(0);
+      int cursor[16] = {};
+      for (int rank = 0; rank < K; ++rank) {
+        float best = NegInf;
+        int32_t id = INT_MAX;
+        for (int slot = 0; slot < 16; ++slot) {
+          const int64_t tile = lane + slot * Lanes;
+          if (tile >= tiles || cursor[slot] >= K) continue;
+          const int32_t candidate = candidates[(row * tiles + tile) * K + cursor[slot]];
+          if (candidate == INT_MAX) continue;
+          const float value = values[row * vocab + candidate];
+          if (value > best || (value == best && candidate < id)) {
+            best = value;
+            id = candidate;
+          }
+        }
+        work_values[lane] = best;
+        work_ids[lane] = id;
+        item.barrier(sycl::access::fence_space::local_space);
+        for (int step = Lanes / 2; step; step /= 2) {
+          if (lane < step &&
+              (work_values[lane + step] > work_values[lane] ||
+               (work_values[lane + step] == work_values[lane] &&
+                work_ids[lane + step] < work_ids[lane]))) {
+            work_values[lane] = work_values[lane + step];
+            work_ids[lane] = work_ids[lane + step];
+          }
+          item.barrier(sycl::access::fence_space::local_space);
+        }
+        const int32_t winner = work_ids[0];
+        if (lane == 0) selected[row * K + rank] = winner;
+        item.barrier(sycl::access::fence_space::local_space);
+        if (winner != INT_MAX && (winner / Tile) % Lanes == lane)
+          ++cursor[(winner / Tile) / Lanes];
+      }
+    });
+  });
+  RecordProfileEvent(q, "topk20_merge", merge_event);
+
+  const auto probe_event = NativeQueue(q).submit([&](sycl::handler& h) {
+    sycl::local_accessor<int32_t> counts(Lanes, h);
+    sycl::local_accessor<int32_t> invalids(Lanes, h);
+    h.parallel_for(sycl::nd_range<1>(rows * Lanes, Lanes),
+                   [=](sycl::nd_item<1> item) {
+      const int64_t row = item.get_group(0), lane = item.get_local_id(0);
+      const int32_t kth = selected[row * K + K - 1];
+      const float threshold = kth == INT_MAX ? NegInf : values[row * vocab + kth];
+      int32_t count = 0, invalid = kth == INT_MAX;
+      for (int64_t col = lane; col < vocab; col += Lanes) {
+        const float value = values[row * vocab + col];
+        count += value >= threshold;
+        invalid |= !sycl::isfinite(value);
+      }
+      counts[lane] = count;
+      invalids[lane] = invalid;
+      item.barrier(sycl::access::fence_space::local_space);
+      for (int step = Lanes / 2; step; step /= 2) {
+        if (lane < step) {
+          counts[lane] += counts[lane + step];
+          invalids[lane] |= invalids[lane + step];
+        }
+        item.barrier(sycl::access::fence_space::local_space);
+      }
+      if (lane == 0) {
+        const float top_p = ps[row];
+        float weight[K], sum = 0;
+        const float maximum = values[row * vocab + selected[row * K]];
+        for (int rank = 0; rank < K; ++rank) {
+          weight[rank] = sycl::exp(values[row * vocab + selected[row * K + rank]] - maximum);
+          sum += weight[rank];
+        }
+        int keep = 0;
+        float before = 0;
+        bool boundary = false;
+        for (int rank = 0; rank < K; ++rank) {
+          if (rank && sycl::fabs(before / sum - top_p) < 1e-5f) boundary = true;
+          if (rank == 0 || before / sum < top_p) ++keep;
+          before += weight[rank];
+        }
+        fallback[row] = (invalids[0] ? 1 : 0) | (counts[0] > K ? 2 : 0) |
+                        (!(top_p > 0 && top_p <= 1) ? 4 : 0) |
+                        (boundary ? 8 : 0);
+        cutoffs[row] = selected[row * K + keep - 1];
+      }
+    });
+  });
+  RecordProfileEvent(q, "topk20_probe", probe_event);
+  std::vector<int32_t> host_fallback(static_cast<size_t>(rows), 0);
+  auto& backend = GetBackend(q.device.type);
+  backend.Copy(q, host_fallback.data(), fallback, size_t(rows) * sizeof(int32_t));
+  backend.Synchronize(q);
+  if (std::getenv("VT_B70_FAST_TOPK_TRACE")) {
+    std::fprintf(stderr, "topk20 fallback:");
+    for (int32_t value : host_fallback) std::fprintf(stderr, " %d", value);
+    std::fprintf(stderr, "\n");
+  }
+  if (std::any_of(host_fallback.begin(), host_fallback.end(),
+                  [](int32_t value) { return value != 0; })) return false;
+
+  const auto mask_event = NativeQueue(q).parallel_for(
+      sycl::range<1>(rows * vocab), [=](sycl::id<1> item) {
+    const int64_t row = item[0] / vocab, col = item[0] % vocab;
+    const int32_t cutoff_id = cutoffs[row];
+    const float cutoff = values[row * vocab + cutoff_id];
+    const float value = values[item[0]];
+    if (value < cutoff || (value == cutoff && col > cutoff_id))
+      values[item[0]] = NegInf;
+  });
+  RecordProfileEvent(q, "topk20_mask", mask_event);
+  backend.Synchronize(q);
+  return true;
 }
 void ApplyPenaltiesKernel(Queue& q, Tensor& logits, const Tensor& prompt_mask,
                            const Tensor& counts, const Tensor& output_mask,
