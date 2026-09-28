@@ -134,6 +134,38 @@ the first Q5 attention-output gap. This does not establish the cause of the
 pre-quantization source difference, nor does it close the two sampled-logit
 quality failures.
 
+## Same-input Q5 operator timing
+
+The captured Python Q and FP8 K/V were replayed on the B70 in fresh
+single-process, 20-call warm measurements. Python used the production M04
+adapter and native shared-KV operator. C++ used `vt::PagedAttention` with the
+current Split-K route, identical logical Q/K/V and causal positions. The
+Python result reproduced the captured M04 output exactly; the C++ replay
+retained its 0.03114% relative RMS error and passed 31/31 focused assertions.
+
+| Scope | Python M04 | C++ Split-K |
+| --- | ---: | ---: |
+| Synchronized adapter/call host median | 0.141–0.159 ms | 1.999 ms |
+| Device timed span / kernel stages | 0.165 ms adapter span | 1.905 ms partial + 0.067 ms reduction |
+
+The C++ host samples were bimodal, roughly 1.02–2.38 ms; the device partial
+median confirms that the slow path is real GPU work, not solely a host wait.
+The Python device figure is an event span around the entire adapter, whereas
+the C++ figures are two individual kernel events. They show the size and
+location of the opportunity, but are not a full-model speedup prediction.
+The existing C++ path shares K/V across pairs of GQA heads but processes five
+verification rows separately; M04 packs those rows for shared historical KV
+loading. The two earlier simple shared-KV C++ experiments regressed the full
+request, so the next candidate must follow the packed/tiled M04 structure and
+pass the same-input output and full P4096/O1024 gates.
+
+The separate real P4096/O32 profile ruled out the FP8 KV cache writer as a
+material next target: 180 writer events totaled 34.74 ms on GPU, of which
+the first 17 prefill writes used 33.68 ms. Even eliminating the entire prefill
+writer would save less than 0.84% of the observed 4.014 s first-token time;
+the other 163 writes totaled about 1.06 ms. This is an upper bound on that
+profile, not an accepted model-level optimization.
+
 The two source captures (~16 MiB each) remain outside Git in
 `/tmp/b70_python_prequant` and `/tmp/b70_cpp_prequant`:
 
@@ -149,3 +181,36 @@ three GDN layers and compare the GPTQ QKV projection and Q/K norm/RoPE stages
 on identical inputs. The FP8 writer and M04/Split-K arithmetic need no
 correctness change based on this capture. W5's verification throughput,
 graphs and broader sampled-quality gate remain open.
+
+## Torch-free Xe2 M04-like verification candidate
+
+A narrowly adapted native copy of the pinned Xe2 shared-KV policy now builds
+with C++/SYCL-TLA, without Torch or Python at inference time. It accepts the
+27B native FP8 page layout for Q2–Q5, 1664-token physical pages and unit
+scales. The C++ adapter packs Q for shared historical K/V loading and unpacks
+the output. It is **off by default**; set `VT_XPU_XE2_VERIFY=1` to try it under
+`VT_XPU_ATTENTION=auto`. Unsupported shapes retain the existing route.
+
+On the captured real Python Q5 input with the same logical FP8 K/V bytes, the
+focused B70 replay passed 34/34 assertions. Native output differs in 5 of
+30,720 FP16 entries from Python M04; relative RMS is `5.21419e-06` and
+maximum absolute difference is `0.000244141`. A warm 20-call synchronized
+host median was **0.213176 ms** with the actual VT cache layout, versus
+**1.999 ms** for the existing Split-K replay and approximately 0.141–0.159 ms
+for the Python M04 adapter. These are operator-only timings. The C++ public
+KV layout remains head-contiguous and was not changed for the experiment.
+
+The P4096/O32 sampled eager MTP4 full-model smoke passed 50/50 assertions,
+emitted the same 32 token IDs as the earlier route, and kept 23/29 draft
+acceptance. Its separate O1 TTFT was 4.23372 s, full O32 wall 4.73164 s,
+and derived short-request decode 62.2585 tokens/s. This short measurement is
+for correctness and route smoke, not the promotion benchmark. The full
+P4096/O1024 C++ A/B passed 50/50 assertions on each route: default Split-K
+49.3827 versus optional Xe2 verifier 62.7176 derived emitted decode
+tokens/s, with O1024 wall 24.959 versus 20.5619 s. The prompt hash matched;
+the output hashes and acceptance counts differed (default 770/1012 accepted,
+candidate 767/1024). This single-run +27.0% candidate is **not promoted**:
+the differing sampled continuation needs same-prefix Python target-logit
+comparison, and Q2–Q5 route coverage remains incomplete. See
+`checkpoint_review_20260928.md` for the exact full-request figures and
+remaining W0–W8 work.

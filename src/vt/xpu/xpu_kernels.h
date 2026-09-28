@@ -76,4 +76,8 @@ bool PagedAttentionPrefillKernel(Queue&, Tensor&, const Tensor&, const Tensor&, 
 bool PagedAttentionXe2PrefillKernel(Queue&, Tensor&, const Tensor&, const Tensor&, const Tensor&,
                                     const Tensor&, const Tensor&, const Tensor&, const PagedAttentionArgs&);
 #endif
+#ifdef VLLM_CPP_XPU_XE2_VERIFY
+bool PagedAttentionXe2VerifyKernel(Queue&, Tensor&, const Tensor&, const Tensor&, const Tensor&,
+                                   const Tensor&, const Tensor&, const Tensor&, const PagedAttentionArgs&);
+#endif
 }  // namespace vt::xpu
