@@ -99,7 +99,53 @@ host encoding across ties and scales. These checks weaken a simple rounding
 rule hypothesis but do not yet compare the two engines' actual cache writers
 on identical pre-quantization operands.
 
-The next quality test should capture pre-quantization K/V from the same
-full-attention prefill layer in both engines, replay each writer on identical
-inputs, and compare the emitted cache bytes. Kernel-layout optimization can
-then proceed without conflating input drift with M04/Split-K arithmetic.
+## First 4K prefill layer before FP8 conversion
+
+The first full-attention prefill layer's post-projection, post-RoPE K/V was
+captured before the native cache writer in both engines. Python identified
+`language_model.model.layers.3.self_attn`; both captures had 4096 rows,
+four KV heads, head size 256 and FP16 storage. The same request produced
+prompt hash `4760835697920107937` and the 1664-token effective page.
+Python first performs a **zero-valued 4096-row startup profile**, which is
+not a real request. The diagnostic probe was corrected to arm only after
+`/health` and the real request was submitted. The zero profile was excluded
+from every number below. Neither capture probe remains in committed model
+runtime code; the C++ focused model target was rebuilt after removal.
+
+| First prefill layer, 4096 active tokens | K | V |
+| --- | ---: | ---: |
+| FP16 pre-quantization relative RMS, Python vs C++ | 0.0965% | 0.1091% |
+| Exact FP16 values | 21.87% | 20.70% |
+| Mismatched E4M3 bytes, actual Python vs C++ cache | 150,196 | 124,368 |
+| Python FP16 source cast to E4M3 vs actual Python cache | **0** | **0** |
+| C++ FP16 source cast to E4M3 vs actual C++ cache | **0** | **0** |
+| Native C++ FP8 writer fed the captured Python FP16 source vs Python cache | **0** | **0** |
+
+The byte counts cover 4,194,304 values per K or V. The C++ writer replay is
+an optional branch of `test_xpu_attention_fast.cpp`, selected with
+`VT_B70_M04_PREQUANT_DIR`; with the previous M04 and crossed-replay fixtures,
+it passed **52/52 assertions**, zero reference-tier hits. It wrote all 4096
+token slots using `ReshapeAndCacheFp8` on the B70. Thus the cache writers are
+bitwise compatible **on these identical real FP16 inputs and unit scales**.
+The source tensors already differ by about one tenth of a percent before FP8;
+quantization turns those small differences into roughly 3–4% changed cache
+bytes. The earlier crossed replay shows that this cache difference dominates
+the first Q5 attention-output gap. This does not establish the cause of the
+pre-quantization source difference, nor does it close the two sampled-logit
+quality failures.
+
+The two source captures (~16 MiB each) remain outside Git in
+`/tmp/b70_python_prequant` and `/tmp/b70_cpp_prequant`:
+
+| Source file | SHA-256 |
+| --- | --- |
+| Python K | `37074f3c014303fdc5d16a557ac721f28075b24a9259bbcf07847426982403af` |
+| Python V | `e4cdfbc03fff3126849c739b3f03946d06933ba5d3076d2b767d7d1fc4f5bdad` |
+| C++ K | `0155ef03f6c69018680bd1ecdefe7aa2ea66bf157f75af1276a45feb8ef8e328` |
+| C++ V | `748dcc9b4d89c5b7511d77282ca26288b1bf2f41b6fdd9e00d42d2fa91fc8a5a` |
+
+Next isolate the input to this first full-attention projection after the
+three GDN layers and compare the GPTQ QKV projection and Q/K norm/RoPE stages
+on identical inputs. The FP8 writer and M04/Split-K arithmetic need no
+correctness change based on this capture. W5's verification throughput,
+graphs and broader sampled-quality gate remain open.
