@@ -59,3 +59,27 @@ The dump SHA-256 values for reproducibility are:
 | Python processed F32 | `b7736ec3ca227976bce8d4efb9cabfbf4faad8ddf1da85b15ade9774c294eb36` |
 | C++ raw F32 | `a706dd6021fd27a622877328854b33fd172279b28bdf2ea5de74e9241023951f` |
 | C++ processed F32 | `681f6c31e0c2cf8a8e52a56e2aa2454821ace3a5515e6ce8878b0f6aeabafda1` |
+
+## Existing native-GDN prefill route as a control
+
+The already available `VT_XPU_GDN_NATIVE=1` route was tested on the same
+prefix, using the current default speculative-GDN workgroups. It retained
+the first 32 sampled token IDs. Its first verification row had raw TV
+`0.022447` and KL `0.001750` against Python, versus `0.024451` and
+`0.002165` for the chunked-GDN default. The raw top-10 overlap improved
+from 9 to 10, but TV still exceeded the frozen 2% target.
+
+One unprofiled P4096/O1024 request per route, without logit dumps, gave:
+
+| Prefill GDN | Separate O1 TTFT | Full request wall | Derived decode tok/s | Drafts proposed/accepted/steps |
+| --- | ---: | ---: | ---: | ---: |
+| Chunked default | 4.0730 s | 24.8416 s | 49.2570 | 1012/770/253 |
+| Native opt-in | 3.5625 s | 26.9412 s | 43.7578 | 1139/737/285 |
+
+The native route improves this request's first-token latency, but the full
+MTP4 request is slower and has a different 1024-token output hash. Separate
+O32 runs matched; the first divergence in the O1024 runs was not located.
+The decode-rate difference is therefore not an isolated kernel-speed
+measurement. The route stays opt-in;
+neither the prefill gain nor the small first-row quality improvement justifies
+promoting it for the complete sampled MTP4 profile.
