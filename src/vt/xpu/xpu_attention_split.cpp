@@ -29,7 +29,8 @@ bool PagedAttentionSplitKernel(Queue& q, Tensor& out, const Tensor& query, const
   const bool extended_queries = (!extended_setting ||
       std::string_view(extended_setting) == "1") &&
       b70_fp8 && heads == 24 && kvheads == 4 &&
-      dim == 256 && page == 1600 && args.causal && !args.window_size &&
+      dim == 256 && (page == 1600 || page == 1664) &&
+      args.causal && !args.window_size &&
       args.logits_soft_cap == 0 && args.k_scale == 1.0f &&
       args.v_scale == 1.0f;
   if (tokens < 1 || tokens > (extended_queries ? 31 : 20) ||
@@ -62,7 +63,7 @@ bool PagedAttentionSplitKernel(Queue& q, Tensor& out, const Tensor& query, const
   const bool active_page_cap = (!active_page_setting ||
       std::string_view(active_page_setting) == "1") &&
       b70_fp8 && heads == 24 && kvheads == 4 && dim == 256 &&
-      page == 1600 && args.max_seq_len > 0 && args.causal &&
+      (page == 1600 || page == 1664) && args.max_seq_len > 0 && args.causal &&
       !args.window_size && args.logits_soft_cap == 0 &&
       args.k_scale == 1.0f && args.v_scale == 1.0f;
   const int64_t planned_capacity = active_page_cap ?
