@@ -51,3 +51,55 @@ different Q/K/V generation, cache quantization, positions, or small errors
 amplified by downstream layers. The next discriminating capture is the native
 C++ Q and active FP8 KV from the same prompt and first verification layer,
 compared directly with the Python operands before revisiting shared-KV tiling.
+
+## Native input capture and crossed replay
+
+That next capture was completed on the same 4096-token prompt (token-ID FNV64
+`4760835697920107937`) with C++ eager MTP4, FP8 KV and the 1664-token
+effective page. The first C++ Q5 verification also had KV length 4101 and
+unit scales. A temporary source probe captured its first full-attention
+layer's Q, output, and three active K/V pages. The short P4096/O32 native
+request passed 50/50 assertions and the capture instrumentation was removed
+and the model target rebuilt. The raw files remain outside Git at
+`/tmp/b70_cpp_m04_inputs` (~10 MiB). This capture did not separately record
+the draft IDs; the earlier same-prefix probability probe did, while these
+new Q tensors remain close across all five rows.
+
+| Operand, active positions only | Python/C++ comparison |
+| --- | ---: |
+| Q F16 relative RMS | 0.0736% |
+| K E4M3 relative RMS | 0.6824% |
+| V E4M3 relative RMS | 0.7238% |
+| K bytes equal | 96.42% |
+| V bytes equal | 97.04% |
+| Own complete attention outputs, relative RMS | 0.5293% |
+
+The optional `VT_B70_M04_CPP_REPLAY_DIR` branch of the focused test swaps one
+real operand group at a time, always comparing with the captured Python M04
+output. The native C++ output is reproduced **bit-for-bit** from its captured
+Q and KV, so the replay accurately models the production Split-K call.
+
+| Q / K / V source | Relative RMS against Python M04 output |
+| --- | ---: |
+| Python / Python / Python through C++ Split-K | 0.0311% |
+| C++ / Python / Python | 0.0550% |
+| Python / C++ / Python | 0.3322% |
+| Python / Python / C++ | 0.4091% |
+| Python / C++ / C++ | 0.5285% |
+| C++ / C++ / C++ | 0.5293% |
+
+The crossed replays show that the existing cache values dominate this
+first-layer attention-output gap; both K and V contribute, with V somewhat
+larger for this request. They do not determine whether the cache differences
+come from upstream projections, accumulated prefill differences, or FP8
+storage semantics. A separate diagnostic converted every finite FP16 value
+through the C++ host E4M3 codec and PyTorch's E4M3 cast: all 63,488 finite
+encodings matched. The focused native XPU codec test also compares device and
+host encoding across ties and scales. These checks weaken a simple rounding
+rule hypothesis but do not yet compare the two engines' actual cache writers
+on identical pre-quantization operands.
+
+The next quality test should capture pre-quantization K/V from the same
+full-attention prefill layer in both engines, replay each writer on identical
+inputs, and compare the emitted cache bytes. Kernel-layout optimization can
+then proceed without conflating input drift with M04/Split-K arithmetic.

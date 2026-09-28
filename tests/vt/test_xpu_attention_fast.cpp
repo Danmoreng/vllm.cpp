@@ -1009,5 +1009,66 @@ TEST_CASE("XPU FP8 attention: captured Python M04 Q5 operator replay"
               << " max_abs=" << maximum << std::endl;
   }
   Accuracy(actual, expected, false, true);
+  if (const char* cpp_directory = std::getenv("VT_B70_M04_CPP_REPLAY_DIR")) {
+    auto read_cpp = [&](const std::string& name, size_t bytes) {
+      std::ifstream file(std::string(cpp_directory) + "/" + name, std::ios::binary);
+      REQUIRE(file.good());
+      std::vector<unsigned char> data(bytes);
+      file.read(reinterpret_cast<char*>(data.data()), data.size());
+      REQUIRE(file.gcount() == static_cast<std::streamsize>(bytes));
+      REQUIRE(file.peek() == std::char_traits<char>::eof());
+      return data;
+    };
+    const auto cpp_q = read_cpp("q.bin", q_bytes);
+    const auto cpp_k = read_cpp("k.bin", size_t(pages) * page_bytes);
+    const auto cpp_v = read_cpp("v.bin", size_t(pages) * page_bytes);
+    const auto cpp_out = read_cpp("output.bin", q_bytes);
+    std::vector<unsigned char> cpp_cache(cache_host.size());
+    for (int p = 0; p < pages; ++p) {
+      std::memcpy(cpp_cache.data() + size_t(2 * p) * page_bytes,
+                  cpp_k.data() + size_t(p) * page_bytes, page_bytes);
+      std::memcpy(cpp_cache.data() + size_t(2 * p + 1) * page_bytes,
+                  cpp_v.data() + size_t(p) * page_bytes, page_bytes);
+    }
+    auto rerun = [&](const char* label, const std::vector<unsigned char>& q_bytes_in,
+                     const std::vector<unsigned char>& cache_bytes_in) {
+      query.upload(q_bytes_in.data());
+      cache.upload(cache_bytes_in.data());
+      vt::PagedAttention(gpu.q, output.tensor, query.tensor, kc, vc,
+                         table.tensor, lengths.tensor, offsets.tensor, args);
+      vt::GetBackend(gpu.q.device).Synchronize(gpu.q);
+      const auto values = output.floats();
+      double delta2 = 0, norm2 = 0;
+      for (size_t i = 0; i < values.size(); ++i) {
+        const double delta = double(values[i]) - expected[i];
+        delta2 += delta * delta;
+        norm2 += double(expected[i]) * expected[i];
+      }
+      std::cout << "M04_CROSS_REPLAY " << label
+                << " relative_rms_vs_python=" << std::sqrt(delta2 / norm2)
+                << std::endl;
+      return values;
+    };
+    rerun("cpp_q_python_kv", cpp_q, cache_host);
+    auto cpp_k_python_v = cache_host;
+    auto python_k_cpp_v = cache_host;
+    for (int p = 0; p < pages; ++p) {
+      std::memcpy(cpp_k_python_v.data() + size_t(2 * p) * page_bytes,
+                  cpp_cache.data() + size_t(2 * p) * page_bytes, page_bytes);
+      std::memcpy(python_k_cpp_v.data() + size_t(2 * p + 1) * page_bytes,
+                  cpp_cache.data() + size_t(2 * p + 1) * page_bytes, page_bytes);
+    }
+    rerun("python_q_cpp_k_python_v", q_host, cpp_k_python_v);
+    rerun("python_q_python_k_cpp_v", q_host, python_k_cpp_v);
+    rerun("python_q_cpp_kv", q_host, cpp_cache);
+    const auto self = rerun("cpp_q_cpp_kv", cpp_q, cpp_cache);
+    std::vector<float> cpp_expected(q_bytes / sizeof(uint16_t));
+    for (size_t i = 0; i < cpp_expected.size(); ++i) {
+      uint16_t bits;
+      std::memcpy(&bits, cpp_out.data() + i * sizeof(bits), sizeof(bits));
+      cpp_expected[i] = vt::F16ToF32(bits);
+    }
+    Accuracy(self, cpp_expected, false, true);
+  }
   CHECK(vt::GetReferenceTierHits() == 0);
 }
