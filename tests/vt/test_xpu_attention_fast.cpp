@@ -1070,5 +1070,52 @@ TEST_CASE("XPU FP8 attention: captured Python M04 Q5 operator replay"
     }
     Accuracy(self, cpp_expected, false, true);
   }
+  if (const char* prequant_directory = std::getenv("VT_B70_M04_PREQUANT_DIR")) {
+    auto read_prequant = [&](const char* name) {
+      std::ifstream file(std::string(prequant_directory) + "/" + name + ".bin",
+                         std::ios::binary);
+      REQUIRE(file.good());
+      std::vector<unsigned char> data(size_t(4096) * kv_heads * dim * sizeof(uint16_t));
+      file.read(reinterpret_cast<char*>(data.data()), data.size());
+      REQUIRE(file.gcount() == static_cast<std::streamsize>(data.size()));
+      REQUIRE(file.peek() == std::char_traits<char>::eof());
+      return data;
+    };
+    Buffer source_k(gpu.q, DType::kF16, {4096, kv_heads, dim});
+    Buffer source_v(gpu.q, DType::kF16, {4096, kv_heads, dim});
+    Buffer fresh_cache(gpu.q, DType::kI8, {pages, 2 * page, kv_heads, dim});
+    Buffer slots(gpu.q, DType::kI64, {4096});
+    const auto prequant_k = read_prequant("k");
+    const auto prequant_v = read_prequant("v");
+    source_k.upload(prequant_k.data());
+    source_v.upload(prequant_v.data());
+    std::vector<int64_t> slot_ids(4096);
+    std::iota(slot_ids.begin(), slot_ids.end(), 0);
+    slots.upload(slot_ids.data());
+    auto fresh_k = vt::Tensor::Contiguous(fresh_cache.tensor.data, DType::kI8,
+                                          gpu.q.device, {pages, page, kv_heads, dim});
+    fresh_k.stride[0] *= 2;
+    auto fresh_v = fresh_k;
+    fresh_v.data = static_cast<char*>(fresh_k.data) + page_bytes;
+    vt::ReshapeAndCacheFp8(gpu.q, source_k.tensor, source_v.tensor, fresh_k,
+                           fresh_v, slots.tensor, vt::Fp8KVCacheDataType::kFp8E4M3,
+                           1.0f, 1.0f);
+    vt::GetBackend(gpu.q.device).Synchronize(gpu.q);
+    const auto written = fresh_cache.download();
+    int64_t k_mismatches = 0, v_mismatches = 0;
+    for (int token = 0; token < 4096; ++token) {
+      const size_t row = size_t(token) * kv_heads * dim;
+      const size_t block = size_t(token / page) * 2 * page_bytes +
+                           size_t(token % page) * kv_heads * dim;
+      for (size_t i = 0; i < size_t(kv_heads * dim); ++i) {
+        k_mismatches += written[block + i] != k_host[row + i];
+        v_mismatches += written[block + page_bytes + i] != v_host[row + i];
+      }
+    }
+    std::cout << "M04_PREQUANT_REPLAY k_mismatches=" << k_mismatches
+              << " v_mismatches=" << v_mismatches << std::endl;
+    CHECK(k_mismatches == 0);
+    CHECK(v_mismatches == 0);
+  }
   CHECK(vt::GetReferenceTierHits() == 0);
 }
