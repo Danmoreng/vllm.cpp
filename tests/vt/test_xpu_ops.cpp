@@ -73,6 +73,56 @@ void Close(const std::vector<float>& actual, const std::vector<float>& expected,
 constexpr DType floats[] = {DType::kF32, DType::kF16, DType::kBF16};
 }
 
+TEST_CASE("XPU greedy rejection matches CPU for ragged GPTQ vocabulary") {
+  Queues qs;
+  constexpr int32_t vocab = 248320, rows = 10, requests = 4, width = 4;
+  const std::vector<int32_t> offsets{0, 2, 6, 7, 10}; // k = 1, 3, 0, 2
+  std::vector<float> logits(static_cast<size_t>(rows) * vocab, -5.0f);
+  std::vector<int32_t> target(rows);
+  for (int32_t row = 0; row < rows; ++row) {
+    target[row] = (row * 7919 + 13) % vocab;
+    logits[static_cast<size_t>(row) * vocab + target[row]] = 100.0f;
+  }
+  // Exercise the lowest-id tie rule and the all -inf row.
+  logits[target[0] + 1] = 100.0f;
+  for (int32_t col = 0; col < vocab; ++col)
+    logits[static_cast<size_t>(rows - 1) * vocab + col] =
+        -std::numeric_limits<float>::infinity();
+  target[rows - 1] = 0;
+  std::vector<int32_t> draft(rows, -1);
+  for (int32_t req = 0; req < requests; ++req)
+    for (int32_t j = 0; j < offsets[req + 1] - offsets[req] - 1; ++j) {
+      const int32_t row = offsets[req] + j;
+      draft[row + 1] = j == 0 ? target[row] : (target[row] + 1) % vocab;
+    }
+  std::vector<unsigned char> expected_tokens, expected_counts, expected_argmax;
+  for (auto* q : {&qs.cpu, &qs.gpu}) {
+    Buffer dl(*q, DType::kF32, {rows, vocab});
+    Buffer dd(*q, DType::kI32, {rows});
+    Buffer dc(*q, DType::kI32, {requests + 1});
+    Buffer ds(*q, DType::kI32, {requests, width});
+    Buffer dn(*q, DType::kI32, {requests});
+    Buffer da(*q, DType::kI32, {rows});
+    dl.put(logits); dd.upload(draft.data()); dc.upload(offsets.data());
+    vt::GreedyRejectionSample(*q, ds.t, dn.t, da.t, dl.t, dd.t, dc.t);
+    if (q == &qs.cpu) {
+      expected_tokens = ds.raw();
+      expected_counts = dn.raw();
+      expected_argmax = da.raw();
+    } else {
+      CHECK(ds.raw() == expected_tokens);
+      CHECK(dn.raw() == expected_counts);
+      CHECK(da.raw() == expected_argmax);
+      const std::vector<int32_t> bad_offsets{0, 2, 2, 7, 10};
+      dc.upload(bad_offsets.data());
+      CHECK_THROWS(vt::GreedyRejectionSample(*q, ds.t, dn.t, da.t,
+                                             dl.t, dd.t, dc.t));
+    }
+  }
+  CHECK(vt::GetReferenceTierHits() == 0);
+  CHECK(vt::xpu::GetMemoryInfo().allocated_bytes == 0);
+}
+
 TEST_CASE("XPU copy and casts: all float pairs, strides, tails and overlapping transpose") {
   Queues qs;
   for (auto src_type : floats) for (auto dst_type : floats) for (int width : {1, 3, 127, 129}) {
@@ -210,6 +260,39 @@ TEST_CASE("XPU Matmul and MatmulBT: mixed dtypes, strided activation and real BA
     Buffer out(*q, DType::kBF16, {1, 48}); a.put(Values(5120)); b.put(Values(48 * 5120));
     vt::MatmulBT(*q, out.t, a.t, b.t);
     if (q == &qs.cpu) expected = out.floats(); else CHECK(out.floats() == expected);
+  }
+}
+
+TEST_CASE("XPU MTP matmuls preserve FP16 activations with BF16 weights") {
+  Queues qs;
+  for (bool transpose : {false, true}) {
+    constexpr int m = 2, k = 13, n = 9;
+    const auto av = Values(m * k, 3);
+    const auto bv = Values(k * n, 7);
+    Buffer cpu_a(qs.cpu, DType::kF16, {m, k});
+    Buffer gpu_a(qs.gpu, DType::kF16, {m, k});
+    Buffer cpu_b(qs.cpu, DType::kBF16,
+                 {transpose ? n : k, transpose ? k : n});
+    Buffer gpu_b(qs.gpu, DType::kBF16,
+                 {transpose ? n : k, transpose ? k : n});
+    Buffer expected(qs.cpu, DType::kF32, {m, n});
+    Buffer actual(qs.gpu, DType::kF16, {m, n});
+    cpu_a.put(av); gpu_a.put(av); cpu_b.put(bv); gpu_b.put(bv);
+    if (transpose) {
+      vt::MatmulBT(qs.cpu, expected.t, cpu_a.t, cpu_b.t);
+      vt::MatmulBT(qs.gpu, actual.t, gpu_a.t, gpu_b.t);
+    } else {
+      vt::Matmul(qs.cpu, expected.t, cpu_a.t, cpu_b.t);
+      vt::Matmul(qs.gpu, actual.t, gpu_a.t, gpu_b.t);
+    }
+    const auto want = expected.floats();
+    const auto got = actual.floats();
+    REQUIRE(got.size() == want.size());
+    for (size_t i = 0; i < got.size(); ++i) {
+      CAPTURE(transpose);
+      CAPTURE(i);
+      CHECK(got[i] == vt::F16ToF32(vt::F32ToF16(want[i])));
+    }
   }
 }
 

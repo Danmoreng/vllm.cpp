@@ -19,6 +19,8 @@ struct Registrar {
     XPU_OP(kMatmulBT, MatmulFn, MatmulBTKernel);
     XPU_OP(kRmsNorm, RmsNormFn, RmsNormKernel);
     XPU_OP(kGreedyArgmax, GreedyArgmaxFn, GreedyArgmaxKernel);
+    XPU_OP(kGreedyRejectionSample, GreedyRejectionSampleFn,
+           GreedyRejectionSampleKernel);
     XPU_OP(kApplyTopKTopP, ApplyTopKTopPFn, ApplyTopKTopPKernel);
     XPU_OP(kRandomSample, RandomSampleFn, RandomSampleKernel);
     XPU_OP(kApplyTemperature, ApplyTemperatureFn, ApplyTemperatureKernel);
@@ -33,9 +35,11 @@ struct Registrar {
     XPU_OP(kExl3Gemm, Exl3GemmFn, Exl3GemmKernel);
     XPU_OP(kCausalConv1dFwd, CausalConv1dFwdFn, CausalConv1dFwdKernel);
     XPU_OP(kCausalConv1dUpdate, CausalConv1dUpdateFn, CausalConv1dUpdateKernel);
+    XPU_OP(kCausalConv1dSpecUpdate, CausalConv1dSpecUpdateFn, CausalConv1dSpecUpdateKernel);
     XPU_OP(kGdnPostConv, GdnPostConvFn, GdnPostConvKernel);
     XPU_OP(kGdnPrefill, GdnPrefillFn, GdnPrefillKernel);
     XPU_OP(kGdnDecode, GdnDecodeFn, GdnDecodeKernel);
+    XPU_OP(kGdnSpecDecode, GdnSpecDecodeFn, GdnSpecDecodeKernel);
     XPU_OP(kRmsNormGated, RmsNormGatedFn, RmsNormGatedKernel);
     XPU_OP(kGdnStateGather, GdnStateGatherFn, GdnStateGatherKernel);
     XPU_OP(kGdnStateScatter, GdnStateScatterFn, GdnStateScatterKernel);

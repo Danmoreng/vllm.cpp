@@ -5420,8 +5420,13 @@ DBuf GdnBlockPaged(Dev d, const GdnLayerWeights& w, const HfConfig& cfg,
            "gdn paged: a spec batch must have num_decodes == 0 (upstream "
            "reclassifies non-spec decodes to prefill, gdn_attn.py:243-251)");
   const bool mixed_spec = spec && np > 0;
-  VT_CHECK(gptq == nullptr || !spec,
-           "gptq4: speculative GDN state routing is not enabled for the text control");
+  VT_CHECK(gptq == nullptr || !mixed_spec,
+           "gptq4: mixed speculative GDN state routing is not enabled for the text control");
+  if (gptq != nullptr && spec) {
+    VT_CHECK(state.conv_state.dtype == DType::kF16 &&
+                 state.ssm_state.dtype == DType::kF32,
+             "gptq4: speculative GDN requires FP16 conv and FP32 SSM state");
+  }
 
   // P4 diagnostic: capture one real GPTQ prefill layer for an isolated GDN
   // replay. The environment knob is inert on ordinary model runs. Capturing
@@ -6248,19 +6253,10 @@ DBuf FullAttnBlockPaged(Dev d, const FullAttnLayerWeights& w, const HfConfig& cf
   // (Phase 1: f32 query · <cache-dtype> cache, f32-accumulate softmax — the
   // attention kernel converts bf16 cache reads to f32).
   //
-  // KV-FP8 W3 (#1593): the fp8 cache takes the SAME bf16 normalisation, and it
-  // has to. `vt::ReshapeAndCacheFp8` quantizes from ONE source dtype
-  // (`k.dtype == v.dtype`, ops.cpp), and K and V do not arrive in the same one:
-  // K is `attn_dt`, which is f32 for every fp8 cache because `kv.dtype ==
-  // DType::kBF16` is a term of both FA2 eligibility tests above, while V is
-  // whatever the v_proj GEMM emitted — bf16 on the block-wise fp8 arm
-  // (`MatmulFp8BlockScaledD`), bf16 on the NVFP4 arm under the default
-  // `VT_BF16_GEMM_OUT`, and bf16 on ordinary torch safetensors
-  // (`MatmulBf16D`). Only the per-tensor fp8 arm and the transposed
-  // GGUF/synthetic path pair f32 with f32, which is why a CPU gate over
-  // synthetic weights could not see this. bf16 rather than f32 because bf16 is
-  // the dtype upstream quantizes from: its model IS bf16 where
-  // `reshape_and_cache_flash` takes key/value (`cache_kernels.cu:314-401`).
+  // KV-FP8 W3 (#1593): the FP8 store quantizes matching K/V source dtypes.
+  // The GPTQ draft has native FP16 K and V, as does the production FP16 model.
+  // Other arms can produce F32 K and BF16/F32 V; those normalize to BF16
+  // before the FP8 store. The BF16 cache arm follows the same normalization.
   Tensor kw = kn3;
   Tensor vw = v3;
   const bool fp8_kv = dense_attn::IsFp8KvCache(kv);
@@ -6268,9 +6264,9 @@ DBuf FullAttnBlockPaged(Dev d, const FullAttnLayerWeights& w, const HfConfig& cf
     VT_CHECK(kw.dtype == DType::kF16 && vw.dtype == DType::kF16,
              "gptq4: F16 KV cache requires F16 attention K and V projections");
   }
-  if (fp8_kv && gptq != nullptr)
+  if (fp8_kv && (kw.dtype == DType::kF16 || vw.dtype == DType::kF16))
     VT_CHECK(kw.dtype == DType::kF16 && vw.dtype == DType::kF16,
-             "gptq4: FP8 KV cache must quantize the FP16 model's K and V");
+             "qwen3_5: FP8 KV cache requires matching FP16 K and V");
   std::optional<DBuf> kf32, vf32;
   if (kv.dtype == DType::kF32) {
     if (kw.dtype != DType::kF32) {
@@ -6285,7 +6281,8 @@ DBuf FullAttnBlockPaged(Dev d, const FullAttnLayerWeights& w, const HfConfig& cf
     }
   }
   std::optional<DBuf> kbf, vbf;
-  if (kv.dtype == DType::kBF16 || (fp8_kv && gptq == nullptr)) {
+  if (kv.dtype == DType::kBF16 ||
+      (fp8_kv && kw.dtype != DType::kF16)) {
     // K may already be bf16 (an FA2 preamble emits bf16 k directly —
     // the RN round of the same f32 value this CastBf16 would produce); only
     // down-cast when the preamble/fallback produced f32 K.
@@ -8403,10 +8400,10 @@ void RunDenseLayerPaged(Dev d, const Qwen3_5DenseLayerWeights& layer,
 // The fc-cat-norm head from qwen3_5_mtp.py:129-140, shared by the standalone
 // (Qwen3_5MTPModel::Forward) and paged (ForwardPaged) drafts so a single copy of
 // the head math feeds both. Produces `h = fc(cat[pre_fc_norm_embedding(embed),
-// pre_fc_norm_hidden(target_hidden)])` as a [T,H] bf16 device buffer; the caller
+// pre_fc_norm_hidden(target_hidden)])` as a [T,H] activation-dtype device buffer; the caller
 // runs the (dense or MoE) decoder layer + final norm over it. `embed_tokens` is
 // the shared target embedding; `target_hidden_states` is the target model's
-// post-final-norm bf16 [T,H] output (the drafter's hidden-state tap).
+// post-final-norm [T,H] output (the drafter's hidden-state tap).
 DBuf MtpHeadHidden(Dev device, const Qwen3_5MTPWeights& weights,
                    const HfConfig& config, const OwnedTensor& embed_tokens,
                    const std::vector<int32_t>& input_ids,
@@ -8414,28 +8411,29 @@ DBuf MtpHeadHidden(Dev device, const Qwen3_5MTPWeights& weights,
   const int64_t hidden_size = config.hidden_size;
   const int64_t vocab_size = config.vocab_size;
   const float eps = static_cast<float>(config.rms_norm_eps);
+  const DType draft_dtype = ActDType(device);
 
   Tensor embedding_table = Qwen3_5EmbeddingTable(device.b, device.q, embed_tokens,
                                                 vocab_size, hidden_size);
   DBuf device_ids(device, DType::kI32, {tokens}, input_ids.data());
-  DBuf embedding(device, DType::kBF16, {tokens, hidden_size});
+  DBuf embedding(device, draft_dtype, {tokens, hidden_size});
   vt::Embedding(device.q, embedding.t(), embedding_table, device_ids.t());
 
   Tensor embedding_norm_weight =
       ResidentWeight(device, weights.pre_fc_norm_embedding, {hidden_size});
   Tensor hidden_norm_weight =
       ResidentWeight(device, weights.pre_fc_norm_hidden, {hidden_size});
-  DBuf embedding_norm(device, DType::kBF16, {tokens, hidden_size});
-  DBuf target_norm(device, DType::kBF16, {tokens, hidden_size});
+  DBuf embedding_norm(device, draft_dtype, {tokens, hidden_size});
+  DBuf target_norm(device, draft_dtype, {tokens, hidden_size});
   vt::RmsNorm(device.q, embedding_norm.t(), embedding.t(), embedding_norm_weight,
               vt::RmsNormArgs{eps, true});
   vt::RmsNorm(device.q, target_norm.t(), target_hidden_states, hidden_norm_weight,
               vt::RmsNormArgs{eps, true});
 
   // torch.cat([embedding_norm, target_norm], -1), row by row (portable, exact).
-  DBuf concatenated(device, DType::kBF16, {tokens, 2 * hidden_size});
+  DBuf concatenated(device, draft_dtype, {tokens, 2 * hidden_size});
   const size_t row_bytes =
-      static_cast<size_t>(hidden_size) * vt::SizeOf(DType::kBF16);
+      static_cast<size_t>(hidden_size) * vt::SizeOf(draft_dtype);
   auto* cat = static_cast<uint8_t*>(concatenated.ptr());
   const auto* embed = static_cast<const uint8_t*>(embedding_norm.t().data);
   const auto* target = static_cast<const uint8_t*>(target_norm.t().data);
@@ -8447,13 +8445,17 @@ DBuf MtpHeadHidden(Dev device, const Qwen3_5MTPWeights& weights,
                   row_bytes);
   }
   // MODEL-QWEN35-EXL3-HEAD (#2495 item 5): the fc-cat projection through the ONE
-  // EXL3 linear seam when the checkpoint quantized it, bf16 out because that is
-  // what `MatmulBf16D` returns and what the decoder layer below consumes. There
+  // EXL3 linear seam when the checkpoint quantized it, in the same activation
+  // dtype that the decoder layer below consumes. There
   // is no second matmul: `dense_exl3::Linear` forwards to
   // `layers::Exl3LinearMethod`, which calls `dense_attn::Exl3MatmulD`.
   if (weights.IsExl3()) {
     return dense_exl3::Linear(device, concatenated.t(), weights.fc,
-                              weights.fc_exl3, DType::kBF16);
+                              weights.fc_exl3, draft_dtype);
+  }
+  if (weights.IsGptq4Draft()) {
+    return dense_gptq4::Packed(device, concatenated.t(), weights.fc_gptq4,
+                               dense_gptq4::Projection::kMtpFc);
   }
   return MatmulBf16D(device, concatenated.t(), weights.fc);
 }
@@ -8532,7 +8534,7 @@ StepDevInputs BuildFullAttnStepDevInputs(Dev d,
 
 // ── MTP final-norm + owning return (SPEC-MTP I5c), shared by Forward/ForwardPaged.
 // mtp.norm over the fused residual stream (qwen3_5_mtp.py:163-165), then move the
-// [T,H] bf16 result into a pool-backed owning carrier (the WrapDeviceLogits idiom).
+// [T,H] result into a pool-backed owning carrier (the WrapDeviceLogits idiom).
 Qwen3_5MTPHiddenStates MtpFinalize(Dev device, const Qwen3_5MTPWeights& weights,
                                    const HfConfig& config, DBuf& hidden,
                                    DBuf& residual, int64_t tokens) {
@@ -8540,7 +8542,7 @@ Qwen3_5MTPHiddenStates MtpFinalize(Dev device, const Qwen3_5MTPWeights& weights,
   const float eps = static_cast<float>(config.rms_norm_eps);
   Tensor final_norm_weight =
       ResidentWeight(device, weights.final_norm, {hidden_size});
-  DBuf normalized(device, DType::kBF16, {tokens, hidden_size});
+  DBuf normalized(device, ActDType(device), {tokens, hidden_size});
   vt::RmsNorm(device.q, normalized.t(), hidden.t(), final_norm_weight,
               vt::RmsNormArgs{eps, true}, &residual.t());
   Qwen3_5MTPHiddenStates out;
@@ -9800,7 +9802,10 @@ Qwen3_5MTPHiddenStates Qwen3_5MTPModel::Forward(
   VT_CHECK(weights_->IsExl3()
                ? (weights_->fc_exl3.InFeatures() == 2 * hidden_size &&
                   weights_->fc_exl3.OutFeatures() == hidden_size)
-               : (weights_->fc.rank == 2 && weights_->fc.nk &&
+               : weights_->IsGptq4Draft()
+                 ? (weights_->fc_gptq4.k == 2 * hidden_size &&
+                    weights_->fc_gptq4.n == hidden_size)
+                 : (weights_->fc.rank == 2 && weights_->fc.nk &&
                   weights_->fc.shape[0] == hidden_size &&
                   weights_->fc.shape[1] == 2 * hidden_size),
            "qwen3_5 MTP forward: fc must be raw bf16 [H,2H] or an EXL3 trellis "
@@ -9859,11 +9864,13 @@ Qwen3_5MTPHiddenStates Qwen3_5MTPModel::ForwardPaged(
   VT_CHECK(target_hidden_states.rank == 2 &&
                target_hidden_states.shape[0] == tokens &&
                target_hidden_states.shape[1] == hidden_size &&
-               target_hidden_states.dtype == DType::kBF16 &&
+               (target_hidden_states.dtype == DType::kBF16 ||
+                (queue.device.type == vt::DeviceType::kXPU &&
+                 target_hidden_states.dtype == DType::kF16)) &&
                target_hidden_states.IsContiguous() &&
                target_hidden_states.device == queue.device,
            "qwen3_5 MTP paged forward: target hidden states must be contiguous "
-           "bf16 [T,H] on the queue device");
+           "bf16 [T,H] or xpu f16 [T,H] on the queue device");
   // MODEL-QWEN35-EXL3-HEAD (#2495 item 5): ONE precondition, two containers.
   // The trellis stores [K=2H, N=H] where the torch Linear stores [N=H, K=2H],
   // so the same projection is asserted through the orientation its own owner
@@ -9871,7 +9878,10 @@ Qwen3_5MTPHiddenStates Qwen3_5MTPModel::ForwardPaged(
   VT_CHECK(weights_->IsExl3()
                ? (weights_->fc_exl3.InFeatures() == 2 * hidden_size &&
                   weights_->fc_exl3.OutFeatures() == hidden_size)
-               : (weights_->fc.rank == 2 && weights_->fc.nk &&
+               : weights_->IsGptq4Draft()
+                 ? (weights_->fc_gptq4.k == 2 * hidden_size &&
+                    weights_->fc_gptq4.n == hidden_size)
+                 : (weights_->fc.rank == 2 && weights_->fc.nk &&
                   weights_->fc.shape[0] == hidden_size &&
                   weights_->fc.shape[1] == 2 * hidden_size),
            "qwen3_5 MTP paged forward: fc must be raw bf16 [H,2H] or an EXL3 trellis "
@@ -9884,7 +9894,13 @@ Qwen3_5MTPHiddenStates Qwen3_5MTPModel::ForwardPaged(
 
   // ONE decode step, for the same reason as the unpaged draft forward above.
   const Qwen35ExpertStreamStep expert_stream_step;
-  Dev device{vt::GetBackend(queue.device.type), queue};
+  // The production Python speculator keeps hidden states in the FP16 target
+  // dtype. Its BF16 checkpoint draft weights are quantized at load time, while
+  // the INT4 matmul consumes FP16 activations. Keep the native XPU draft in
+  // FP16 too: no per-token FP16/BF16 bridge is needed at this boundary.
+  Dev device{vt::GetBackend(queue.device.type), queue,
+             target_hidden_states.dtype == DType::kF16
+                 ? std::optional<DType>(DType::kF16) : std::nullopt};
 
   // Same head math as Forward; the difference is the DECODER LAYER, which runs
   // paged (writes/reads the draft KV layer via slot_mapping/block_table).
@@ -9895,7 +9911,7 @@ Qwen3_5MTPHiddenStates Qwen3_5MTPModel::ForwardPaged(
 
   // Per-step device inputs for the single full-attention layer (no GDN state) +
   // the fused-preamble cos|sin cache (a stub unless VT_FUSE_ATTN_PREAMBLE). The
-  // MTP head is bf16-unquantized, so the fp4 attn preamble default is OFF.
+  // The fused preamble serves both the BF16 and packed GPTQ draft layers.
   StepDevInputs sdi = BuildFullAttnStepDevInputs(device, positions, attn_meta);
   MaybeBuildAttnCosSin(device, sdi, *config_, tokens, /*fp4_attn=*/false);
 
@@ -9929,17 +9945,19 @@ Qwen3_5MTPHiddenStates Qwen3_5MTPModel::GatherHiddenRows(
   const int64_t num_rows = static_cast<int64_t>(rows.size());
   VT_CHECK(num_rows > 0, "qwen3_5 MTP gather: empty row list");
   VT_CHECK(hidden_states.rank == 2 && hidden_states.shape[1] == hidden_size &&
-               hidden_states.dtype == DType::kBF16 &&
+               (hidden_states.dtype == DType::kBF16 ||
+                (queue.device.type == vt::DeviceType::kXPU &&
+                 hidden_states.dtype == DType::kF16)) &&
                hidden_states.IsContiguous() &&
                hidden_states.device == queue.device,
-           "qwen3_5 MTP gather: hidden states must be contiguous bf16 [T,H] on "
+           "qwen3_5 MTP gather: hidden states must be contiguous bf16 or xpu f16 [T,H] on "
            "the queue device");
   const int64_t tokens = hidden_states.shape[0];
 
   Dev device{vt::GetBackend(queue.device.type), queue};
-  DBuf out(device, DType::kBF16, {num_rows, hidden_size});
+  DBuf out(device, hidden_states.dtype, {num_rows, hidden_size});
   const size_t row_bytes =
-      static_cast<size_t>(hidden_size) * vt::SizeOf(DType::kBF16);
+      static_cast<size_t>(hidden_size) * vt::SizeOf(hidden_states.dtype);
   auto* dst = static_cast<uint8_t*>(out.ptr());
   const auto* src = static_cast<const uint8_t*>(hidden_states.data);
   for (int64_t i = 0; i < num_rows; ++i) {
@@ -9960,12 +9978,26 @@ ForwardLogits Qwen3_5MTPModel::ComputeLogits(
   const int64_t hidden_size = config_->hidden_size;
   VT_CHECK(hidden_states.rank == 2 &&
                hidden_states.shape[1] == hidden_size &&
-               hidden_states.dtype == DType::kBF16 &&
+               (hidden_states.dtype == DType::kBF16 ||
+                (queue.device.type == vt::DeviceType::kXPU &&
+                 hidden_states.dtype == DType::kF16)) &&
                hidden_states.IsContiguous() &&
                hidden_states.device == queue.device,
-           "qwen3_5 MTP logits: hidden states must be contiguous bf16 [T,H] "
+           "qwen3_5 MTP logits: hidden states must be contiguous bf16 or xpu f16 [T,H] "
            "on the queue device");
   Dev device{vt::GetBackend(queue.device.type), queue};
+  if (weights_->IsGptq4Draft()) {
+    VT_CHECK(weights_->draft_lm_head_gptq4.k == hidden_size &&
+                 weights_->draft_lm_head_gptq4.n == config_->vocab_size,
+             "qwen3_5 MTP: packed draft head geometry mismatch");
+    DBuf half = dense_gptq4::Packed(
+        device, hidden_states, weights_->draft_lm_head_gptq4,
+        dense_gptq4::Projection::kMtpHead);
+    DBuf logits(device, DType::kF32,
+                {hidden_states.shape[0], config_->vocab_size});
+    vt::CastF32(device.q, logits.t(), half.t());
+    return WrapDeviceLogits(device, std::move(logits), config_->vocab_size);
+  }
   // MODEL-QWEN35-EXL3-HEAD (#2495 item 5). The arms are ordered
   // `exl3 -> fp4 -> bf16`, which is `DenseLogitsF32D`'s order and
   // `DflashLogitsF32D`'s, so the three readers of ONE target head cannot

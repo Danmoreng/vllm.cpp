@@ -50,4 +50,11 @@ Gptq4Weight LoadMergedGptq4Weight(
     const TensorResolver& get, const std::vector<std::string>& projections,
     int64_t k, const std::vector<int64_t>& output_widths);
 
+// One-time symmetric G128 packing of dense checkpoint Linear weights [N,K].
+// Matches the production draft's q=round(weight/(maxabs/7)), clamp[-8,7],
+// q+8 nibble layout. Sources are concatenated in output-row order.
+Gptq4Weight QuantizeMergedGptq4Weight(
+    const std::vector<StTensor>& sources, int64_t k);
+Gptq4Weight QuantizeGptq4Weight(const StTensor& source, int64_t k);
+
 }  // namespace vllm

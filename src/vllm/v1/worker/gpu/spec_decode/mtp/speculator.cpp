@@ -244,7 +244,7 @@ MtpDraftProposal MtpProposeDrafts(
   // not necessarily run when this line is reached; releasing the source buffer
   // returns it to the device pool, from which the very next allocation inside
   // ForwardPaged could take those bytes and overwrite them before the copies
-  // read them. It is one verify-sized [T,H] bf16 activation held across k-1
+  // read them. It is one verify-sized [T,H] draft activation held across k-1
   // draft steps, which is small beside the draft KV it is protecting.
 
   // A decode step samples from row r for request r: one query token per request.
