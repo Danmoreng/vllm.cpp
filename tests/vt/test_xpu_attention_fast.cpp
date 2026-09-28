@@ -1009,6 +1009,80 @@ TEST_CASE("XPU FP8 attention: captured Python M04 Q5 operator replay"
               << " max_abs=" << maximum << std::endl;
   }
   Accuracy(actual, expected, false, true);
+  if (std::getenv("VT_B70_M04_BENCH")) {
+    auto timed_run = [&] {
+      const auto start = std::chrono::steady_clock::now();
+      vt::PagedAttention(gpu.q, output.tensor, query.tensor, kc, vc,
+                         table.tensor, lengths.tensor, offsets.tensor, args);
+      vt::GetBackend(gpu.q.device).Synchronize(gpu.q);
+      return std::chrono::duration<double, std::milli>(
+                 std::chrono::steady_clock::now() - start).count();
+    };
+    for (int i = 0; i < 5; ++i) timed_run();
+    std::vector<double> samples;
+    for (int i = 0; i < 20; ++i) samples.push_back(timed_run());
+    std::sort(samples.begin(), samples.end());
+    std::cout << "M04_SPLITK_WALL_MEDIAN_MS " <<
+        (samples[9] + samples[10]) / 2 << " SAMPLES_MS "
+              << nlohmann::json(samples).dump() << std::endl;
+    if (std::getenv("VT_XPU_PROFILE")) {
+      std::vector<double> partial_ms, reduce_ms;
+      for (const auto& event : vt::xpu::DrainProfileEvents()) {
+        const double ms = double(event.end_ns - event.start_ns) / 1e6;
+        if (event.stage == "attention_split_partial") partial_ms.push_back(ms);
+        if (event.stage == "attention_split_reduce_cooperative") reduce_ms.push_back(ms);
+      }
+      REQUIRE(partial_ms.size() == 25);
+      REQUIRE(reduce_ms.size() == 25);
+      partial_ms.erase(partial_ms.begin(), partial_ms.begin() + 5);
+      reduce_ms.erase(reduce_ms.begin(), reduce_ms.begin() + 5);
+      std::sort(partial_ms.begin(), partial_ms.end());
+      std::sort(reduce_ms.begin(), reduce_ms.end());
+      std::cout << "M04_SPLITK_GPU_PARTIAL_MEDIAN_MS " <<
+          (partial_ms[9] + partial_ms[10]) / 2
+                << " REDUCE_MEDIAN_MS " << (reduce_ms[9] + reduce_ms[10]) / 2
+                << std::endl;
+    }
+  }
+  if (std::getenv("VT_B70_M04_VERIFY")) {
+    setenv("VT_XPU_ATTENTION", "verify", 1);
+    if (std::getenv("VT_XPU_PROFILE")) (void)vt::xpu::DrainProfileEvents();
+    auto verify_run = [&](const vt::Tensor& verify_key, const vt::Tensor& verify_value) {
+      const auto start = std::chrono::steady_clock::now();
+      vt::PagedAttention(gpu.q, output.tensor, query.tensor, verify_key, verify_value,
+                         table.tensor, lengths.tensor, offsets.tensor, args);
+      vt::GetBackend(gpu.q.device).Synchronize(gpu.q);
+      return std::chrono::duration<double, std::milli>(
+                 std::chrono::steady_clock::now() - start).count();
+    };
+    verify_run(kc, vc);
+    const auto verify_output = output.floats();
+    int mismatches = 0, nonfinite = 0;
+    for (size_t i = 0; i < expected.size(); ++i)
+      mismatches += verify_output[i] != expected[i],
+      nonfinite += !std::isfinite(verify_output[i]);
+    std::cout << "M04_NATIVE_VERIFY_F16_MISMATCHES " << mismatches
+              << " NONFINITE " << nonfinite << " FIRST ";
+    for (int i = 0; i < 8; ++i) std::cout << verify_output[i] << " ";
+    std::cout << std::endl;
+    Accuracy(verify_output, expected, false, true);
+    if (std::getenv("VT_XPU_PROFILE")) {
+      int packs = 0, unpacks = 0;
+      for (const auto& event : vt::xpu::DrainProfileEvents()) {
+        packs += event.stage == "attention_verify_pack";
+        unpacks += event.stage == "attention_verify_unpack";
+      }
+      CHECK(packs == 1);
+      CHECK(unpacks == 1);
+    }
+    for (int i = 0; i < 5; ++i) verify_run(kc, vc);
+    std::vector<double> samples;
+    for (int i = 0; i < 20; ++i) samples.push_back(verify_run(kc, vc));
+    std::sort(samples.begin(), samples.end());
+    std::cout << "M04_NATIVE_VERIFY_WALL_MEDIAN_MS " <<
+        (samples[9] + samples[10]) / 2 << " SAMPLES_MS "
+              << nlohmann::json(samples).dump() << std::endl;
+  }
   if (const char* cpp_directory = std::getenv("VT_B70_M04_CPP_REPLAY_DIR")) {
     auto read_cpp = [&](const std::string& name, size_t bytes) {
       std::ifstream file(std::string(cpp_directory) + "/" + name, std::ios::binary);

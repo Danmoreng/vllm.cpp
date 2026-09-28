@@ -1765,6 +1765,17 @@ if(VLLM_CPP_XPU)
       target_compile_definitions(vllm_xpu_xe2_prefill PRIVATE VT_XE2_PREFILL_NO_PREFETCH)
     endif()
     target_compile_options(vllm_xpu_xe2_prefill PRIVATE -fsycl)
+    add_library(vllm_xpu_xe2_verify OBJECT src/vt/xpu/xpu_attention_verify_xe2.cpp)
+    set_target_properties(vllm_xpu_xe2_verify PROPERTIES POSITION_INDEPENDENT_CODE ON)
+    target_include_directories(vllm_xpu_xe2_verify PRIVATE include src)
+    target_include_directories(vllm_xpu_xe2_verify SYSTEM PRIVATE
+      third_party/b70_xe2_verify
+      "${VLLM_CPP_SYCL_TLA_DIR}/include"
+      "${VLLM_CPP_SYCL_TLA_DIR}/tools/util/include"
+      "${VLLM_CPP_SYCL_TLA_DIR}/applications")
+    target_compile_definitions(vllm_xpu_xe2_verify PRIVATE
+      CUTLASS_ENABLE_SYCL SYCL_INTEL_TARGET VLLM_XPU_ENABLE_XE2)
+    target_compile_options(vllm_xpu_xe2_verify PRIVATE -fsycl)
     # Torch-free GDN experiment from the same pinned Xe2/SYCL-TLA stack.
     # Its runtime selector is off until the real-layer and model gates pass.
     add_library(vllm_xpu_xe2_gdn OBJECT src/vt/xpu/xpu_gdn_xe2.cpp)
@@ -1781,7 +1792,9 @@ if(VLLM_CPP_XPU)
     target_compile_options(vllm_xpu_xe2_gdn PRIVATE -fsycl)
     target_compile_definitions(vllm_xpu PRIVATE VLLM_CPP_XPU_XE2_GDN)
     target_compile_definitions(vllm_xpu PRIVATE VLLM_CPP_XPU_XE2_PREFILL)
+    target_compile_definitions(vllm_xpu PRIVATE VLLM_CPP_XPU_XE2_VERIFY)
     target_sources(vllm PRIVATE $<TARGET_OBJECTS:vllm_xpu_xe2_prefill>)
+    target_sources(vllm PRIVATE $<TARGET_OBJECTS:vllm_xpu_xe2_verify>)
     target_sources(vllm PRIVATE $<TARGET_OBJECTS:vllm_xpu_xe2_gdn>)
     target_link_options(vllm PUBLIC -flink-huge-device-code -Xspirv-translator
       "-spirv-ext=+SPV_INTEL_split_barrier,+SPV_INTEL_2d_block_io,+SPV_INTEL_subgroup_matrix_multiply_accumulate")
