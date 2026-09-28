@@ -585,16 +585,27 @@ void CheckQuality(vllm_engine* engine, int long_context) {
               << " answer=" << json(answer).dump() << std::endl;
   }
 }
-void ProfileSingleRequest(vllm_engine* engine, int requested_prompt, int outputs) {
+void ProfileSingleRequest(vllm_engine* engine, const std::string& model,
+                          int requested_prompt, int outputs) {
   using nlohmann::json;
   const bool graph = Setting("VT_XPU_GRAPH", 0) == 1;
+  const bool mtp = Setting("VT_B70_MTP_K", 0) != 0;
   const char* path = std::getenv("VT_B70_PROFILE_OUT");
   REQUIRE(path != nullptr);
   REQUIRE(outputs >= 2); REQUIRE(outputs <= 100);
-  const std::string prompt = requested_prompt ? RepeatedPrompt(requested_prompt) :
+  const std::string prompt = requested_prompt ?
+      (mtp ? LongRetrievalPrompt(model, requested_prompt) :
+             RepeatedPrompt(requested_prompt)) :
       "The capital of France is";
   auto sampling = vllm_sampling_params_default();
-  sampling.temperature = 0; sampling.ignore_eos = 1;
+  sampling.temperature = mtp ? 1.0f : 0.0f;
+  if (mtp) {
+    sampling.top_p = .95f;
+    sampling.top_k = 20;
+    sampling.seed = 42;
+    sampling.has_seed = 1;
+  }
+  sampling.ignore_eos = 1;
   sampling.max_tokens = graph ? 10 : 2;
   vllm_completion warm{};
   REQUIRE_MESSAGE(vllm_complete(engine, prompt.c_str(), &sampling, &warm) == VLLM_OK,
@@ -615,7 +626,9 @@ void ProfileSingleRequest(vllm_engine* engine, int requested_prompt, int outputs
   const auto finish = std::chrono::steady_clock::now();
   const auto clock_after = vt::xpu::CaptureProfileClockAnchor();
   REQUIRE(times.finished);
-  REQUIRE(times.tokens.size() == static_cast<size_t>(outputs));
+  REQUIRE(!times.tokens.empty());
+  REQUIRE(times.tokens.size() <= static_cast<size_t>(outputs));
+  if (!mtp) REQUIRE(times.tokens.size() == static_cast<size_t>(outputs));
   const auto records = vt::xpu::DrainProfileEvents();
   const auto host_records = vt::xpu::DrainHostProfileRecords();
   REQUIRE_FALSE(records.empty());
@@ -634,6 +647,8 @@ void ProfileSingleRequest(vllm_engine* engine, int requested_prompt, int outputs
                 {"device_start_ns", anchor.device_start_ns}, {"device_end_ns", anchor.device_end_ns}};
   };
   out << json({{"event", "request"}, {"profiling_mode", graph ? "sycl_graph_span_events" : "sycl_eager_events"},
+               {"speculative_depth", Setting("VT_B70_MTP_K", 0)},
+               {"sampler", mtp ? "temperature_1_top_p_0.95_top_k_20_seed_42" : "greedy"},
                {"device", json::parse(vt::xpu::DeviceDescription())},
                {"prompt_tokens", prompt_tokens}, {"output_tokens", outputs},
                {"start_steady_ns", ns(start)}, {"callback_steady_ns", callbacks},
@@ -715,7 +730,7 @@ void MeasureWarm(vllm_engine* engine, int requested_prompt, int requested_output
 void MeasureSampledMtp(vllm_engine* engine, const std::string& model,
                        int prompt_tokens, int output_tokens) {
   REQUIRE(prompt_tokens == 4096);
-  REQUIRE(output_tokens == 1024);
+  REQUIRE(output_tokens == (std::getenv("VT_B70_SAMPLED_MTP_SHORT") ? 32 : 1024));
   const std::string prompt = LongRetrievalPrompt(model, prompt_tokens);
   const auto tokenizer = vllm::tok::Tokenizer::FromHfJson(
       (std::filesystem::path(model) / "tokenizer.json").string());
@@ -782,6 +797,12 @@ void MeasureSampledMtp(vllm_engine* engine, const std::string& model,
             << " output_hash_fnv64=" << output_hash
             << " gpu_bytes=" << memory.allocated_bytes
             << " gpu_peak_bytes=" << memory.peak_allocated_bytes << std::endl;
+  if (std::getenv("VT_B70_SAMPLED_MTP_TRACE_IDS") ||
+      std::getenv("VT_B70_SAMPLED_MTP_SHORT")) {
+    std::cout << "MTP_SAMPLED_IDS";
+    for (int32_t id : generated) std::cout << ' ' << id;
+    std::cout << std::endl;
+  }
 }
 }
 
@@ -913,7 +934,7 @@ TEST_CASE("XPU Qwen checkpoint: native text prefill and repeated greedy decode t
     return;
   }
   if (profile) {
-    ProfileSingleRequest(engine.get(), requested_prompt, profile_outputs);
+    ProfileSingleRequest(engine.get(), model, requested_prompt, profile_outputs);
     CHECK(vt::GetReferenceTierHits() == initialization_hits);
     return;
   }
