@@ -6,6 +6,7 @@ import pytest
 
 from tools.bench.qwen38_endpoint_bench import (
     HTTPTransport,
+    _sample,
     comparison_verdict,
     load_corpus,
     run_workload,
@@ -143,7 +144,7 @@ def test_comparison_fails_closed_on_all_canonical_evidence():
         assert comparison_verdict(base, right)["verdict"] == "refused"
 
 
-def test_canonical_hashes_exclude_runtime_model_names_and_adapter_extras():
+def test_canonical_hashes_exclude_runtime_model_names_but_include_semantic_extras():
     config = {"endpoint": "x", "corpus": [{"text": "same", "max_tokens": 2}],
               "waves": 5}
     left = run_workload({**config, "model": "engine-a/model"}, FakeTransport())
@@ -154,10 +155,25 @@ def test_canonical_hashes_exclude_runtime_model_names_and_adapter_extras():
     ]
     assert comparison_verdict(left, right)["verdict"] == "matched"
 
-    http_a = HTTPTransport("x", tokenizer_identity="tok@rev", extra_json={"draft_model": "a"})
-    http_b = HTTPTransport("x", tokenizer_identity="tok@rev", extra_json={"draft_model": "b"})
-    payload = {"model": "runtime", "prompt": "same"}
-    assert http_a.prepare_payload(payload) != http_b.prepare_payload(payload)
+    for key, values in (("top_k", (10, 20)), ("stop", (["A"], ["B"])),
+                        ("chat_template_kwargs", ({"enable_thinking": False},
+                                                  {"enable_thinking": True}))):
+        class SemanticFake(FakeTransport):
+            def __init__(self, value):
+                super().__init__()
+                self.http = HTTPTransport("x", "tok", extra_json={key: value})
+            def semantic_payload(self, payload):
+                return self.http.semantic_payload(payload)
+        extra_left = run_workload({**config, "model": "alias"}, SemanticFake(values[0]))
+        extra_right = run_workload({**config, "model": "other"}, SemanticFake(values[1]))
+        assert extra_left["canonical_payload_hash"] != extra_right["canonical_payload_hash"]
+        assert extra_left["samples"][0]["payload_hash"] != extra_right["samples"][0]["payload_hash"]
+        assert comparison_verdict(extra_left, extra_right)["verdict"] == "refused"
+
+    tf = HTTPTransport("x", "tok", adapter="tensorfold", draft_mode="off")
+    semantic = tf.semantic_payload({"model": "alias", "prompt": "same"})
+    assert semantic["draft"] is False
+    assert "return_token_ids" not in semantic
 
 
 def test_workload_refuses_missing_or_comparison_different_tokenizer_identity():
@@ -259,6 +275,46 @@ def test_tensorfold_terminal_fixture_parses_tokens_telemetry_and_terminal_e2e(mo
     assert response["draft"] == {"drafts": True, "rounds": 2, "min_rows": 2}
     assert response["prefill"] == {"prefill_s": .12}
     assert response["decode"] == {"decode_s": .34}
+
+
+def test_vllm_cpp_tokenize_fixture_matches_tensorfold_token_evidence(monkeypatch):
+    sse = (b'data: {"choices":[{"text":"same output"}]}\n\n'
+           b'data: {"choices":[{"text":""}],"usage":{"prompt_tokens":4,'
+           b'"completion_tokens":3,"total_tokens":7}}\n\n'
+           b'data: [DONE]\n\n')
+    tokenize = b'{"count":3,"max_model_len":32768,"tokens":[101,102,103],"token_strs":null}'
+    requests = []
+
+    def urlopen(request):
+        requests.append(request)
+        return BytesIO(sse if request.full_url.endswith("/v1/completions") else tokenize)
+
+    monkeypatch.setattr("tools.bench.qwen38_endpoint_bench.urllib.request.urlopen", urlopen)
+    monkeypatch.setattr("tools.bench.qwen38_endpoint_bench.time.perf_counter",
+                        iter([10., 10.1, 10.2]).__next__)
+    transport = HTTPTransport("http://host:8000/v1/completions", "tok",
+                              adapter="vllm-cpp", draft_mode="off")
+    response = transport({"model": "m", "stream": True})
+    assert response["prompt_tokens"] == 4
+    assert response["terminal_token_ids"] == [101, 102, 103]
+    assert requests[-1].full_url == "http://host:8000/tokenize"
+    assert json.loads(requests[-1].data) == {"prompt": "same output", "add_special_tokens": False}
+
+    vllm_sample = _sample(response, 10.)
+    tensorfold_sample = _sample({"events": [{"offset_s": .1, "text": "same output"}],
+                                 "prompt_tokens": 4, "generated_tokens": 3,
+                                 "terminal_token_ids": [101, 102, 103], "e2e_s": .2}, 10.)
+    assert vllm_sample["token_fingerprint"] == tensorfold_sample["token_fingerprint"]
+
+
+def test_vllm_cpp_accepts_explicit_safe_tokenize_url():
+    transport = HTTPTransport("https://generation.example/v1/completions", "tok",
+                              adapter="vllm-cpp",
+                              tokenize_url="https://tokens.example/tokenize")
+    assert transport.tokenize_url == "https://tokens.example/tokenize"
+    with pytest.raises(ValueError, match="http"):
+        HTTPTransport("https://host/v1/completions", "tok", adapter="vllm-cpp",
+                      tokenize_url="file:///tmp/tokenize")
 
 
 def test_itl_requires_one_token_per_timed_event():
