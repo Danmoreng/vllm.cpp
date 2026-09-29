@@ -286,6 +286,21 @@ def comparison_verdict(left: dict[str, Any], right: dict[str, Any]) -> dict[str,
     elif any(s.get("refusal_reason") for s in left_samples + right_samples):
         reason = "an input sample was refused"
     else:
+        evidence_fields = (
+            ("prompt_token_fingerprint", "prompt_token_fingerprints"),
+            ("reply_text_token_fingerprint", "reply_text_token_fingerprints"),
+            ("engine_generated_token_fingerprint", "engine_generated_token_fingerprints"),
+        )
+        for run in (left, right):
+            for sample_field, aggregate_field in evidence_fields:
+                derived = [sample.get(sample_field) for sample in run["samples"]]
+                if aggregate_field in run and run[aggregate_field] != derived:
+                    reason = f"{aggregate_field} aggregate/sample fingerprint evidence is inconsistent"
+                    break
+            if reason:
+                break
+
+    if reason is None:
         for left_sample, right_sample in zip(left_samples, right_samples):
             if (not left_sample.get("payload_hash") or
                     left_sample.get("payload_hash") != right_sample.get("payload_hash")):
@@ -301,8 +316,10 @@ def comparison_verdict(left: dict[str, Any], right: dict[str, Any]) -> dict[str,
                 reason = "per-sample prompt token fingerprints differ"
                 break
 
-    left_reply = left.get("reply_text_token_fingerprints")
-    right_reply = right.get("reply_text_token_fingerprints")
+    left_reply = ([sample.get("reply_text_token_fingerprint") for sample in left_samples]
+                  if isinstance(left_samples, list) else None)
+    right_reply = ([sample.get("reply_text_token_fingerprint") for sample in right_samples]
+                   if isinstance(right_samples, list) else None)
     if left_reply and right_reply and all(left_reply + right_reply):
         reply_text_equality = "equal" if left_reply == right_reply else "different"
     else:
@@ -312,11 +329,11 @@ def comparison_verdict(left: dict[str, Any], right: dict[str, Any]) -> dict[str,
         return {"verdict": "refused", "refusal_reason": reason,
                 "reply_text_token_equality": reply_text_equality}
 
-    left_prompt = left.get("prompt_token_fingerprints")
-    right_prompt = right.get("prompt_token_fingerprints")
-    if not left_prompt or not right_prompt or any(not x for x in left_prompt + right_prompt):
-        return {"verdict": "PROFILE_COMPARISON",
-                "refusal_reason": "prompt token fingerprints are unavailable",
+    left_prompt = [sample.get("prompt_token_fingerprint") for sample in left_samples]
+    right_prompt = [sample.get("prompt_token_fingerprint") for sample in right_samples]
+    if any(not fingerprint for fingerprint in left_prompt + right_prompt):
+        return {"verdict": "refused",
+                "refusal_reason": "every sample requires a nonempty prompt token fingerprint",
                 "reply_text_token_equality": reply_text_equality}
     if left_prompt != right_prompt:
         return {"verdict": "refused", "refusal_reason": "prompt token fingerprints differ",

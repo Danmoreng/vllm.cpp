@@ -148,6 +148,30 @@ def test_comparison_fails_closed_on_all_canonical_evidence():
         assert comparison_verdict(base, right)["verdict"] == "refused"
 
 
+def test_comparison_refuses_fabricated_aggregate_evidence():
+    sample = {"refusal_reason": None, "payload_hash": "payload", "prompt_tokens": 2,
+              "prompt_token_fingerprint": "prompt", "reply_text_token_fingerprint": "reply",
+              "engine_generated_token_fingerprint": "engine"}
+    base = {"refusal_reason": None, "canonical_payload_hash": "payloads",
+            "run_identity": "run", "tokenizer_identity": "tok", "samples": [sample],
+            "prompt_token_fingerprints": ["prompt"],
+            "reply_text_token_fingerprints": ["reply"],
+            "engine_generated_token_fingerprints": ["engine"]}
+    mutations = [
+        lambda x: x["samples"][0].update(prompt_token_fingerprint=None),
+        lambda x: x["samples"][0].update(prompt_token_fingerprint="different"),
+        lambda x: x.update(prompt_token_fingerprints=["fabricated"]),
+        lambda x: x.update(reply_text_token_fingerprints=["fabricated"]),
+        lambda x: x.update(engine_generated_token_fingerprints=["fabricated"]),
+    ]
+    for mutate in mutations:
+        right = json.loads(json.dumps(base))
+        mutate(right)
+        verdict = comparison_verdict(base, right)
+        assert verdict["verdict"] == "refused"
+        assert "fingerprint" in verdict["refusal_reason"]
+
+
 def test_canonical_hashes_exclude_runtime_model_names_but_include_semantic_extras():
     config = {"endpoint": "x", "corpus": [{"text": "same", "max_tokens": 2}],
               "waves": 5}
@@ -222,7 +246,7 @@ def test_usage_without_token_ids_keeps_valid_absolute_profile_measurements():
     assert result["token_throughput"] is not None
     assert all(s["tpot_s"] == pytest.approx(.1) for s in result["samples"])
     assert all(s["engine_generated_token_fingerprint"] is None for s in result["samples"])
-    assert comparison_verdict(result, result)["verdict"] == "PROFILE_COMPARISON"
+    assert comparison_verdict(result, result)["verdict"] == "refused"
 
 
 def test_comparison_refuses_different_workload_shape():
@@ -334,7 +358,7 @@ def test_vllm_cpp_tokenize_fixture_matches_tensorfold_token_evidence(monkeypatch
              "engine_generated_token_fingerprints": [tensorfold_sample["engine_generated_token_fingerprint"]]}
     verdict = comparison_verdict(left, right)
     assert verdict["reply_text_token_equality"] == "unavailable"
-    assert verdict["verdict"] == "PROFILE_COMPARISON"
+    assert verdict["verdict"] == "refused"
 
 
 def test_vllm_cpp_accepts_explicit_safe_tokenize_url():
