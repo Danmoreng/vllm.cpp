@@ -14,9 +14,16 @@ embedded in the harness):
 python3 tools/bench/qwen38_endpoint_bench.py \
   --endpoint http://127.0.0.1:8000/v1/completions \
   --model "$MODEL" \
+  --tokenizer-identity "$TOKENIZER_NAME_OR_DIGEST" \
   --corpus benchmarks/manifests/qwen38_tensorfold/corpus.json \
   --output raw.json --concurrency 1 --waves 5 --draft off
 ```
+
+`--tokenizer-identity` must identify the common tokenizer by immutable revision
+or digest; the harness fails closed when it is omitted, and comparisons refuse
+different identities. Runtime model aliases and endpoint adapter extras are
+excluded from canonical workload hashes, while semantic prompt and decoding
+parameters remain covered.
 
 `--draft` is recorded as run metadata only and is never sent as a request
 field. If an endpoint documents an endpoint-specific field, add it explicitly,
