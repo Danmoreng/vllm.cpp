@@ -30070,3 +30070,27 @@ dependence is open and belongs to the follow-up row. Leg 2 (8-request repeat)
 skipped: the staircase is unambiguous and the OOM signature reproduced in-leg.
 
 Log: `/tmp/dram-leg1.log` (raw trace, ~125k lines).
+
+## BENCH-QWEN38-TENSORFOLD-GAP W1 — BLOCKED_MISSING_ARTIFACTS, no benchmark number (2026-09-29, `dgx:gpu0`, source `4c89728bc740ca2886def8f191d28a2a5f912c6d`)
+
+Two successful repository `rc` jobs inspected `dgx:gpu0` (NVIDIA GB10,
+driver 580.173.02); the committed evidence retains SHA-256 fingerprints rather
+than raw job IDs. The leased workspace contained neither the staged
+`unsloth/Qwen3.8-Flash-Next-GGUF` UD-IQ1_S bytes nor the
+`Vontra/Qwen3.8-Flash-Next-MLX-4bit-MTP` checkpoint, and no pinned TensorFold or
+MiaAI recipe checkout. Local Hugging Face state had a repository ref but no
+snapshot or weight bytes. No huge artifact was downloaded.
+
+This is a prerequisite blocker, not a timing result. No server or executable
+correctness gate ran; serial decode, drafted decode, prefill and serving ladders,
+clock and memory windows, and both same-tool profiles are
+`NOT_RUN_PREREQUISITE`. No number and no cross-engine ratio are recorded.
+Production vLLM remains the named `BLOCKED` denominator. TensorFold publisher
+figures remain unverified and do not justify W2-W6.
+
+The independent selected-GGUF verdict is `BLOCKED_NO_MTP_WEIGHTS`. The committed
+real-header manifest has 1,224 tensor entries, trunk blocks 0 through 47, and no
+name matching `mtp`, `nextn`, `draft`, `eh_proj`, `enorm`, or `hnorm`. This does
+not inspect or characterize the absent TensorFold checkpoint. Evidence:
+`.agents/evidence/bench-qwen38-tensorfold-gap/20260929T180547Z/`; public summary:
+`docs/benchmarks/qwen38-tensorfold-gap.md`.

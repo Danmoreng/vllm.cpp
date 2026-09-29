@@ -1,0 +1,18 @@
+{
+  "scan_scope": "leased /workspace, max depth 7; operator configuration checked for availability without recording values",
+  "expected_vllm_cpp_directories": [
+    {"name": "qwen4exp-flash-next-iq1s", "present": false},
+    {"name": "UD-IQ1_S", "present": false}
+  ],
+  "tensorfold_artifact_candidates": 0,
+  "tensorfold_source_candidates": 0,
+  "relevant_source_checkouts": ["vllm.cpp-gpu-gate"],
+  "local_hf_metadata": {
+    "repository": "unsloth/Qwen3.8-Flash-Next-GGUF",
+    "ref_present": true,
+    "snapshot_present": false,
+    "weight_bytes_present": false
+  },
+  "operator_checkpoint_root_available": false,
+  "download_performed": false
+}

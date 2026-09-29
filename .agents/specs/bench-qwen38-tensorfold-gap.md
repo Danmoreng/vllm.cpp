@@ -8,7 +8,7 @@
 | Host | `dgx:gpu0`, one GB10 with 128 GB unified memory, through an `rc` lease |
 | Branch | `row/BENCH-QWEN38-TENSORFOLD-GAP`, base `d15b1cc095694df69d8014ea6597582882e1bc1c` |
 | Integration | One pull request. The spec commit precedes implementation commits. |
-| Status | `SPIKE`; this document contains no locally measured TensorFold number yet |
+| Status | `BLOCKED_MISSING_ARTIFACTS`; the 2026-09-29 leased discovery produced no benchmark number |
 
 ## Scope
 
@@ -501,14 +501,46 @@ Implementation and evidence follow as separately reviewable commits. A fresh
 review is required before landing. No merge or push authority is inferred from
 approval to implement.
 
+## Outcome
+
+Task 4 / W1 stopped at its declared artifact prerequisite on 2026-09-29.
+Two successful repository `rc` jobs inspected `dgx:gpu0`; sanitized evidence
+retains only SHA-256 fingerprints of their job IDs. The leased workspace had no
+staged UD-IQ1_S bytes, no TensorFold MLX-MTP checkpoint, and no pinned
+TensorFold or MiaAI recipe source. Local Hugging Face state held a repository
+ref but no snapshot or weights. No large download was authorized or performed.
+
+The outcome is `BLOCKED_MISSING_ARTIFACTS`, not a failed benchmark. No server,
+correctness gate, timed ladder, clock window, memory series, or profile ran; no
+number or ratio is admissible. Production vLLM is a named `BLOCKED` denominator.
+TensorFold publisher figures remain unverified. The independent GGUF artifact
+verdict is `BLOCKED_NO_MTP_WEIGHTS`: the committed 1,224-entry real-header
+manifest has only trunk blocks 0 through 47 and no name matching `mtp`, `nextn`,
+`draft`, `eh_proj`, `enorm`, or `hnorm`.
+
+W2 through W6 are not justified by a profile. W3/native MTP is additionally
+blocked by absent weights. Tasks 5, 6, and 7 in the execution plan therefore
+remain blocked rather than becoming speculative implementation work. Evidence:
+`.agents/evidence/bench-qwen38-tensorfold-gap/20260929T180547Z/`; public record:
+`docs/benchmarks/qwen38-tensorfold-gap.md`.
+
+## Now
+
+`BLOCKED_MISSING_ARTIFACTS`. Resume W1 only after both exact model artifacts and
+pinned TensorFold/recipe sources are staged through an authorized path. Re-run
+executable correctness before any timing; do not reuse this blocker as profile
+evidence.
+
 ## Owed
 
 - W0 owes the TensorFold comparator record, row adoption, harness, and
   fake-server tests, plus checker evidence if a new comparator surface is
   required.
-- W1 owes the local denominator, profiles, and the measured target for W2 onward.
-- W2 through W6 are conditional on profiles and must record a refusal when their
-  premise is false.
-- The final wave owes `## Outcome` with defaults, rejected candidates, public
-  benchmark records, and either a valid matched-arm residual gap or an explicit
-  refusal to compute one.
+- W1 is blocked on authorized staging of both selected artifacts and the pinned
+  TensorFold/recipe sources. Its 2026-09-29 attempt owes no number; on resume it
+  still owes correctness, ladders, clock windows, memory capture, and profiles.
+- W2 through W6 are blocked because W1 produced no profile. W3 is independently
+  `BLOCKED_NO_MTP_WEIGHTS` for the selected GGUF.
+- The final wave owes no synthesis until those prerequisites are cleared; it must
+  then update the public and agent benchmark records and either report a valid
+  matched-arm residual gap or explicitly refuse to compute one.

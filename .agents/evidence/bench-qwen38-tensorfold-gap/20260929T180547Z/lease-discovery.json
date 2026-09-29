@@ -1,0 +1,10 @@
+{
+  "device": "dgx:gpu0",
+  "jobs": [
+    {"job_fingerprint_sha256": "0f1937cf575b6f5c565648ae845f37770c7cefbc673e952ec3ed4fd5670c0907", "state": "succeeded"},
+    {"job_fingerprint_sha256": "8dfeb7dc3a02911a7e2c969a5f7af663c2383519a7254840d3e6299580a2218d", "state": "succeeded"}
+  ],
+  "gpu": {"name": "NVIDIA GB10", "driver": "580.173.02"},
+  "device_ready_after_jobs": true,
+  "raw_job_ids_retained": false
+}
