@@ -30073,12 +30073,13 @@ Log: `/tmp/dram-leg1.log` (raw trace, ~125k lines).
 
 ## BENCH-QWEN38-TENSORFOLD-GAP W1 — BLOCKED_MISSING_ARTIFACTS, no benchmark number (2026-09-29, `dgx:gpu0`, source `4c89728bc740ca2886def8f191d28a2a5f912c6d`)
 
-Two successful repository `rc` jobs inspected `dgx:gpu0` (NVIDIA GB10,
-driver 580.173.02); the committed evidence retains SHA-256 fingerprints rather
-than raw job IDs. The leased workspace contained neither the staged
-`unsloth/Qwen3.8-Flash-Next-GGUF` UD-IQ1_S bytes nor the
-`Vontra/Qwen3.8-Flash-Next-MLX-4bit-MTP` checkpoint, and no pinned TensorFold or
-MiaAI recipe checkout. Local Hugging Face state had a repository ref but no
+A fresh successful repository `rc` audit lease executed the committed bounded
+scan script on `dgx:gpu0` (NVIDIA GB10, driver 580.173.02); evidence retains its
+SHA-256 lease fingerprint rather than a raw job ID. Its raw marker receipt found
+both documented staging paths absent and zero matches in `/workspace` to depth
+3 for the committed TensorFold/MiaAI/Vontra and MLX-MTP/Flash-Next-MTP
+patterns. This establishes absence only in those bounded locations, not across
+the host. Local Hugging Face state had a repository ref but no
 snapshot or weight bytes. No huge artifact was downloaded.
 
 This is a prerequisite blocker, not a timing result. No server or executable

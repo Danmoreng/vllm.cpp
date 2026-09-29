@@ -504,10 +504,13 @@ approval to implement.
 ## Outcome
 
 Task 4 / W1 stopped at its declared artifact prerequisite on 2026-09-29.
-Two successful repository `rc` jobs inspected `dgx:gpu0`; sanitized evidence
-retains only SHA-256 fingerprints of their job IDs. The leased workspace had no
-staged UD-IQ1_S bytes, no TensorFold MLX-MTP checkpoint, and no pinned
-TensorFold or MiaAI recipe source. Local Hugging Face state held a repository
+Two successful repository `rc` jobs first established access; a fresh successful
+lease then executed the committed bounded discovery script on `dgx:gpu0`.
+Sanitized evidence retains only its SHA-256 lease fingerprint and raw marker
+receipt. The two documented staging paths were absent, and bounded `/workspace`
+searches to depth 3 found zero matches for the committed TensorFold/MiaAI/Vontra
+and MLX-MTP/Flash-Next-MTP patterns. This is not a claim of exhaustive host-wide
+absence. Local Hugging Face state held a repository
 ref but no snapshot or weights. No large download was authorized or performed.
 
 The outcome is `BLOCKED_MISSING_ARTIFACTS`, not a failed benchmark. No server,
