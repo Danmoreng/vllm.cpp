@@ -776,3 +776,159 @@ class TestGitHubProjection:
     def test_remote_body_normalization_has_lf_and_one_final_newline(self) -> None:
         body = "\r\nRow: ROW-A  \r\n\r\nProblem\t\r\n\r\n"
         assert records.normalize_github_body(body) == "Row: ROW-A\n\nProblem\n"
+
+
+class TestFrozenEvidenceEnforcement:
+    """The frozen-evidence contract applies wherever the block appears.
+
+    A record outside _intake that QUOTES an archived row must quote the row
+    it declares, byte for byte, modulo exactly the relative-link rebase the
+    record's directory forces (#3348). Absence of the block stays legal for
+    every owner except _intake; presence is not.
+    """
+
+    def row_owned(self, **changes: object) -> records.IssueRecord:
+        values: dict[str, object] = {
+            "id": f"ISSUE-GH-{''}91",
+            "title": "Archived 91, row-owned",
+            "row": "ROW-A",
+            "state": "OPEN",
+            "kind": "bug",
+            "github": 91,
+            "mirror": "SYNCED",
+            "availability": "FULL",
+            "created": "2026-08-01",
+            "updated": "2026-08-31",
+            "closed": "-",
+            "problem": linked_intake_problem(number=91),
+            "resolution": "-",
+        }
+        values.update(changes)
+        return records.IssueRecord(**values)
+
+    def test_row_owned_quote_rebased_to_the_same_file_passes(
+        self, tmp_path: Path
+    ) -> None:
+        validate(
+            tmp_path,
+            self.row_owned(),
+            owner="ROW-A",
+            rows={"ROW-A"},
+            owed=(),
+            frozen_archive=linked_frozen_archive_source(number=91),
+        )
+
+    def test_row_owned_quote_rebased_to_a_different_file_fails(
+        self, tmp_path: Path
+    ) -> None:
+        with pytest.raises(records.IssueRecordError, match="must equal the declared line"):
+            validate(
+                tmp_path,
+                self.row_owned(
+                    problem=linked_intake_problem(number=91, spec="../specs/other.md")
+                ),
+                owner="ROW-A",
+                rows={"ROW-A"},
+                owed=(),
+                frozen_archive=linked_frozen_archive_source(number=91),
+            )
+
+    def test_row_owned_quote_rebase_may_not_change_a_fragment(
+        self, tmp_path: Path
+    ) -> None:
+        archived = linked_frozen_archive_source(
+            number=91, spec="../specs/example.md#section"
+        )
+        with pytest.raises(records.IssueRecordError, match="must equal the declared line"):
+            validate(
+                tmp_path,
+                self.row_owned(),
+                owner="ROW-A",
+                rows={"ROW-A"},
+                owed=(),
+                frozen_archive=archived,
+            )
+
+    def test_row_owned_remote_target_must_stay_byte_equal(self, tmp_path: Path) -> None:
+        line = (
+            f"| [#91](https://github.com/mudler/vllm.cpp/issues/91) "
+            f"| — | Spec [docs](https://example.com/guide) | bug |"
+        )
+        archive = (
+            "# Issue index\n\n"
+            "| Issue | Row | Title | Kind |\n"
+            "|---:|---|---|---|\n"
+            f"{line}\n"
+        ).encode()
+        problem = (
+            "Archive: `.agents/completed/issue-index.md:5`\n\n"
+            "### Frozen archive evidence\n\n"
+            f"> {line.replace('example.com/guide', 'example.com/other')}"
+        )
+        with pytest.raises(records.IssueRecordError, match="must equal the declared line"):
+            validate(
+                tmp_path,
+                self.row_owned(problem=problem),
+                owner="ROW-A",
+                rows={"ROW-A"},
+                owed=(),
+                frozen_archive=archive,
+            )
+
+    def test_row_owned_quote_citing_another_issue_fails(self, tmp_path: Path) -> None:
+        with pytest.raises(
+            records.IssueRecordError, match="identify this issue"
+        ):
+            validate(
+                tmp_path,
+                self.row_owned(problem=linked_intake_problem(number=77)),
+                owner="ROW-A",
+                rows={"ROW-A"},
+                owed=(),
+                frozen_archive=linked_frozen_archive_source(number=77),
+            )
+
+    def test_owed_quote_rebased_to_the_same_file_passes(self, tmp_path: Path) -> None:
+        record = self.row_owned(row=None)
+        validate(
+            tmp_path,
+            record,
+            owner="_owed",
+            rows={"ROW-A"},
+            owed={record.id: 1},
+            frozen_archive=linked_frozen_archive_source(number=91),
+        )
+
+    def test_row_without_the_block_stays_legal(self, tmp_path: Path) -> None:
+        validate(
+            tmp_path,
+            self.row_owned(problem="No archive quote here."),
+            owner="ROW-A",
+            rows={"ROW-A"},
+            owed=(),
+            frozen_archive=None,
+        )
+
+    def test_no_record_base_still_requires_byte_equality(self) -> None:
+        evidence = linked_intake_problem(number=91)
+        archive = linked_frozen_archive_source(number=91)
+        # The record-spelled quote (what a quote CUT INTO the record looks
+        # like after its links resolve from the record's directory) is the
+        # case that needs a base: byte equality alone rejects it, because the
+        # archive spells the link for ITS directory.
+        record_spelled = evidence.rsplit("> ", 1)[1].replace("../specs/", "../../specs/")
+        assert records._archive_evidence_matches_source((6, record_spelled), archive) is False
+        assert (
+            records._archive_evidence_matches_source(
+                (6, record_spelled), archive, ".agents/issues/ROW-A"
+            )
+            is True
+        )
+        # The archive-spelled quote passes byte-equality with no base at all.
+        archive_spelled = evidence.rsplit("> ", 1)[1]
+        assert records._archive_evidence_matches_source((6, archive_spelled), archive) is True
+
+    def test_crlf_archive_source_matches_an_lf_quote(self) -> None:
+        line = "| [#91](https://github.com/mudler/vllm.cpp/issues/91) | — | bug |"
+        archive = ("# Issue index\n" + line + "\n").replace("\n", "\r\n").encode()
+        assert records._archive_evidence_matches_source((2, line), archive) is True

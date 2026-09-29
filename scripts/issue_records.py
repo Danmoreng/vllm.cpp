@@ -368,6 +368,12 @@ def _archive_evidence_matches_source(
     spelling a MOVE forces (`../specs/x.md` vs `../../specs/x.md`) and
     nothing else. `record_base` is the record's repository-relative
     directory; with no base to resolve against, only byte equality passes.
+
+    A trailing CR on the archived line is stripped before comparing: the
+    committed blob is LF, but a Windows working copy checks the archive out
+    CRLF, and byte equality must answer the CONTENT of the line, not which
+    checkout read it. The quote side is parsed from record text, so it has
+    no CR to strip.
     """
 
     if frozen_archive is None:
@@ -376,7 +382,7 @@ def _archive_evidence_matches_source(
     source_lines = frozen_archive.split(b"\n")
     if line_number > len(source_lines):
         return False
-    source_line = source_lines[line_number - 1]
+    source_line = source_lines[line_number - 1].removesuffix(b"\r")
     if source_line == archived_line.encode("utf-8"):
         return True
     if not record_base:
@@ -432,6 +438,37 @@ def valid_intake_archive_evidence(
         return None
     _, line = evidence
     return evidence if _archive_row_owner(line, record.github) in {"", "-", "—"} else None
+
+
+def _quoted_evidence_errors(
+    evidence: tuple[int, str] | None,
+    frozen_archive: bytes | None,
+    record_base: str,
+    github: int | None,
+) -> list[str]:
+    """Contract errors for a record that QUOTES an archived row.
+
+    Wherever a record carries a Frozen archive evidence block -- _intake,
+    _owed, or row-owned -- the quote must be the line it declares, modulo
+    the relative-link rebase the record's directory forces, and the line
+    must be about this record's own GitHub number. Absence of the block is
+    legal everywhere except _intake; presence is not, in any owner
+    directory. Measured over the corpus at d15b1cc09 with the 27 dropped
+    archive rows restored (GATE-ISSUE-ARCHIVE-RESTORE): all 831 existing
+    blocks satisfy both halves, so the ratchet adds no new red.
+    """
+
+    if evidence is None:
+        return []
+    if not _archive_evidence_matches_source(evidence, frozen_archive, record_base):
+        return [
+            "Frozen archive evidence must equal the declared line in the frozen "
+            "archive source (a relative link may differ only by spelling, and "
+            "must resolve to the same file)"
+        ]
+    if _archive_row_owner(evidence[1], github) is None:
+        return ["Frozen archive evidence must identify this issue"]
+    return []
 
 
 def validate_issue_record(
@@ -597,6 +634,14 @@ def validate_issue_record(
             errors.append("Row must be - for a file under _owed")
         if owed_count != 1:
             errors.append("an _owed issue must have exactly one owning spec reference")
+        errors.extend(
+            _quoted_evidence_errors(
+                intake_archive_evidence(record),
+                frozen_archive,
+                record_base,
+                record.github,
+            )
+        )
     else:
         if record.row != owner:
             errors.append(f"path row {owner!r} must equal Row field {record.row or '-'}")
@@ -604,6 +649,14 @@ def validate_issue_record(
             errors.append(f"row {owner!r} is not canonical and claimable")
         if owed_count:
             errors.append("a row-owned issue must not retain an owed reference")
+        errors.extend(
+            _quoted_evidence_errors(
+                intake_archive_evidence(record),
+                frozen_archive,
+                record_base,
+                record.github,
+            )
+        )
 
     if errors:
         raise IssueRecordError("; ".join(errors))

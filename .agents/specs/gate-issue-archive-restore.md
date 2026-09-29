@@ -67,3 +67,17 @@ Out of scope, each for its own reason:
    `PERF-27B-LMHEAD-DSR` line while living under `PERF-27B-LMHEAD-FP4`).
    They are pre-existing record-content questions, orthogonal to line
    existence, and every one of them still resolves after the restore.
+
+## Enforcement (the stacked checker PR)
+
+With the rows restored and #3350's relative-link comparison landed, the
+frozen-evidence contract is enforced wherever the block appears, in every
+owner directory: a record that QUOTES an archived row must quote the line it
+declares, modulo exactly the relative-link rebase the record's directory
+forces, and the quoted line must carry the record's own GitHub number.
+Absence of the block stays legal everywhere except `_intake`; presence is
+not. Measured over the corpus on the restored archive: 831 records carry a
+block, 831 resolve, 831 identify their own issue, 0 violations -- the
+ratchet adds no new red. Working-copy EOL no longer changes the answer: the
+comparison strips a trailing CR from the archived line, because the
+committed blob is LF and a Windows checkout is not.
