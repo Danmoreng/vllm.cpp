@@ -6,24 +6,15 @@ The 2026-09-29 DGX reproduction attempt is
 `BLOCKED_MISSING_ARTIFACTS`. It publishes no performance number and no
 cross-engine ratio.
 
-Two successful repository `rc` jobs established access; a fresh successful audit
-lease then executed the committed bounded scan script on `dgx:gpu0` (NVIDIA
-GB10, driver 580.173.02). Raw job IDs are not retained; the evidence stores only
-a SHA-256 lease fingerprint. The raw receipt establishes absence only from the
-two documented staging paths and from `/workspace` to depth 3 for the committed
-TensorFold, MiaAI, Vontra, MLX-MTP, and Flash-Next-MTP patterns. It does not
-claim exhaustive host-wide absence. Those bounded locations contained neither
-required model arm:
-
-- the staged `unsloth/Qwen3.8-Flash-Next-GGUF` UD-IQ1_S bytes needed by
-  vllm.cpp were absent from both previously documented workspace locations;
-- the `Vontra/Qwen3.8-Flash-Next-MLX-4bit-MTP` checkpoint required by
-  TensorFold was absent;
-- no pinned TensorFold or MiaAI recipe source checkout was present.
-
-Local Hugging Face state had a repository ref for the GGUF repository but no
-snapshot or weight bytes. Operator checkpoint configuration did not resolve to
-an available path. No large artifact was downloaded.
+A fresh successful audit lease then executed the committed bounded scan script
+on `dgx:gpu0` (NVIDIA GB10, driver 580.173.02). The raw job ID is not retained;
+the evidence stores only a SHA-256 lease fingerprint. The raw receipt establishes
+absence only from the two documented staging paths and from `/workspace` to
+depth 3 for the committed TensorFold, MiaAI, Vontra, MLX-MTP, and
+Flash-Next-MTP patterns. It does not claim exhaustive host-wide absence. The
+required artifacts/source were not found in that retained scope, so runner
+artifact manifests and source revisions could not be populated and measurement
+did not start.
 
 ## Consequence
 
@@ -66,8 +57,8 @@ The execution-plan outcomes are explicit:
   retain. Long-context selection, PLE, prefill geometry, and copy drafting have
   no measured bottleneck or correctness baseline.
 
-The campaign can resume measurement only after both exact artifacts and pinned TensorFold
-sources are staged through an authorized path. It must then rerun correctness
+The campaign can resume measurement only after the runner prerequisites are
+available in the documented/configured staging scope. It must then rerun correctness
 before timing rather than reusing this blocker as benchmark evidence.
 
 ## Evidence and validation

@@ -504,14 +504,14 @@ approval to implement.
 ## Outcome
 
 Task 4 / W1 stopped at its declared artifact prerequisite on 2026-09-29.
-Two successful repository `rc` jobs first established access; a fresh successful
-lease then executed the committed bounded discovery script on `dgx:gpu0`.
-Sanitized evidence retains only its SHA-256 lease fingerprint and raw marker
-receipt. The two documented staging paths were absent, and bounded `/workspace`
-searches to depth 3 found zero matches for the committed TensorFold/MiaAI/Vontra
-and MLX-MTP/Flash-Next-MTP patterns. This is not a claim of exhaustive host-wide
-absence. Local Hugging Face state held a repository
-ref but no snapshot or weights. No large download was authorized or performed.
+A fresh successful lease executed the committed bounded discovery script on
+`dgx:gpu0`. Sanitized evidence retains only its SHA-256 lease fingerprint and
+raw marker receipt. The two documented staging paths were absent, and bounded
+`/workspace` searches to depth 3 found zero matches for the committed
+TensorFold/MiaAI/Vontra and MLX-MTP/Flash-Next-MTP patterns. This is not a claim
+of exhaustive host-wide absence. Required artifacts/source were not found in
+that retained scope, so the runner prerequisites could not be populated and
+measurement did not start.
 
 The outcome is `BLOCKED_MISSING_ARTIFACTS`, not a failed benchmark. No server,
 correctness gate, timed ladder, clock window, memory series, or profile ran; no
@@ -530,8 +530,8 @@ outcomes without a speculative product optimization. Evidence:
 
 ## Now
 
-`BLOCKED_MISSING_ARTIFACTS`. Resume W1 only after both exact model artifacts and
-pinned TensorFold/recipe sources are staged through an authorized path. Re-run
+`BLOCKED_MISSING_ARTIFACTS`. Resume W1 only after the runner prerequisites are
+available in the documented/configured staging scope. Re-run
 executable correctness before any timing; do not reuse this blocker as profile
 evidence.
 
@@ -540,8 +540,8 @@ evidence.
 - W0 owes the TensorFold comparator record, row adoption, harness, and
   fake-server tests, plus checker evidence if a new comparator surface is
   required.
-- W1 is blocked on authorized staging of both selected artifacts and the pinned
-  TensorFold/recipe sources. Its 2026-09-29 attempt owes no number; on resume it
+- W1 is blocked until required artifacts/source are available in the retained
+  documented/configured staging scope. Its 2026-09-29 attempt owes no number; on resume it
   still owes correctness, ladders, clock windows, memory capture, and profiles.
 - Task 5 / W2 records `SKIPPED_NO_PROFILE` and `NO_PORT_DECISION`; no QSA product
   edit is justified without the profile premise.
