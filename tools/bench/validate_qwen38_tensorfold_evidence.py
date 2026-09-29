@@ -66,6 +66,28 @@ def exact_keys(value: dict, expected: set[str], label: str) -> None:
     require(set(value) == expected, f"{label} keys differ: expected {sorted(expected)}")
 
 
+def parse_kv_receipt(path: pathlib.Path, required_begin: str | None = None) -> dict[str, str]:
+    require(path.is_file(), f"missing raw receipt: {path}")
+    text = path.read_text(encoding="utf-8")
+    require(RAW_UUID.search(text) is None, f"raw lease/job UUID in {path.name}")
+    require(SENSITIVE_VALUE.search(text) is None, f"credential-like value in {path.name}")
+    values: dict[str, str] = {}
+    for number, line in enumerate(text.splitlines(), 1):
+        require(re.fullmatch(r"[A-Z][A-Z0-9_]*=.*", line) is not None,
+                f"malformed receipt line {path.name}:{number}")
+        key, value = line.split("=", 1)
+        require(key not in values, f"duplicate receipt marker {key}")
+        values[key] = value
+    if required_begin:
+        require(values.get(required_begin) == "1", f"missing receipt marker {required_begin}")
+    return values
+
+
+def sha256_file(path: pathlib.Path) -> str:
+    import hashlib
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
 def inspect_manifest(path: pathlib.Path, terms: list[str]) -> dict:
     require(path.is_file(), f"committed GGUF manifest is missing: {path}")
     text = path.read_text(encoding="utf-8")
@@ -84,15 +106,15 @@ def inspect_manifest(path: pathlib.Path, terms: list[str]) -> dict:
     }
 
 
-def validate_leases(summary: dict, lease: dict) -> None:
-    exact_keys(lease, {"device", "jobs", "gpu", "device_ready_after_jobs", "raw_job_ids_retained"}, "lease-discovery")
+def validate_leases(summary: dict, lease: dict, directory: pathlib.Path, receipt: dict[str, str], invocation: dict[str, str]) -> None:
+    exact_keys(lease, {"device", "jobs", "gpu", "device_ready_after_jobs", "raw_job_ids_retained", "raw_receipt", "invocation_receipt"}, "lease-discovery")
     require(lease["device"] == "dgx:gpu0", "lease-discovery device must be dgx:gpu0")
     require(lease["device_ready_after_jobs"] is True, "device was not ready after discovery")
     require(lease["raw_job_ids_retained"] is False, "raw lease IDs must not be retained")
     require(isinstance(lease["gpu"], dict) and lease["gpu"].get("name") == "NVIDIA GB10",
             "lease-discovery GPU identity is missing")
     jobs = lease["jobs"]
-    require(isinstance(jobs, list) and len(jobs) >= 2, "two completed lease scans are required")
+    require(isinstance(jobs, list) and len(jobs) >= 1, "at least one completed lease scan is required")
     for item in jobs:
         exact_keys(item, {"job_fingerprint_sha256", "state"}, "lease job")
         require(item["state"] == "succeeded", "lease discovery job did not succeed")
@@ -103,14 +125,28 @@ def validate_leases(summary: dict, lease: dict) -> None:
             "summary lease count disagrees with lease-discovery")
     expected = [{"device": lease["device"], **item} for item in jobs]
     require(summary_jobs == expected, "summary leases disagree with lease-discovery")
+    require(lease["raw_receipt"] == "discovery-receipt.stdout" and
+            lease["invocation_receipt"] == "discovery-invocation.txt", "lease receipt names differ")
+    require(receipt.get("Q38_DEVICE") == lease["device"], "raw receipt device disagrees")
+    require(receipt.get("Q38_LEASE_SHA256") == jobs[0]["job_fingerprint_sha256"],
+            "raw receipt lease fingerprint disagrees")
+    require(receipt.get("Q38_GPU_NAME") == lease["gpu"]["name"] and
+            receipt.get("Q38_GPU_DRIVER") == lease["gpu"]["driver"], "raw GPU receipt disagrees")
+    require(receipt.get("Q38_RECEIPT_END") == "1", "raw discovery receipt is incomplete")
+    require(re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", receipt.get("Q38_TIMESTAMP_UTC", "")) is not None,
+            "raw discovery timestamp missing")
+    require(invocation.get("RC_EXIT_CODE") == "0", "rc discovery command did not exit zero")
+    for key in ("HOST_STARTED_UTC", "HOST_FINISHED_UTC"):
+        require(re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", invocation.get(key, "")) is not None,
+                f"missing invocation timestamp {key}")
 
 
-def validate_artifacts(summary: dict, discovery: dict) -> None:
+def validate_artifacts(summary: dict, discovery: dict, command: dict, receipt: dict[str, str], repo: pathlib.Path) -> None:
     exact_keys(discovery, {
         "scan_scope", "scan_completed", "scan_device", "expected_vllm_cpp_directories",
         "tensorfold_artifact_candidates", "tensorfold_source_candidates",
-        "relevant_source_checkouts", "local_hf_metadata",
-        "operator_checkpoint_root_available", "download_performed",
+        "local_hf_metadata", "operator_checkpoint_root_available", "download_performed",
+        "raw_receipt", "command_manifest",
     }, "artifact-discovery")
     require(discovery["scan_completed"] is True, "artifact scan did not complete")
     require(discovery["scan_device"] == "dgx:gpu0", "artifact scan device differs from lease")
@@ -121,6 +157,32 @@ def validate_artifacts(summary: dict, discovery: dict) -> None:
     require(discovery["tensorfold_artifact_candidates"] == 0, "TensorFold artifact candidate count must be zero")
     require(discovery["tensorfold_source_candidates"] == 0, "TensorFold source candidate count must be zero")
     require(discovery["download_performed"] is False, "blocked evidence must not download an artifact")
+    require(discovery["raw_receipt"] == "discovery-receipt.stdout" and
+            discovery["command_manifest"] == "discovery-command.json", "artifact receipt names differ")
+    exact_keys(command, {"schema_version", "script", "script_sha256", "remote_command", "device", "max_runtime", "idle_timeout", "receipt", "invocation_receipt", "scope"}, "discovery-command")
+    require(command["schema_version"] == 1 and command["device"] == "dgx:gpu0", "command manifest identity differs")
+    require(command["script"] == "tools/bench/qwen38_tensorfold_discovery.sh", "unexpected discovery script")
+    script = repo / command["script"]
+    require(SHA256.fullmatch(command["script_sha256"]) is not None and sha256_file(script) == command["script_sha256"],
+            "committed discovery script hash differs")
+    require(receipt.get("Q38_SCRIPT_SHA256") == command["script_sha256"], "executed script hash differs")
+    require(receipt.get("Q38_SEARCH_ROOT") == command["scope"]["search_root_label"] and
+            int(receipt.get("Q38_SEARCH_MAXDEPTH", "-1")) == command["scope"]["search_maxdepth"],
+            "raw bounded search scope differs from command manifest")
+    marker_by_label = {
+        "VLLM_CPP_CKPT_A": "Q38_STAGING_VLLM_CPP_CKPT_A_PRESENT",
+        "VLLM_CPP_CKPT_B": "Q38_STAGING_VLLM_CPP_CKPT_B_PRESENT",
+    }
+    for item in directories:
+        require(receipt.get(marker_by_label[item["name"]]) == "0", f"raw receipt says {item['name']} is present")
+    raw_tf_artifacts = sum(int(receipt.get(key, "-1")) for key in
+                           ("Q38_SEARCH_VONTRA_DIR_COUNT", "Q38_SEARCH_MLX_MTP_FILE_COUNT", "Q38_SEARCH_FLASH_NEXT_MTP_FILE_COUNT"))
+    raw_tf_sources = sum(int(receipt.get(key, "-1")) for key in
+                         ("Q38_SEARCH_TENSORFOLD_DIR_COUNT", "Q38_SEARCH_MIAAI_DIR_COUNT"))
+    require(raw_tf_artifacts == discovery["tensorfold_artifact_candidates"] == 0,
+            "artifact count is not derived from raw receipt")
+    require(raw_tf_sources == discovery["tensorfold_source_candidates"] == 0,
+            "source count is not derived from raw receipt")
     require(discovery["operator_checkpoint_root_available"] is False, "operator checkpoint root contradicts blocker")
     hf = discovery["local_hf_metadata"]
     exact_keys(hf, {"repository", "ref_present", "snapshot_present", "weight_bytes_present"}, "local_hf_metadata")
@@ -185,6 +247,9 @@ def validate(directory: pathlib.Path) -> None:
     lease = load_object(directory / "lease-discovery.json")
     discovery = load_object(directory / "artifact-discovery.json")
     checks = load_object(directory / "checks.json")
+    command = load_object(directory / "discovery-command.json")
+    receipt = parse_kv_receipt(directory / "discovery-receipt.stdout", "Q38_RECEIPT_BEGIN")
+    invocation = parse_kv_receipt(directory / "discovery-invocation.txt")
     require((directory / "README.md").is_file(), "missing raw blocker evidence: README.md")
     require(summary.get("schema_version") == 1, "schema_version must be 1")
     require(summary.get("benchmark_id") == BENCHMARK_ID, "wrong benchmark_id")
@@ -192,7 +257,8 @@ def validate(directory: pathlib.Path) -> None:
     require(status in {BLOCKED, MEASURED}, f"status must be {BLOCKED} or {MEASURED}")
     require(re.fullmatch(r"[0-9a-f]{40}", str(summary.get("source_sha", ""))) is not None,
             "source_sha must be full 40-hex")
-    validate_leases(summary, lease)
+    repo = pathlib.Path(__file__).resolve().parents[2]
+    validate_leases(summary, lease, directory, receipt, invocation)
     validate_checks(summary, checks)
 
     if status == MEASURED:
@@ -209,7 +275,7 @@ def validate(directory: pathlib.Path) -> None:
         require(all(x == "CAPTURED" for x in summary.get("profiles", {}).values()), "measured profiles incomplete")
         return
 
-    validate_artifacts(summary, discovery)
+    validate_artifacts(summary, discovery, command, receipt, repo)
     require(summary.get("numbers_published") is False, "blocked evidence must publish no numbers")
     require(summary.get("cross_engine_ratio") is None, "blocked evidence must not contain a ratio")
     artifacts = summary.get("artifacts")
@@ -223,7 +289,7 @@ def validate(directory: pathlib.Path) -> None:
             "production vLLM must remain a named blocked denominator")
     require(set(summary.get("workloads", {})) == WORKLOADS, "all workload dispositions are required")
     require(set(summary.get("profiles", {})) == ENGINES, "both profile dispositions are required")
-    validate_mtp(summary, pathlib.Path(__file__).resolve().parents[2])
+    validate_mtp(summary, repo)
     require("blocked_later_tasks" not in summary, "obsolete blocked_later_tasks is forbidden")
     require(summary.get("task_outcomes") == TASK_OUTCOMES, "task outcomes disagree with execution plan")
 

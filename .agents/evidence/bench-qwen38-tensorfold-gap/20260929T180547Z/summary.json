@@ -16,12 +16,7 @@
   "lease_checks": [
     {
       "device": "dgx:gpu0",
-      "job_fingerprint_sha256": "0f1937cf575b6f5c565648ae845f37770c7cefbc673e952ec3ed4fd5670c0907",
-      "state": "succeeded"
-    },
-    {
-      "device": "dgx:gpu0",
-      "job_fingerprint_sha256": "8dfeb7dc3a02911a7e2c969a5f7af663c2383519a7254840d3e6299580a2218d",
+      "job_fingerprint_sha256": "9b8c269c1aae79510a8dd7d897d883837fb436775330c57b62877cf1b82a80cb",
       "state": "succeeded"
     }
   ],

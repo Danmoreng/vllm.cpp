@@ -6,10 +6,14 @@ The 2026-09-29 DGX reproduction attempt is
 `BLOCKED_MISSING_ARTIFACTS`. It publishes no performance number and no
 cross-engine ratio.
 
-Two repository `rc` jobs successfully inspected `dgx:gpu0` (NVIDIA GB10,
-driver 580.173.02). Their raw job IDs are not retained; the evidence stores only
-SHA-256 fingerprints. The leased workspace contained neither required model
-arm:
+Two successful repository `rc` jobs established access; a fresh successful audit
+lease then executed the committed bounded scan script on `dgx:gpu0` (NVIDIA
+GB10, driver 580.173.02). Raw job IDs are not retained; the evidence stores only
+a SHA-256 lease fingerprint. The raw receipt establishes absence only from the
+two documented staging paths and from `/workspace` to depth 3 for the committed
+TensorFold, MiaAI, Vontra, MLX-MTP, and Flash-Next-MTP patterns. It does not
+claim exhaustive host-wide absence. Those bounded locations contained neither
+required model arm:
 
 - the staged `unsloth/Qwen3.8-Flash-Next-GGUF` UD-IQ1_S bytes needed by
   vllm.cpp were absent from both previously documented workspace locations;

@@ -19,10 +19,13 @@ def materialize(tmp_path: Path, file: str = "summary.json", mutate=None) -> Path
         if source.is_file():
             shutil.copyfile(source, tmp_path / source.name)
     path = tmp_path / file
-    value = json.loads(path.read_text())
-    if mutate:
-        mutate(value)
-    path.write_text(json.dumps(value))
+    if file.endswith(".json"):
+        value = json.loads(path.read_text())
+        if mutate:
+            mutate(value)
+        path.write_text(json.dumps(value))
+    elif mutate:
+        path.write_text(mutate(path.read_text()))
     return tmp_path
 
 
@@ -47,6 +50,10 @@ def test_committed_blocker_validates():
         ("checks.json", lambda x: x["focused_tests"].update(passed=0)),
         ("checks.json", lambda x: x["focused_tests"].update(status="FAILED", failed=1)),
         ("checks.json", lambda x: x.update(approved_runner_source_sha="0" * 40)),
+        ("discovery-command.json", lambda x: x.update(script_sha256="0" * 64)),
+        ("discovery-receipt.stdout", lambda text: text.replace("Q38_RECEIPT_END=1", "Q38_RECEIPT_END=0")),
+        ("discovery-receipt.stdout", lambda text: text.replace("Q38_STAGING_VLLM_CPP_CKPT_A_PRESENT=0", "Q38_STAGING_VLLM_CPP_CKPT_A_PRESENT=1")),
+        ("discovery-invocation.txt", lambda text: text.replace("RC_EXIT_CODE=0", "RC_EXIT_CODE=2")),
     ],
 )
 def test_blocked_schema_mutations_fail_closed(tmp_path, file, mutate):

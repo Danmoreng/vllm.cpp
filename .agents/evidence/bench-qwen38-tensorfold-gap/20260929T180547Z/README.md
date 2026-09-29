@@ -2,7 +2,7 @@
 
 Status: `BLOCKED_MISSING_ARTIFACTS`.
 
-Two successful repository `rc` jobs inspected `dgx:gpu0`; only SHA-256 fingerprints of their job IDs are retained. The leased `/workspace` had neither the staged UD-IQ1_S directories documented by earlier records nor a TensorFold MLX/MTP checkpoint or pinned TensorFold source. Local Hugging Face state contained a repository ref but no snapshot or weight bytes. No artifact was downloaded.
+A fresh successful repository `rc` audit lease executed the committed bounded scan script on `dgx:gpu0`; only a SHA-256 lease fingerprint is retained. The raw receipt found the two documented staging paths absent and zero matches under `/workspace` to depth 3 for the committed TensorFold/MiaAI/Vontra and MLX-MTP/Flash-Next-MTP patterns. This is not an exhaustive host-wide absence claim. Local Hugging Face state contained a repository ref but no snapshot or weight bytes. No artifact was downloaded.
 
 Because prerequisites were absent, no server was started and no correctness, timing, clock, memory, ladder, or profiler result was produced. Every workload and both same-tool profiles are explicitly `NOT_RUN_PREREQUISITE`; there is no cross-engine ratio. Production vLLM remains a named blocked denominator.
 
