@@ -140,13 +140,48 @@ def test_comparison_fails_closed_on_all_canonical_evidence():
         assert comparison_verdict(base, right)["verdict"] == "refused"
 
 
+def test_canonical_hashes_exclude_runtime_model_names_and_adapter_extras():
+    config = {"endpoint": "x", "corpus": [{"text": "same", "max_tokens": 2}],
+              "waves": 5}
+    left = run_workload({**config, "model": "engine-a/model"}, FakeTransport())
+    right = run_workload({**config, "model": "engine-b-alias"}, FakeTransport())
+    assert left["canonical_payload_hash"] == right["canonical_payload_hash"]
+    assert [s["payload_hash"] for s in left["samples"]] == [
+        s["payload_hash"] for s in right["samples"]
+    ]
+    assert comparison_verdict(left, right)["verdict"] == "matched"
+
+    http_a = HTTPTransport("x", tokenizer_identity="tok@rev", extra_json={"draft_model": "a"})
+    http_b = HTTPTransport("x", tokenizer_identity="tok@rev", extra_json={"draft_model": "b"})
+    payload = {"model": "runtime", "prompt": "same"}
+    assert http_a.prepare_payload(payload) != http_b.prepare_payload(payload)
+
+
+def test_workload_refuses_missing_or_comparison_different_tokenizer_identity():
+    transport = FakeTransport()
+    transport.tokenizer_identity = None
+    config = {"endpoint": "x", "model": "m", "corpus": [{"text": "x", "max_tokens": 1}],
+              "waves": 5}
+    missing = run_workload(config, transport)
+    assert "tokenizer identity" in missing["refusal_reason"]
+
+    left = run_workload(config, FakeTransport())
+    different_transport = FakeTransport()
+    different_transport.tokenizer_identity = {"name": "other", "revision": "abc123"}
+    right = run_workload(config, different_transport)
+    verdict = comparison_verdict(left, right)
+    assert verdict["verdict"] == "refused"
+    assert "tokenizer" in verdict["refusal_reason"]
+
+
 def test_http_payload_extra_json_is_explicit_and_cannot_override_canonical_fields():
-    transport = HTTPTransport("http://example.invalid", extra_json={"draft_model": "d"})
+    transport = HTTPTransport("http://example.invalid", tokenizer_identity="tok@revision",
+                              extra_json={"draft_model": "d"})
     assert transport.prepare_payload({"model": "m", "stream": True}) == {
         "model": "m", "stream": True, "draft_model": "d"
     }
     with pytest.raises(ValueError, match="override"):
-        HTTPTransport("x", extra_json={"model": "other"}).prepare_payload({"model": "m"})
+        HTTPTransport("x", tokenizer_identity="tok", extra_json={"model": "other"}).prepare_payload({"model": "m"})
 
 
 def test_sample_refuses_usage_without_reliable_generated_token_accounting():

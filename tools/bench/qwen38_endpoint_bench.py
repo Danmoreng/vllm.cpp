@@ -59,6 +59,11 @@ def _payload(model: str, row: dict[str, Any]) -> dict[str, Any]:
     return payload
 
 
+def _semantic_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    """Return engine-neutral request fields used for cross-endpoint identity."""
+    return {key: value for key, value in payload.items() if key != "model"}
+
+
 def _percentile(values: Iterable[float], q: float) -> float | None:
     ordered = sorted(float(x) for x in values if x is not None and math.isfinite(float(x)))
     if not ordered:
@@ -172,7 +177,7 @@ def run_workload(config: dict[str, Any], transport: Callable[[dict[str, Any]], d
                       "cache": None, "draft": None, "memory_samples": [],
                       "refusal_reason": f"transport error: {error}"}
         sample.update({"wave": wave, "slot": slot, "corpus_index": index,
-                       "payload_hash": _hash(payload)})
+                       "payload_hash": _hash(_semantic_payload(payload))})
         return sample
 
     for wave in range(waves):
@@ -182,17 +187,23 @@ def run_workload(config: dict[str, Any], transport: Callable[[dict[str, Any]], d
 
     workload_makespan_s = time.perf_counter() - workload_started
     aggregate = summarize(samples, workload_makespan_s)
+    tokenizer_identity = getattr(transport, "tokenizer_identity", None)
     refused = any(s.get("refusal_reason") for s in samples)
+    refusal_reason = "one or more samples were refused" if refused else None
+    if not tokenizer_identity:
+        refusal_reason = "tokenizer identity was not provided"
+        aggregate["request_rate"] = None
+        aggregate["token_throughput"] = None
     aggregate.update({
         "schema_version": 1,
-        "refusal_reason": "one or more samples were refused" if refused else None,
+        "refusal_reason": refusal_reason,
         "endpoint": config["endpoint"],
         "model": config["model"],
         "draft_mode": config.get("draft", "off"),
         "concurrency": concurrency,
         "waves": waves,
-        "canonical_payload_hash": _hash(payloads),
-        "tokenizer_identity": getattr(transport, "tokenizer_identity", None),
+        "canonical_payload_hash": _hash([_semantic_payload(payload) for payload in payloads]),
+        "tokenizer_identity": tokenizer_identity,
         "token_fingerprints": [s["token_fingerprint"] for s in samples],
         "samples": samples,
     })
@@ -238,10 +249,11 @@ def comparison_verdict(left: dict[str, Any], right: dict[str, Any]) -> dict[str,
 
 class HTTPTransport:
     """Minimal UTF-8 OpenAI-compatible streaming transport."""
-    tokenizer_identity = None
 
-    def __init__(self, endpoint: str, extra_json: dict[str, Any] | None = None):
+    def __init__(self, endpoint: str, tokenizer_identity: Any,
+                 extra_json: dict[str, Any] | None = None):
         self.endpoint = endpoint
+        self.tokenizer_identity = tokenizer_identity
         self.extra_json = dict(extra_json or {})
 
     def prepare_payload(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -288,6 +300,8 @@ def main() -> int:
     parser.add_argument("--model", required=True)
     parser.add_argument("--corpus", required=True)
     parser.add_argument("--output", required=True)
+    parser.add_argument("--tokenizer-identity", required=True,
+                        help="shared tokenizer name/revision or immutable digest")
     parser.add_argument("--draft", choices=("on", "off"), default="off",
                         help="run metadata only; does not alter the endpoint request")
     parser.add_argument("--extra-json", type=_extra_json, default={}, metavar="OBJECT",
@@ -297,7 +311,9 @@ def main() -> int:
     args = parser.parse_args()
     config = vars(args)
     config["corpus"] = load_corpus(args.corpus)
-    result = run_workload(config, HTTPTransport(args.endpoint, args.extra_json))
+    result = run_workload(
+        config, HTTPTransport(args.endpoint, args.tokenizer_identity, args.extra_json)
+    )
     Path(args.output).write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return 0
 
