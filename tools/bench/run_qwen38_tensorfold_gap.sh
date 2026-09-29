@@ -5,6 +5,7 @@ ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 HARNESS=${QWEN38_HARNESS:-$ROOT/tools/bench/qwen38_endpoint_bench.py}
 CORPUS="$ROOT/benchmarks/manifests/qwen38_tensorfold/corpus.json"
 CLOCK_SAMPLER=${QWEN38_CLOCK_SAMPLER:-$ROOT/tools/bench/gpu_clock_state.py}
+DEFAULT_CLOCK_SAMPLER=$ROOT/tools/bench/gpu_clock_state.py
 MEMINFO=${QWEN38_MEMINFO_PATH:-/proc/meminfo}
 RC_COMMAND=${QWEN38_RC_COMMAND:-rc}
 GPU_STATE_COMMAND=${QWEN38_GPU_STATE_COMMAND:-nvidia-smi --query-gpu=index,name,uuid,driver_version,temperature.gpu,power.draw,power.limit,memory.total,memory.free --format=csv,noheader,nounits}
@@ -87,6 +88,15 @@ j=os.environ["RC_JOB_ID"]
 ok=any(str(r.get("id",r.get("job_id","")))==j and r.get("device",r.get("device_id"))=="dgx:gpu0" and str(r.get("state",r.get("status",""))).lower() in {"running","held","active"} for r in rows)
 raise SystemExit(0 if ok else 2)' || fail "RC_JOB_ID is not an active dgx:gpu0 repository lease"
 }
+clock_tool() {
+  if test "$CLOCK_SAMPLER" = "$DEFAULT_CLOCK_SAMPLER"; then
+    (cd "$ROOT" && PYTHONPATH="$ROOT${PYTHONPATH:+:$PYTHONPATH}" python3 -m tools.bench.gpu_clock_state "$@")
+  else
+    python3 "$CLOCK_SAMPLER" "$@"
+  fi
+}
+clock_smoke() { clock_tool --help >/dev/null 2>&1 || fail "clock sampler runtime smoke check failed"; }
+lease_fingerprint() { printf '%s\0%s' "$RC_DEVICE" "$RC_JOB_ID" | sha256sum | cut -d' ' -f1; }
 mem_available() { awk '/^MemAvailable:/{print $2; exit}' "$MEMINFO"; }
 probe_ready() { if test -n "${QWEN38_ENDPOINT_PROBE:-}"; then "$QWEN38_ENDPOINT_PROBE" "$ENDPOINT_READY_URL" >/dev/null 2>&1; else curl --fail --silent --max-time 5 "$ENDPOINT_READY_URL" >/dev/null; fi; }
 common_gate() {
@@ -100,13 +110,14 @@ common_gate() {
   test -r "$MEMINFO" || fail "memory sampler unavailable"
   available=$(mem_available); [[ "$available" =~ ^[0-9]+$ && "$MIN_FREE_MEMORY_KIB" =~ ^[0-9]+$ ]] || fail "invalid free-memory gate"
   test "$available" -ge "$MIN_FREE_MEMORY_KIB" || fail "free unified memory below baseline"
-  test -r "$CLOCK_SAMPLER" || fail "clock sampler unavailable"; python3 -m py_compile "$CLOCK_SAMPLER"
+  test -r "$CLOCK_SAMPLER" || fail "clock sampler unavailable"; clock_smoke
   case "$policy" in down) ! probe_ready || fail "endpoint already active before launch";; ready) probe_ready || fail "endpoint is not ready";; either) :;; esac
 }
 check_one() { common_gate "$1" ready; echo "qwen38-tensorfold-gap: check PASS ($ENGINE)"; }
 launch_one() { local wanted=$1 file=$2; common_gate "$file" down; test "$ENGINE" = "$wanted" || fail "wrong engine"; require_var LAUNCH_COMMAND; exec bash -c "$LAUNCH_COMMAND"; }
 run_harness() {
-  local output=$1 raw="${1}.unredacted" status
+  local output=$1 raw status
+  raw=$(mktemp "$RAW_DIR/harness.XXXXXX")
   set +e
   python3 "$HARNESS" --endpoint "$ENDPOINT" --model "$MODEL" --corpus "$CORPUS" --output "$raw" --tokenizer-identity "$TOKENIZER_IDENTITY" --adapter "$ENGINE" --draft "${DRAFT:-off}" --concurrency "${CONCURRENCY:-1}" --waves "${WAVES:-5}"
   status=$?
@@ -115,10 +126,10 @@ run_harness() {
   return "$status"
 }
 write_provenance() {
-  local output=$1 identity; identity=$(artifact_identity "$ARTIFACT_MANIFEST")
-  python3 - "$output" "$ENGINE" "$EXPECTED_REVISION" "${EXPECTED_RECIPE_REVISION:-}" "$identity" "$ENDPOINT" "$MODEL" "$TOKENIZER_IDENTITY" "$ARTIFACT_MANIFEST" <<'PY'
+  local output=$1 identity lease; identity=$(artifact_identity "$ARTIFACT_MANIFEST"); lease=$(lease_fingerprint)
+  python3 - "$output" "$ENGINE" "$EXPECTED_REVISION" "${EXPECTED_RECIPE_REVISION:-}" "$identity" "$ENDPOINT" "$MODEL" "$TOKENIZER_IDENTITY" "$ARTIFACT_MANIFEST" "$lease" <<'PY'
 import json,os,pathlib,re,sys,urllib.parse
-out,engine,rev,recipe,artifact,endpoint,model,tok,manifest=sys.argv[1:]
+out,engine,rev,recipe,artifact,endpoint,model,tok,manifest,lease=sys.argv[1:]
 def safe(label,value):
  if any(ord(c)<32 or ord(c)==127 for c in value): raise SystemExit(f"control character in {label}")
  if re.search(r"(?i)(password|secret|token|api[_-]?key|bearer|credential)",value): raise SystemExit(f"credential-like value in {label}")
@@ -128,18 +139,23 @@ endpoint=urllib.parse.urlunsplit((u.scheme,u.hostname + ((":"+str(u.port)) if u.
 entries=[]; base=pathlib.Path(manifest).parent
 for line in pathlib.Path(manifest).read_text().splitlines():
  d,p=line.split(None,1); p=p.strip(); q=base/p; s=q.stat(); entries.append({"name":safe("artifact name",pathlib.Path(p).name),"sha256":d,"size":s.st_size,"mtime_ns":s.st_mtime_ns})
-data={"engine":engine,"revision":rev,"recipe_revision":recipe or None,"artifact_identity":artifact,"artifacts":sorted(entries,key=lambda x:(x["name"],x["sha256"])),"endpoint":safe("endpoint",endpoint),"model":safe("model",model),"tokenizer_identity":safe("tokenizer identity",tok),"source_dirty":False,"runtime":{"rc_device":os.environ["RC_DEVICE"]},"server_log":"server.log"}
+data={"engine":engine,"revision":rev,"recipe_revision":recipe or None,"artifact_identity":artifact,"artifacts":sorted(entries,key=lambda x:(x["name"],x["sha256"])),"endpoint":safe("endpoint",endpoint),"model":safe("model",model),"tokenizer_identity":safe("tokenizer identity",tok),"source_dirty":False,"runtime":{"rc_device":os.environ["RC_DEVICE"],"lease_fingerprint":lease},"server_log":"server.log"}
 pathlib.Path(out).write_text(json.dumps(data,indent=2,sort_keys=True)+"\n")
 PY
 }
 redact_file() {
-  local input=$1 output=$2 remove=${3:-yes}
-  bash -c "$REDACTION_COMMAND" <"$input" >"$output" || fail "redaction failed for $(basename "$output")"
+  local input=$1 output=$2 remove=${3:-yes} staged
+  staged=$(mktemp "$RAW_DIR/redacted.XXXXXX")
+  if ! bash -c "$REDACTION_COMMAND" <"$input" >"$staged"; then
+    rm -f "$staged"
+    return 2
+  fi
+  mv "$staged" "$output"
   test "$remove" = no || rm -f "$input"
 }
 run_redacted() {
   local output=$1 status tmp
-  tmp="${output}.unredacted"
+  tmp=$(mktemp "$RAW_DIR/subprocess.XXXXXX")
   shift
   set +e; "$@" >"$tmp" 2>&1; status=$?; set -e
   redact_file "$tmp" "$output"
@@ -154,44 +170,49 @@ wait_ready() {
   return 1
 }
 capture_arm() (
-  local file=$1 out=$2 before after sampler="" sampler_status started=0
+  local file=$1 arm_out=$2 before after sampler="" sampler_status started=0 raw_samples raw_summary raw_sampler
   # Invoked indirectly by trap.
   # shellcheck disable=SC2329
   cleanup_arm() {
     local status=$?
     if test -n "$sampler"; then kill -INT "$sampler" 2>/dev/null || true; wait "$sampler" 2>/dev/null || true; fi
-    if test "$started" = 1; then run_redacted "$out/server-stop.log" bash -c "$STOP_COMMAND" || status=2; fi
+    if test "$started" = 1; then run_redacted "$arm_out/server-stop.log" bash -c "$STOP_COMMAND" || status=2; fi
     if bash -c "$STATUS_COMMAND" >/dev/null 2>&1; then echo "endpoint remains active after teardown" >&2; status=2; fi
     exit "$status"
   }
   common_gate "$file" down
   for v in START_COMMAND STOP_COMMAND STATUS_COMMAND SERVER_LOG_PATH REDACTION_COMMAND; do require_var "$v"; done
-  before=$(mem_available); printf '%s\n' "$before" >"$out/memory-before-kib.txt"
+  before=$(mem_available); printf '%s\n' "$before" >"$arm_out/memory-before-kib.txt"
   if bash -c "$STATUS_COMMAND" >/dev/null 2>&1; then fail "$ENGINE was already running; capture will not attach or stop it"; fi
   started=1; trap cleanup_arm EXIT INT TERM
-  run_redacted "$out/server-start.log" bash -c "$START_COMMAND" || fail "$ENGINE start command failed"
+  run_redacted "$arm_out/server-start.log" bash -c "$START_COMMAND" || fail "$ENGINE start command failed"
   wait_ready || fail "$ENGINE failed to become ready"
-  run_redacted "$out/gpu-state-before.csv" bash -c "$GPU_STATE_COMMAND" || fail "GPU runtime identity probe failed"
-  python3 "$CLOCK_SAMPLER" sample --output "$out/clocks.unredacted" --summary "$out/clocks-summary.unredacted" --interval 1 --max-duration 3600 >"$out/clock-sampler.unredacted" 2>&1 & sampler=$!
-  run_harness "$out/result.json"
+  run_redacted "$arm_out/gpu-state-before.csv" bash -c "$GPU_STATE_COMMAND" || fail "GPU runtime identity probe failed"
+  raw_samples=$(mktemp "$RAW_DIR/clocks.XXXXXX")
+  raw_summary=$(mktemp "$RAW_DIR/clock-summary.XXXXXX")
+  raw_sampler=$(mktemp "$RAW_DIR/clock-log.XXXXXX")
+  clock_tool sample --output "$raw_samples" --summary "$raw_summary" --interval 1 --max-duration 3600 >"$raw_sampler" 2>&1 & sampler=$!
+  run_harness "$arm_out/result.json"
   kill -INT "$sampler" 2>/dev/null || true
   set +e; wait "$sampler"; sampler_status=$?; set -e; sampler=""
-  redact_file "$out/clock-sampler.unredacted" "$out/clock-sampler.log"
-  redact_file "$out/clocks.unredacted" "$out/clocks.jsonl"
-  redact_file "$out/clocks-summary.unredacted" "$out/clocks-summary.json"
+  redact_file "$raw_sampler" "$arm_out/clock-sampler.log" || fail "clock sampler log redaction failed"
+  redact_file "$raw_samples" "$arm_out/clocks.jsonl" || fail "clock sample redaction failed"
+  redact_file "$raw_summary" "$arm_out/clocks-summary.json" || fail "clock summary redaction failed"
   test "$sampler_status" -eq 0 || fail "clock sampler refused window"
-  python3 - "$out/clocks-summary.json" <<'PY'
+  python3 - "$arm_out/clocks-summary.json" <<'PY'
 import json,sys
 x=json.load(open(sys.argv[1])); n=x.get("sm_clock_mhz",{}).get("n",0)
 raise SystemExit(0 if n>=30 else 2)
 PY
-  run_redacted "$out/gpu-state-after.csv" bash -c "$GPU_STATE_COMMAND" || fail "GPU power/thermal probe failed"
-  redact_file "$SERVER_LOG_PATH" "$out/server.log" no
-  write_provenance "$out/provenance.json"
-  run_redacted "$out/server-stop.log" bash -c "$STOP_COMMAND" || fail "$ENGINE stop command failed"; started=0
+  run_redacted "$arm_out/gpu-state-after.csv" bash -c "$GPU_STATE_COMMAND" || fail "GPU power/thermal probe failed"
+  redact_file "$SERVER_LOG_PATH" "$arm_out/server.log" no
+  write_provenance "$arm_out/provenance.json"
+  run_redacted "$arm_out/server-stop.log" bash -c "$STOP_COMMAND" || fail "$ENGINE stop command failed"; started=0
   ! bash -c "$STATUS_COMMAND" >/dev/null 2>&1 || fail "$ENGINE teardown failed"
-  after=$(mem_available); printf '%s\n' "$after" >"$out/memory-after-kib.txt"
+  after=$(mem_available); printf '%s\n' "$after" >"$arm_out/memory-after-kib.txt"
   test "$after" -ge "$MIN_FREE_MEMORY_KIB" || fail "free unified memory did not return to baseline"
+  verify_lease
+  printf '%s\n' "$(lease_fingerprint)" >"$arm_out/lease-fingerprint.txt"
   trap - EXIT INT TERM
 )
 compare_results() {
@@ -204,14 +225,30 @@ if sys.argv[4]!=sys.argv[5] and out["verdict"]!="REFUSED": out.update(verdict="P
 pathlib.Path(sys.argv[6]).write_text(json.dumps(out,indent=2,sort_keys=True)+"\n"); raise SystemExit(2 if out["verdict"]=="REFUSED" else 0)
 PY
 }
-capture() {
-  local tf=$1 cpp=$2 base=${3:-$ROOT/.agents/evidence/bench-qwen38-tensorfold-gap} stamp out ta ca
+capture() (
+  local tf=$1 cpp=$2 base=${3:-$ROOT/.agents/evidence/bench-qwen38-tensorfold-gap} stamp out ta ca expected_lease status=0
+  RAW_DIR=$(mktemp -d "${TMPDIR:-/tmp}/qwen38-capture.XXXXXX"); chmod 700 "$RAW_DIR"; export RAW_DIR
+  cleanup_capture() {
+    local rc=$?
+    find "$RAW_DIR" -type f -exec sh -c 'command -v shred >/dev/null 2>&1 && shred -u "$1" || rm -f "$1"' _ {} \; 2>/dev/null || true
+    rm -rf "$RAW_DIR"
+    if test "$rc" -ne 0 && test -n "${out:-}"; then rm -rf "$out"; fi
+    exit "$rc"
+  }
+  # shellcheck disable=SC2329
+  trap cleanup_capture EXIT INT TERM
+  verify_lease; expected_lease=$(lease_fingerprint)
   stamp=$(date -u +%Y%m%dT%H%M%SZ); out="$base/$stamp"; test ! -e "$out" || fail "evidence exists"; mkdir -p "$out/tensorfold" "$out/vllm-cpp"
-  capture_arm "$tf" "$out/tensorfold"; load_env "$tf"; ta=$(artifact_identity "$ARTIFACT_MANIFEST")
-  capture_arm "$cpp" "$out/vllm-cpp"; load_env "$cpp"; ca=$(artifact_identity "$ARTIFACT_MANIFEST")
-  run_redacted "$out/clock-comparison.json" python3 "$CLOCK_SAMPLER" compare --ours "$out/tensorfold/clocks-summary.json" --vllm "$out/vllm-cpp/clocks-summary.json" || fail "cross-arm clock gate refused comparison"
+  capture_arm "$tf" "$out/tensorfold"; test "$(cat "$out/tensorfold/lease-fingerprint.txt")" = "$expected_lease" || fail "lease changed after tensorfold arm"
+  load_env "$tf"; ta=$(artifact_identity "$ARTIFACT_MANIFEST")
+  capture_arm "$cpp" "$out/vllm-cpp"; test "$(cat "$out/vllm-cpp/lease-fingerprint.txt")" = "$expected_lease" || fail "lease changed after vllm-cpp arm"
+  load_env "$cpp"; ca=$(artifact_identity "$ARTIFACT_MANIFEST")
+  verify_lease; test "$(lease_fingerprint)" = "$expected_lease" || fail "lease changed before final verdict"
+  run_redacted "$out/clock-comparison.json" clock_tool compare --ours "$out/tensorfold/clocks-summary.json" --vllm "$out/vllm-cpp/clocks-summary.json" || fail "cross-arm clock gate refused comparison"
+  verify_lease; test "$(lease_fingerprint)" = "$expected_lease" || fail "lease changed before final verdict"
   compare_results "$out/tensorfold/result.json" "$out/vllm-cpp/result.json" "$ta" "$ca" "$out/comparison.json"; printf '%s\n' "$out"
-}
+  trap - EXIT INT TERM; cleanup_capture
+)
 usage(){ echo "usage: $0 {check|tensorfold|vllm-cpp|capture} ..."; }
 command=${1:-}; shift || true
 case "$command" in
