@@ -14,18 +14,38 @@ require_var() { test -n "${!1:-}" || fail "$1 is required"; }
 
 reset_config() { local v; for v in "${CONFIG_VARS[@]}"; do unset "$v"; done; }
 load_env() {
-  local path=$1 name allowed v
+  local path=$1 name value i parsed_file
+  local -a parsed=()
   test -f "$path" || fail "environment file does not exist: $path"
-  while IFS= read -r name; do
-    allowed=0
-    for v in "${CONFIG_VARS[@]}"; do test "$name" = "$v" && allowed=1; done
-    test "$allowed" = 1 || fail "unsupported or suspicious field in environment file: $name"
-  done < <(sed -nE 's/^[[:space:]]*(export[[:space:]]+)?([A-Za-z_][A-Za-z0-9_]*)=.*/\2/p' "$path")
   reset_config
-  set -a
-  # shellcheck disable=SC1090
-  source "$path"
-  set +a
+  parsed_file=$(mktemp); trap 'rm -f "$parsed_file"' RETURN
+  if ! python3 - "$path" "${CONFIG_VARS[@]}" >"$parsed_file" <<'PY'
+import pathlib,re,sys
+path=pathlib.Path(sys.argv[1]); allowed=set(sys.argv[2:]); seen=set()
+for number,line in enumerate(path.read_text(encoding="utf-8").splitlines(),1):
+    if not line.strip() or line.lstrip().startswith("#"): continue
+    match=re.fullmatch(r"([A-Z][A-Z0-9_]*)=(.*)",line)
+    if not match: raise SystemExit(f"invalid data-only assignment at line {number}")
+    key,value=match.groups()
+    if key not in allowed: raise SystemExit(f"unsupported or suspicious field: {key}")
+    if key in seen: raise SystemExit(f"duplicate field: {key}")
+    seen.add(key)
+    if len(value)>=2 and value[0]==value[-1] and value[0] in "\"'": value=value[1:-1]
+    if any(c in value for c in ("$","`","\x00","\r","\n")):
+        raise SystemExit(f"expansion or control character forbidden in {key}")
+    sys.stdout.buffer.write(key.encode()+b"\0"+value.encode()+b"\0")
+PY
+  then
+    fail "environment file is not strict data: $path"
+  fi
+  mapfile -d '' -t parsed <"$parsed_file"
+  rm -f "$parsed_file"; trap - RETURN
+  test $((${#parsed[@]} % 2)) -eq 0 || fail "environment parser returned malformed data"
+  for ((i=0; i<${#parsed[@]}; i+=2)); do
+    name=${parsed[i]}; value=${parsed[i+1]}; printf -v "$name" '%s' "$value"
+    # shellcheck disable=SC2163
+    export "$name"
+  done
 }
 check_revision() {
   local d=$1 expected=$2 label=$3 actual
@@ -83,56 +103,92 @@ common_gate() {
   test -r "$CLOCK_SAMPLER" || fail "clock sampler unavailable"; python3 -m py_compile "$CLOCK_SAMPLER"
   case "$policy" in down) ! probe_ready || fail "endpoint already active before launch";; ready) probe_ready || fail "endpoint is not ready";; either) :;; esac
 }
-check_one() { common_gate "$1" either; echo "qwen38-tensorfold-gap: check PASS ($ENGINE)"; }
+check_one() { common_gate "$1" ready; echo "qwen38-tensorfold-gap: check PASS ($ENGINE)"; }
 launch_one() { local wanted=$1 file=$2; common_gate "$file" down; test "$ENGINE" = "$wanted" || fail "wrong engine"; require_var LAUNCH_COMMAND; exec bash -c "$LAUNCH_COMMAND"; }
-run_harness() { python3 "$HARNESS" --endpoint "$ENDPOINT" --model "$MODEL" --corpus "$CORPUS" --output "$1" --tokenizer-identity "$TOKENIZER_IDENTITY" --adapter "$ENGINE" --draft "${DRAFT:-off}" --concurrency "${CONCURRENCY:-1}" --waves "${WAVES:-5}"; }
+run_harness() {
+  local output=$1 raw="${1}.unredacted" status
+  set +e
+  python3 "$HARNESS" --endpoint "$ENDPOINT" --model "$MODEL" --corpus "$CORPUS" --output "$raw" --tokenizer-identity "$TOKENIZER_IDENTITY" --adapter "$ENGINE" --draft "${DRAFT:-off}" --concurrency "${CONCURRENCY:-1}" --waves "${WAVES:-5}"
+  status=$?
+  set -e
+  test -f "$raw" && redact_file "$raw" "$output"
+  return "$status"
+}
 write_provenance() {
   local output=$1 identity; identity=$(artifact_identity "$ARTIFACT_MANIFEST")
-  python3 - "$output" "$ENGINE" "$EXPECTED_REVISION" "${EXPECTED_RECIPE_REVISION:-}" "$identity" "$ENDPOINT" "$MODEL" "$TOKENIZER_IDENTITY" "$ARTIFACT_MANIFEST" "$SOURCE_DIR" "$SERVER_LOG_PATH" <<'PY'
-import json,os,pathlib,sys
-out,engine,rev,recipe,artifact,endpoint,model,tok,manifest,source,log=sys.argv[1:]
+  python3 - "$output" "$ENGINE" "$EXPECTED_REVISION" "${EXPECTED_RECIPE_REVISION:-}" "$identity" "$ENDPOINT" "$MODEL" "$TOKENIZER_IDENTITY" "$ARTIFACT_MANIFEST" <<'PY'
+import json,os,pathlib,re,sys,urllib.parse
+out,engine,rev,recipe,artifact,endpoint,model,tok,manifest=sys.argv[1:]
+def safe(label,value):
+ if any(ord(c)<32 or ord(c)==127 for c in value): raise SystemExit(f"control character in {label}")
+ if re.search(r"(?i)(password|secret|token|api[_-]?key|bearer|credential)",value): raise SystemExit(f"credential-like value in {label}")
+ return value
+u=urllib.parse.urlsplit(endpoint)
+endpoint=urllib.parse.urlunsplit((u.scheme,u.hostname + ((":"+str(u.port)) if u.port else ""),u.path,"",""))
 entries=[]; base=pathlib.Path(manifest).parent
 for line in pathlib.Path(manifest).read_text().splitlines():
- d,p=line.split(None,1); p=p.strip(); q=base/p; s=q.stat(); entries.append({"path":p,"sha256":d,"size":s.st_size,"mtime_ns":s.st_mtime_ns})
-data={"engine":engine,"revision":rev,"recipe_revision":recipe or None,"artifact_identity":artifact,"artifacts":sorted(entries,key=lambda x:x["path"]),"endpoint":endpoint,"model":model,"tokenizer_identity":tok,"source_dirty":False,"runtime":{"rc_device":os.environ["RC_DEVICE"],"rc_job_id":os.environ["RC_JOB_ID"]},"server_log":"server.log"}
+ d,p=line.split(None,1); p=p.strip(); q=base/p; s=q.stat(); entries.append({"name":safe("artifact name",pathlib.Path(p).name),"sha256":d,"size":s.st_size,"mtime_ns":s.st_mtime_ns})
+data={"engine":engine,"revision":rev,"recipe_revision":recipe or None,"artifact_identity":artifact,"artifacts":sorted(entries,key=lambda x:(x["name"],x["sha256"])),"endpoint":safe("endpoint",endpoint),"model":safe("model",model),"tokenizer_identity":safe("tokenizer identity",tok),"source_dirty":False,"runtime":{"rc_device":os.environ["RC_DEVICE"]},"server_log":"server.log"}
 pathlib.Path(out).write_text(json.dumps(data,indent=2,sort_keys=True)+"\n")
 PY
 }
+redact_file() {
+  local input=$1 output=$2 remove=${3:-yes}
+  bash -c "$REDACTION_COMMAND" <"$input" >"$output" || fail "redaction failed for $(basename "$output")"
+  test "$remove" = no || rm -f "$input"
+}
+run_redacted() {
+  local output=$1 status tmp
+  tmp="${output}.unredacted"
+  shift
+  set +e; "$@" >"$tmp" 2>&1; status=$?; set -e
+  redact_file "$tmp" "$output"
+  return "$status"
+}
+wait_ready() {
+  local i
+  for ((i=0;i<60;i++)); do
+    if bash -c "$STATUS_COMMAND" >/dev/null 2>&1 && probe_ready; then return 0; fi
+    sleep 1
+  done
+  return 1
+}
 capture_arm() (
-  local file=$1 out=$2 before after sampler="" started=0
+  local file=$1 out=$2 before after sampler="" sampler_status started=0
   # Invoked indirectly by trap.
   # shellcheck disable=SC2329
   cleanup_arm() {
     local status=$?
     if test -n "$sampler"; then kill -INT "$sampler" 2>/dev/null || true; wait "$sampler" 2>/dev/null || true; fi
-    if test "$started" = 1; then bash -c "$STOP_COMMAND" >>"$out/server-stop.log" 2>&1 || status=2; fi
+    if test "$started" = 1; then run_redacted "$out/server-stop.log" bash -c "$STOP_COMMAND" || status=2; fi
     if bash -c "$STATUS_COMMAND" >/dev/null 2>&1; then echo "endpoint remains active after teardown" >&2; status=2; fi
     exit "$status"
   }
-  common_gate "$file" either
+  common_gate "$file" down
   for v in START_COMMAND STOP_COMMAND STATUS_COMMAND SERVER_LOG_PATH REDACTION_COMMAND; do require_var "$v"; done
   before=$(mem_available); printf '%s\n' "$before" >"$out/memory-before-kib.txt"
-  if ! bash -c "$STATUS_COMMAND" >/dev/null 2>&1; then
-    started=1; trap cleanup_arm EXIT INT TERM
-    bash -c "$START_COMMAND" >"$out/server-start.log" 2>&1
-  else
-    # Capture must own teardown even when an operator declares an existing arm.
-    started=1; trap cleanup_arm EXIT INT TERM
-  fi
-  bash -c "$STATUS_COMMAND" >/dev/null 2>&1 || fail "$ENGINE failed to become ready"; probe_ready || fail "$ENGINE endpoint not ready"
-  bash -c "$GPU_STATE_COMMAND" >"$out/gpu-state-before.csv" || fail "GPU runtime identity probe failed"
-  python3 "$CLOCK_SAMPLER" sample --output "$out/clocks.jsonl" --summary "$out/clocks-summary.json" --interval 1 --max-duration 3600 & sampler=$!
+  if bash -c "$STATUS_COMMAND" >/dev/null 2>&1; then fail "$ENGINE was already running; capture will not attach or stop it"; fi
+  started=1; trap cleanup_arm EXIT INT TERM
+  run_redacted "$out/server-start.log" bash -c "$START_COMMAND" || fail "$ENGINE start command failed"
+  wait_ready || fail "$ENGINE failed to become ready"
+  run_redacted "$out/gpu-state-before.csv" bash -c "$GPU_STATE_COMMAND" || fail "GPU runtime identity probe failed"
+  python3 "$CLOCK_SAMPLER" sample --output "$out/clocks.unredacted" --summary "$out/clocks-summary.unredacted" --interval 1 --max-duration 3600 >"$out/clock-sampler.unredacted" 2>&1 & sampler=$!
   run_harness "$out/result.json"
-  kill -INT "$sampler" 2>/dev/null || true; wait "$sampler" || fail "clock sampler refused window"; sampler=""
+  kill -INT "$sampler" 2>/dev/null || true
+  set +e; wait "$sampler"; sampler_status=$?; set -e; sampler=""
+  redact_file "$out/clock-sampler.unredacted" "$out/clock-sampler.log"
+  redact_file "$out/clocks.unredacted" "$out/clocks.jsonl"
+  redact_file "$out/clocks-summary.unredacted" "$out/clocks-summary.json"
+  test "$sampler_status" -eq 0 || fail "clock sampler refused window"
   python3 - "$out/clocks-summary.json" <<'PY'
 import json,sys
 x=json.load(open(sys.argv[1])); n=x.get("sm_clock_mhz",{}).get("n",0)
 raise SystemExit(0 if n>=30 else 2)
 PY
-  bash -c "$GPU_STATE_COMMAND" >"$out/gpu-state-after.csv" || fail "GPU power/thermal probe failed"
-  bash -c "$REDACTION_COMMAND < \"$SERVER_LOG_PATH\" > \"$out/server.log\"" || fail "server-log redaction failed"
+  run_redacted "$out/gpu-state-after.csv" bash -c "$GPU_STATE_COMMAND" || fail "GPU power/thermal probe failed"
+  redact_file "$SERVER_LOG_PATH" "$out/server.log" no
   write_provenance "$out/provenance.json"
-  bash -c "$STOP_COMMAND" >"$out/server-stop.log" 2>&1; started=0
+  run_redacted "$out/server-stop.log" bash -c "$STOP_COMMAND" || fail "$ENGINE stop command failed"; started=0
   ! bash -c "$STATUS_COMMAND" >/dev/null 2>&1 || fail "$ENGINE teardown failed"
   after=$(mem_available); printf '%s\n' "$after" >"$out/memory-after-kib.txt"
   test "$after" -ge "$MIN_FREE_MEMORY_KIB" || fail "free unified memory did not return to baseline"
@@ -153,6 +209,7 @@ capture() {
   stamp=$(date -u +%Y%m%dT%H%M%SZ); out="$base/$stamp"; test ! -e "$out" || fail "evidence exists"; mkdir -p "$out/tensorfold" "$out/vllm-cpp"
   capture_arm "$tf" "$out/tensorfold"; load_env "$tf"; ta=$(artifact_identity "$ARTIFACT_MANIFEST")
   capture_arm "$cpp" "$out/vllm-cpp"; load_env "$cpp"; ca=$(artifact_identity "$ARTIFACT_MANIFEST")
+  run_redacted "$out/clock-comparison.json" python3 "$CLOCK_SAMPLER" compare --ours "$out/tensorfold/clocks-summary.json" --vllm "$out/vllm-cpp/clocks-summary.json" || fail "cross-arm clock gate refused comparison"
   compare_results "$out/tensorfold/result.json" "$out/vllm-cpp/result.json" "$ta" "$ca" "$out/comparison.json"; printf '%s\n' "$out"
 }
 usage(){ echo "usage: $0 {check|tensorfold|vllm-cpp|capture} ..."; }

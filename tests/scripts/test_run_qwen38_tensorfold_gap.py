@@ -96,6 +96,14 @@ def test_check_accepts_clean_exact_revision_and_does_not_launch(tmp_path):
     assert "check PASS" in result.stdout
 
 
+def test_check_requires_ready_endpoint(tmp_path):
+    env_file, _, _, process_env = fixture(tmp_path)
+    process_env["QWEN38_ENDPOINT_PROBE"] = "false"
+    result = run_check(env_file, process_env)
+    assert result.returncode != 0
+    assert "not ready" in result.stderr
+
+
 def test_dirty_revision_fails_closed(tmp_path):
     env_file, source, _, process_env = fixture(tmp_path)
     (source / "tracked").write_text("dirty\n")
@@ -146,13 +154,17 @@ def test_capture_runs_arms_serially_tears_down_and_sanitizes_provenance(tmp_path
     lifecycle.write_text(
         "#!/bin/sh\nset -eu\na=$1; arm=$2; state=$3; events=$4; log=$5\n"
         "case $a in start) test ! -e \"$state\"; echo \"$arm:start\" >>\"$events\"; "
-        "touch \"$state\"; printf 'safe\\nSECRET_TOKEN=hidden\\n' >\"$log\";; "
+        "echo 'SECRET_TOKEN=hidden'; touch \"$state\"; printf 'safe\\nSECRET_TOKEN=hidden\\n' >\"$log\";; "
         "status) test -e \"$state\";; stop) echo \"$arm:stop\" >>\"$events\"; rm -f \"$state\";; esac\n"
     )
     lifecycle.chmod(0o755)
     clock = tmp_path / "clock.py"
+    clock_compare = tmp_path / "clock-compare-called"
     clock.write_text(
-        "import json,pathlib,sys\n"
+        "import json,os,pathlib,sys\n"
+        f"marker=pathlib.Path({str(clock_compare)!r})\n"
+        "if sys.argv[1]=='compare':\n"
+        " marker.write_text('called'); print(json.dumps({'reasons':['forced']})); raise SystemExit(1 if os.environ.get('FAIL_CLOCK_COMPARE') else 0)\n"
         "o=pathlib.Path(sys.argv[sys.argv.index('--output')+1]); s=pathlib.Path(sys.argv[sys.argv.index('--summary')+1])\n"
         "o.write_text('\\n'.join('{}' for _ in range(30))+'\\n')\n"
         "s.write_text(json.dumps({'sm_clock_mhz':{'n':30}}))\n"
@@ -174,6 +186,8 @@ def test_capture_runs_arms_serially_tears_down_and_sanitizes_provenance(tmp_path
     def arm(name, engine, recipe=False):
         path = tmp_path / f"{name}.env"
         text = env_file.read_text().replace("ENGINE=vllm-cpp", f"ENGINE={engine}")
+        text = text.replace("ENDPOINT=http://127.0.0.1:9/v1/completions",
+                            "ENDPOINT=http://user:SECRET_TOKEN@127.0.0.1:9/v1/completions?api_key=SECRET_TOKEN#private")
         text = text.replace("START_COMMAND='false'", f"START_COMMAND='{lifecycle} start {name} {state} {events} {server_log}'")
         text = text.replace("STOP_COMMAND='true'", f"STOP_COMMAND='{lifecycle} stop {name} {state} {events} {server_log}'")
         text = text.replace("STATUS_COMMAND='false'", f"STATUS_COMMAND='{lifecycle} status {name} {state} {events} {server_log}'")
@@ -195,8 +209,11 @@ def test_capture_runs_arms_serially_tears_down_and_sanitizes_provenance(tmp_path
     cpp.write_text(cpp.read_text().replace(f"ARTIFACT_MANIFEST={manifest}",
                                            f"ARTIFACT_MANIFEST={cpp_manifest}"))
     output = tmp_path / "evidence"
+    probe = tmp_path / "probe"
+    probe.write_text(f"#!/bin/sh\ntest -e {state}\n")
+    probe.chmod(0o755)
     process_env.update(QWEN38_CLOCK_SAMPLER=str(clock), QWEN38_HARNESS=str(harness),
-                       QWEN38_GPU_STATE_COMMAND=str(gpu))
+                       QWEN38_GPU_STATE_COMMAND=str(gpu), QWEN38_ENDPOINT_PROBE=str(probe))
     result = subprocess.run([str(RUNNER), "capture", str(tf), str(cpp), str(output)],
                             cwd=ROOT, env=process_env, text=True, capture_output=True)
     assert result.returncode == 0, result.stderr
@@ -204,6 +221,7 @@ def test_capture_runs_arms_serially_tears_down_and_sanitizes_provenance(tmp_path
     assert events.read_text().splitlines() == ["tensorfold:start", "tensorfold:stop",
                                                "vllm-cpp:start", "vllm-cpp:stop"]
     assert not state.exists()
+    assert clock_compare.read_text() == "called"
     for name in ("tensorfold", "vllm-cpp"):
         arm_out = run / name
         assert json.loads((arm_out / "clocks-summary.json").read_text())["sm_clock_mhz"]["n"] >= 30
@@ -219,11 +237,22 @@ def test_capture_runs_arms_serially_tears_down_and_sanitizes_provenance(tmp_path
     assert tf_provenance["source_dirty"] is False
     serialized = json.dumps([tf_provenance, cpp_provenance])
     assert "SECRET_TOKEN" not in serialized and "START_COMMAND" not in serialized
+    assert "SECRET_TOKEN" not in "".join(p.read_text(errors="ignore") for p in run.rglob("*") if p.is_file())
     comparison = json.loads((run / "comparison.json").read_text())
     assert comparison["left_artifact"] == tf_provenance["artifact_identity"]
     assert comparison["right_artifact"] == cpp_provenance["artifact_identity"]
     assert comparison["verdict"] == "PROFILE_COMPARISON"
     assert "ratio" not in comparison
+
+    failed_output = tmp_path / "failed-evidence"
+    failed_env = dict(process_env, FAIL_CLOCK_COMPARE="1")
+    failed = subprocess.run([str(RUNNER), "capture", str(tf), str(cpp), str(failed_output)],
+                            cwd=ROOT, env=failed_env, text=True, capture_output=True)
+    assert failed.returncode != 0
+    failed_run = next(failed_output.iterdir())
+    assert (failed_run / "clock-comparison.json").is_file()
+    assert not (failed_run / "comparison.json").exists()
+    assert "clock gate refused" in failed.stderr
 
 
 def test_suspicious_env_field_is_refused_before_launch(tmp_path):
@@ -236,6 +265,30 @@ def test_suspicious_env_field_is_refused_before_launch(tmp_path):
     assert result.returncode != 0
     assert "suspicious" in result.stderr
     assert not marker.exists()
+
+
+def test_data_env_rejects_shell_expansion_without_execution(tmp_path):
+    env_file, _, _, process_env = fixture(tmp_path)
+    marker = tmp_path / "owned"
+    env_file.write_text(env_file.read_text() + f"MODEL=$(touch {marker})\n")
+    result = run_check(env_file, process_env)
+    assert result.returncode != 0
+    assert not marker.exists()
+    assert "strict data" in result.stderr
+
+
+def test_capture_refuses_preexisting_server_without_stopping_it(tmp_path):
+    source = RUNNER.read_text()
+    refusal = 'was already running; capture will not attach or stop it'
+    assert refusal in source
+    assert source.index(refusal) < source.index('run_redacted "$out/server-start.log"')
+
+
+def test_clock_compare_failure_aborts_final_verdict(tmp_path):
+    source = RUNNER.read_text()
+    assert 'compare --ours "$out/tensorfold/clocks-summary.json"' in source
+    assert '|| fail "cross-arm clock gate refused comparison"' in source
+    assert source.index('compare --ours "$out/tensorfold/clocks-summary.json"') < source.index('compare_results "$out/tensorfold/result.json"')
 
 
 def test_capture_comparison_refuses_mismatched_token_fingerprints_and_emits_no_ratio(tmp_path):
