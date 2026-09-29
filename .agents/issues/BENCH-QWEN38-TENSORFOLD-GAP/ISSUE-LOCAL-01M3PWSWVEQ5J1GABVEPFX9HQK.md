@@ -1,6 +1,6 @@
 ID: ISSUE-LOCAL-01M3PWSWVEQ5J1GABVEPFX9HQK
 Title: Close the Qwen3.8 Flash Next speed gap against TensorFold
-Row: -
+Row: BENCH-QWEN38-TENSORFOLD-GAP
 State: OPEN
 Kind: performance
 GitHub: -
@@ -16,4 +16,4 @@ TensorFold v0.3.6.3 reports 62.4 tok/s single-request decode and 2.2-2.5k tok/s 
 
 ## Resolution
 
-Pin TensorFold and its deployment patch set as a secondary implementation/performance oracle; reproduce both engines on dgx:gpu0 under a declared protocol; profile prefill and decode; then land only correctness-gated changes that close measured gaps, beginning with persistent QSA state and native MTP when profiles justify them.
+Pin TensorFold and its deployment patch set as an implementation/performance comparator that does not supply correct output; reproduce both engines on dgx:gpu0 under a declared protocol; profile prefill and decode; then land only correctness-gated changes that close measured gaps, beginning with persistent QSA state and native MTP when profiles justify them.
