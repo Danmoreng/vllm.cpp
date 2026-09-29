@@ -22,17 +22,27 @@ python3 tools/bench/qwen38_endpoint_bench.py \
 
 `--tokenizer-identity` must identify the common tokenizer by immutable revision
 or digest; the harness fails closed when it is omitted, and comparisons refuse
-different identities. Runtime model aliases and endpoint adapter extras are
-excluded from canonical workload hashes, while semantic prompt and decoding
-parameters remain covered.
+different identities. Runtime model aliases and adapter-owned evidence-only
+fields are excluded from canonical workload hashes, while semantic prompt,
+decoding, and endpoint-extra parameters remain covered.
 
-`--adapter generic` adds no endpoint-specific semantic fields. With `--adapter
-tensorfold`, draft mode is explicit on the wire (`draft:false` or `draft:true`)
-and the harness sends `return_token_ids:true`. The terminal `tensorfold` SSE
-block supplies token IDs/hash and cache, draft, prefill, and decode telemetry.
-`--extra-json` may add other documented fields, but cannot contradict canonical
-or adapter semantic fields. The effective draft policy is included in run
-identity.
+`--adapter generic` adds no endpoint-specific evidence seam and therefore
+supports absolute profiling but fails closed for token-exact matching. With
+`--adapter tensorfold`, draft mode is explicit on the wire (`draft:false` or
+`draft:true`) and the harness sends `return_token_ids:true`. The terminal
+`tensorfold` SSE block supplies token IDs/hash and cache, draft, prefill, and
+decode telemetry. With `--adapter vllm-cpp`, the harness POSTs the exact
+assembled generated text to the server's `/tokenize` endpoint with
+`add_special_tokens:false`; this is the pinned `api_server.cpp` evidence seam
+because generation SSE does not expose token IDs. `--tokenize-url` may override
+the safely derived endpoint-origin URL with another absolute HTTP(S) URL.
+
+`--extra-json` fields are semantic by default and are included in canonical
+per-sample and run identity (including `top_k`, `stop`, and
+`chat_template_kwargs`). They cannot contradict canonical or adapter semantic
+fields. Only an adapter-owned, documented transport-only allowlist is omitted;
+currently that is TensorFold's evidence request `return_token_ids`. The
+effective draft policy remains in run identity.
 
 Keep every raw repetition. A cross-engine result may be called matched only
 when neither run nor any sample was refused and canonical payload hashes,

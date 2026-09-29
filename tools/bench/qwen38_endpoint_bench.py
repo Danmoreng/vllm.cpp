@@ -11,6 +11,7 @@ import math
 import time
 import urllib.request
 from pathlib import Path
+from urllib.parse import urlsplit
 from typing import Any, Callable, Iterable
 
 
@@ -189,8 +190,10 @@ def run_workload(config: dict[str, Any], transport: Callable[[dict[str, Any]], d
                       "token_ids": [], "token_fingerprint": None, "generated_text": "",
                       "cache": None, "draft": None, "memory_samples": [],
                       "refusal_reason": f"transport error: {error}"}
+        semantic_payload = (transport.semantic_payload(payload)
+                            if hasattr(transport, "semantic_payload") else _semantic_payload(payload))
         sample.update({"wave": wave, "slot": slot, "corpus_index": index,
-                       "payload_hash": _hash(_semantic_payload(payload))})
+                       "payload_hash": _hash(semantic_payload)})
         return sample
 
     for wave in range(waves):
@@ -207,7 +210,9 @@ def run_workload(config: dict[str, Any], transport: Callable[[dict[str, Any]], d
         refusal_reason = "tokenizer identity was not provided"
         aggregate["request_rate"] = None
         aggregate["token_throughput"] = None
-    semantic_payloads = [_semantic_payload(payload) for payload in payloads]
+    semantic_payloads = [(transport.semantic_payload(payload)
+                          if hasattr(transport, "semantic_payload") else _semantic_payload(payload))
+                         for payload in payloads]
     canonical_payload_hash = _hash(semantic_payloads)
     semantic_options = getattr(transport, "semantic_options", {})
     effective_draft_mode = semantic_options.get("draft_mode", config.get("draft", "off"))
@@ -278,19 +283,37 @@ class HTTPTransport:
 
     def __init__(self, endpoint: str, tokenizer_identity: Any,
                  extra_json: dict[str, Any] | None = None, *, adapter: str = "generic",
-                 draft_mode: str = "off"):
-        if adapter not in ("generic", "tensorfold"):
+                 draft_mode: str = "off", tokenize_url: str | None = None):
+        if adapter not in ("generic", "tensorfold", "vllm-cpp"):
             raise ValueError(f"unknown endpoint adapter: {adapter}")
         self.endpoint = endpoint
         self.tokenizer_identity = tokenizer_identity
         self.adapter = adapter
         self.draft_mode = draft_mode
         self.extra_json = dict(extra_json or {})
+        self.tokenize_url = self._tokenize_url(tokenize_url) if adapter == "vllm-cpp" else None
         semantic_fields = {"draft", "return_token_ids"} if adapter == "tensorfold" else set()
         overlap = semantic_fields & self.extra_json.keys()
         if overlap:
             raise ValueError(f"endpoint extra JSON cannot override adapter semantic fields: {sorted(overlap)}")
-        self.semantic_options = {"draft_mode": draft_mode, "token_evidence": adapter == "tensorfold"}
+        self.semantic_options = {"draft_mode": draft_mode, "token_evidence": adapter != "generic"}
+
+    def _tokenize_url(self, explicit: str | None) -> str:
+        parsed = urlsplit(explicit or self.endpoint)
+        if parsed.scheme not in ("http", "https") or not parsed.netloc or parsed.username:
+            raise ValueError("tokenize URL must be an absolute http(s) URL without credentials")
+        if explicit:
+            return explicit
+        return f"{parsed.scheme}://{parsed.netloc}/tokenize"
+
+    def semantic_payload(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Normalize effective semantics, omitting aliases and evidence-only fields."""
+        prepared = self.prepare_payload(payload)
+        transport_only = {"return_token_ids"} if self.adapter == "tensorfold" else set()
+        excluded = {"model"} | transport_only
+        semantic = {key: value for key, value in prepared.items() if key not in excluded}
+        semantic["draft"] = self.draft_mode == "on"
+        return semantic
 
     def prepare_payload(self, payload: dict[str, Any]) -> dict[str, Any]:
         adapter_fields: dict[str, Any] = {}
@@ -324,12 +347,27 @@ class HTTPTransport:
                 ids = chunk.get("token_ids", choice.get("token_ids", []))
                 if text or ids:
                     events.append({"offset_s": terminal_offset, "text": text, "token_ids": ids})
+        if self.adapter == "vllm-cpp":
+            generated_text = "".join(str(event.get("text", "")) for event in events)
+            tokenize_request = urllib.request.Request(
+                self.tokenize_url,
+                data=_canonical({"prompt": generated_text, "add_special_tokens": False}),
+                headers={"Content-Type": "application/json; charset=utf-8"},
+            )
+            with urllib.request.urlopen(tokenize_request) as tokenize_response:
+                tokenized = json.load(tokenize_response)
+            tokens = tokenized.get("tokens")
+            if not isinstance(tokens, list) or any(not isinstance(token, int) for token in tokens):
+                raise ValueError("vllm-cpp /tokenize response did not contain integer tokens")
+            terminal_token_ids = tokens
+        else:
+            terminal_token_ids = tensorfold.get("token_ids")
         return {
             "events": events,
             "e2e_s": terminal_offset,
             "prompt_tokens": usage.get("prompt_tokens"),
             "generated_tokens": usage.get("completion_tokens"),
-            "terminal_token_ids": tensorfold.get("token_ids"),
+            "terminal_token_ids": terminal_token_ids,
             "token_sha": tensorfold.get("token_sha"),
             "cache": ({"cached": tensorfold["cached"]} if "cached" in tensorfold else None),
             "draft": ({key: tensorfold[key] for key in ("drafts", "rounds", "min_rows")
@@ -358,8 +396,11 @@ def main() -> int:
     parser.add_argument("--output", required=True)
     parser.add_argument("--tokenizer-identity", required=True,
                         help="shared tokenizer name/revision or immutable digest")
-    parser.add_argument("--adapter", choices=("generic", "tensorfold"), default="generic",
+    parser.add_argument("--adapter", choices=("generic", "tensorfold", "vllm-cpp"),
+                        default="generic",
                         help="endpoint-specific documented request/response schema")
+    parser.add_argument("--tokenize-url",
+                        help="vllm-cpp /tokenize URL (defaults safely from endpoint origin)")
     parser.add_argument("--draft", choices=("on", "off"), default="off",
                         help="effective draft policy; tensorfold maps it to the wire")
     parser.add_argument("--extra-json", type=_extra_json, default={}, metavar="OBJECT",
@@ -371,7 +412,8 @@ def main() -> int:
     config["corpus"] = load_corpus(args.corpus)
     result = run_workload(
         config, HTTPTransport(args.endpoint, args.tokenizer_identity, args.extra_json,
-                              adapter=args.adapter, draft_mode=args.draft)
+                              adapter=args.adapter, draft_mode=args.draft,
+                              tokenize_url=args.tokenize_url)
     )
     Path(args.output).write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return 0
