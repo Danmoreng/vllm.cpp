@@ -118,11 +118,14 @@ def summarize(samples: list[dict[str, Any]], workload_makespan_s: float | None =
 def _sample(response: dict[str, Any], started: float) -> dict[str, Any]:
     events = response.get("events", [])
     offsets = [float(event["offset_s"]) for event in events]
-    token_ids = [token for event in events for token in event.get("token_ids", [])]
+    generated_token_ids = [token for event in events for token in event.get("token_ids", [])]
     texts = [str(event.get("text", "")) for event in events]
     generated_value = response.get("generated_tokens")
     generated = int(generated_value) if generated_value is not None else None
-    e2e = float(response.get("e2e_s", offsets[-1] if offsets else time.perf_counter() - started))
+    if "e2e_s" in response:
+        e2e = float(response["e2e_s"])
+    else:
+        e2e = offsets[-1] if offsets else time.perf_counter() - started
     ttft = offsets[0] if offsets else None
     event_token_counts = [len(event.get("token_ids", [])) for event in events]
     timed_token_events = bool(events) and all(count == 1 for count in event_token_counts)
@@ -135,8 +138,10 @@ def _sample(response: dict[str, Any], started: float) -> dict[str, Any]:
     tpot = ((e2e - ttft) / (generated - 1)) if ttft is not None and generated is not None and generated > 1 else None
     terminal_token_ids = response.get("terminal_token_ids")
     if terminal_token_ids is not None:
-        token_ids = [int(token) for token in terminal_token_ids]
-    fingerprint = _hash(token_ids) if token_ids else None
+        generated_token_ids = [int(token) for token in terminal_token_ids]
+    generated_fingerprint = _hash(generated_token_ids) if generated_token_ids else None
+    prompt_token_ids = response.get("prompt_token_ids")
+    prompt_fingerprint = _hash(prompt_token_ids) if prompt_token_ids is not None else None
     refusal = response.get("refusal_reason")
     if generated is None and not refusal:
         refusal = "endpoint did not expose reliable generated-token usage"
@@ -151,8 +156,10 @@ def _sample(response: dict[str, Any], started: float) -> dict[str, Any]:
         "itl_s": itl,
         "itl_unavailable_reason": itl_reason,
         "e2e_s": e2e,
-        "token_ids": token_ids,
-        "token_fingerprint": fingerprint,
+        "generated_token_ids": generated_token_ids,
+        "generated_token_fingerprint": generated_fingerprint,
+        "prompt_token_ids": prompt_token_ids,
+        "prompt_token_fingerprint": prompt_fingerprint,
         "generated_text": "".join(texts),
         "cache": response.get("cache"),
         "draft": response.get("draft"),
@@ -187,7 +194,9 @@ def run_workload(config: dict[str, Any], transport: Callable[[dict[str, Any]], d
         except Exception as error:  # preserve failed repetitions too
             sample = {"prompt_tokens": None, "generated_tokens": None, "ttft_s": None,
                       "tpot_s": None, "itl_s": [], "e2e_s": time.perf_counter() - started,
-                      "token_ids": [], "token_fingerprint": None, "generated_text": "",
+                      "generated_token_ids": [], "generated_token_fingerprint": None,
+                      "prompt_token_ids": None, "prompt_token_fingerprint": None,
+                      "generated_text": "",
                       "cache": None, "draft": None, "memory_samples": [],
                       "refusal_reason": f"transport error: {error}"}
         semantic_payload = (transport.semantic_payload(payload)
@@ -202,6 +211,20 @@ def run_workload(config: dict[str, Any], transport: Callable[[dict[str, Any]], d
             samples.extend(f.result() for f in futures)
 
     workload_makespan_s = time.perf_counter() - workload_started
+
+    # Evidence-only requests happen after all measured closed-loop generation.
+    if hasattr(transport, "enrich_evidence"):
+        for sample, payload in zip(samples, (payloads[s["corpus_index"]] for s in samples)):
+            try:
+                evidence = transport.enrich_evidence(sample, payload)
+                sample.update(evidence)
+                generated_ids = sample.get("generated_token_ids")
+                prompt_ids = sample.get("prompt_token_ids")
+                sample["generated_token_fingerprint"] = _hash(generated_ids) if generated_ids else None
+                sample["prompt_token_fingerprint"] = _hash(prompt_ids) if prompt_ids is not None else None
+            except Exception as error:
+                sample["evidence_refusal_reason"] = f"evidence error: {error}"
+
     aggregate = summarize(samples, workload_makespan_s)
     tokenizer_identity = getattr(transport, "tokenizer_identity", None)
     refused = any(s.get("refusal_reason") for s in samples)
@@ -233,14 +256,15 @@ def run_workload(config: dict[str, Any], transport: Callable[[dict[str, Any]], d
         "canonical_payload_hash": canonical_payload_hash,
         "run_identity": run_identity,
         "tokenizer_identity": tokenizer_identity,
-        "token_fingerprints": [s["token_fingerprint"] for s in samples],
+        "prompt_token_fingerprints": [s.get("prompt_token_fingerprint") for s in samples],
+        "generated_token_fingerprints": [s.get("generated_token_fingerprint") for s in samples],
         "samples": samples,
     })
     return aggregate
 
 
 def comparison_verdict(left: dict[str, Any], right: dict[str, Any]) -> dict[str, Any]:
-    """Fail closed unless both runs contain equal canonical correctness evidence."""
+    """Classify input comparability and report generated-token equality separately."""
     reason = None
     left_samples, right_samples = left.get("samples"), right.get("samples")
     if left.get("refusal_reason") or right.get("refusal_reason"):
@@ -267,16 +291,34 @@ def comparison_verdict(left: dict[str, Any], right: dict[str, Any]) -> dict[str,
                     left_sample.get("prompt_tokens") != right_sample.get("prompt_tokens")):
                 reason = "prompt token counts are missing or differ"
                 break
-            if (not left_sample.get("token_fingerprint") or
-                    left_sample.get("token_fingerprint") != right_sample.get("token_fingerprint")):
-                reason = "consumed token fingerprints are missing or differ"
+            left_prompt_fp = left_sample.get("prompt_token_fingerprint")
+            right_prompt_fp = right_sample.get("prompt_token_fingerprint")
+            if left_prompt_fp is not None and right_prompt_fp is not None and left_prompt_fp != right_prompt_fp:
+                reason = "per-sample prompt token fingerprints differ"
                 break
 
-    left_fp, right_fp = left.get("token_fingerprints"), right.get("token_fingerprints")
-    if reason is None and (not left_fp or left_fp != right_fp or any(not x for x in left_fp + right_fp)):
-        reason = "token fingerprint evidence is missing or differs"
-    return {"verdict": "refused" if reason else "matched", "refusal_reason": reason}
+    left_generated = left.get("generated_token_fingerprints")
+    right_generated = right.get("generated_token_fingerprints")
+    if left_generated and right_generated and all(left_generated + right_generated):
+        generated_equality = "equal" if left_generated == right_generated else "different"
+    else:
+        generated_equality = "unavailable"
 
+    if reason:
+        return {"verdict": "refused", "refusal_reason": reason,
+                "generated_token_equality": generated_equality}
+
+    left_prompt = left.get("prompt_token_fingerprints")
+    right_prompt = right.get("prompt_token_fingerprints")
+    if not left_prompt or not right_prompt or any(not x for x in left_prompt + right_prompt):
+        return {"verdict": "PROFILE_COMPARISON",
+                "refusal_reason": "prompt token fingerprints are unavailable",
+                "generated_token_equality": generated_equality}
+    if left_prompt != right_prompt:
+        return {"verdict": "refused", "refusal_reason": "prompt token fingerprints differ",
+                "generated_token_equality": generated_equality}
+    return {"verdict": "MATCHED_INPUT", "refusal_reason": None,
+            "generated_token_equality": generated_equality}
 
 class HTTPTransport:
     """UTF-8 OpenAI streaming transport with explicit endpoint semantics."""
@@ -347,27 +389,12 @@ class HTTPTransport:
                 ids = chunk.get("token_ids", choice.get("token_ids", []))
                 if text or ids:
                     events.append({"offset_s": terminal_offset, "text": text, "token_ids": ids})
-        if self.adapter == "vllm-cpp":
-            generated_text = "".join(str(event.get("text", "")) for event in events)
-            tokenize_request = urllib.request.Request(
-                self.tokenize_url,
-                data=_canonical({"prompt": generated_text, "add_special_tokens": False}),
-                headers={"Content-Type": "application/json; charset=utf-8"},
-            )
-            with urllib.request.urlopen(tokenize_request) as tokenize_response:
-                tokenized = json.load(tokenize_response)
-            tokens = tokenized.get("tokens")
-            if not isinstance(tokens, list) or any(not isinstance(token, int) for token in tokens):
-                raise ValueError("vllm-cpp /tokenize response did not contain integer tokens")
-            terminal_token_ids = tokens
-        else:
-            terminal_token_ids = tensorfold.get("token_ids")
         return {
             "events": events,
             "e2e_s": terminal_offset,
             "prompt_tokens": usage.get("prompt_tokens"),
             "generated_tokens": usage.get("completion_tokens"),
-            "terminal_token_ids": terminal_token_ids,
+            "terminal_token_ids": tensorfold.get("token_ids"),
             "token_sha": tensorfold.get("token_sha"),
             "cache": ({"cached": tensorfold["cached"]} if "cached" in tensorfold else None),
             "draft": ({key: tensorfold[key] for key in ("drafts", "rounds", "min_rows")
@@ -376,6 +403,31 @@ class HTTPTransport:
             "decode": ({"decode_s": tensorfold["decode_s"]} if "decode_s" in tensorfold else None),
             "tensorfold": tensorfold or None,
         }
+
+    def _tokenize(self, text: str) -> list[int]:
+        request = urllib.request.Request(
+            self.tokenize_url,
+            data=_canonical({"prompt": text, "add_special_tokens": False}),
+            headers={"Content-Type": "application/json; charset=utf-8"},
+        )
+        with urllib.request.urlopen(request) as response:
+            tokenized = json.load(response)
+        tokens = tokenized.get("tokens")
+        if not isinstance(tokens, list) or any(not isinstance(token, int) for token in tokens):
+            raise ValueError("vllm-cpp /tokenize response did not contain integer tokens")
+        return tokens
+
+    def enrich_evidence(self, sample: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
+        if self.adapter != "vllm-cpp":
+            return {}
+        evidence = {"generated_token_ids": self._tokenize(sample["generated_text"])}
+        if "prompt" in payload:
+            evidence["prompt_token_ids"] = self._tokenize(payload["prompt"])
+        else:
+            evidence["evidence_refusal_reason"] = (
+                "chat prompt fingerprint unavailable: identical chat-template application is not exposed"
+            )
+        return evidence
 
 
 def _extra_json(value: str) -> dict[str, Any]:

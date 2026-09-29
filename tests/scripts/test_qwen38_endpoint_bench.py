@@ -40,6 +40,7 @@ class FakeTransport:
                 for i in range(n)
             ],
             "prompt_tokens": 7,
+            "prompt_token_ids": [10, 11, 12, 13, 14, 15, 16],
             "generated_tokens": n,
             "cache": {"hits": 2, "queries": 3},
             "draft": {"accepted": 1, "proposed": 2},
@@ -63,7 +64,8 @@ def test_workload_is_canonical_closed_loop_and_preserves_raw_repetitions():
     assert result["raw_repetitions"] == result["samples"]
     assert result["tokenizer_identity"] == transport.tokenizer_identity
     assert len(result["canonical_payload_hash"]) == 64
-    assert all(s["token_fingerprint"] for s in result["samples"])
+    assert all(s["generated_token_fingerprint"] for s in result["samples"])
+    assert all(s["prompt_token_fingerprint"] for s in result["samples"])
     assert all(s["ttft_s"] == pytest.approx(0.01) for s in result["samples"])
     assert all(s["tpot_s"] == pytest.approx(0.01) for s in result["samples"])
     assert all(s["itl_s"] == pytest.approx([0.01, 0.01]) for s in result["samples"])
@@ -114,7 +116,7 @@ def test_workload_promotes_sample_refusal_and_records_full_run_makespan(monkeypa
 
     result = run_workload({"endpoint": "x", "model": "m", "corpus": [{"text": "x"}],
                            "waves": 5, "concurrency": 1}, RefusingTransport())
-    assert result["workload_makespan_s"] == pytest.approx(2.0)
+    assert result["workload_makespan_s"] == pytest.approx(1.0)
     assert result["refusal_reason"] == "one or more samples were refused"
     assert result["request_rate"] is None
     assert result["token_throughput"] is None
@@ -122,12 +124,13 @@ def test_workload_promotes_sample_refusal_and_records_full_run_makespan(monkeypa
 
 def test_comparison_fails_closed_on_all_canonical_evidence():
     sample = {"refusal_reason": None, "payload_hash": "payload", "prompt_tokens": 7,
-              "token_fingerprint": "tokens"}
+              "prompt_token_fingerprint": "prompt", "generated_token_fingerprint": "generated"}
     base = {"refusal_reason": None, "canonical_payload_hash": "run-payload",
             "run_identity": "workload-shape",
             "tokenizer_identity": {"name": "tok", "revision": "1"},
-            "samples": [sample], "token_fingerprints": ["tokens"]}
-    assert comparison_verdict(base, json.loads(json.dumps(base)))["verdict"] == "matched"
+            "samples": [sample], "prompt_token_fingerprints": ["prompt"],
+            "generated_token_fingerprints": ["generated"]}
+    assert comparison_verdict(base, json.loads(json.dumps(base)))["verdict"] == "MATCHED_INPUT"
     mutations = [
         ("top refusal", lambda x: x.update(refusal_reason="no")),
         ("sample refusal", lambda x: x["samples"][0].update(refusal_reason="no")),
@@ -135,8 +138,7 @@ def test_comparison_fails_closed_on_all_canonical_evidence():
         ("run identity", lambda x: x.update(run_identity="other")),
         ("tokenizer", lambda x: x.update(tokenizer_identity=None)),
         ("prompt tokens", lambda x: x["samples"][0].update(prompt_tokens=8)),
-        ("consumed token", lambda x: x["samples"][0].update(token_fingerprint="other")),
-        ("fingerprint list", lambda x: x.update(token_fingerprints=["other"])),
+        ("prompt fingerprint", lambda x: x.update(prompt_token_fingerprints=["other"])),
     ]
     for _, mutate in mutations:
         right = json.loads(json.dumps(base))
@@ -153,7 +155,7 @@ def test_canonical_hashes_exclude_runtime_model_names_but_include_semantic_extra
     assert [s["payload_hash"] for s in left["samples"]] == [
         s["payload_hash"] for s in right["samples"]
     ]
-    assert comparison_verdict(left, right)["verdict"] == "matched"
+    assert comparison_verdict(left, right)["verdict"] == "MATCHED_INPUT"
 
     for key, values in (("top_k", (10, 20)), ("stop", (["A"], ["B"])),
                         ("chat_template_kwargs", ({"enable_thinking": False},
@@ -217,8 +219,8 @@ def test_usage_without_token_ids_keeps_valid_absolute_profile_measurements():
     assert result["request_rate"] is not None
     assert result["token_throughput"] is not None
     assert all(s["tpot_s"] == pytest.approx(.1) for s in result["samples"])
-    assert all(s["token_fingerprint"] is None for s in result["samples"])
-    assert comparison_verdict(result, result)["verdict"] == "refused"
+    assert all(s["generated_token_fingerprint"] is None for s in result["samples"])
+    assert comparison_verdict(result, result)["verdict"] == "PROFILE_COMPARISON"
 
 
 def test_comparison_refuses_different_workload_shape():
@@ -270,6 +272,9 @@ def test_tensorfold_terminal_fixture_parses_tokens_telemetry_and_terminal_e2e(mo
     assert response["e2e_s"] == pytest.approx(.5)
     assert response["generated_tokens"] == 3
     assert response["terminal_token_ids"] == [101, 102, 103]
+    tensorfold_sample = _sample(response, 10.)
+    assert tensorfold_sample["generated_token_fingerprint"]
+    assert tensorfold_sample["prompt_token_fingerprint"] is None
     assert response["token_sha"] == "pinned-sha"
     assert response["cache"] == {"cached": 5}
     assert response["draft"] == {"drafts": True, "rounds": 2, "min_rows": 2}
@@ -294,17 +299,27 @@ def test_vllm_cpp_tokenize_fixture_matches_tensorfold_token_evidence(monkeypatch
                         iter([10., 10.1, 10.2]).__next__)
     transport = HTTPTransport("http://host:8000/v1/completions", "tok",
                               adapter="vllm-cpp", draft_mode="off")
-    response = transport({"model": "m", "stream": True})
+    response = transport({"model": "m", "stream": True, "prompt": "input"})
     assert response["prompt_tokens"] == 4
-    assert response["terminal_token_ids"] == [101, 102, 103]
+    assert response["terminal_token_ids"] is None
+    evidence = transport.enrich_evidence(_sample(response, 10.),
+                                         {"model": "m", "prompt": "input"})
+    assert evidence["generated_token_ids"] == [101, 102, 103]
+    assert evidence["prompt_token_ids"] == [101, 102, 103]
     assert requests[-1].full_url == "http://host:8000/tokenize"
-    assert json.loads(requests[-1].data) == {"prompt": "same output", "add_special_tokens": False}
+    assert json.loads(requests[-1].data) == {"prompt": "input", "add_special_tokens": False}
 
     vllm_sample = _sample(response, 10.)
+    vllm_sample.update(evidence)
+    vllm_sample["generated_token_fingerprint"] = _sample(
+        {"events": [], "prompt_tokens": 0, "generated_tokens": 3,
+         "terminal_token_ids": evidence["generated_token_ids"], "e2e_s": 0}, 0
+    )["generated_token_fingerprint"]
     tensorfold_sample = _sample({"events": [{"offset_s": .1, "text": "same output"}],
                                  "prompt_tokens": 4, "generated_tokens": 3,
                                  "terminal_token_ids": [101, 102, 103], "e2e_s": .2}, 10.)
-    assert vllm_sample["token_fingerprint"] == tensorfold_sample["token_fingerprint"]
+    assert vllm_sample["generated_token_fingerprint"] == tensorfold_sample["generated_token_fingerprint"]
+    assert tensorfold_sample["prompt_token_fingerprint"] is None
 
 
 def test_vllm_cpp_accepts_explicit_safe_tokenize_url():
@@ -315,6 +330,44 @@ def test_vllm_cpp_accepts_explicit_safe_tokenize_url():
     with pytest.raises(ValueError, match="http"):
         HTTPTransport("https://host/v1/completions", "tok", adapter="vllm-cpp",
                       tokenize_url="file:///tmp/tokenize")
+
+
+def test_deferred_evidence_does_not_affect_generation_timing_or_pacing(monkeypatch):
+    clock = [0.0]
+    monkeypatch.setattr("tools.bench.qwen38_endpoint_bench.time.perf_counter", lambda: clock[0])
+
+    class DeferredTransport:
+        tokenizer_identity = "tok"
+        def __init__(self):
+            self.starts = []
+            self.evidence_starts = []
+        def __call__(self, payload):
+            self.starts.append(clock[0])
+            clock[0] += 1
+            return {"events": [{"offset_s": 1, "text": "x"}], "e2e_s": 1,
+                    "prompt_tokens": 1, "generated_tokens": 1}
+        def enrich_evidence(self, sample, payload):
+            self.evidence_starts.append(clock[0])
+            clock[0] += 100
+            return {"generated_token_ids": [2], "prompt_token_ids": [1]}
+
+    transport = DeferredTransport()
+    result = run_workload({"endpoint": "x", "model": "m", "corpus": [{"text": "p"}],
+                           "waves": 5}, transport)
+    assert transport.starts == [0, 1, 2, 3, 4]
+    assert transport.evidence_starts == [5, 105, 205, 305, 405]
+    assert result["workload_makespan_s"] == 5
+    assert all(sample["e2e_s"] == 1 for sample in result["samples"])
+
+
+def test_vllm_cpp_chat_prompt_evidence_fails_closed():
+    transport = HTTPTransport("http://host/v1/chat/completions", "tok", adapter="vllm-cpp")
+    transport._tokenize = lambda text: [1, 2]
+    evidence = transport.enrich_evidence({"generated_text": "answer"},
+                                         {"messages": [{"role": "user", "content": "hi"}]})
+    assert evidence["generated_token_ids"] == [1, 2]
+    assert "prompt_token_ids" not in evidence
+    assert "chat prompt fingerprint unavailable" in evidence["evidence_refusal_reason"]
 
 
 def test_itl_requires_one_token_per_timed_event():
