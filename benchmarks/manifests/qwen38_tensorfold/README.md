@@ -34,9 +34,12 @@ sent.
 Keep every raw repetition. A cross-engine result may be called matched only
 when neither run nor any sample was refused and canonical payload hashes,
 tokenizer identities, prompt token counts, and generated-token fingerprints
-are all present and equal. The HTTP adapter requests streaming usage; if usage
-or reliable generated-token accounting is absent, the sample and enclosing run
-are refused and token throughput/TPOT are not reported as valid. Endpoints that
-do not expose token IDs are likewise refused rather than silently treated as
-equivalent. Corpus changes alter the canonical payload hash and must start a
-new comparison series.
+are all present and equal. Missing streamed token IDs leave fingerprints null
+but do not invalidate absolute timing or throughput measurements when usage
+counts are present; only a matched-token comparison is refused. The HTTP
+adapter requests streaming usage; if usage or reliable generated-token
+accounting is absent, the sample and enclosing run are refused and token
+throughput/TPOT are not reported as valid. Comparisons also require an equal
+run identity covering draft mode, concurrency, waves, and canonical semantic
+requests. Corpus changes alter the canonical payload hash and must start a new
+comparison series.
