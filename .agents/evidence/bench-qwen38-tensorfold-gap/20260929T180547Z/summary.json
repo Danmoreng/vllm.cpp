@@ -37,7 +37,7 @@
   },
   "numbers_published": false,
   "production_vllm_denominator": {
-    "reason": "No policy-authorized fitting safetensors artifact was present in the leased workspace; production vLLM cannot consume the absent GGUF artifact.",
+    "reason": "Required model bytes were not found in the two documented staging paths or bounded /workspace depth-3 name scan, so the runner artifact manifests could not be populated.",
     "status": "BLOCKED"
   },
   "profiles": {
@@ -46,8 +46,6 @@
   },
   "run_id": "20260929T180547Z",
   "scan_assertions": {
-    "local_hf_ref_has_weight_snapshot": false,
-    "operator_checkpoint_root_available": false,
     "workspace_tensorfold_artifact_candidates": 0,
     "workspace_tensorfold_source_candidates": 0,
     "workspace_vllm_cpp_artifact_directories_present": 0
@@ -60,7 +58,6 @@
     "task_6": "BLOCKED_NO_MTP_WEIGHTS",
     "task_7": "SYNTHESIS_NO_PRODUCT_OPTIMIZATION"
   },
-  "tensorfold_source_present": false,
   "workloads": {
     "drafted_decode": "NOT_RUN_PREREQUISITE",
     "prefill_ladder": "NOT_RUN_PREREQUISITE",

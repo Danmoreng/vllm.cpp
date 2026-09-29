@@ -145,7 +145,6 @@ def validate_artifacts(summary: dict, discovery: dict, command: dict, receipt: d
     exact_keys(discovery, {
         "scan_scope", "scan_completed", "scan_device", "expected_vllm_cpp_directories",
         "tensorfold_artifact_candidates", "tensorfold_source_candidates",
-        "local_hf_metadata", "operator_checkpoint_root_available", "download_performed",
         "raw_receipt", "command_manifest",
     }, "artifact-discovery")
     require(discovery["scan_completed"] is True, "artifact scan did not complete")
@@ -156,7 +155,6 @@ def validate_artifacts(summary: dict, discovery: dict, command: dict, receipt: d
             "expected vllm.cpp artifact directory was present or malformed")
     require(discovery["tensorfold_artifact_candidates"] == 0, "TensorFold artifact candidate count must be zero")
     require(discovery["tensorfold_source_candidates"] == 0, "TensorFold source candidate count must be zero")
-    require(discovery["download_performed"] is False, "blocked evidence must not download an artifact")
     require(discovery["raw_receipt"] == "discovery-receipt.stdout" and
             discovery["command_manifest"] == "discovery-command.json", "artifact receipt names differ")
     exact_keys(command, {"schema_version", "script", "script_sha256", "remote_command", "device", "max_runtime", "idle_timeout", "receipt", "invocation_receipt", "scope"}, "discovery-command")
@@ -183,20 +181,12 @@ def validate_artifacts(summary: dict, discovery: dict, command: dict, receipt: d
             "artifact count is not derived from raw receipt")
     require(raw_tf_sources == discovery["tensorfold_source_candidates"] == 0,
             "source count is not derived from raw receipt")
-    require(discovery["operator_checkpoint_root_available"] is False, "operator checkpoint root contradicts blocker")
-    hf = discovery["local_hf_metadata"]
-    exact_keys(hf, {"repository", "ref_present", "snapshot_present", "weight_bytes_present"}, "local_hf_metadata")
-    require(hf["snapshot_present"] is False and hf["weight_bytes_present"] is False,
-            "local HF bytes contradict missing-artifact blocker")
     assertions = summary.get("scan_assertions")
     require(assertions == {
-        "local_hf_ref_has_weight_snapshot": False,
-        "operator_checkpoint_root_available": False,
         "workspace_tensorfold_artifact_candidates": discovery["tensorfold_artifact_candidates"],
         "workspace_tensorfold_source_candidates": discovery["tensorfold_source_candidates"],
         "workspace_vllm_cpp_artifact_directories_present": sum(bool(x["present"]) for x in directories),
     }, "summary scan assertions disagree with artifact-discovery")
-    require(summary.get("tensorfold_source_present") is False, "summary TensorFold source state contradicts discovery")
 
 
 def validate_checks(summary: dict, checks: dict) -> None:

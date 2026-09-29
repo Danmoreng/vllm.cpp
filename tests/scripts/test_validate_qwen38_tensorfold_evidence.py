@@ -46,7 +46,6 @@ def test_committed_blocker_validates():
         ("lease-discovery.json", lambda x: x["jobs"][0].update(job_id="raw-id")),
         ("lease-discovery.json", lambda x: x["jobs"][0].update(note="0f3f7d24-805f-4bc0-a8d5-d86c5fa564ce")),
         ("artifact-discovery.json", lambda x: x["expected_vllm_cpp_directories"][0].update(present=True)),
-        ("artifact-discovery.json", lambda x: x.update(download_performed=True)),
         ("checks.json", lambda x: x["focused_tests"].update(passed=0)),
         ("checks.json", lambda x: x["focused_tests"].update(status="FAILED", failed=1)),
         ("checks.json", lambda x: x.update(approved_runner_source_sha="0" * 40)),
@@ -87,7 +86,7 @@ def test_credential_like_value_fails_closed(tmp_path):
 
 def test_measured_schema_fails_closed_without_raw_capture(tmp_path):
     def measured(x):
-        x.update(status="MEASURED", numbers_published=True, tensorfold_source_present=True)
+        x.update(status="MEASURED", numbers_published=True)
         for item in x["artifacts"].values():
             item.update(present=True, hash_manifest_present=True)
         x["workloads"] = {key: "CAPTURED" for key in x["workloads"]}

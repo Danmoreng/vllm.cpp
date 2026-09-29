@@ -30076,11 +30076,12 @@ Log: `/tmp/dram-leg1.log` (raw trace, ~125k lines).
 A fresh successful repository `rc` audit lease executed the committed bounded
 scan script on `dgx:gpu0` (NVIDIA GB10, driver 580.173.02); evidence retains its
 SHA-256 lease fingerprint rather than a raw job ID. Its raw marker receipt found
-both documented staging paths absent and zero matches in `/workspace` to depth
-3 for the committed TensorFold/MiaAI/Vontra and MLX-MTP/Flash-Next-MTP
-patterns. This establishes absence only in those bounded locations, not across
-the host. Local Hugging Face state had a repository ref but no
-snapshot or weight bytes. No huge artifact was downloaded.
+the two documented staging paths absent and zero matches in `/workspace` to
+depth 3 for the committed TensorFold/MiaAI/Vontra and
+MLX-MTP/Flash-Next-MTP patterns. This establishes absence only in those bounded
+locations, not across the host. Required artifacts/source were not found in the
+retained scope, so runner prerequisites could not be populated and measurement
+did not start.
 
 This is a prerequisite blocker, not a timing result. No server or executable
 correctness gate ran; serial decode, drafted decode, prefill and serving ladders,
