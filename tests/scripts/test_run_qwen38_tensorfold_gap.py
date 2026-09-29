@@ -47,13 +47,18 @@ def fixture(tmp_path: Path):
         f"ARTIFACT_MANIFEST={manifest}\nENDPOINT=http://127.0.0.1:9/v1/completions\n"
         "ENDPOINT_READY_URL=http://127.0.0.1:9/health\nMODEL=fixture\n"
         "TOKENIZER_IDENTITY=fixture@revision\nLAUNCH_COMMAND='printf launched'\n"
+        "START_COMMAND='false'\nSTOP_COMMAND='true'\nSTATUS_COMMAND='false'\n"
+        f"SERVER_LOG_PATH={tmp_path / 'server.log'}\nREDACTION_COMMAND=cat\n"
         "MIN_FREE_MEMORY_KIB=1\n"
     )
+    rc = tmp_path / "rc"
+    rc.write_text("#!/bin/sh\nprintf '%s\\n' '[{\"id\":\"lease-1\",\"device\":\"dgx:gpu0\",\"state\":\"running\"}]'\n")
+    rc.chmod(0o755)
     process_env = {
         **os.environ,
-        "RC_DEVICE": "fixture:gpu0",
+        "RC_DEVICE": "dgx:gpu0",
         "RC_JOB_ID": "lease-1",
-        "RC_TOKEN": "not-a-real-token",
+        "QWEN38_RC_COMMAND": str(rc),
         "QWEN38_MEMINFO_PATH": str(meminfo),
         "QWEN38_CLOCK_SAMPLER": str(clock),
         "QWEN38_ENDPOINT_PROBE": "true",
@@ -76,6 +81,11 @@ def test_examples_are_portable_pinned_templates_without_secrets_or_fake_hashes()
         assert "/home/" not in text and "/workspace/" not in text
         assert "RC_TOKEN=" not in text
         assert "ARTIFACT_SHA256=" not in text
+        assert "ARTIFACT_ID=" not in text
+        for field in ("START_COMMAND=", "STOP_COMMAND=", "STATUS_COMMAND=",
+                      "SERVER_LOG_PATH=", "REDACTION_COMMAND="):
+            assert field in text
+        assert "RC_JOB_ID=" not in text and "RC_DEVICE=" not in text
 
 
 def test_check_accepts_clean_exact_revision_and_does_not_launch(tmp_path):
@@ -107,14 +117,125 @@ def test_wrong_revision_and_missing_artifact_hash_fail_closed(tmp_path):
     assert "hash" in result.stderr.lower() or "manifest" in result.stderr.lower()
 
 
-def test_missing_each_required_lease_variable_fails_closed(tmp_path):
+def test_missing_or_fake_lease_cannot_launch(tmp_path):
     env_file, _, _, process_env = fixture(tmp_path)
-    for variable in ("RC_DEVICE", "RC_JOB_ID", "RC_TOKEN"):
+    for variable in ("RC_DEVICE", "RC_JOB_ID"):
         candidate = dict(process_env)
         candidate.pop(variable)
         result = run_check(env_file, candidate)
         assert result.returncode != 0
         assert variable in result.stderr
+
+    fake = dict(process_env)
+    fake["RC_JOB_ID"] = "invented"
+    marker = tmp_path / "launched"
+    env_file.write_text(env_file.read_text().replace("LAUNCH_COMMAND='printf launched'", f"LAUNCH_COMMAND='touch {marker}'"))
+    result = subprocess.run([str(RUNNER), "vllm-cpp", str(env_file)], cwd=ROOT,
+                            env=fake, text=True, capture_output=True)
+    assert result.returncode != 0
+    assert not marker.exists()
+    assert "active dgx:gpu0" in result.stderr
+
+
+def test_capture_runs_arms_serially_tears_down_and_sanitizes_provenance(tmp_path):
+    env_file, _, manifest, process_env = fixture(tmp_path)
+    events = tmp_path / "events"
+    state = tmp_path / "server.state"
+    server_log = tmp_path / "server.log"
+    lifecycle = tmp_path / "lifecycle.sh"
+    lifecycle.write_text(
+        "#!/bin/sh\nset -eu\na=$1; arm=$2; state=$3; events=$4; log=$5\n"
+        "case $a in start) test ! -e \"$state\"; echo \"$arm:start\" >>\"$events\"; "
+        "touch \"$state\"; printf 'safe\\nSECRET_TOKEN=hidden\\n' >\"$log\";; "
+        "status) test -e \"$state\";; stop) echo \"$arm:stop\" >>\"$events\"; rm -f \"$state\";; esac\n"
+    )
+    lifecycle.chmod(0o755)
+    clock = tmp_path / "clock.py"
+    clock.write_text(
+        "import json,pathlib,sys\n"
+        "o=pathlib.Path(sys.argv[sys.argv.index('--output')+1]); s=pathlib.Path(sys.argv[sys.argv.index('--summary')+1])\n"
+        "o.write_text('\\n'.join('{}' for _ in range(30))+'\\n')\n"
+        "s.write_text(json.dumps({'sm_clock_mhz':{'n':30}}))\n"
+    )
+    harness = tmp_path / "harness.py"
+    harness.write_text(
+        "import json,pathlib,sys\n"
+        "out=pathlib.Path(sys.argv[sys.argv.index('--output')+1])\n"
+        "x={'refusal_reason':None,'canonical_payload_hash':'payload','run_identity':'run',"
+        "'tokenizer_identity':'fixture@revision','samples':[{'refusal_reason':None,"
+        "'payload_hash':'sample','prompt_tokens':1,'prompt_token_fingerprint':'same'}],"
+        "'prompt_token_fingerprints':['same']}\n"
+        "out.write_text(json.dumps(x))\n"
+    )
+    gpu = tmp_path / "gpu-state"
+    gpu.write_text("#!/bin/sh\necho '0, Fake GPU, uuid, driver, 40, 10, 20, 100, 90'\n")
+    gpu.chmod(0o755)
+
+    def arm(name, engine, recipe=False):
+        path = tmp_path / f"{name}.env"
+        text = env_file.read_text().replace("ENGINE=vllm-cpp", f"ENGINE={engine}")
+        text = text.replace("START_COMMAND='false'", f"START_COMMAND='{lifecycle} start {name} {state} {events} {server_log}'")
+        text = text.replace("STOP_COMMAND='true'", f"STOP_COMMAND='{lifecycle} stop {name} {state} {events} {server_log}'")
+        text = text.replace("STATUS_COMMAND='false'", f"STATUS_COMMAND='{lifecycle} status {name} {state} {events} {server_log}'")
+        text = text.replace(f"SERVER_LOG_PATH={tmp_path / 'server.log'}", f"SERVER_LOG_PATH={server_log}")
+        text = text.replace("REDACTION_COMMAND=cat", "REDACTION_COMMAND='sed /SECRET/d'")
+        if recipe:
+            source = tmp_path / "recipe"
+            revision = make_repo(source)
+            text += f"RECIPE_SOURCE_DIR={source}\nEXPECTED_RECIPE_REVISION={revision}\n"
+        path.write_text(text)
+        return path
+
+    tf = arm("tensorfold", "tensorfold", recipe=True)
+    cpp = arm("vllm-cpp", "vllm-cpp")
+    cpp_artifact = tmp_path / "cpp-weights.bin"
+    cpp_artifact.write_bytes(b"different verified artifact")
+    cpp_manifest = tmp_path / "cpp-artifacts.sha256"
+    cpp_manifest.write_text(f"{hashlib.sha256(cpp_artifact.read_bytes()).hexdigest()}  {cpp_artifact.name}\n")
+    cpp.write_text(cpp.read_text().replace(f"ARTIFACT_MANIFEST={manifest}",
+                                           f"ARTIFACT_MANIFEST={cpp_manifest}"))
+    output = tmp_path / "evidence"
+    process_env.update(QWEN38_CLOCK_SAMPLER=str(clock), QWEN38_HARNESS=str(harness),
+                       QWEN38_GPU_STATE_COMMAND=str(gpu))
+    result = subprocess.run([str(RUNNER), "capture", str(tf), str(cpp), str(output)],
+                            cwd=ROOT, env=process_env, text=True, capture_output=True)
+    assert result.returncode == 0, result.stderr
+    run = next(output.iterdir())
+    assert events.read_text().splitlines() == ["tensorfold:start", "tensorfold:stop",
+                                               "vllm-cpp:start", "vllm-cpp:stop"]
+    assert not state.exists()
+    for name in ("tensorfold", "vllm-cpp"):
+        arm_out = run / name
+        assert json.loads((arm_out / "clocks-summary.json").read_text())["sm_clock_mhz"]["n"] >= 30
+        assert (arm_out / "gpu-state-before.csv").is_file()
+        assert (arm_out / "gpu-state-after.csv").is_file()
+        assert "SECRET" not in (arm_out / "server.log").read_text()
+        assert not (arm_out / f"{name}.env").exists()
+    tf_provenance = json.loads((run / "tensorfold/provenance.json").read_text())
+    cpp_provenance = json.loads((run / "vllm-cpp/provenance.json").read_text())
+    assert tf_provenance["recipe_revision"]
+    assert cpp_provenance["recipe_revision"] is None  # no state leaked from the first source
+    assert tf_provenance["artifact_identity"] != cpp_provenance["artifact_identity"]
+    assert tf_provenance["source_dirty"] is False
+    serialized = json.dumps([tf_provenance, cpp_provenance])
+    assert "SECRET_TOKEN" not in serialized and "START_COMMAND" not in serialized
+    comparison = json.loads((run / "comparison.json").read_text())
+    assert comparison["left_artifact"] == tf_provenance["artifact_identity"]
+    assert comparison["right_artifact"] == cpp_provenance["artifact_identity"]
+    assert comparison["verdict"] == "PROFILE_COMPARISON"
+    assert "ratio" not in comparison
+
+
+def test_suspicious_env_field_is_refused_before_launch(tmp_path):
+    env_file, _, _, process_env = fixture(tmp_path)
+    env_file.write_text(env_file.read_text() + "API_SECRET=do-not-serialize\n")
+    marker = tmp_path / "launched"
+    env_file.write_text(env_file.read_text().replace("LAUNCH_COMMAND='printf launched'", f"LAUNCH_COMMAND='touch {marker}'"))
+    result = subprocess.run([str(RUNNER), "vllm-cpp", str(env_file)], cwd=ROOT,
+                            env=process_env, text=True, capture_output=True)
+    assert result.returncode != 0
+    assert "suspicious" in result.stderr
+    assert not marker.exists()
 
 
 def test_capture_comparison_refuses_mismatched_token_fingerprints_and_emits_no_ratio(tmp_path):
@@ -137,6 +258,26 @@ def test_capture_comparison_refuses_mismatched_token_fingerprints_and_emits_no_r
     comparison = json.loads(out.read_text())
     assert comparison["verdict"] == "REFUSED"
     assert "ratio" not in comparison
+
+
+def test_unlike_manifest_identity_forces_profile_comparison_without_ratio(tmp_path):
+    sample = {
+        "refusal_reason": None, "canonical_payload_hash": "payload", "run_identity": "run",
+        "tokenizer_identity": "tok", "samples": [{"refusal_reason": None,
+        "payload_hash": "sample", "prompt_tokens": 1, "prompt_token_fingerprint": "same"}],
+        "prompt_token_fingerprints": ["same"],
+    }
+    left, right = tmp_path / "left.json", tmp_path / "right.json"
+    left.write_text(json.dumps(sample)); right.write_text(json.dumps(sample))
+    out = tmp_path / "comparison.json"
+    result = subprocess.run([str(RUNNER), "compare-results", str(left), str(right),
+                             "manifest-derived-a", "manifest-derived-b", str(out)],
+                            cwd=ROOT, text=True, capture_output=True)
+    assert result.returncode == 0, result.stderr
+    comparison = json.loads(out.read_text())
+    assert comparison["verdict"] == "PROFILE_COMPARISON"
+    assert "ratio" not in comparison
+    assert "manifest" in comparison["no_ratio_reason"]
 
 
 def test_capture_source_has_timestamped_evidence_and_harness_contract():
