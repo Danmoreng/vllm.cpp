@@ -22,9 +22,9 @@ Artifact hashes and launch environment files could not be created from measured
 bytes. Therefore no server was started and the executable correctness gate did
 not run. Serial decode, drafted decode, prefill and serving ladders, busy clock
 windows, memory capture, and same-tool profiles are all
-`NOT_RUN_PREREQUISITE`. Production vLLM remains the required denominator and is
-recorded as `BLOCKED`: no policy-authorized fitting safetensors artifact was
-present, and production vLLM cannot consume an absent GGUF.
+`NOT_RUN_PREREQUISITE`. Production vLLM remains the required named denominator
+and is recorded as `NOT_RUN`: this blocked discovery did not stage or inspect a
+runnable production-vLLM denominator.
 
 TensorFold's publisher rates remain **unverified publisher claims**. They are
 not local observations, a target derived from a local profile, or evidence for
@@ -48,14 +48,13 @@ scoped for weights that are absent.
 
 The execution-plan outcomes are explicit:
 
-- **Task 5:** `SKIPPED_NO_PROFILE` / `NO_PORT_DECISION`. Incremental QSA is not
-  implemented because Task 4 produced no profile proving repeated compressor
-  work material.
-- **Task 6:** `BLOCKED_NO_MTP_WEIGHTS`. The selected GGUF has no MTP head.
-- **Task 7:** `SYNTHESIS_NO_PRODUCT_OPTIMIZATION`. Synthesis still executes to
-  publish these outcomes, but there is no profile-justified product change to
-  retain. Long-context selection, PLE, prefill geometry, and copy drafting have
-  no measured bottleneck or correctness baseline.
+- **Task 5 / W2:** `NO_PORT_DECISION`. Incremental QSA is not implemented
+  because Task 4 produced no profile proving repeated compressor work material.
+- **Task 6 / W3:** `BLOCKED_NO_MTP_WEIGHTS`. The selected GGUF has no MTP head.
+- **W4-W5:** `SKIPPED_NO_PROFILE`. Long-context selection, PLE, and prefill
+  geometry have no measured bottleneck or correctness baseline.
+- **Task 7 / W6:** `SYNTHESIS_COMPLETED_NO_PRODUCT_OPTIMIZATION`. This record is
+  the completed synthesis; no profile-justified product change was retained.
 
 The campaign can resume measurement only after the runner prerequisites are
 available in the documented/configured staging scope. It must then rerun correctness

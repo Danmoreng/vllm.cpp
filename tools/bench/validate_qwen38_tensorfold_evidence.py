@@ -19,9 +19,9 @@ WORKLOADS = {"serial_decode", "drafted_decode", "prefill_ladder", "serving_ladde
 ENGINES = {"tensorfold", "vllm-cpp"}
 SEARCH_TERMS = ["mtp", "nextn", "draft", "eh_proj", "enorm", "hnorm"]
 TASK_OUTCOMES = {
-    "task_5": "SKIPPED_NO_PROFILE",
+    "task_5": "NO_PORT_DECISION",
     "task_6": "BLOCKED_NO_MTP_WEIGHTS",
-    "task_7": "SYNTHESIS_NO_PRODUCT_OPTIMIZATION",
+    "task_7": "SYNTHESIS_COMPLETED_NO_PRODUCT_OPTIMIZATION",
 }
 SHA256 = re.compile(r"[0-9a-f]{64}")
 RAW_UUID = re.compile(r"(?i)\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b")
@@ -275,8 +275,8 @@ def validate(directory: pathlib.Path) -> None:
         require(item == {"required": True, "present": False, "hash_manifest_present": False},
                 f"{engine} artifact state contradicts blocker")
     denominator = summary.get("production_vllm_denominator")
-    require(isinstance(denominator, dict) and denominator.get("status") == "BLOCKED",
-            "production vLLM must remain a named blocked denominator")
+    require(isinstance(denominator, dict) and denominator.get("status") == "NOT_RUN",
+            "production vLLM must remain a named NOT_RUN denominator")
     require(set(summary.get("workloads", {})) == WORKLOADS, "all workload dispositions are required")
     require(set(summary.get("profiles", {})) == ENGINES, "both profile dispositions are required")
     validate_mtp(summary, repo)

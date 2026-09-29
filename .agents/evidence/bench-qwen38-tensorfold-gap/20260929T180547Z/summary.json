@@ -37,8 +37,8 @@
   },
   "numbers_published": false,
   "production_vllm_denominator": {
-    "reason": "Required model bytes were not found in the two documented staging paths or bounded /workspace depth-3 name scan, so the runner artifact manifests could not be populated.",
-    "status": "BLOCKED"
+    "reason": "Blocked discovery did not stage or inspect a runnable production-vLLM denominator.",
+    "status": "NOT_RUN"
   },
   "profiles": {
     "tensorfold": "NOT_RUN_PREREQUISITE",
@@ -54,9 +54,9 @@
   "source_sha": "4c89728bc740ca2886def8f191d28a2a5f912c6d",
   "status": "BLOCKED_MISSING_ARTIFACTS",
   "task_outcomes": {
-    "task_5": "SKIPPED_NO_PROFILE",
+    "task_5": "NO_PORT_DECISION",
     "task_6": "BLOCKED_NO_MTP_WEIGHTS",
-    "task_7": "SYNTHESIS_NO_PRODUCT_OPTIMIZATION"
+    "task_7": "SYNTHESIS_COMPLETED_NO_PRODUCT_OPTIMIZATION"
   },
   "workloads": {
     "drafted_decode": "NOT_RUN_PREREQUISITE",
