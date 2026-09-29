@@ -51,14 +51,18 @@ scoped for weights that are absent.
 
 ## Follow-on disposition
 
-W2 through W6 are not justified by a Task 4 profile:
+The execution-plan outcomes are explicit:
 
-- incremental QSA and long-context selector work have no local profile premise;
-- native MTP is additionally blocked by missing GGUF MTP weights;
-- PLE, prefill geometry, and copy-draft work have no measured bottleneck or
-  correctness baseline.
+- **Task 5:** `SKIPPED_NO_PROFILE` / `NO_PORT_DECISION`. Incremental QSA is not
+  implemented because Task 4 produced no profile proving repeated compressor
+  work material.
+- **Task 6:** `BLOCKED_NO_MTP_WEIGHTS`. The selected GGUF has no MTP head.
+- **Task 7:** `SYNTHESIS_NO_PRODUCT_OPTIMIZATION`. Synthesis still executes to
+  publish these outcomes, but there is no profile-justified product change to
+  retain. Long-context selection, PLE, prefill geometry, and copy drafting have
+  no measured bottleneck or correctness baseline.
 
-The campaign can resume only after both exact artifacts and pinned TensorFold
+The campaign can resume measurement only after both exact artifacts and pinned TensorFold
 sources are staged through an authorized path. It must then rerun correctness
 before timing rather than reusing this blocker as benchmark evidence.
 

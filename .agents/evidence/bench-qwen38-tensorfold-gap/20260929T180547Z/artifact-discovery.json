@@ -1,5 +1,7 @@
 {
   "scan_scope": "leased /workspace, max depth 7; operator configuration checked for availability without recording values",
+  "scan_completed": true,
+  "scan_device": "dgx:gpu0",
   "expected_vllm_cpp_directories": [
     {"name": "qwen4exp-flash-next-iq1s", "present": false},
     {"name": "UD-IQ1_S", "present": false}
