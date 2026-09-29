@@ -326,19 +326,21 @@ def comparison_verdict(left: dict[str, Any], right: dict[str, Any]) -> dict[str,
         reply_text_equality = "unavailable"
 
     if reason:
-        return {"verdict": "refused", "refusal_reason": reason,
+        return {"verdict": "REFUSED", "refusal_reason": reason, "no_ratio_reason": reason,
                 "reply_text_token_equality": reply_text_equality}
 
     left_prompt = [sample.get("prompt_token_fingerprint") for sample in left_samples]
     right_prompt = [sample.get("prompt_token_fingerprint") for sample in right_samples]
     if any(not fingerprint for fingerprint in left_prompt + right_prompt):
-        return {"verdict": "refused",
-                "refusal_reason": "every sample requires a nonempty prompt token fingerprint",
+        no_ratio_reason = "prompt token fingerprints are unavailable for one or more samples"
+        return {"verdict": "PROFILE_COMPARISON", "refusal_reason": None,
+                "no_ratio_reason": no_ratio_reason,
                 "reply_text_token_equality": reply_text_equality}
     if left_prompt != right_prompt:
-        return {"verdict": "refused", "refusal_reason": "prompt token fingerprints differ",
+        reason = "prompt token fingerprints differ"
+        return {"verdict": "REFUSED", "refusal_reason": reason, "no_ratio_reason": reason,
                 "reply_text_token_equality": reply_text_equality}
-    return {"verdict": "MATCHED_INPUT", "refusal_reason": None,
+    return {"verdict": "MATCHED_INPUT", "refusal_reason": None, "no_ratio_reason": None,
             "reply_text_token_equality": reply_text_equality}
 
 class HTTPTransport:
