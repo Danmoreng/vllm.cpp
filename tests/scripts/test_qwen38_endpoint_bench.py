@@ -64,7 +64,7 @@ def test_workload_is_canonical_closed_loop_and_preserves_raw_repetitions():
     assert result["raw_repetitions"] == result["samples"]
     assert result["tokenizer_identity"] == transport.tokenizer_identity
     assert len(result["canonical_payload_hash"]) == 64
-    assert all(s["generated_token_fingerprint"] for s in result["samples"])
+    assert all(s["engine_generated_token_fingerprint"] for s in result["samples"])
     assert all(s["prompt_token_fingerprint"] for s in result["samples"])
     assert all(s["ttft_s"] == pytest.approx(0.01) for s in result["samples"])
     assert all(s["tpot_s"] == pytest.approx(0.01) for s in result["samples"])
@@ -124,13 +124,15 @@ def test_workload_promotes_sample_refusal_and_records_full_run_makespan(monkeypa
 
 def test_comparison_fails_closed_on_all_canonical_evidence():
     sample = {"refusal_reason": None, "payload_hash": "payload", "prompt_tokens": 7,
-              "prompt_token_fingerprint": "prompt", "generated_token_fingerprint": "generated"}
+              "prompt_token_fingerprint": "prompt", "reply_text_token_fingerprint": "reply"}
     base = {"refusal_reason": None, "canonical_payload_hash": "run-payload",
             "run_identity": "workload-shape",
             "tokenizer_identity": {"name": "tok", "revision": "1"},
             "samples": [sample], "prompt_token_fingerprints": ["prompt"],
-            "generated_token_fingerprints": ["generated"]}
-    assert comparison_verdict(base, json.loads(json.dumps(base)))["verdict"] == "MATCHED_INPUT"
+            "reply_text_token_fingerprints": ["reply"]}
+    matched = comparison_verdict(base, json.loads(json.dumps(base)))
+    assert matched["verdict"] == "MATCHED_INPUT"
+    assert matched["reply_text_token_equality"] == "equal"
     mutations = [
         ("top refusal", lambda x: x.update(refusal_reason="no")),
         ("sample refusal", lambda x: x["samples"][0].update(refusal_reason="no")),
@@ -219,7 +221,7 @@ def test_usage_without_token_ids_keeps_valid_absolute_profile_measurements():
     assert result["request_rate"] is not None
     assert result["token_throughput"] is not None
     assert all(s["tpot_s"] == pytest.approx(.1) for s in result["samples"])
-    assert all(s["generated_token_fingerprint"] is None for s in result["samples"])
+    assert all(s["engine_generated_token_fingerprint"] is None for s in result["samples"])
     assert comparison_verdict(result, result)["verdict"] == "PROFILE_COMPARISON"
 
 
@@ -273,7 +275,7 @@ def test_tensorfold_terminal_fixture_parses_tokens_telemetry_and_terminal_e2e(mo
     assert response["generated_tokens"] == 3
     assert response["terminal_token_ids"] == [101, 102, 103]
     tensorfold_sample = _sample(response, 10.)
-    assert tensorfold_sample["generated_token_fingerprint"]
+    assert tensorfold_sample["engine_generated_token_fingerprint"]
     assert tensorfold_sample["prompt_token_fingerprint"] is None
     assert response["token_sha"] == "pinned-sha"
     assert response["cache"] == {"cached": 5}
@@ -304,22 +306,35 @@ def test_vllm_cpp_tokenize_fixture_matches_tensorfold_token_evidence(monkeypatch
     assert response["terminal_token_ids"] is None
     evidence = transport.enrich_evidence(_sample(response, 10.),
                                          {"model": "m", "prompt": "input"})
-    assert evidence["generated_token_ids"] == [101, 102, 103]
+    assert evidence["reply_text_token_ids"] == [101, 102, 103]
     assert evidence["prompt_token_ids"] == [101, 102, 103]
     assert requests[-1].full_url == "http://host:8000/tokenize"
     assert json.loads(requests[-1].data) == {"prompt": "input", "add_special_tokens": False}
 
     vllm_sample = _sample(response, 10.)
     vllm_sample.update(evidence)
-    vllm_sample["generated_token_fingerprint"] = _sample(
+    vllm_sample["reply_text_token_fingerprint"] = _sample(
         {"events": [], "prompt_tokens": 0, "generated_tokens": 3,
-         "terminal_token_ids": evidence["generated_token_ids"], "e2e_s": 0}, 0
-    )["generated_token_fingerprint"]
+         "terminal_token_ids": evidence["reply_text_token_ids"], "e2e_s": 0}, 0
+    )["engine_generated_token_fingerprint"]
     tensorfold_sample = _sample({"events": [{"offset_s": .1, "text": "same output"}],
                                  "prompt_tokens": 4, "generated_tokens": 3,
                                  "terminal_token_ids": [101, 102, 103], "e2e_s": .2}, 10.)
-    assert vllm_sample["generated_token_fingerprint"] == tensorfold_sample["generated_token_fingerprint"]
-    assert tensorfold_sample["prompt_token_fingerprint"] is None
+    assert vllm_sample["engine_generated_token_fingerprint"] is None
+    assert vllm_sample["reply_text_token_fingerprint"]
+    assert tensorfold_sample["engine_generated_token_fingerprint"]
+    assert tensorfold_sample.get("reply_text_token_fingerprint") is None
+
+    left = {"refusal_reason": None, "canonical_payload_hash": "p", "run_identity": "r",
+            "tokenizer_identity": "tok", "samples": [{"payload_hash": "s", "prompt_tokens": 4}],
+            "prompt_token_fingerprints": [None],
+            "reply_text_token_fingerprints": [vllm_sample["reply_text_token_fingerprint"]]}
+    right = {**left, "samples": [{"payload_hash": "s", "prompt_tokens": 4}],
+             "reply_text_token_fingerprints": [None],
+             "engine_generated_token_fingerprints": [tensorfold_sample["engine_generated_token_fingerprint"]]}
+    verdict = comparison_verdict(left, right)
+    assert verdict["reply_text_token_equality"] == "unavailable"
+    assert verdict["verdict"] == "PROFILE_COMPARISON"
 
 
 def test_vllm_cpp_accepts_explicit_safe_tokenize_url():
@@ -349,7 +364,7 @@ def test_deferred_evidence_does_not_affect_generation_timing_or_pacing(monkeypat
         def enrich_evidence(self, sample, payload):
             self.evidence_starts.append(clock[0])
             clock[0] += 100
-            return {"generated_token_ids": [2], "prompt_token_ids": [1]}
+            return {"reply_text_token_ids": [2], "prompt_token_ids": [1]}
 
     transport = DeferredTransport()
     result = run_workload({"endpoint": "x", "model": "m", "corpus": [{"text": "p"}],
@@ -365,7 +380,7 @@ def test_vllm_cpp_chat_prompt_evidence_fails_closed():
     transport._tokenize = lambda text: [1, 2]
     evidence = transport.enrich_evidence({"generated_text": "answer"},
                                          {"messages": [{"role": "user", "content": "hi"}]})
-    assert evidence["generated_token_ids"] == [1, 2]
+    assert evidence["reply_text_token_ids"] == [1, 2]
     assert "prompt_token_ids" not in evidence
     assert "chat prompt fingerprint unavailable" in evidence["evidence_refusal_reason"]
 

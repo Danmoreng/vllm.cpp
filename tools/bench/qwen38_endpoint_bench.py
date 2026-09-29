@@ -118,7 +118,7 @@ def summarize(samples: list[dict[str, Any]], workload_makespan_s: float | None =
 def _sample(response: dict[str, Any], started: float) -> dict[str, Any]:
     events = response.get("events", [])
     offsets = [float(event["offset_s"]) for event in events]
-    generated_token_ids = [token for event in events for token in event.get("token_ids", [])]
+    engine_generated_token_ids = [token for event in events for token in event.get("token_ids", [])]
     texts = [str(event.get("text", "")) for event in events]
     generated_value = response.get("generated_tokens")
     generated = int(generated_value) if generated_value is not None else None
@@ -138,8 +138,8 @@ def _sample(response: dict[str, Any], started: float) -> dict[str, Any]:
     tpot = ((e2e - ttft) / (generated - 1)) if ttft is not None and generated is not None and generated > 1 else None
     terminal_token_ids = response.get("terminal_token_ids")
     if terminal_token_ids is not None:
-        generated_token_ids = [int(token) for token in terminal_token_ids]
-    generated_fingerprint = _hash(generated_token_ids) if generated_token_ids else None
+        engine_generated_token_ids = [int(token) for token in terminal_token_ids]
+    generated_fingerprint = _hash(engine_generated_token_ids) if engine_generated_token_ids else None
     prompt_token_ids = response.get("prompt_token_ids")
     prompt_fingerprint = _hash(prompt_token_ids) if prompt_token_ids is not None else None
     refusal = response.get("refusal_reason")
@@ -156,8 +156,8 @@ def _sample(response: dict[str, Any], started: float) -> dict[str, Any]:
         "itl_s": itl,
         "itl_unavailable_reason": itl_reason,
         "e2e_s": e2e,
-        "generated_token_ids": generated_token_ids,
-        "generated_token_fingerprint": generated_fingerprint,
+        "engine_generated_token_ids": engine_generated_token_ids,
+        "engine_generated_token_fingerprint": generated_fingerprint,
         "prompt_token_ids": prompt_token_ids,
         "prompt_token_fingerprint": prompt_fingerprint,
         "generated_text": "".join(texts),
@@ -194,7 +194,8 @@ def run_workload(config: dict[str, Any], transport: Callable[[dict[str, Any]], d
         except Exception as error:  # preserve failed repetitions too
             sample = {"prompt_tokens": None, "generated_tokens": None, "ttft_s": None,
                       "tpot_s": None, "itl_s": [], "e2e_s": time.perf_counter() - started,
-                      "generated_token_ids": [], "generated_token_fingerprint": None,
+                      "engine_generated_token_ids": [], "engine_generated_token_fingerprint": None,
+                      "reply_text_token_ids": None, "reply_text_token_fingerprint": None,
                       "prompt_token_ids": None, "prompt_token_fingerprint": None,
                       "generated_text": "",
                       "cache": None, "draft": None, "memory_samples": [],
@@ -218,9 +219,11 @@ def run_workload(config: dict[str, Any], transport: Callable[[dict[str, Any]], d
             try:
                 evidence = transport.enrich_evidence(sample, payload)
                 sample.update(evidence)
-                generated_ids = sample.get("generated_token_ids")
+                engine_ids = sample.get("engine_generated_token_ids")
+                reply_ids = sample.get("reply_text_token_ids")
                 prompt_ids = sample.get("prompt_token_ids")
-                sample["generated_token_fingerprint"] = _hash(generated_ids) if generated_ids else None
+                sample["engine_generated_token_fingerprint"] = _hash(engine_ids) if engine_ids else None
+                sample["reply_text_token_fingerprint"] = _hash(reply_ids) if reply_ids is not None else None
                 sample["prompt_token_fingerprint"] = _hash(prompt_ids) if prompt_ids is not None else None
             except Exception as error:
                 sample["evidence_refusal_reason"] = f"evidence error: {error}"
@@ -257,14 +260,15 @@ def run_workload(config: dict[str, Any], transport: Callable[[dict[str, Any]], d
         "run_identity": run_identity,
         "tokenizer_identity": tokenizer_identity,
         "prompt_token_fingerprints": [s.get("prompt_token_fingerprint") for s in samples],
-        "generated_token_fingerprints": [s.get("generated_token_fingerprint") for s in samples],
+        "engine_generated_token_fingerprints": [s.get("engine_generated_token_fingerprint") for s in samples],
+        "reply_text_token_fingerprints": [s.get("reply_text_token_fingerprint") for s in samples],
         "samples": samples,
     })
     return aggregate
 
 
 def comparison_verdict(left: dict[str, Any], right: dict[str, Any]) -> dict[str, Any]:
-    """Classify input comparability and report generated-token equality separately."""
+    """Classify input comparability and compare only provenance-equivalent reply evidence."""
     reason = None
     left_samples, right_samples = left.get("samples"), right.get("samples")
     if left.get("refusal_reason") or right.get("refusal_reason"):
@@ -297,28 +301,28 @@ def comparison_verdict(left: dict[str, Any], right: dict[str, Any]) -> dict[str,
                 reason = "per-sample prompt token fingerprints differ"
                 break
 
-    left_generated = left.get("generated_token_fingerprints")
-    right_generated = right.get("generated_token_fingerprints")
-    if left_generated and right_generated and all(left_generated + right_generated):
-        generated_equality = "equal" if left_generated == right_generated else "different"
+    left_reply = left.get("reply_text_token_fingerprints")
+    right_reply = right.get("reply_text_token_fingerprints")
+    if left_reply and right_reply and all(left_reply + right_reply):
+        reply_text_equality = "equal" if left_reply == right_reply else "different"
     else:
-        generated_equality = "unavailable"
+        reply_text_equality = "unavailable"
 
     if reason:
         return {"verdict": "refused", "refusal_reason": reason,
-                "generated_token_equality": generated_equality}
+                "reply_text_token_equality": reply_text_equality}
 
     left_prompt = left.get("prompt_token_fingerprints")
     right_prompt = right.get("prompt_token_fingerprints")
     if not left_prompt or not right_prompt or any(not x for x in left_prompt + right_prompt):
         return {"verdict": "PROFILE_COMPARISON",
                 "refusal_reason": "prompt token fingerprints are unavailable",
-                "generated_token_equality": generated_equality}
+                "reply_text_token_equality": reply_text_equality}
     if left_prompt != right_prompt:
         return {"verdict": "refused", "refusal_reason": "prompt token fingerprints differ",
-                "generated_token_equality": generated_equality}
+                "reply_text_token_equality": reply_text_equality}
     return {"verdict": "MATCHED_INPUT", "refusal_reason": None,
-            "generated_token_equality": generated_equality}
+            "reply_text_token_equality": reply_text_equality}
 
 class HTTPTransport:
     """UTF-8 OpenAI streaming transport with explicit endpoint semantics."""
@@ -420,7 +424,7 @@ class HTTPTransport:
     def enrich_evidence(self, sample: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
         if self.adapter != "vllm-cpp":
             return {}
-        evidence = {"generated_token_ids": self._tokenize(sample["generated_text"])}
+        evidence = {"reply_text_token_ids": self._tokenize(sample["generated_text"])}
         if "prompt" in payload:
             evidence["prompt_token_ids"] = self._tokenize(payload["prompt"])
         else:
