@@ -52,7 +52,12 @@ def fixture(tmp_path: Path):
         "MIN_FREE_MEMORY_KIB=1\n"
     )
     rc = tmp_path / "rc"
-    rc.write_text("#!/bin/sh\nprintf '%s\\n' '[{\"id\":\"lease-1\",\"device\":\"dgx:gpu0\",\"state\":\"running\"}]'\n")
+    rc.write_text(
+        "#!/bin/sh\nset -eu\n"
+        "if test -n \"${RC_CALLS_FILE:-}\"; then n=$(cat \"$RC_CALLS_FILE\" 2>/dev/null || echo 0); n=$((n+1)); echo $n >\"$RC_CALLS_FILE\"; "
+        "if test -n \"${RC_REVOKE_AFTER:-}\" && test $n -gt \"$RC_REVOKE_AFTER\"; then echo '[]'; exit 0; fi; fi\n"
+        "printf '%s\\n' '[{\"id\":\"lease-1\",\"device\":\"dgx:gpu0\",\"state\":\"running\"}]'\n"
+    )
     rc.chmod(0o755)
     process_env = {
         **os.environ,
@@ -94,6 +99,17 @@ def test_check_accepts_clean_exact_revision_and_does_not_launch(tmp_path):
     assert result.returncode == 0, result.stderr
     assert "launched" not in result.stdout
     assert "check PASS" in result.stdout
+
+
+def test_default_clock_sampler_runs_as_module_without_inherited_pythonpath(tmp_path):
+    env_file, _, _, process_env = fixture(tmp_path)
+    process_env.pop("QWEN38_CLOCK_SAMPLER")
+    process_env["PYTHONPATH"] = ""
+    result = run_check(env_file, process_env)
+    assert result.returncode == 0, result.stderr
+    source = RUNNER.read_text()
+    assert "python3 -m tools.bench.gpu_clock_state" in source
+    assert "python3 -m py_compile" not in source
 
 
 def test_check_requires_ready_endpoint(tmp_path):
@@ -162,6 +178,7 @@ def test_capture_runs_arms_serially_tears_down_and_sanitizes_provenance(tmp_path
     clock_compare = tmp_path / "clock-compare-called"
     clock.write_text(
         "import json,os,pathlib,sys\n"
+        "if sys.argv[1]=='--help': raise SystemExit(0)\n"
         f"marker=pathlib.Path({str(clock_compare)!r})\n"
         "if sys.argv[1]=='compare':\n"
         " marker.write_text('called'); print(json.dumps({'reasons':['forced']})); raise SystemExit(1 if os.environ.get('FAIL_CLOCK_COMPARE') else 0)\n"
@@ -235,6 +252,8 @@ def test_capture_runs_arms_serially_tears_down_and_sanitizes_provenance(tmp_path
     assert cpp_provenance["recipe_revision"] is None  # no state leaked from the first source
     assert tf_provenance["artifact_identity"] != cpp_provenance["artifact_identity"]
     assert tf_provenance["source_dirty"] is False
+    assert tf_provenance["runtime"]["lease_fingerprint"] == cpp_provenance["runtime"]["lease_fingerprint"]
+    assert len(tf_provenance["runtime"]["lease_fingerprint"]) == 64
     serialized = json.dumps([tf_provenance, cpp_provenance])
     assert "SECRET_TOKEN" not in serialized and "START_COMMAND" not in serialized
     assert "SECRET_TOKEN" not in "".join(p.read_text(errors="ignore") for p in run.rglob("*") if p.is_file())
@@ -249,10 +268,38 @@ def test_capture_runs_arms_serially_tears_down_and_sanitizes_provenance(tmp_path
     failed = subprocess.run([str(RUNNER), "capture", str(tf), str(cpp), str(failed_output)],
                             cwd=ROOT, env=failed_env, text=True, capture_output=True)
     assert failed.returncode != 0
-    failed_run = next(failed_output.iterdir())
-    assert (failed_run / "clock-comparison.json").is_file()
-    assert not (failed_run / "comparison.json").exists()
+    assert not failed_output.exists() or not any(failed_output.iterdir())
     assert "clock gate refused" in failed.stderr
+
+    redaction_output = tmp_path / "redaction-failed-evidence"
+    raw_parent = tmp_path / "raw-tmp"
+    raw_parent.mkdir()
+    bad_tf = tmp_path / "bad-redactor-tf.env"
+    bad_cpp = tmp_path / "bad-redactor-cpp.env"
+    bad_tf.write_text(tf.read_text().replace("REDACTION_COMMAND='sed /SECRET/d'", "REDACTION_COMMAND=false"))
+    bad_cpp.write_text(cpp.read_text().replace("REDACTION_COMMAND='sed /SECRET/d'", "REDACTION_COMMAND=false"))
+    redaction_failed = subprocess.run(
+        [str(RUNNER), "capture", str(bad_tf), str(bad_cpp), str(redaction_output)],
+        cwd=ROOT, env=dict(process_env, TMPDIR=str(raw_parent)), text=True, capture_output=True,
+    )
+    assert redaction_failed.returncode != 0
+    assert not redaction_output.exists() or not any(redaction_output.iterdir())
+    assert not list(raw_parent.iterdir())
+    assert "SECRET_TOKEN" not in "".join(
+        p.read_text(errors="ignore") for root in (redaction_output, raw_parent)
+        if root.exists() for p in root.rglob("*") if p.is_file()
+    )
+
+    revoked_output = tmp_path / "revoked-evidence"
+    calls = tmp_path / "rc-calls"
+    revoked = subprocess.run(
+        [str(RUNNER), "capture", str(tf), str(cpp), str(revoked_output)], cwd=ROOT,
+        env=dict(process_env, RC_CALLS_FILE=str(calls), RC_REVOKE_AFTER="5"),
+        text=True, capture_output=True,
+    )
+    assert revoked.returncode != 0
+    assert "active dgx:gpu0" in revoked.stderr
+    assert not revoked_output.exists() or not any(revoked_output.iterdir())
 
 
 def test_suspicious_env_field_is_refused_before_launch(tmp_path):
@@ -281,7 +328,7 @@ def test_capture_refuses_preexisting_server_without_stopping_it(tmp_path):
     source = RUNNER.read_text()
     refusal = 'was already running; capture will not attach or stop it'
     assert refusal in source
-    assert source.index(refusal) < source.index('run_redacted "$out/server-start.log"')
+    assert source.index(refusal) < source.index('run_redacted "$arm_out/server-start.log"')
 
 
 def test_clock_compare_failure_aborts_final_verdict(tmp_path):
@@ -289,6 +336,14 @@ def test_clock_compare_failure_aborts_final_verdict(tmp_path):
     assert 'compare --ours "$out/tensorfold/clocks-summary.json"' in source
     assert '|| fail "cross-arm clock gate refused comparison"' in source
     assert source.index('compare --ours "$out/tensorfold/clocks-summary.json"') < source.index('compare_results "$out/tensorfold/result.json"')
+
+
+def test_lease_revocation_is_rechecked_before_final_verdict(tmp_path):
+    source = RUNNER.read_text()
+    final = source.index('run_redacted "$out/clock-comparison.json"')
+    assert source.rfind("verify_lease", 0, final) > source.index('capture_arm "$cpp"')
+    assert source.index("verify_lease", final) < source.index('compare_results "$out/tensorfold/result.json"')
+    assert "lease_fingerprint" in source
 
 
 def test_capture_comparison_refuses_mismatched_token_fingerprints_and_emits_no_ratio(tmp_path):
