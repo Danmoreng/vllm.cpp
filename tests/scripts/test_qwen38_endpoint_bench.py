@@ -132,6 +132,7 @@ def test_comparison_fails_closed_on_all_canonical_evidence():
             "reply_text_token_fingerprints": ["reply"]}
     matched = comparison_verdict(base, json.loads(json.dumps(base)))
     assert matched["verdict"] == "MATCHED_INPUT"
+    assert matched["no_ratio_reason"] is None
     assert matched["reply_text_token_equality"] == "equal"
     mutations = [
         ("top refusal", lambda x: x.update(refusal_reason="no")),
@@ -145,7 +146,7 @@ def test_comparison_fails_closed_on_all_canonical_evidence():
     for _, mutate in mutations:
         right = json.loads(json.dumps(base))
         mutate(right)
-        assert comparison_verdict(base, right)["verdict"] == "refused"
+        assert comparison_verdict(base, right)["verdict"] == "REFUSED"
 
 
 def test_comparison_refuses_fabricated_aggregate_evidence():
@@ -168,7 +169,7 @@ def test_comparison_refuses_fabricated_aggregate_evidence():
         right = json.loads(json.dumps(base))
         mutate(right)
         verdict = comparison_verdict(base, right)
-        assert verdict["verdict"] == "refused"
+        assert verdict["verdict"] == "REFUSED"
         assert "fingerprint" in verdict["refusal_reason"]
 
 
@@ -196,7 +197,7 @@ def test_canonical_hashes_exclude_runtime_model_names_but_include_semantic_extra
         extra_right = run_workload({**config, "model": "other"}, SemanticFake(values[1]))
         assert extra_left["canonical_payload_hash"] != extra_right["canonical_payload_hash"]
         assert extra_left["samples"][0]["payload_hash"] != extra_right["samples"][0]["payload_hash"]
-        assert comparison_verdict(extra_left, extra_right)["verdict"] == "refused"
+        assert comparison_verdict(extra_left, extra_right)["verdict"] == "REFUSED"
 
     tf = HTTPTransport("x", "tok", adapter="tensorfold", draft_mode="off")
     semantic = tf.semantic_payload({"model": "alias", "prompt": "same"})
@@ -217,7 +218,7 @@ def test_workload_refuses_missing_or_comparison_different_tokenizer_identity():
     different_transport.tokenizer_identity = {"name": "other", "revision": "abc123"}
     right = run_workload(config, different_transport)
     verdict = comparison_verdict(left, right)
-    assert verdict["verdict"] == "refused"
+    assert verdict["verdict"] == "REFUSED"
     assert "tokenizer" in verdict["refusal_reason"]
 
 
@@ -246,7 +247,10 @@ def test_usage_without_token_ids_keeps_valid_absolute_profile_measurements():
     assert result["token_throughput"] is not None
     assert all(s["tpot_s"] == pytest.approx(.1) for s in result["samples"])
     assert all(s["engine_generated_token_fingerprint"] is None for s in result["samples"])
-    assert comparison_verdict(result, result)["verdict"] == "refused"
+    verdict = comparison_verdict(result, result)
+    assert verdict["verdict"] == "PROFILE_COMPARISON"
+    assert "prompt token fingerprints" in verdict["no_ratio_reason"]
+    assert verdict["refusal_reason"] is None
 
 
 def test_comparison_refuses_different_workload_shape():
@@ -258,7 +262,7 @@ def test_comparison_refuses_different_workload_shape():
                     {"draft": "off", "concurrency": 1, "waves": 6}):
         candidate = run_workload({**base, **changed}, FakeTransport())
         verdict = comparison_verdict(reference, candidate)
-        assert verdict["verdict"] == "refused"
+        assert verdict["verdict"] == "REFUSED"
         assert "run identities" in verdict["refusal_reason"]
 
 
@@ -350,15 +354,26 @@ def test_vllm_cpp_tokenize_fixture_matches_tensorfold_token_evidence(monkeypatch
     assert tensorfold_sample.get("reply_text_token_fingerprint") is None
 
     left = {"refusal_reason": None, "canonical_payload_hash": "p", "run_identity": "r",
-            "tokenizer_identity": "tok", "samples": [{"payload_hash": "s", "prompt_tokens": 4}],
+            "tokenizer_identity": "tok",
+            "samples": [{"payload_hash": "s", "prompt_tokens": 4,
+                         "prompt_token_fingerprint": None,
+                         "reply_text_token_fingerprint": vllm_sample["reply_text_token_fingerprint"],
+                         "engine_generated_token_fingerprint": None}],
             "prompt_token_fingerprints": [None],
-            "reply_text_token_fingerprints": [vllm_sample["reply_text_token_fingerprint"]]}
-    right = {**left, "samples": [{"payload_hash": "s", "prompt_tokens": 4}],
+            "reply_text_token_fingerprints": [vllm_sample["reply_text_token_fingerprint"]],
+            "engine_generated_token_fingerprints": [None]}
+    right = {**left,
+             "samples": [{"payload_hash": "s", "prompt_tokens": 4,
+                          "prompt_token_fingerprint": None,
+                          "reply_text_token_fingerprint": None,
+                          "engine_generated_token_fingerprint": tensorfold_sample["engine_generated_token_fingerprint"]}],
              "reply_text_token_fingerprints": [None],
              "engine_generated_token_fingerprints": [tensorfold_sample["engine_generated_token_fingerprint"]]}
     verdict = comparison_verdict(left, right)
     assert verdict["reply_text_token_equality"] == "unavailable"
-    assert verdict["verdict"] == "refused"
+    assert verdict["verdict"] == "PROFILE_COMPARISON"
+    assert "prompt token fingerprints" in verdict["no_ratio_reason"]
+    assert verdict["refusal_reason"] is None
 
 
 def test_vllm_cpp_accepts_explicit_safe_tokenize_url():
