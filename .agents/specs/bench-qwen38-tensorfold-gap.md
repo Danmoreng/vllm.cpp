@@ -3,7 +3,7 @@
 | Field | Value |
 |---|---|
 | Issue | `ISSUE-LOCAL-01M3PWSWVEQ5J1GABVEPFX9HQK` |
-| Ownership | `_owed` issue `ISSUE-LOCAL-01M3PWSWVEQ5J1GABVEPFX9HQK`; W0 creates and atomically adopts `BENCH-QWEN38-TENSORFOLD-GAP` |
+| Ownership | `BENCH-QWEN38-TENSORFOLD-GAP` owns `ISSUE-LOCAL-01M3PWSWVEQ5J1GABVEPFX9HQK` |
 | Subject | vllm.cpp `qwen4_exp` GGUF path, initially `unsloth/Qwen3.8-Flash-Next-GGUF` UD-IQ1_S; TensorFold `qwen4_exp` CUDA path on `Vontra/Qwen3.8-Flash-Next-MLX-4bit-MTP` |
 | Host | `dgx:gpu0`, one GB10 with 128 GB unified memory, through an `rc` lease |
 | Branch | `row/BENCH-QWEN38-TENSORFOLD-GAP`, base `d15b1cc095694df69d8014ea6597582882e1bc1c` |
@@ -20,7 +20,7 @@ of the measured gap, record that result and scope a separate arm.
 
 The campaign covers:
 
-- a pinned TensorFold oracle and a pinned MiaAI deployment recipe;
+- a pinned TensorFold comparator and a pinned MiaAI deployment recipe;
 - one harness and one corpus for both servers;
 - correctness checks before performance ratios;
 - separate prefill, serial decode, drafted decode, and concurrency results;
@@ -84,11 +84,9 @@ multimodal behavior.
 
 TensorFold remains an external implementation and performance comparator. It
 is not a secondary correctness oracle and therefore does not enter the
-`AGENTS.md` secondary-oracle registry. W0 adds
-`.agents/oracles/tensorfold.md` as a pin/scope record only if the existing oracle
-checker accepts non-correctness comparators there; otherwise W0 adds a dedicated
-`.agents/comparators/tensorfold.md` record and checker support with a
-red-before/green-after test. No policy wording may imply that TensorFold supplies
+`AGENTS.md` secondary-oracle registry. W0 uses the dedicated `.agents/comparators/tensorfold.md` record because the
+existing oracle registry admits only correctness oracles. The comparator checker
+pins both repositories and requires the explicit `not-an-oracle` classification. No policy wording may imply that TensorFold supplies
 correct output.
 
 Pin these two independent objects:
@@ -99,7 +97,7 @@ Pin these two independent objects:
   `856bb6be4b58ce6a6727e6d071fb1c52f3f80e6e`.
 
 The first object owns the CUDA family implementation. The second owns the eight
-runtime patches, image recipe, flags, and publisher claims. The oracle record
+runtime patches, image recipe, flags, and publisher claims. The comparator record
 must name both because neither object alone reconstructs the reported engine.
 
 TensorFold may answer:
@@ -329,12 +327,9 @@ that memory layout or lifecycle matches.
 
 ### W0 — Record and harness
 
-- add a TensorFold comparator pin/scope record without admitting it as a
-  secondary correctness oracle; use `.agents/oracles/tensorfold.md` only if the
-  checker supports that distinction, otherwise add a dedicated comparator
-  record surface and checker with red-before/green-after evidence;
-- create `BENCH-QWEN38-TENSORFOLD-GAP`, atomically move the `_owed` issue into
-  the row, set its `Row:` field, and remove the `_owed` reference from this spec;
+- add the dedicated TensorFold comparator pin/scope record without admitting it
+  as a secondary correctness oracle;
+- create `BENCH-QWEN38-TENSORFOLD-GAP` and atomically adopt its issue;
 - add the shared endpoint harness and unit tests for corpus identity, token-ID
   fingerprints, refusal verdicts, metrics, and raw-result serialization;
 - add launch manifests for each server without embedding secrets or host paths.
@@ -508,7 +503,6 @@ approval to implement.
 
 ## Owed
 
-- `ISSUE-LOCAL-01M3PWSWVEQ5J1GABVEPFX9HQK` owns W0 through W6 until mirrored.
 - W0 owes the TensorFold comparator record, row adoption, harness, and
   fake-server tests, plus checker evidence if a new comparator surface is
   required.
