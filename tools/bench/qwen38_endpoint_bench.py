@@ -97,7 +97,7 @@ def summarize(samples: list[dict[str, Any]], workload_makespan_s: float | None =
     generated_values = [s.get("generated_tokens") for s in successful]
     generated = sum(int(x) for x in generated_values if x is not None)
     accounting_valid = len(successful) == len(samples) and all(x is not None for x in generated_values)
-    itls = [x for s in successful for x in s.get("itl_s", [])]
+    itls = [x for s in successful for x in (s.get("itl_s") or [])]
     return {
         "request_count": len(samples),
         "successful_requests": len(successful),
@@ -123,8 +123,18 @@ def _sample(response: dict[str, Any], started: float) -> dict[str, Any]:
     generated = int(generated_value) if generated_value is not None else None
     e2e = float(response.get("e2e_s", offsets[-1] if offsets else time.perf_counter() - started))
     ttft = offsets[0] if offsets else None
-    itl = [b - a for a, b in zip(offsets, offsets[1:])]
+    event_token_counts = [len(event.get("token_ids", [])) for event in events]
+    timed_token_events = bool(events) and all(count == 1 for count in event_token_counts)
+    if timed_token_events:
+        itl: list[float] | None = [b - a for a, b in zip(offsets, offsets[1:])]
+        itl_reason = None
+    else:
+        itl = None
+        itl_reason = "event-to-token cardinality is not provably one"
     tpot = ((e2e - ttft) / (generated - 1)) if ttft is not None and generated is not None and generated > 1 else None
+    terminal_token_ids = response.get("terminal_token_ids")
+    if terminal_token_ids is not None:
+        token_ids = [int(token) for token in terminal_token_ids]
     fingerprint = _hash(token_ids) if token_ids else None
     refusal = response.get("refusal_reason")
     if generated is None and not refusal:
@@ -138,12 +148,17 @@ def _sample(response: dict[str, Any], started: float) -> dict[str, Any]:
         "ttft_s": ttft,
         "tpot_s": tpot,
         "itl_s": itl,
+        "itl_unavailable_reason": itl_reason,
         "e2e_s": e2e,
         "token_ids": token_ids,
         "token_fingerprint": fingerprint,
         "generated_text": "".join(texts),
         "cache": response.get("cache"),
         "draft": response.get("draft"),
+        "prefill": response.get("prefill"),
+        "decode": response.get("decode"),
+        "token_sha": response.get("token_sha"),
+        "tensorfold": response.get("tensorfold"),
         "memory_samples": response.get("memory_samples", []),
         "refusal_reason": refusal,
     }
@@ -194,9 +209,11 @@ def run_workload(config: dict[str, Any], transport: Callable[[dict[str, Any]], d
         aggregate["token_throughput"] = None
     semantic_payloads = [_semantic_payload(payload) for payload in payloads]
     canonical_payload_hash = _hash(semantic_payloads)
+    semantic_options = getattr(transport, "semantic_options", {})
+    effective_draft_mode = semantic_options.get("draft_mode", config.get("draft", "off"))
     run_identity = _hash({
         "canonical_payload_hash": canonical_payload_hash,
-        "draft_mode": config.get("draft", "off"),
+        "draft_mode": effective_draft_mode,
         "concurrency": concurrency,
         "waves": waves,
     })
@@ -205,7 +222,7 @@ def run_workload(config: dict[str, Any], transport: Callable[[dict[str, Any]], d
         "refusal_reason": refusal_reason,
         "endpoint": config["endpoint"],
         "model": config["model"],
-        "draft_mode": config.get("draft", "off"),
+        "draft_mode": effective_draft_mode,
         "concurrency": concurrency,
         "waves": waves,
         "canonical_payload_hash": canonical_payload_hash,
@@ -257,40 +274,70 @@ def comparison_verdict(left: dict[str, Any], right: dict[str, Any]) -> dict[str,
 
 
 class HTTPTransport:
-    """Minimal UTF-8 OpenAI-compatible streaming transport."""
+    """UTF-8 OpenAI streaming transport with explicit endpoint semantics."""
 
     def __init__(self, endpoint: str, tokenizer_identity: Any,
-                 extra_json: dict[str, Any] | None = None):
+                 extra_json: dict[str, Any] | None = None, *, adapter: str = "generic",
+                 draft_mode: str = "off"):
+        if adapter not in ("generic", "tensorfold"):
+            raise ValueError(f"unknown endpoint adapter: {adapter}")
         self.endpoint = endpoint
         self.tokenizer_identity = tokenizer_identity
+        self.adapter = adapter
+        self.draft_mode = draft_mode
         self.extra_json = dict(extra_json or {})
+        semantic_fields = {"draft", "return_token_ids"} if adapter == "tensorfold" else set()
+        overlap = semantic_fields & self.extra_json.keys()
+        if overlap:
+            raise ValueError(f"endpoint extra JSON cannot override adapter semantic fields: {sorted(overlap)}")
+        self.semantic_options = {"draft_mode": draft_mode, "token_evidence": adapter == "tensorfold"}
 
     def prepare_payload(self, payload: dict[str, Any]) -> dict[str, Any]:
-        overlap = self.extra_json.keys() & payload.keys()
+        adapter_fields: dict[str, Any] = {}
+        if self.adapter == "tensorfold":
+            adapter_fields = {"draft": self.draft_mode == "on", "return_token_ids": True}
+        overlap = self.extra_json.keys() & (payload.keys() | adapter_fields.keys())
         if overlap:
-            raise ValueError(f"endpoint extra JSON cannot override canonical fields: {sorted(overlap)}")
-        return {**payload, **self.extra_json}
+            raise ValueError(f"endpoint extra JSON cannot override canonical or semantic fields: {sorted(overlap)}")
+        return {**payload, **adapter_fields, **self.extra_json}
 
     def __call__(self, payload: dict[str, Any]) -> dict[str, Any]:
         request = urllib.request.Request(self.endpoint, data=_canonical(self.prepare_payload(payload)),
                                          headers={"Content-Type": "application/json; charset=utf-8"})
         started = time.perf_counter()
-        events, usage = [], {}
+        events: list[dict[str, Any]] = []
+        usage: dict[str, Any] = {}
+        tensorfold: dict[str, Any] = {}
+        terminal_offset = 0.0
         with urllib.request.urlopen(request) as response:
             for raw in response:
                 line = raw.decode("utf-8").strip()
                 if not line.startswith("data:") or line[5:].strip() == "[DONE]":
                     continue
                 chunk = json.loads(line[5:].strip())
+                terminal_offset = time.perf_counter() - started
                 usage.update(chunk.get("usage") or {})
+                tensorfold.update(chunk.get("tensorfold") or {})
                 choice = (chunk.get("choices") or [{}])[0]
-                text = choice.get("text", choice.get("delta", {}).get("content", ""))
+                delta = choice.get("delta") or {}
+                text = choice.get("text") or delta.get("content") or delta.get("reasoning_content") or ""
                 ids = chunk.get("token_ids", choice.get("token_ids", []))
                 if text or ids:
-                    events.append({"offset_s": time.perf_counter() - started,
-                                   "text": text or "", "token_ids": ids})
-        return {"events": events, "prompt_tokens": usage.get("prompt_tokens"),
-                "generated_tokens": usage.get("completion_tokens")}
+                    events.append({"offset_s": terminal_offset, "text": text, "token_ids": ids})
+        return {
+            "events": events,
+            "e2e_s": terminal_offset,
+            "prompt_tokens": usage.get("prompt_tokens"),
+            "generated_tokens": usage.get("completion_tokens"),
+            "terminal_token_ids": tensorfold.get("token_ids"),
+            "token_sha": tensorfold.get("token_sha"),
+            "cache": ({"cached": tensorfold["cached"]} if "cached" in tensorfold else None),
+            "draft": ({key: tensorfold[key] for key in ("drafts", "rounds", "min_rows")
+                       if key in tensorfold} or None),
+            "prefill": ({"prefill_s": tensorfold["prefill_s"]} if "prefill_s" in tensorfold else None),
+            "decode": ({"decode_s": tensorfold["decode_s"]} if "decode_s" in tensorfold else None),
+            "tensorfold": tensorfold or None,
+        }
 
 
 def _extra_json(value: str) -> dict[str, Any]:
@@ -311,8 +358,10 @@ def main() -> int:
     parser.add_argument("--output", required=True)
     parser.add_argument("--tokenizer-identity", required=True,
                         help="shared tokenizer name/revision or immutable digest")
+    parser.add_argument("--adapter", choices=("generic", "tensorfold"), default="generic",
+                        help="endpoint-specific documented request/response schema")
     parser.add_argument("--draft", choices=("on", "off"), default="off",
-                        help="run metadata only; does not alter the endpoint request")
+                        help="effective draft policy; tensorfold maps it to the wire")
     parser.add_argument("--extra-json", type=_extra_json, default={}, metavar="OBJECT",
                         help="documented endpoint-specific JSON fields to add to each request")
     parser.add_argument("--concurrency", type=int, default=1)
@@ -321,7 +370,8 @@ def main() -> int:
     config = vars(args)
     config["corpus"] = load_corpus(args.corpus)
     result = run_workload(
-        config, HTTPTransport(args.endpoint, args.tokenizer_identity, args.extra_json)
+        config, HTTPTransport(args.endpoint, args.tokenizer_identity, args.extra_json,
+                              adapter=args.adapter, draft_mode=args.draft)
     )
     Path(args.output).write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return 0
