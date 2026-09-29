@@ -1,4 +1,5 @@
 import json
+from io import BytesIO
 from pathlib import Path
 
 import pytest
@@ -215,6 +216,63 @@ def test_comparison_refuses_different_workload_shape():
         verdict = comparison_verdict(reference, candidate)
         assert verdict["verdict"] == "refused"
         assert "run identities" in verdict["refusal_reason"]
+
+
+def test_tensorfold_adapter_maps_semantics_and_rejects_overrides():
+    transport = HTTPTransport("x", tokenizer_identity="tok", adapter="tensorfold",
+                              draft_mode="off")
+    prepared = transport.prepare_payload({"model": "m", "stream": True})
+    assert prepared["draft"] is False
+    assert prepared["return_token_ids"] is True
+    assert transport.semantic_options == {"draft_mode": "off", "token_evidence": True}
+
+    drafted = HTTPTransport("x", tokenizer_identity="tok", adapter="tensorfold",
+                            draft_mode="on")
+    assert drafted.prepare_payload({"model": "m"})["draft"] is True
+    with pytest.raises(ValueError, match="semantic"):
+        HTTPTransport("x", tokenizer_identity="tok", adapter="tensorfold",
+                      draft_mode="off", extra_json={"draft": True})
+
+
+def test_tensorfold_terminal_fixture_parses_tokens_telemetry_and_terminal_e2e(monkeypatch):
+    terminal = {
+        "choices": [{"index": 0, "text": "", "finish_reason": "length"}],
+        "usage": {"prompt_tokens": 7, "completion_tokens": 3, "total_tokens": 10},
+        "tensorfold": {"token_ids": [101, 102, 103], "token_sha": "pinned-sha",
+                       "prefill_s": 0.12, "decode_s": 0.34, "rounds": 2,
+                       "drafts": True, "cached": 5, "min_rows": 2},
+    }
+    body = (b'data: {"choices":[{"text":"ab"}]}\n\n' +
+            b'data: {"choices":[{"text":"c"}]}\n\n' +
+            f"data: {json.dumps(terminal)}\n\n".encode() + b"data: [DONE]\n\n")
+    monkeypatch.setattr("tools.bench.qwen38_endpoint_bench.urllib.request.urlopen",
+                        lambda request: BytesIO(body))
+    clock = iter([10.0, 10.1, 10.2, 10.5])
+    monkeypatch.setattr("tools.bench.qwen38_endpoint_bench.time.perf_counter", lambda: next(clock))
+    response = HTTPTransport("http://example.invalid", "tok", adapter="tensorfold", draft_mode="on")(
+        {"model": "m", "stream": True})
+    assert response["e2e_s"] == pytest.approx(.5)
+    assert response["generated_tokens"] == 3
+    assert response["terminal_token_ids"] == [101, 102, 103]
+    assert response["token_sha"] == "pinned-sha"
+    assert response["cache"] == {"cached": 5}
+    assert response["draft"] == {"drafts": True, "rounds": 2, "min_rows": 2}
+    assert response["prefill"] == {"prefill_s": .12}
+    assert response["decode"] == {"decode_s": .34}
+
+
+def test_itl_requires_one_token_per_timed_event():
+    class BatchedDeltaTransport(FakeTransport):
+        def __call__(self, payload):
+            return {"events": [{"offset_s": .1, "text": "ab", "token_ids": [1, 2]},
+                               {"offset_s": .2, "text": "c", "token_ids": [3]}],
+                    "prompt_tokens": 2, "generated_tokens": 3, "e2e_s": .3,
+                    "terminal_token_ids": [1, 2, 3]}
+    result = run_workload({"endpoint": "x", "model": "m", "corpus": [{"text": "x"}],
+                           "waves": 5}, BatchedDeltaTransport())
+    assert all(s["itl_s"] is None for s in result["samples"])
+    assert all("cardinality" in s["itl_unavailable_reason"] for s in result["samples"])
+    assert result["metrics"]["itl_s"]["count"] == 0
 
 
 def test_sample_refuses_usage_without_reliable_generated_token_accounting():
