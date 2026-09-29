@@ -129,8 +129,6 @@ def _sample(response: dict[str, Any], started: float) -> dict[str, Any]:
     refusal = response.get("refusal_reason")
     if generated is None and not refusal:
         refusal = "endpoint did not expose reliable generated-token usage"
-    if not fingerprint and not refusal:
-        refusal = "endpoint did not expose generated token IDs; token fingerprint unavailable"
     prompt_value = response.get("prompt_tokens")
     if prompt_value is None and not refusal:
         refusal = "endpoint did not expose prompt-token usage"
@@ -194,6 +192,14 @@ def run_workload(config: dict[str, Any], transport: Callable[[dict[str, Any]], d
         refusal_reason = "tokenizer identity was not provided"
         aggregate["request_rate"] = None
         aggregate["token_throughput"] = None
+    semantic_payloads = [_semantic_payload(payload) for payload in payloads]
+    canonical_payload_hash = _hash(semantic_payloads)
+    run_identity = _hash({
+        "canonical_payload_hash": canonical_payload_hash,
+        "draft_mode": config.get("draft", "off"),
+        "concurrency": concurrency,
+        "waves": waves,
+    })
     aggregate.update({
         "schema_version": 1,
         "refusal_reason": refusal_reason,
@@ -202,7 +208,8 @@ def run_workload(config: dict[str, Any], transport: Callable[[dict[str, Any]], d
         "draft_mode": config.get("draft", "off"),
         "concurrency": concurrency,
         "waves": waves,
-        "canonical_payload_hash": _hash([_semantic_payload(payload) for payload in payloads]),
+        "canonical_payload_hash": canonical_payload_hash,
+        "run_identity": run_identity,
         "tokenizer_identity": tokenizer_identity,
         "token_fingerprints": [s["token_fingerprint"] for s in samples],
         "samples": samples,
@@ -216,16 +223,18 @@ def comparison_verdict(left: dict[str, Any], right: dict[str, Any]) -> dict[str,
     left_samples, right_samples = left.get("samples"), right.get("samples")
     if left.get("refusal_reason") or right.get("refusal_reason"):
         reason = "an input run was refused"
+    elif not left.get("canonical_payload_hash") or left.get("canonical_payload_hash") != right.get("canonical_payload_hash"):
+        reason = "canonical payload hashes are missing or differ"
+    elif not left.get("run_identity") or left.get("run_identity") != right.get("run_identity"):
+        reason = "run identities are missing or differ"
+    elif not left.get("tokenizer_identity") or left.get("tokenizer_identity") != right.get("tokenizer_identity"):
+        reason = "tokenizer identities are missing or differ"
     elif not isinstance(left_samples, list) or not isinstance(right_samples, list) or not left_samples:
         reason = "per-sample evidence is missing"
     elif len(left_samples) != len(right_samples):
         reason = "sample counts differ"
     elif any(s.get("refusal_reason") for s in left_samples + right_samples):
         reason = "an input sample was refused"
-    elif not left.get("canonical_payload_hash") or left.get("canonical_payload_hash") != right.get("canonical_payload_hash"):
-        reason = "canonical payload hashes are missing or differ"
-    elif not left.get("tokenizer_identity") or left.get("tokenizer_identity") != right.get("tokenizer_identity"):
-        reason = "tokenizer identities are missing or differ"
     else:
         for left_sample, right_sample in zip(left_samples, right_samples):
             if (not left_sample.get("payload_hash") or

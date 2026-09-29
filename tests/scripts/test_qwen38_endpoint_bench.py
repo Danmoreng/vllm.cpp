@@ -122,6 +122,7 @@ def test_comparison_fails_closed_on_all_canonical_evidence():
     sample = {"refusal_reason": None, "payload_hash": "payload", "prompt_tokens": 7,
               "token_fingerprint": "tokens"}
     base = {"refusal_reason": None, "canonical_payload_hash": "run-payload",
+            "run_identity": "workload-shape",
             "tokenizer_identity": {"name": "tok", "revision": "1"},
             "samples": [sample], "token_fingerprints": ["tokens"]}
     assert comparison_verdict(base, json.loads(json.dumps(base)))["verdict"] == "matched"
@@ -129,6 +130,7 @@ def test_comparison_fails_closed_on_all_canonical_evidence():
         ("top refusal", lambda x: x.update(refusal_reason="no")),
         ("sample refusal", lambda x: x["samples"][0].update(refusal_reason="no")),
         ("payload", lambda x: x.update(canonical_payload_hash="other")),
+        ("run identity", lambda x: x.update(run_identity="other")),
         ("tokenizer", lambda x: x.update(tokenizer_identity=None)),
         ("prompt tokens", lambda x: x["samples"][0].update(prompt_tokens=8)),
         ("consumed token", lambda x: x["samples"][0].update(token_fingerprint="other")),
@@ -182,6 +184,37 @@ def test_http_payload_extra_json_is_explicit_and_cannot_override_canonical_field
     }
     with pytest.raises(ValueError, match="override"):
         HTTPTransport("x", tokenizer_identity="tok", extra_json={"model": "other"}).prepare_payload({"model": "m"})
+
+
+def test_usage_without_token_ids_keeps_valid_absolute_profile_measurements():
+    class UsageOnlyTransport:
+        tokenizer_identity = "tok@rev"
+        def __call__(self, payload):
+            return {"events": [{"offset_s": .1, "text": "one"},
+                               {"offset_s": .2, "text": " chunk"}],
+                    "prompt_tokens": 3, "generated_tokens": 2, "e2e_s": .2}
+
+    result = run_workload({"endpoint": "x", "model": "m", "corpus": [{"text": "x"}],
+                           "waves": 5}, UsageOnlyTransport())
+    assert result["refusal_reason"] is None
+    assert result["request_rate"] is not None
+    assert result["token_throughput"] is not None
+    assert all(s["tpot_s"] == pytest.approx(.1) for s in result["samples"])
+    assert all(s["token_fingerprint"] is None for s in result["samples"])
+    assert comparison_verdict(result, result)["verdict"] == "refused"
+
+
+def test_comparison_refuses_different_workload_shape():
+    base = {"endpoint": "x", "model": "m", "corpus": [{"text": "x", "max_tokens": 1}]}
+    reference = run_workload({**base, "draft": "off", "concurrency": 1, "waves": 5},
+                             FakeTransport())
+    for changed in ({"draft": "on", "concurrency": 1, "waves": 5},
+                    {"draft": "off", "concurrency": 2, "waves": 5},
+                    {"draft": "off", "concurrency": 1, "waves": 6}):
+        candidate = run_workload({**base, **changed}, FakeTransport())
+        verdict = comparison_verdict(reference, candidate)
+        assert verdict["verdict"] == "refused"
+        assert "run identities" in verdict["refusal_reason"]
 
 
 def test_sample_refuses_usage_without_reliable_generated_token_accounting():
