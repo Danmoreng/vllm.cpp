@@ -41,7 +41,7 @@ def _hash(value: Any) -> str:
     return hashlib.sha256(_canonical(value)).hexdigest()
 
 
-def _payload(model: str, row: dict[str, Any], draft: str) -> dict[str, Any]:
+def _payload(model: str, row: dict[str, Any]) -> dict[str, Any]:
     payload = {
         "model": model,
         "max_tokens": int(row.get("max_tokens", 128)),
@@ -50,7 +50,7 @@ def _payload(model: str, row: dict[str, Any], draft: str) -> dict[str, Any]:
         "top_p": 1,
         "ignore_eos": True,
         "stream": True,
-        "draft": draft == "on",
+        "stream_options": {"include_usage": True},
     }
     if "messages" in row:
         payload["messages"] = row["messages"]
@@ -85,23 +85,26 @@ def _stats(values: Iterable[float]) -> dict[str, float | int | None]:
     }
 
 
-def summarize(samples: list[dict[str, Any]]) -> dict[str, Any]:
+def summarize(samples: list[dict[str, Any]], workload_makespan_s: float | None = None) -> dict[str, Any]:
     """Return percentile aggregates without discarding any raw repetition."""
     successful = [s for s in samples if not s.get("refusal_reason")]
-    elapsed = max((float(s.get("e2e_s", 0)) for s in successful), default=0.0)
-    generated = sum(int(s.get("generated_tokens", 0)) for s in successful)
+    elapsed = float(workload_makespan_s) if workload_makespan_s is not None else None
+    generated_values = [s.get("generated_tokens") for s in successful]
+    generated = sum(int(x) for x in generated_values if x is not None)
+    accounting_valid = len(successful) == len(samples) and all(x is not None for x in generated_values)
     itls = [x for s in successful for x in s.get("itl_s", [])]
     return {
         "request_count": len(samples),
         "successful_requests": len(successful),
+        "workload_makespan_s": elapsed,
         "metrics": {
             "ttft_s": _stats(s.get("ttft_s") for s in successful),
             "tpot_s": _stats(s.get("tpot_s") for s in successful),
             "itl_s": _stats(itls),
             "e2e_s": _stats(s.get("e2e_s") for s in successful),
         },
-        "request_rate": len(successful) / elapsed if elapsed else None,
-        "token_throughput": generated / elapsed if elapsed else None,
+        "request_rate": len(successful) / elapsed if accounting_valid and elapsed else None,
+        "token_throughput": generated / elapsed if accounting_valid and elapsed else None,
         "raw_repetitions": samples,
     }
 
@@ -111,17 +114,23 @@ def _sample(response: dict[str, Any], started: float) -> dict[str, Any]:
     offsets = [float(event["offset_s"]) for event in events]
     token_ids = [token for event in events for token in event.get("token_ids", [])]
     texts = [str(event.get("text", "")) for event in events]
-    generated = int(response.get("generated_tokens", len(token_ids) or len(events)))
+    generated_value = response.get("generated_tokens")
+    generated = int(generated_value) if generated_value is not None else None
     e2e = float(response.get("e2e_s", offsets[-1] if offsets else time.perf_counter() - started))
     ttft = offsets[0] if offsets else None
     itl = [b - a for a, b in zip(offsets, offsets[1:])]
-    tpot = ((e2e - ttft) / (generated - 1)) if ttft is not None and generated > 1 else None
+    tpot = ((e2e - ttft) / (generated - 1)) if ttft is not None and generated is not None and generated > 1 else None
     fingerprint = _hash(token_ids) if token_ids else None
     refusal = response.get("refusal_reason")
+    if generated is None and not refusal:
+        refusal = "endpoint did not expose reliable generated-token usage"
     if not fingerprint and not refusal:
         refusal = "endpoint did not expose generated token IDs; token fingerprint unavailable"
+    prompt_value = response.get("prompt_tokens")
+    if prompt_value is None and not refusal:
+        refusal = "endpoint did not expose prompt-token usage"
     return {
-        "prompt_tokens": int(response.get("prompt_tokens", 0)),
+        "prompt_tokens": int(prompt_value) if prompt_value is not None else None,
         "generated_tokens": generated,
         "ttft_s": ttft,
         "tpot_s": tpot,
@@ -146,8 +155,9 @@ def run_workload(config: dict[str, Any], transport: Callable[[dict[str, Any]], d
     if concurrency < 1:
         raise ValueError("concurrency must be positive")
     corpus = config["corpus"]
-    payloads = [_payload(config["model"], row, config.get("draft", "off")) for row in corpus]
+    payloads = [_payload(config["model"], row) for row in corpus]
     samples: list[dict[str, Any]] = []
+    workload_started = time.perf_counter()
 
     def one(wave: int, slot: int) -> dict[str, Any]:
         index = (wave * concurrency + slot) % len(payloads)
@@ -156,7 +166,7 @@ def run_workload(config: dict[str, Any], transport: Callable[[dict[str, Any]], d
         try:
             sample = _sample(transport(payload), started)
         except Exception as error:  # preserve failed repetitions too
-            sample = {"prompt_tokens": 0, "generated_tokens": 0, "ttft_s": None,
+            sample = {"prompt_tokens": None, "generated_tokens": None, "ttft_s": None,
                       "tpot_s": None, "itl_s": [], "e2e_s": time.perf_counter() - started,
                       "token_ids": [], "token_fingerprint": None, "generated_text": "",
                       "cache": None, "draft": None, "memory_samples": [],
@@ -170,9 +180,12 @@ def run_workload(config: dict[str, Any], transport: Callable[[dict[str, Any]], d
             futures = [pool.submit(one, wave, slot) for slot in range(concurrency)]
             samples.extend(f.result() for f in futures)
 
-    aggregate = summarize(samples)
+    workload_makespan_s = time.perf_counter() - workload_started
+    aggregate = summarize(samples, workload_makespan_s)
+    refused = any(s.get("refusal_reason") for s in samples)
     aggregate.update({
         "schema_version": 1,
+        "refusal_reason": "one or more samples were refused" if refused else None,
         "endpoint": config["endpoint"],
         "model": config["model"],
         "draft_mode": config.get("draft", "off"),
@@ -187,15 +200,39 @@ def run_workload(config: dict[str, Any], transport: Callable[[dict[str, Any]], d
 
 
 def comparison_verdict(left: dict[str, Any], right: dict[str, Any]) -> dict[str, Any]:
-    """Match only complete runs having identical, non-empty token fingerprints."""
-    left_fp, right_fp = left.get("token_fingerprints"), right.get("token_fingerprints")
+    """Fail closed unless both runs contain equal canonical correctness evidence."""
     reason = None
+    left_samples, right_samples = left.get("samples"), right.get("samples")
     if left.get("refusal_reason") or right.get("refusal_reason"):
         reason = "an input run was refused"
-    elif not left_fp or not right_fp or any(not x for x in left_fp + right_fp):
-        reason = "token fingerprint evidence is missing"
-    elif left_fp != right_fp:
-        reason = "token fingerprints differ"
+    elif not isinstance(left_samples, list) or not isinstance(right_samples, list) or not left_samples:
+        reason = "per-sample evidence is missing"
+    elif len(left_samples) != len(right_samples):
+        reason = "sample counts differ"
+    elif any(s.get("refusal_reason") for s in left_samples + right_samples):
+        reason = "an input sample was refused"
+    elif not left.get("canonical_payload_hash") or left.get("canonical_payload_hash") != right.get("canonical_payload_hash"):
+        reason = "canonical payload hashes are missing or differ"
+    elif not left.get("tokenizer_identity") or left.get("tokenizer_identity") != right.get("tokenizer_identity"):
+        reason = "tokenizer identities are missing or differ"
+    else:
+        for left_sample, right_sample in zip(left_samples, right_samples):
+            if (not left_sample.get("payload_hash") or
+                    left_sample.get("payload_hash") != right_sample.get("payload_hash")):
+                reason = "per-sample payload hashes are missing or differ"
+                break
+            if (left_sample.get("prompt_tokens") is None or
+                    left_sample.get("prompt_tokens") != right_sample.get("prompt_tokens")):
+                reason = "prompt token counts are missing or differ"
+                break
+            if (not left_sample.get("token_fingerprint") or
+                    left_sample.get("token_fingerprint") != right_sample.get("token_fingerprint")):
+                reason = "consumed token fingerprints are missing or differ"
+                break
+
+    left_fp, right_fp = left.get("token_fingerprints"), right.get("token_fingerprints")
+    if reason is None and (not left_fp or left_fp != right_fp or any(not x for x in left_fp + right_fp)):
+        reason = "token fingerprint evidence is missing or differs"
     return {"verdict": "refused" if reason else "matched", "refusal_reason": reason}
 
 
@@ -203,11 +240,18 @@ class HTTPTransport:
     """Minimal UTF-8 OpenAI-compatible streaming transport."""
     tokenizer_identity = None
 
-    def __init__(self, endpoint: str):
+    def __init__(self, endpoint: str, extra_json: dict[str, Any] | None = None):
         self.endpoint = endpoint
+        self.extra_json = dict(extra_json or {})
+
+    def prepare_payload(self, payload: dict[str, Any]) -> dict[str, Any]:
+        overlap = self.extra_json.keys() & payload.keys()
+        if overlap:
+            raise ValueError(f"endpoint extra JSON cannot override canonical fields: {sorted(overlap)}")
+        return {**payload, **self.extra_json}
 
     def __call__(self, payload: dict[str, Any]) -> dict[str, Any]:
-        request = urllib.request.Request(self.endpoint, data=_canonical(payload),
+        request = urllib.request.Request(self.endpoint, data=_canonical(self.prepare_payload(payload)),
                                          headers={"Content-Type": "application/json; charset=utf-8"})
         started = time.perf_counter()
         events, usage = [], {}
@@ -224,8 +268,18 @@ class HTTPTransport:
                 if text or ids:
                     events.append({"offset_s": time.perf_counter() - started,
                                    "text": text or "", "token_ids": ids})
-        return {"events": events, "prompt_tokens": usage.get("prompt_tokens", 0),
-                "generated_tokens": usage.get("completion_tokens", len(events))}
+        return {"events": events, "prompt_tokens": usage.get("prompt_tokens"),
+                "generated_tokens": usage.get("completion_tokens")}
+
+
+def _extra_json(value: str) -> dict[str, Any]:
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError as error:
+        raise argparse.ArgumentTypeError(f"invalid JSON: {error.msg}") from error
+    if not isinstance(parsed, dict):
+        raise argparse.ArgumentTypeError("extra JSON must be an object")
+    return parsed
 
 
 def main() -> int:
@@ -234,13 +288,16 @@ def main() -> int:
     parser.add_argument("--model", required=True)
     parser.add_argument("--corpus", required=True)
     parser.add_argument("--output", required=True)
-    parser.add_argument("--draft", choices=("on", "off"), default="off")
+    parser.add_argument("--draft", choices=("on", "off"), default="off",
+                        help="run metadata only; does not alter the endpoint request")
+    parser.add_argument("--extra-json", type=_extra_json, default={}, metavar="OBJECT",
+                        help="documented endpoint-specific JSON fields to add to each request")
     parser.add_argument("--concurrency", type=int, default=1)
     parser.add_argument("--waves", type=int, default=5)
     args = parser.parse_args()
     config = vars(args)
     config["corpus"] = load_corpus(args.corpus)
-    result = run_workload(config, HTTPTransport(args.endpoint))
+    result = run_workload(config, HTTPTransport(args.endpoint, args.extra_json))
     Path(args.output).write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return 0
 

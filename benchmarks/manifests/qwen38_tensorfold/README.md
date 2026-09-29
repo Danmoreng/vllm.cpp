@@ -2,8 +2,10 @@
 
 This directory defines the engine-neutral corpus used by
 `tools/bench/qwen38_endpoint_bench.py`. The harness sends UTF-8 OpenAI-compatible
-requests with seed 0, greedy decoding, `ignore_eos`, streaming enabled, and at
-least five closed-loop waves.
+requests with seed 0, greedy decoding, `ignore_eos`, streaming enabled with
+usage requested, and at least five closed-loop waves. Aggregate request and
+token rates use the measured makespan of the complete workload, rather than an
+individual request latency.
 
 Run either endpoint with its runtime model identifier (model names are not
 embedded in the harness):
@@ -16,8 +18,18 @@ python3 tools/bench/qwen38_endpoint_bench.py \
   --output raw.json --concurrency 1 --waves 5 --draft off
 ```
 
+`--draft` is recorded as run metadata only and is never sent as a request
+field. If an endpoint documents an endpoint-specific field, add it explicitly,
+for example `--extra-json '{"draft_model":"MODEL"}'`. Extra JSON cannot
+override canonical request fields. By default no draft-related wire field is
+sent.
+
 Keep every raw repetition. A cross-engine result may be called matched only
-when all generated-token fingerprints are present and equal. Endpoints that do
-not expose token IDs are therefore recorded with a refusal reason rather than
-silently treated as equivalent. Corpus changes alter the canonical payload
-hash and must start a new comparison series.
+when neither run nor any sample was refused and canonical payload hashes,
+tokenizer identities, prompt token counts, and generated-token fingerprints
+are all present and equal. The HTTP adapter requests streaming usage; if usage
+or reliable generated-token accounting is absent, the sample and enclosing run
+are refused and token throughput/TPOT are not reported as valid. Endpoints that
+do not expose token IDs are likewise refused rather than silently treated as
+equivalent. Corpus changes alter the canonical payload hash and must start a
+new comparison series.
