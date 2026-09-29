@@ -30087,10 +30087,12 @@ This is a prerequisite blocker, not a timing result. No server or executable
 correctness gate ran; serial decode, drafted decode, prefill and serving ladders,
 clock and memory windows, and both same-tool profiles are
 `NOT_RUN_PREREQUISITE`. No number and no cross-engine ratio are recorded.
-Production vLLM remains the named `BLOCKED` denominator. TensorFold publisher
-figures remain unverified. Task 5 is `SKIPPED_NO_PROFILE` / `NO_PORT_DECISION`;
-Task 6 is `BLOCKED_NO_MTP_WEIGHTS`; Task 7 executes synthesis as
-`SYNTHESIS_NO_PRODUCT_OPTIMIZATION` and makes no product edit.
+Production vLLM remains the named denominator and is `NOT_RUN`: blocked
+discovery did not stage or inspect a runnable production-vLLM denominator.
+TensorFold publisher figures remain unverified. Task 5/W2 is `NO_PORT_DECISION`;
+Task 6/W3 is `BLOCKED_NO_MTP_WEIGHTS`; W4-W5 are `SKIPPED_NO_PROFILE`; Task 7/W6
+completed synthesis as `SYNTHESIS_COMPLETED_NO_PRODUCT_OPTIMIZATION` and made no
+product edit.
 
 The independent selected-GGUF verdict is `BLOCKED_NO_MTP_WEIGHTS`. The committed
 real-header manifest has 1,224 tensor entries, trunk blocks 0 through 47, and no

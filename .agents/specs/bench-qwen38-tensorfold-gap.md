@@ -515,16 +515,19 @@ measurement did not start.
 
 The outcome is `BLOCKED_MISSING_ARTIFACTS`, not a failed benchmark. No server,
 correctness gate, timed ladder, clock window, memory series, or profile ran; no
-number or ratio is admissible. Production vLLM is a named `BLOCKED` denominator.
+number or ratio is admissible. Production vLLM remains the named denominator
+and is `NOT_RUN`: blocked discovery did not stage or inspect a runnable
+production-vLLM denominator.
 TensorFold publisher figures remain unverified. The independent GGUF artifact
 verdict is `BLOCKED_NO_MTP_WEIGHTS`: the committed 1,224-entry real-header
 manifest has only trunk blocks 0 through 47 and no name matching `mtp`, `nextn`,
 `draft`, `eh_proj`, `enorm`, or `hnorm`.
 
-Task 5 is `SKIPPED_NO_PROFILE` / `NO_PORT_DECISION`: no incremental-QSA
-product edit is justified. Task 6 is `BLOCKED_NO_MTP_WEIGHTS`. Task 7 still
-executes synthesis as `SYNTHESIS_NO_PRODUCT_OPTIMIZATION`, publishing these
-outcomes without a speculative product optimization. Evidence:
+Task 5/W2 is `NO_PORT_DECISION`: no incremental-QSA product edit is justified.
+Task 6/W3 is `BLOCKED_NO_MTP_WEIGHTS`. W4-W5 are `SKIPPED_NO_PROFILE`.
+Task 7/W6 completed synthesis as
+`SYNTHESIS_COMPLETED_NO_PRODUCT_OPTIMIZATION`, publishing these outcomes without
+a product optimization. Evidence:
 `.agents/evidence/bench-qwen38-tensorfold-gap/20260929T180547Z/`; public record:
 `docs/benchmarks/qwen38-tensorfold-gap.md`.
 
@@ -537,16 +540,15 @@ evidence.
 
 ## Owed
 
-- W0 owes the TensorFold comparator record, row adoption, harness, and
-  fake-server tests, plus checker evidence if a new comparator surface is
-  required.
+- W0 is delivered: comparator pin, ownership, endpoint harness, and launch/capture
+  runner are committed and focused tests pass.
 - W1 is blocked until required artifacts/source are available in the retained
   documented/configured staging scope. Its 2026-09-29 attempt owes no number; on resume it
   still owes correctness, ladders, clock windows, memory capture, and profiles.
-- Task 5 / W2 records `SKIPPED_NO_PROFILE` and `NO_PORT_DECISION`; no QSA product
-  edit is justified without the profile premise.
+- Task 5 / W2 records `NO_PORT_DECISION`; no QSA product edit is justified
+  without the profile premise.
 - Task 6 / W3 is `BLOCKED_NO_MTP_WEIGHTS` for the selected GGUF.
-- Task 7 / W4-W6 still executes synthesis as
-  `SYNTHESIS_NO_PRODUCT_OPTIMIZATION`: update the public and agent benchmark
-  records with these outcomes, without inventing a product optimization or
-  cross-engine ratio.
+- W4-W5 are `SKIPPED_NO_PROFILE`.
+- Task 7 / W6 completed synthesis as
+  `SYNTHESIS_COMPLETED_NO_PRODUCT_OPTIMIZATION`: the public and agent benchmark
+  records carry the outcomes without a product optimization or cross-engine ratio.
