@@ -518,9 +518,10 @@ verdict is `BLOCKED_NO_MTP_WEIGHTS`: the committed 1,224-entry real-header
 manifest has only trunk blocks 0 through 47 and no name matching `mtp`, `nextn`,
 `draft`, `eh_proj`, `enorm`, or `hnorm`.
 
-W2 through W6 are not justified by a profile. W3/native MTP is additionally
-blocked by absent weights. Tasks 5, 6, and 7 in the execution plan therefore
-remain blocked rather than becoming speculative implementation work. Evidence:
+Task 5 is `SKIPPED_NO_PROFILE` / `NO_PORT_DECISION`: no incremental-QSA
+product edit is justified. Task 6 is `BLOCKED_NO_MTP_WEIGHTS`. Task 7 still
+executes synthesis as `SYNTHESIS_NO_PRODUCT_OPTIMIZATION`, publishing these
+outcomes without a speculative product optimization. Evidence:
 `.agents/evidence/bench-qwen38-tensorfold-gap/20260929T180547Z/`; public record:
 `docs/benchmarks/qwen38-tensorfold-gap.md`.
 
@@ -539,8 +540,10 @@ evidence.
 - W1 is blocked on authorized staging of both selected artifacts and the pinned
   TensorFold/recipe sources. Its 2026-09-29 attempt owes no number; on resume it
   still owes correctness, ladders, clock windows, memory capture, and profiles.
-- W2 through W6 are blocked because W1 produced no profile. W3 is independently
-  `BLOCKED_NO_MTP_WEIGHTS` for the selected GGUF.
-- The final wave owes no synthesis until those prerequisites are cleared; it must
-  then update the public and agent benchmark records and either report a valid
-  matched-arm residual gap or explicitly refuse to compute one.
+- Task 5 / W2 records `SKIPPED_NO_PROFILE` and `NO_PORT_DECISION`; no QSA product
+  edit is justified without the profile premise.
+- Task 6 / W3 is `BLOCKED_NO_MTP_WEIGHTS` for the selected GGUF.
+- Task 7 / W4-W6 still executes synthesis as
+  `SYNTHESIS_NO_PRODUCT_OPTIMIZATION`: update the public and agent benchmark
+  records with these outcomes, without inventing a product optimization or
+  cross-engine ratio.
