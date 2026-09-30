@@ -2185,7 +2185,7 @@ LoadedEngine::LoadedEngine(HfConfig config, Qwen3_5DenseWeights weights,
 LoadedEngine::LoadedEngine(HfConfig config, Qwen3_5DenseWeights weights,
                            tok::Tokenizer tokenizer, const EngineParams& params,
                            std::unique_ptr<DflashDraft> dflash_draft)
-    : LoadedEngine(std::move(config), MakeQwen3_5DenseLoadedModel(std::move(weights)),
+    : LoadedEngine(config, MakeQwen3_5DenseLoadedModel(std::move(weights), config),
                    std::move(tokenizer), params, /*preselected_queue=*/nullptr,
                    std::move(dflash_draft)) {}
 

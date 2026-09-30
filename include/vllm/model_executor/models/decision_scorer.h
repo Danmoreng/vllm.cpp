@@ -78,6 +78,10 @@ struct CompileLimits {
 // separators. Throws RequestError on a non-finite number (allow_nan=False).
 std::string JsonDumps(const nlohmann::ordered_json& value);
 
+// Python str.strip() == "" over ASCII whitespace only; a string of only
+// non-ASCII whitespace (U+00A0) is NOT blank here, where Python would say it is.
+bool IsBlank(std::string_view s);
+
 // compiler.py serialize(): a string as-is, anything else JsonDumps.
 std::string Serialize(const nlohmann::ordered_json& value);
 

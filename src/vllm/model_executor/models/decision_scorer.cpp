@@ -56,13 +56,6 @@ void DumpPython(const ojson& v, std::string& out) {
   out += v.dump();
 }
 
-// Python str.strip() over the ASCII whitespace str.isspace() accepts.
-bool IsBlank(std::string_view s) {
-  return std::all_of(s.begin(), s.end(), [](unsigned char c) {
-    return c == ' ' || (c >= '\t' && c <= '\r') || (c >= 0x1c && c <= 0x1f);
-  });
-}
-
 // openjev Content = str | dict | list.
 bool IsContent(const ojson& v) {
   return v.is_string() || v.is_object() || v.is_array();
@@ -91,6 +84,13 @@ void RequireWidth(std::size_t n, const std::string& where,
 }
 
 }  // namespace
+
+// Python str.strip() over the ASCII whitespace str.isspace() accepts.
+bool IsBlank(std::string_view s) {
+  return std::all_of(s.begin(), s.end(), [](unsigned char c) {
+    return c == ' ' || (c >= '\t' && c <= '\r') || (c >= 0x1c && c <= 0x1f);
+  });
+}
 
 std::string JsonDumps(const ojson& value) {
   std::string out;
