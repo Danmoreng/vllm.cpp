@@ -9614,6 +9614,46 @@ std::vector<float> Qwen3_5DenseModel::ForwardDenseHidden(
   return hidden_f32;
 }
 
+std::vector<float> Qwen3_5DenseModel::ForwardDenseLastLogits(
+    const std::vector<int32_t>& token_ids, const std::vector<int32_t>& positions,
+    const Qwen3_5DenseWeights& weights, const HfConfig& config,
+    vt::Queue& queue) {
+  const int64_t T = static_cast<int64_t>(token_ids.size());
+  const int64_t H = config.hidden_size;
+  const int64_t vocab = config.vocab_size;
+  VT_CHECK(T > 0, "qwen3_5 dense forward last logits: empty token_ids");
+  VT_CHECK(static_cast<int64_t>(positions.size()) == T,
+           "qwen3_5 dense forward last logits: positions length must equal token count");
+  VT_CHECK(static_cast<int64_t>(weights.layers.size()) == config.num_hidden_layers,
+           "qwen3_5 dense forward last logits: weights.layers size must equal "
+           "num_hidden_layers");
+  Dev d{vt::GetBackend(queue.device.type), queue};
+  const float eps = static_cast<float>(config.rms_norm_eps);
+
+  Tensor dtab = Qwen3_5EmbeddingTable(d.b, d.q, weights.embed_tokens, vocab, H);
+  DBuf dids(d, DType::kI32, {T}, token_ids.data());
+  DBuf hidden(d, ActDType(d), {T, H});
+  vt::Embedding(d.q, hidden.t(), dtab, dids.t());
+
+  DBuf res(d, ResidualDType(d), {T, H});
+  res.Zero(d);
+
+  for (int64_t l = 0; l < config.num_hidden_layers; ++l)
+    RunDenseLayer(d, weights.layers[static_cast<size_t>(l)], config, hidden, res,
+                  positions, T);
+
+  Tensor dfn = ResidentWeight(d, weights.final_norm, {H});
+  DBuf dnorm(d, ActDType(d), {T, H});
+  vt::RmsNorm(d.q, dnorm.t(), hidden.t(), dfn, vt::RmsNormArgs{eps, true}, &res.t());
+
+  DBuf dlast(d, ActDType(d), {1, H});
+  GatherRows(d, dlast.ptr(), dnorm.t(), {static_cast<int32_t>(T - 1)}, H);
+  DBuf dlogits = DenseLogitsF32D(d, dlast.t(), weights);
+  std::vector<float> logits(static_cast<size_t>(vocab));
+  dlogits.Download(d, logits.data());
+  return logits;
+}
+
 Qwen3_5MTPModel::Qwen3_5MTPModel(const Qwen3_5MTPWeights& weights,
                                  const Qwen3_5DenseWeights& target,
                                  const HfConfig& config)

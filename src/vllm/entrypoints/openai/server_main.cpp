@@ -96,6 +96,7 @@
 #include "vllm/model_executor/models/cua_s1_inference.h"  // CuaS1ScoreInference (MODEL-CUA-S1-FORMS)
 #include "vllm/model_executor/models/laya_inference.h"  // LayaInference (MODEL-LAYA)
 #include "vllm/model_executor/models/kev_inference.h"  // KevInference (MODEL-KEV)
+#include "vllm/model_executor/models/nimble_inference.h"  // NimbleDecide (MODEL-NIMBLE)
 #include "vllm/model_executor/models/clm_inference.h"  // ClmInference (MODEL-CLM)
 #include "vllm/model_executor/models/gliner25_decide_inference.h"  // Gliner25DecideInference (MODEL-GLINER25-DECIDE)
 #include "vllm/model_executor/models/xor_inference.h"  // XorInference (MODEL-XOR)
@@ -1354,6 +1355,68 @@ int VllmServerMain(int argc, char** argv) {
               out.scores = std::move(result.scores);
               out.act_logits = std::move(result.act_logits);
               out.prompt_tokens = result.prompt_tokens;
+              return out;
+            });
+        std::cerr << "server: listening on http://" << args.host << ":"
+                  << args.port << "\n";
+        vllm::platform::ConsoleShutdown shutdown_on_signal(
+            [&]() { decision_server.stop(); });
+        if (!decision_server.listen(args.host, args.port)) {
+          std::cerr << "server: failed to bind " << args.host << ":"
+                    << args.port << "\n";
+          return 1;
+        }
+        return 0;
+      }
+
+      // ── NIMBLE DECISION TASK DISPATCH (MODEL-NIMBLE): a model dir whose
+      // architectures resolve to "NimbleModel" (scripts/convert-nimble.py
+      // output) serves /v1/systemone through the REQUEST-level seam
+      // (NimbleDecide, the same function vllm_decide calls), and registers no
+      // generate, embedding, or NER routes. Checked before the pooling check
+      // for the same reason as kev below.
+      bool nimble_model = false;
+      if (!archs.empty()) {
+        try {
+          nimble_model =
+              vllm::ModelRegistry::Resolve(std::span<const std::string>(archs))
+                  .architecture == "NimbleModel";
+        } catch (const std::exception&) {
+          nimble_model = false;
+        }
+      }
+      if (nimble_model) {
+        std::cerr << "server: nimble decision model (" << archs[0]
+                  << "); serving /v1/systemone\n";
+        vllm::entrypoints::EngineParams decision_params;
+        decision_params.block_size = args.block_size;
+        decision_params.num_blocks = args.num_blocks;
+        decision_params.gpu_memory_utilization = args.gpu_memory_utilization;
+        decision_params.kv_cache_memory_bytes = args.kv_cache_memory_bytes;
+        decision_params.max_model_len = args.max_model_len;
+        decision_params.max_num_seqs = args.max_num_seqs;
+        decision_params.max_num_batched_tokens = args.max_num_batched_tokens;
+        decision_params.enable_prefix_caching = args.enable_prefix_caching;
+        decision_params.offload_config = parsed_offload_config;
+        decision_params.weight_residency = parsed_weight_residency;
+        auto loaded_decision = std::shared_ptr<vllm::entrypoints::LoadedEngine>(
+            vllm::entrypoints::LoadedEngine::FromModelDir(args.model_dir,
+                                                          decision_params));
+        namespace oai = vllm::entrypoints::openai;
+        oai::OpenAIServingModels decision_models(served_model_name);
+        oai::ApiServer decision_server(decision_models, vllm::Version());
+        auto decision_mutex = std::make_shared<std::mutex>();
+        decision_server.set_systemone_request(
+            [loaded_decision, decision_mutex](const nlohmann::ordered_json& body)
+                -> nlohmann::ordered_json {
+              std::lock_guard<std::mutex> lock(*decision_mutex);
+              vllm::NimbleResponse r = vllm::NimbleDecide(
+                  loaded_decision->loaded_model(), loaded_decision->tokenizer(),
+                  body);
+              nlohmann::ordered_json out = nlohmann::ordered_json::object();
+              out["answers"] = std::move(r.answers);
+              out["usage"] = {{"input_tokens", r.input_tokens},
+                              {"output_tokens", 0}};
               return out;
             });
         std::cerr << "server: listening on http://" << args.host << ":"
