@@ -12,7 +12,12 @@ the last prompt position, then `softmax(logits / T)`. It does not generate.
 
 `ACTIVE`. Implemented and CPU-verified: reference prompt and answer goldens,
 real-tokenizer ids, and a served end-to-end run on Qwen3.5-0.8B-Base with a
-synthetic LoRA. The gate on the published 9B checkpoint is `PENDING` (Owed).
+synthetic LoRA. On 2026-09-30 the published 9B checkpoint was converted, served
+and compared on CPU with the author's own `prepare_prompts`,
+`candidate_logits` and `decision_result` over HF `transformers` 5.3.0 + PEFT
+0.21.0 BF16 (adapter unmerged): 7 questions, argmax 7/7, input tokens equal,
+max probability difference 0.0054. The CUDA run of the reference, which its
+`ParallelScorer` requires, is still `PENDING`.
 
 ## Scope
 
@@ -167,8 +172,8 @@ This differs from kev's `RenderJson`, so the lane keeps the raw JSON.
   suites unchanged.
 - Reachability: the synthetic test enters through `NimbleDecide`, which both
   production entries call.
-- E2E on the real 9B checkpoint against the reference: `PENDING` (disk, then a
-  CUDA BF16 host for the reference side).
+- E2E on the real 9B checkpoint against the reference: CPU done (argmax 7/7,
+  max dp 0.0054, 2026-09-30); the CUDA run is `PENDING`.
 
 ## Stop conditions
 
@@ -179,7 +184,8 @@ This differs from kev's `RenderJson`, so the lane keeps the raw JSON.
 ## Owed
 
 - The E2E gate on `bespokelabs/Bespoke-Nimble-9B` @ `bd792f44` against the
-  reference `inference.py`.
+  reference `inference.py` ON CUDA (the CPU comparison is done, see `## Now`),
+  and `-v2` at T=2.179.
 - The 27-255 choice arm (`extended_schema.py`).
 - Shared-prefix caching across fields.
 - CUDA serving and GGUF k-quants.
