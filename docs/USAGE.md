@@ -333,18 +333,22 @@ than "it works", so it is worth stating precisely.
 - The text tower ran on real tensors from the released 30B checkpoint at
   **reduced depth — 4 of its 52 layers.** Its **5 prefill argmax positions** are
   identical to a standalone torch transcription of the upstream source and to
-  HF's own `muse_glimmer` implementation. The full-depth 52-layer arm of our
-  forward has **never run**.
+  HF's own `muse_glimmer` implementation. The full-depth 52-layer bf16 arm has
+  generated once, 4 ungated tokens (2026-08-11); no bf16 token gate exists.
 - Those are argmax positions from a single prefill, not generated tokens.
-  **Multi-step decode is untested**, and so is the sliding window across steps.
+  **bf16 multi-step decode is ungated.** The GGUF Q4_K_M arm IS token-gated at
+  full depth against llama.cpp `b10451` (next section).
 - Even at reduced depth this is agreement with independent transcriptions of the
-  same upstream source, not agreement with the model's own runtime: the pinned
-  oracle cannot load `muse_glimmer` at all.
-- The perception encoder has **no reference check of any kind** — the wiring gate
-  proves the tower is reachable and that its output lands on the image/video
-  placeholder rows, not that an image produces the right tokens.
-- Nothing has run end to end through the server, and **no speed number exists for
-  this model on any axis**; there is no denominator to state one against.
+  same upstream source, not agreement with the model's own runtime. The vLLM
+  parity pin `a7c23ac96d` registers `muse_glimmer`, but no bf16 gate against it
+  has run (it needs a GPU lease).
+- The perception encoder has **one reference run** on the released tensors
+  (2026-09-30): f32 soft tokens within 4.07e-5 relative of a torch
+  transcription of the pinned formulas, bf16 within the reference's own bf16
+  envelope. The image processor is not ported, and no image-to-text result
+  exists.
+- Nothing has run end to end through the server, and **no speed number exists
+  against vLLM**; a secondary llama.cpp bar exists (#333).
 - The ATEM reasoning and tool parsers are ported and unit-gated, but at the
   server's default `skip_special_tokens: true` the framing tokens they key on
   (`<|start|>`, `<|message|>`, `<|eom|>`, `<|eot|>`) are stripped before the
@@ -837,21 +841,21 @@ shared forward consumes them in a form a block encoding cannot take.
 
 Three caveats:
 
-- **The k-quant generates coherent text, but is not token-exact against
-  llama.cpp.** Two defects had to be fixed to get there: the GGUF tokenizer gap
+- **The k-quant is token-gated against llama.cpp `b10451`** on the same file
+  (`test_muse_glimmer_gguf_paged_engine`, `VLLM_MUSE_GGUF_PARITY=<file>`,
+  2026-09-30): 16/16 battery prompts inside the 500 mnat near-tie band over 32
+  greedy tokens, 10/16 token-exact. Quantization-matched agreement, not a bf16
+  or vLLM claim. Two defects had to be fixed first: the GGUF tokenizer gap
   ([#347](https://github.com/mudler/vllm.cpp/issues/347), pre `llama4` = the
   GPT-4o / o200k family) and the converter's Q/K RoPE row permutation
   ([#359](https://github.com/mudler/vllm.cpp/issues/359), which produced
-  `" is is is ..."`). `"The capital of France is"` at `--temperature 0` now
-  continues `" Paris. The capital of France is Paris. ..."`. llama.cpp on the
-  same file agrees on the first token and then diverges; whether that residual is
-  quantization drift or a second defect is open.
+  `" is is is ..."`).
 - **Image and video need the bf16 safetensors.** The released
   `mmproj-kquant.gguf` ships its patch embedding without the `patch_temporal`
   axis, so half the weight is not in the file; loading it is refused by name.
-- **No speed number exists for this model in any weight format.** The pinned
-  vLLM oracle cannot load `muse_glimmer` at all, so there is no denominator to
-  quote and none is claimed.
+- **No speed number exists against vLLM in any weight format.** The parity pin
+  `a7c23ac96d` registers `muse_glimmer`, but no vLLM run exists on this fleet;
+  the secondary llama.cpp bar is #333.
 
 Set `VLLM_MUSE_GGUF=<file>` (or `VLLM_MUSE_GGUF_LOAD=<file>` for the full
 materialization) to run `test_muse_glimmer_gguf` against a real checkpoint;
