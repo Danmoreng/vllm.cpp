@@ -175,8 +175,9 @@ struct LagunaParams {
   // llama.cpp `yarn_attn_factor` (default 1.0). The FULL mscale llama.cpp applies is
   //   mscale = yarn_attn_factor * (1 + 0.1*ln(factor))     [rope_yarn, ext_factor!=0]
   // which reproduces HF's precomputed `attention_factor` too (factor 128 -> 1.48520,
-  // factor 32 -> 1.34657). See LagunaYarnMscale. VERIFIED W4 (laguna.rope.scaling.
-  // yarn_attn_factor = 1.0).
+  // factor 32 -> 1.34657). See LagunaYarnMscale. The GGUF resolve keeps it 1.0 and
+  // does NOT read `laguna.rope.scaling.yarn_attn_factor`, as llama.cpp does not:
+  // the XS-2.1 APEX file stores the already-multiplied 1.34657 there.
   double yarn_attn_factor = 1.0;
   double partial_rotary_factor_full = 0.5;  // rotary_dim_full = 64
   int64_t rotary_dim_full = 64;

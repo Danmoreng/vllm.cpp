@@ -605,7 +605,14 @@ LagunaParams LagunaParamsFromGguf(const GgufFile& g) {
       OptInt(g, p + "rope.scaling.original_context_length", 8192);
   d.yarn_beta_fast = OptFloat(g, p + "rope.scaling.yarn_beta_fast", 32.0);
   d.yarn_beta_slow = OptFloat(g, p + "rope.scaling.yarn_beta_slow", 1.0);
-  d.yarn_attn_factor = OptFloat(g, p + "rope.scaling.yarn_attn_factor", 1.0);
+  // `rope.scaling.yarn_attn_factor` is NOT read. llama.cpp `b10451` reads that
+  // key for grok only (src/models/grok.cpp:25); for every other YaRN model it
+  // derives the factor from `rope.scaling.factor` (src/llama-context.cpp:176-213)
+  // and ggml's rope multiplies in (1 + 0.1 ln factor) itself. The UD-Q4_K S-2.1
+  // file stores 1.0, so reading it was harmless there; the XS-2.1 APEX file stores
+  // the already-multiplied 1.34657, and reading it applied the mscale twice on
+  // every full-attention layer (1.813 instead of 1.347).
+  d.yarn_attn_factor = 1.0;
 
   // vocab: prefer the KV, else the token_embd leading (out) dim.
   const GgufValue* vk = g.FindKv(p + "vocab_size");
