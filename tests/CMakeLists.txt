@@ -2054,6 +2054,11 @@ vllm_cpp_add_test(test_placement_reach
   vllm/entrypoints/test_placement_reach.cpp)
 target_include_directories(test_placement_reach PRIVATE ${CMAKE_SOURCE_DIR}/src)
 
+# ISSUE-LOCAL-01M3SDXGYYTS9FDXKZDAE24N0R: the loader's tokenizer/ subdirectory
+# fallback (MODEL-LAYA), entered through LoadedEngine::FromModelDir.
+vllm_cpp_add_test(test_tokenizer_subdir
+  vllm/entrypoints/test_tokenizer_subdir.cpp)
+
 vllm_cpp_add_test(test_placement_dump_dtype
   vllm/model_executor/test_placement_dump_dtype.cpp)
 target_include_directories(test_placement_dump_dtype PRIVATE ${CMAKE_SOURCE_DIR}/src)

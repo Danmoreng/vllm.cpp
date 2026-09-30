@@ -175,6 +175,12 @@ Two more example binaries ship alongside it:
 
 ### Which HF tokenizers load
 
+The loader reads `<model_dir>/tokenizer.json`. When that file is absent, it reads
+`<model_dir>/tokenizer/tokenizer.json` instead, and the same applies to
+`tokenizer_config.json`. The root file always wins. This lets a snapshot such as
+`convaiinnovations/laya`, which keeps its tokenizer in `tokenizer/`, load as
+downloaded, without a symlink.
+
 A checkpoint's `tokenizer.json` is accepted when its `pre_tokenizer` is one this
 build recognises. Recognition is by exact regex or pipeline shape, not by model
 name, so a checkpoint from any vendor loads if it carries one of these:
