@@ -99,7 +99,7 @@
 #include "vllm/model_executor/models/kev_inference.h"  // KevInference (MODEL-KEV)
 #include "vllm/model_executor/models/nimble_inference.h"  // NimbleDecide (MODEL-NIMBLE)
 #include "vllm/model_executor/models/tev1_inference.h"  // Tev1Decide (MODEL-TEV1)
-#include "vllm/model_executor/models/clm_inference.h"  // ClmInference (MODEL-CLM)
+#include "vllm/model_executor/models/clm_inference.h"  // ClmDecide (MODEL-CLM)
 #include "vllm/model_executor/models/gliner25_decide_inference.h"  // Gliner25DecideInference (MODEL-GLINER25-DECIDE)
 #include "vllm/model_executor/models/xor_inference.h"  // XorInference (MODEL-XOR)
 #include "vllm/multimodal/minimax_h3_video.h"
@@ -1603,25 +1603,16 @@ int VllmServerMain(int argc, char** argv) {
         oai::OpenAIServingModels decision_models(served_model_name);
         oai::ApiServer decision_server(decision_models, vllm::Version());
         auto decision_mutex = std::make_shared<std::mutex>();
-        decision_server.set_decision(
-            [loaded_decision, decision_mutex](
-                const std::string& state,
-                const std::string& qtype,
-                const std::string& instructions,
-                const std::vector<std::string>& options)
-                -> oai::ApiServer::DecisionResult {
+        // Request-level, like Nimble: ClmDecide renders the raw state and
+        // criteria JSON the way the reference does, which the per-question
+        // DecisionFn strings cannot carry, and answers in the reference's
+        // own shape.
+        decision_server.set_systemone_request(
+            [loaded_decision, decision_mutex](const nlohmann::ordered_json& body)
+                -> nlohmann::ordered_json {
               std::lock_guard<std::mutex> lock(*decision_mutex);
-              const vllm::LoadedModel& model =
-                  loaded_decision->loaded_model();
-              const vllm::tok::Tokenizer& tokenizer =
-                  loaded_decision->tokenizer();
-              vllm::ClmDecisionResult result =
-                  vllm::ClmInference(model, tokenizer, state, qtype,
-                                     instructions, options);
-              oai::ApiServer::DecisionResult out;
-              out.scores = std::move(result.scores);
-              out.prompt_tokens = result.prompt_tokens;
-              return out;
+              return vllm::ClmDecide(loaded_decision->loaded_model(),
+                                     loaded_decision->tokenizer(), body);
             });
         std::cerr << "server: listening on http://" << args.host << ":"
                   << args.port << "\n";
