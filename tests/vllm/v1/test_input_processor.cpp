@@ -608,6 +608,18 @@ TEST_CASE("eos fallback: a checkpoint that lists its ids keeps its stop set") {
   CHECK(req.sampling_params.stop_token_ids == std::vector<int32_t>{248045});
 }
 
+TEST_CASE("eos fallback: a top-level eos without generation_config.json keeps its stop set") {
+  // from_model_config lets the OUTER eos_token_id win over text_config's, so a
+  // nested checkpoint that names 248046 at the top and 248044 inside, with no
+  // generation_config.json, stops on 248046 alone, before and after the change.
+  EosModelDir model(NestedConfig(R"("eos_token_id": 248046,)"), "",
+                    R"({"eos_token": "<|endoftext|>"})");
+  const EngineCoreRequest req = ProcessWith(model.config_path());
+  REQUIRE(req.sampling_params.eos_token_id.has_value());
+  CHECK(*req.sampling_params.eos_token_id == 248046);
+  CHECK(req.sampling_params.stop_token_ids.empty());
+}
+
 TEST_CASE("eos fallback: the Tev1 shape stops on the tokenizer's eos_token") {
   // No top-level eos, no generation_config.json, eos_token <|im_end|>: vLLM's
   // primary is 248046 and from_model_config adds the text config's 248044.
