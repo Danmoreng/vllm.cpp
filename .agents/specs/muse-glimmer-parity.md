@@ -107,8 +107,9 @@ and the tool/reasoning parser tests, already ported by the row).
 1. This spec, the issue and the record correction.
 2. The vision reference run: extend the reference script with a real-weights
    mode and add the env-gated `test_muse_glimmer_vision_real`.
-3. The GGUF comparison: a llama.cpp greedy driver that prints ids and margins,
-   our side through the production GGUF load, and the classification.
+3. The GGUF comparison: a llama.cpp driver that writes the oracle's greedy ids
+   and its teacher-forced gap on our prefix, our side through the production
+   GGUF load, and the paged-engine gate.
 4. Records: the model page, FEATURES, the matrix row, `## Outcome`.
 
 ## Risks/decisions
@@ -147,8 +148,9 @@ All on CPU, 2026-09-30.
   stay inside the 500 mnat band at every cell (max teacher-forced gap 93 mnats,
   prompt 15 token 8); zero forward-divergent cells. Anchor: our ids equal the
   committed `our_ids.npy`. Gate run: "16/16 prompts PASS (token-exact 10/16; near-tie band only 6/16; max gap 0.093 nats @ prompt[15] tok=8; 0 forward-divergent)", 45 min on a shared 20-core host.
-- **Record correction**: the model page, FEATURES and the matrix row no longer
-  say the pinned oracle cannot load `muse_glimmer`.
+- **Record correction**: the model page, FEATURES and both matrix rows now
+  qualify every "beyond pin" and "no oracle" statement with the pin it held
+  for (`555967922`) and state that `a7c23ac96d` registers the model.
 
 ## Stop conditions
 
