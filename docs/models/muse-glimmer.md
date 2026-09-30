@@ -105,9 +105,9 @@ converter that emits `muse-glimmer.attention.post_norm_rms_epsilon` or
   reference's own bf16 arm reaches 0.970 / 0.99856. The image processor is not
   ported (the tower is fed the reference's pixels), and no image-to-text result
   exists. The encoder normalizes merged multimodal embeddings again as of #405.
-  Its config key is absent from the released checkpoint and defaults on, which
-  had been read as off, so image and video prompts before that fix skipped a
-  normalization step.
+  Its config key is `null` in the released checkpoint, which the pinned config
+  class reads as on. It had been read as off, so image and video prompts before
+  that fix skipped a normalization step.
 - **Nothing has run end to end through the server**, and **no speed number exists
   for this model in any weight format** against vLLM: the parity pin now
   registers the model, but its speed on this fleet is unmeasured, so no
