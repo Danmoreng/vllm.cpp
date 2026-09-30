@@ -16,8 +16,8 @@ CPU + GPU (CUDA), OpenAI-compatible serving through `/v1/chat/completions`.
 alias, the chat template, and `/v1/chat/completions`. Phase 6 (the SystemOne
 lane) is implemented and CPU-verified on both checkpoints against
 `transformers` (4B argmax 7/7, 0.8B 6/7 with one near tie). Phase 7 (the
-tokenizer EOS fallback, [`tev1-eos-fallback.md`](tev1-eos-fallback.md)) is the
-current work. The vLLM gates (Phase 4, and Phase 6 against vLLM's generative
+tokenizer EOS fallback, [`tev1-eos-fallback.md`](tev1-eos-fallback.md)) is done
+on CPU: chat stops on `<|im_end|>` without `stop_token_ids`. The vLLM gates (Phase 4, and Phase 6 against vLLM's generative
 scoring) are `PENDING`.
 
 Phase 6 found and fixed two engine defects on the way, each with its own
@@ -348,8 +348,8 @@ authored from the Tev1 reference implementation (`togethercomputer/tev1`):
 - Phase 3: Decision prompting (document + test) — TODO.
 - Phase 4: E2E parity test vs vLLM oracle — TODO.
 - Phase 5: LoRA merge (if needed) — TODO / likely skip.
-- Phase 6: SystemOne lane (`/v1/systemone`, `vllm_decide`) — ACTIVE.
-- Phase 7: tokenizer EOS fallback (`tev1-eos-fallback.md`) — ACTIVE.
+- Phase 6: SystemOne lane (`/v1/systemone`, `vllm_decide`): DONE (CPU).
+- Phase 7: tokenizer EOS fallback (`tev1-eos-fallback.md`): DONE (CPU).
 
 ## Risks
 

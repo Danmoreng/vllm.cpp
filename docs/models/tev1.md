@@ -150,17 +150,15 @@ curl http://localhost:8000/v1/chat/completions \
           "content":"{\"state\":\"Returns are allowed within 30 days. Purchase was 12 days ago.\",\"question\":\"Is the return within the window?\",\"options\":[{\"label\":\"A\",\"key\":\"yes\",\"description\":\"Yes.\"},{\"label\":\"B\",\"key\":\"no\",\"description\":\"No.\"}]}"}],
        "temperature":0,
        "max_tokens":8,
-       "stop_token_ids":[248046],
        "chat_template_kwargs":{"enable_thinking":false}}'
 ```
 
-Send `"stop_token_ids":[248046]` (`<|im_end|>`). Neither checkpoint ships a
-`generation_config.json`, and this engine does not yet stop on the tokenizer's
-`eos_token`, so without it the reply continues past the letter to the
-`max_tokens` limit (`"A<|im_end|>\n<|endoftext|>..."`, `finish_reason:
-length`). vLLM stops on `<|im_end|>` without the field.
+The reply is the letter alone with `finish_reason: stop`. Neither checkpoint
+ships a `generation_config.json` or names an EOS at the top of `config.json`,
+so the engine stops on the tokenizer's `eos_token` (`<|im_end|>`, 248046), and
+also on `<|endoftext|>` (248044) from the text config, as vLLM does. Before
 [ISSUE-LOCAL-01M3RTGVTN34YQFBR1KZH117XA](../../.agents/issues/MODEL-TEV1/ISSUE-LOCAL-01M3RTGVTN34YQFBR1KZH117XA.md)
-tracks the fix.
+was fixed, a request had to send `"stop_token_ids":[248046]`.
 
 ## What has been measured
 

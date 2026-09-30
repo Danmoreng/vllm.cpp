@@ -751,14 +751,15 @@ secondary ids are merged into the request's `stop_token_ids`, so a chat model
 stops on its turn-level token rather than running to the length cap. A missing
 or malformed `generation_config.json` is a silent no-op.
 
-The tokenizer's own `eos_token` (from `tokenizer_config.json`) is **not** read
-yet. vLLM makes that token the primary eos id, so the two engines differ on a
-checkpoint whose `config.json` and `generation_config.json` do not list it.
-Tev1 is one: it ships no `generation_config.json`, its `config.json` names
-`<|endoftext|>`, and its turn ends on `<|im_end|>`. Send that id in
-`stop_token_ids` until
-[ISSUE-LOCAL-01M3RTGVTN34YQFBR1KZH117XA](../.agents/issues/MODEL-TEV1/ISSUE-LOCAL-01M3RTGVTN34YQFBR1KZH117XA.md)
-is fixed. The [Tev1 page](models/tev1.md) has the exact request.
+When neither `config.json` nor the `tokenizer.json` post-processor names an
+eos, the engine takes the tokenizer's own `eos_token` from the sibling
+`tokenizer_config.json` as the primary eos id, which is vLLM's primary source.
+When no `generation_config.json` exists, it also adds the text config's
+`eos_token_id` as a secondary id, as vLLM's `from_model_config` fallback does.
+Tev1 is such a checkpoint: it stops on `<|im_end|>` without a
+`stop_token_ids` field. A checkpoint that already names its eos keeps it; the
+engine does not yet move the primary id to the tokenizer's for every model, as
+vLLM does ([spec](../.agents/specs/tev1-eos-fallback.md)).
 
 `ignore_eos: true` suppresses **all** of them, primary and secondary alike, and
 generation then runs to the token budget. The ids still count toward
