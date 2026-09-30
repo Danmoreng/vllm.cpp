@@ -335,6 +335,12 @@ LagunaWeights LoadLagunaFromGgufShards(const std::vector<const GgufFile*>& shard
 // DeepseekV4ParamsFromGguf): per-layer head_count array, dual-rope keys, MoE keys.
 LagunaParams LagunaParamsFromGguf(const GgufFile& meta);
 
+// The HF-shaped config a `laguna` GGUF presents to the engine, so
+// `LoadedEngine::FromModelDir` can resolve the registry row and size the engine
+// from the file. Built FROM `LagunaParamsFromGguf`, so `ParseLagunaParams` on the
+// result recovers the same geometry the GGUF weight loader resolves itself.
+HfConfig LagunaHfConfigFromGguf(const GgufFile& meta);
+
 // W5 REAL keep-quant forward. The `LagunaModel::Forward` composition with the ~9
 // GEMM sites routed through vt::MatmulBT (keep-quant on the block-typed weight,
 // dispatches to CPU/CUDA kMatmulBTQuant) instead of the f32 MatmulNK reference.
