@@ -123,7 +123,7 @@ class DriftTests(unittest.TestCase):
     def test_versioned_suffix_registered_arch_passes_self_check(self) -> None:
         # Upstream registers the Nemotron Nano VL wrappers under names that end
         # in a version, not a task suffix (`NemotronH_Nano_VL_V2`,
-        # `NemotronH_Nano_Omni_Reasoning_V3`, registry.py:511-512). They must
+        # `NemotronH_Nano_Omni_Reasoning_V3`, registry.py:512-513). They must
         # be compared, never dropped as unrepresentable.
         registered = REGISTERED | {"NemotronH_Nano_VL_V2", "NemotronH_Nano_Omni_Reasoning_V3"}
         text = _features(TWO + ["`NemotronH_Nano_VL_V2`", "`NemotronH_Nano_Omni_Reasoning_V3`"])

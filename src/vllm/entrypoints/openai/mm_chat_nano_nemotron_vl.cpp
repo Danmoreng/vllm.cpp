@@ -118,14 +118,17 @@ MultiModalChatSeam MakeNanoNemotronVLChatSeam(const MultiModalChatContext& ctx) 
         prompt_fn(rendered, /*add_generation_prompt=*/true, {},
                   nlohmann::ordered_json::object());
     const std::vector<int32_t> prompt_ids = tokenizer.EncodeWithSpecialTokens(prompt);
-    // `sans_images = text[0].replace("<image>", "")` (:689-692).
+    // `sans_images = text[0].replace("<image>", "")` and
+    // `len(tokenizer(sans_images, add_special_tokens=False).input_ids)`
+    // (:689-692). `Encode` is that call: added tokens in the text are still
+    // parsed, and no post_processor BOS/EOS is added, so a BOS-prepending
+    // tokenizer does not shrink the tiler's budget by one token.
     std::string sans = prompt;
     for (size_t at = sans.find(context_token); at != std::string::npos;
          at = sans.find(context_token, at)) {
       sans.erase(at, context_token.size());
     }
-    const int64_t text_len =
-        static_cast<int64_t>(tokenizer.EncodeWithSpecialTokens(sans).size());
+    const int64_t text_len = static_cast<int64_t>(tokenizer.Encode(sans).size());
 
     std::vector<DecodedImageRgb> decoded;
     decoded.reserve(image_parts.size());

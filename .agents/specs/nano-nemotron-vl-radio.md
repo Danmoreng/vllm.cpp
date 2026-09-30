@@ -36,6 +36,10 @@ In scope, image modality only:
 5. The registration of `NemotronH_Nano_VL_V2` and
    `NemotronH_Nano_Omni_Reasoning_V3`, whose language tower is the existing
    `NemotronHForCausalLM` forward under the `language_model.` prefix.
+   Upstream maps two more names to the same class (`registry.py:512-515` @
+   `e126687a9a`): `NemotronH_Super_Omni_Reasoning_V3` and
+   `NemotronH_Omni_Reasoning_V3`. They are not registered here (see
+   `## Owed`).
 
 Out of scope, and refused by name: audio (`sound_encoder`, `sound_projection`,
 `<so_embedding>`), video (`video_embedder`, `<video>`, EVS pruning), and the
@@ -125,7 +129,7 @@ From `tests/models/multimodal/test_nano_nemotron_vl.py` @ `e126687a9a`:
 
 | Upstream case | Here |
 |---|---|
-| `test_nano_nemotron_vl_skips_multimodal_weights_in_text_only_mode` (:77-96) | ported to `test_nano_nemotron_vl_registry.cpp`: a `language_model_only` load reads no tower and `encode_mm` refuses by name. Adapted: a real tiny checkpoint instead of mocked modules |
+| `test_nano_nemotron_vl_skips_multimodal_weights_in_text_only_mode` (:77-96) | ported to `test_nano_nemotron_vl_registry.cpp`: a `language_model_only` load of a checkpoint with NO `sound_config` and a `sound_encoder.encoder.weight` tensor succeeds, reads zero vision and `mlp1` tensors (`NanoNemotronVLVisionLoadOf`), and `encode_mm` refuses by name. Adapted: a real tiny checkpoint instead of mocked modules, and the "not inspected" assertion is the load's own vision count |
 | `test_nano_nemotron_vl_loads_vision_weights_without_sound_encoder` (:99-121) | ported, same file: no `sound_config`, no sound tensor, the load succeeds |
 | `test_nano_nemotron_vl_requires_sound_encoder_for_sound_weights` (:124-136) | ported, same file: a sound tensor without `sound_config` is refused |
 | `test_extract_audio_from_videos_*` (:150-182) | not applicable: audio is refused by name |
@@ -180,12 +184,13 @@ range into one 1 627 048 984-byte file (sha256 `314151d13e98016226d534a707e176f4
 
 | Gate | Result |
 |---|---|
-| `test_nano_nemotron_vl_vision` (synthetic, CI) | 12/12 cases: tiler params exact, resize f32 max abs 2e-5 bound, bf16 pixels <= 1% one-ulp, CPE square-then-crop 1e-6, tower and projector f32 1e-4 and bf16 3e-2, shuffle order, expansion, template prefix, both released configs |
+| `test_nano_nemotron_vl_vision` (synthetic, CI) | 12/12 cases: tiler params exact, resize f32 max abs 2e-5 bound, bf16 pixels <= 1% one-ulp, CPE square-then-crop 1e-6, tower and projector f32 1e-4 and bf16 3e-2, shuffle order (every output row, so the v1 transpose is distinguished), expansion, template prefix, both released configs |
 | same, REAL arm (333x517 image, `max_model_len` 16384) | grid 26x42, 273 rows exact; pixels 344/838656 one-ulp; tower f32 rel 2.36e-5, bf16 4.71e-2; projector f32 4.40e-6, bf16 5.85e-3; end-to-end worst row cosine 0.99776 |
-| `test_nano_nemotron_vl_registry` (CI) | tiny Omni checkpoint loads under the released name; stray tensor refused; image decode through `GPUModelRunner` == independent host reference (4 tokens) and != the text-only decode; audio refused |
+| `test_nano_nemotron_vl_registry` (CI) | tiny Omni checkpoint loads under the released name; stray tensor refused; image decode through `GPUModelRunner` == independent host reference (4 tokens) and != the text-only decode; a text-only load reads 0 vision/`mlp1` tensors and skips a `sound_encoder.*` tensor with no `sound_config`; audio refused |
 | same, STRUCTURAL on the BF16 index | 6243/6243 language tensors claimed, 390/390 vision, 716 deferred by name, 0 unclaimed |
 | same, STRUCTURAL on the NVFP4 index @ `16993199` | FAILS as recorded: 5946 language tensors unclaimed, 60 enumerated-but-not-shipped (`ISSUE-LOCAL-01M3S07X6Y4ADHHQ02FYMR4RXF`) |
-| `test_nano_nemotron_vl_mm_chat` (CI, server build) | 5/5: seams for both names, one- and two-image prefix and expansion, text passthrough, refusal without `max_model_len` |
+| `test_nano_nemotron_vl_mm_chat` (CI, server build) | 6/6: seams for both names, one- and two-image prefix and expansion, text passthrough, refusal without `max_model_len`, and the tiler's text length taken with no special tokens (`add_special_tokens=False`, processors/nano_nemotron_vl.py:689-692) on a BOS-prepending tokenizer |
+| `test_serve_nano_nemotron_vl_mm` (CI, server build) | 2/2: the tiny checkpoint as a model directory through the REAL `VllmServerMain` (seam wired, not UNAVAILABLE) and through `vllm_engine_load` + `vllm_chat` (an image request answered, 17 prompt tokens). Deleting either production `mm_ctx.max_model_len` assignment (`server_main.cpp`, `vllm_c.cpp`) reddens its case |
 | no-regression | `test_nemotron_h_paged_forward` 13/13, `test_nemotron_h_scaffold` 14/14, `test_nemotron_h_loader` 4/4, `test_model_registry` 24/24 |
 
 ## Owed
@@ -207,3 +212,11 @@ range into one 1 627 048 984-byte file (sha256 `314151d13e98016226d534a707e176f4
   checkpoint is refused at load (row-owned issue, not an `_owed` one).
 - The static InternVL tiling arm (`NemotronH_Nano_VL_V2` 12B), refused by name
   at config parse. Tracked by `ISSUE-LOCAL-01M3RY6G385D41W5SNF1C85RRS`.
+- `NemotronH_Super_Omni_Reasoning_V3` and `NemotronH_Omni_Reasoning_V3`
+  (`registry.py:514-515` @ `e126687a9a`), the same upstream class. Not
+  registered: no public checkpoint exists at the pin (upstream's
+  `tests/models/registry.py:1217-1223` points both at the Nano Omni repository
+  with `is_available_online=False`), so no config shows whether their language
+  tower is one the NemotronH loader and forward accept. A load under either name
+  is refused by the registry as an unknown architecture. Tracked by
+  `ISSUE-LOCAL-01M3RY6G385D41W5SNF1C85RRS`.
