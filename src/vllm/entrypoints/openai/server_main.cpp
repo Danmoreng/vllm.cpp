@@ -98,6 +98,7 @@
 #include "vllm/model_executor/models/laya_inference.h"  // LayaInference (MODEL-LAYA)
 #include "vllm/model_executor/models/kev_inference.h"  // KevInference (MODEL-KEV)
 #include "vllm/model_executor/models/nimble_inference.h"  // NimbleDecide (MODEL-NIMBLE)
+#include "vllm/model_executor/models/tev1_inference.h"  // Tev1Decide (MODEL-TEV1)
 #include "vllm/model_executor/models/clm_inference.h"  // ClmInference (MODEL-CLM)
 #include "vllm/model_executor/models/gliner25_decide_inference.h"  // Gliner25DecideInference (MODEL-GLINER25-DECIDE)
 #include "vllm/model_executor/models/xor_inference.h"  // XorInference (MODEL-XOR)
@@ -2304,6 +2305,27 @@ int VllmServerMain(int argc, char** argv) {
     endpoint_opts.enable_server_dev_mode = args.enable_server_dev_mode;
     oai::ConfigureUtilityEndpoints(server, tokenizer, loaded->max_model_len(),
                                    engine, endpoint_opts);
+
+    // ── Tev1 on /v1/systemone (MODEL-TEV1 Phase 6). A model dir whose
+    // architectures name "Tev1Model" keeps every generation route and ALSO
+    // answers /v1/systemone through the request-level seam: Tev1Decide, the
+    // function vllm_decide calls. It scores through this same AsyncLLM, so no
+    // lock is needed beside the chat traffic.
+    if (loaded->architecture() == "Tev1Model") {
+      const int64_t tev1_max_model_len = loaded->max_model_len();
+      server.set_systemone_request(
+          [&engine, &tokenizer, tev1_max_model_len](
+              const nlohmann::ordered_json& body) -> nlohmann::ordered_json {
+            vllm::Tev1Response r =
+                vllm::Tev1Decide(engine, tokenizer, tev1_max_model_len, body);
+            nlohmann::ordered_json out = nlohmann::ordered_json::object();
+            out["answers"] = std::move(r.answers);
+            out["usage"] = {{"input_tokens", r.input_tokens},
+                            {"output_tokens", r.output_tokens}};
+            return out;
+          });
+      std::cerr << "server: Tev1 decision model; /v1/systemone on\n";
+    }
     std::cerr << "server: utility endpoints: /tokenize /detokenize on"
               << (args.enable_tokenizer_info_endpoint ? ", /tokenizer_info on"
                                                       : "")

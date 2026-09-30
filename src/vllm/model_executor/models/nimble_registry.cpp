@@ -123,34 +123,6 @@ const ModelFactory kNimbleFactory{
     .is_dense_model = true,
 };
 
-// parallel_schema.py prepare_prompts' boundary check: each code must add
-// exactly one ordinary token after the prompt, and the ids must be distinct.
-// Every field prompt ends with the same assistant tail and added tokens are
-// hard boundaries, so checking the tail once is the whole-prompt check
-// (extended_schema.py candidate_suffix makes the same reduction).
-std::vector<int32_t> CandidateIds(const tok::Tokenizer& tokenizer, size_t count) {
-  static const std::string kTail = "</think>\n\n";
-  const std::vector<int32_t> tail = tokenizer.Encode(kTail);
-  std::vector<int32_t> ids;
-  for (size_t i = 0; i < count; ++i) {
-    const std::string code(1, static_cast<char>('A' + i));
-    const std::vector<int32_t> combined = tokenizer.Encode(kTail + code);
-    if (combined.size() != tail.size() + 1 ||
-        !std::equal(tail.begin(), tail.end(), combined.begin()) ||
-        tokenizer.IsSpecial(combined.back())) {
-      throw std::runtime_error("nimble: choice code " + code +
-                               " is not one ordinary token at the answer boundary");
-    }
-    ids.push_back(combined.back());
-  }
-  std::vector<int32_t> sorted = ids;
-  std::sort(sorted.begin(), sorted.end());
-  if (std::adjacent_find(sorted.begin(), sorted.end()) != sorted.end()) {
-    throw std::runtime_error("nimble: choice codes must have distinct token ids");
-  }
-  return ids;
-}
-
 }  // namespace
 
 NimbleResponse NimbleDecide(const LoadedModel& model,
@@ -159,42 +131,31 @@ NimbleResponse NimbleDecide(const LoadedModel& model,
   const auto& m = ModelAs<NimbleLoadedModel>(model, "NimbleModel");
   const nimble::Request request = nimble::CompileRequest(body);
   const std::vector<std::string> prompts = nimble::BuildPrompts(request);
-
-  // Tokenize every prompt first: the reference refuses an over-long request
-  // before it scores anything, and names the longest prompt.
-  std::vector<std::vector<int32_t>> ids;
-  ids.reserve(prompts.size());
-  size_t longest = 0;
-  for (const std::string& p : prompts) {
-    ids.push_back(tokenizer.Encode(p));
-    longest = std::max(longest, ids.back().size());
-  }
-  if (static_cast<int64_t>(longest) > m.max_length()) {
-    throw nimble::RequestError(
-        "Longest prompt has " + std::to_string(longest) + " tokens; limit is " +
-        std::to_string(m.max_length()) + ". Nothing was truncated.");
-  }
-
-  size_t widest = 0;
-  for (const nimble::Field& f : request.fields) widest = std::max(widest, f.keys.size());
-  const std::vector<int32_t> codes = CandidateIds(tokenizer, widest);
-
-  NimbleResponse out;
+  // One ForwardDenseLastLogits per field (inference.py candidate_logits,
+  // logits_to_keep=1). Nothing is sampled, so output_tokens stays 0.
   vt::Queue queue = m.queue();
-  for (size_t i = 0; i < request.fields.size(); ++i) {
-    const nimble::Field& f = request.fields[i];
-    std::vector<int32_t> positions(ids[i].size());
-    std::iota(positions.begin(), positions.end(), 0);
-    const std::vector<float> logits = Qwen3_5DenseModel::ForwardDenseLastLogits(
-        ids[i], positions, m.weights(), m.config(), queue);
-    std::vector<double> candidate(f.keys.size());
-    for (size_t k = 0; k < f.keys.size(); ++k) {
-      candidate[k] = static_cast<double>(logits[static_cast<size_t>(codes[k])]);
-    }
-    out.answers[f.name] = nimble::AnswerFromLogits(f, candidate, m.temperature());
-    out.input_tokens += static_cast<int64_t>(ids[i].size());
-  }
-  return out;
+  const decision_scorer::CandidateLogitsFn last_row =
+      [&m, &queue](const std::vector<std::vector<int32_t>>& prompt_ids,
+                   const std::vector<std::vector<int32_t>>& candidate_ids) {
+        decision_scorer::CandidateLogits out;
+        for (size_t i = 0; i < prompt_ids.size(); ++i) {
+          std::vector<int32_t> positions(prompt_ids[i].size());
+          std::iota(positions.begin(), positions.end(), 0);
+          const std::vector<float> logits =
+              Qwen3_5DenseModel::ForwardDenseLastLogits(
+                  prompt_ids[i], positions, m.weights(), m.config(), queue);
+          std::vector<double> candidate;
+          candidate.reserve(candidate_ids[i].size());
+          for (const int32_t id : candidate_ids[i]) {
+            candidate.push_back(static_cast<double>(logits[static_cast<size_t>(id)]));
+          }
+          out.logits.push_back(std::move(candidate));
+        }
+        return out;
+      };
+  return decision_scorer::ScoreRequest(tokenizer, request, prompts, "</think>\n\n",
+                                       m.temperature(), m.max_length(), "nimble",
+                                       last_row);
 }
 
 std::unique_ptr<LoadedModel> MakeNimbleLoadedModel(Qwen3_5DenseWeights weights,

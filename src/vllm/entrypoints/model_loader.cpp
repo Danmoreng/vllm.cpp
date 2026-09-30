@@ -2175,8 +2175,8 @@ LoadedEngine::LoadedEngine(HfConfig config, Qwen3_5MoeWeights weights,
 LoadedEngine::LoadedEngine(HfConfig config, Qwen3_5DenseWeights weights,
                            tok::Tokenizer tokenizer, const EngineParams& params,
                            std::optional<Qwen3_5MTPWeights> mtp_weights)
-    : LoadedEngine(std::move(config),
-                   AttachMtp(MakeQwen3_5DenseLoadedModel(std::move(weights)),
+    : LoadedEngine(config,
+                   AttachMtp(MakeQwen3_5DenseLoadedModel(std::move(weights), config),
                              std::move(mtp_weights)),
                    std::move(tokenizer), params) {}
 
