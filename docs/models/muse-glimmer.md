@@ -90,10 +90,11 @@ converter that emits `muse-glimmer.attention.post_norm_rms_epsilon` or
   **reduced depth, 4 of its 52 layers.** Its **5 prefill argmax positions** are
   identical to a standalone torch transcription of the upstream source and to
   Hugging Face's own `muse_glimmer` implementation. The full-depth 52-layer
-  bf16 safetensors arm has **never run**; the full-depth GGUF Q4_K_M arm has
-  (see the llama.cpp token gate above).
+  bf16 safetensors arm has generated once, 4 ungated tokens (`" Paris. It is"`,
+  2026-08-11); no bf16 token gate exists. The full-depth GGUF Q4_K_M arm is
+  token-gated (see the llama.cpp token gate above).
 - Those are argmax positions from a single prefill, not generated tokens.
-  **Multi-step decode on the bf16 safetensors arm is untested**; on the GGUF
+  **Multi-step decode on the bf16 safetensors arm is ungated**; on the GGUF
   arm it is gated for 32 tokens (prompts are far shorter than the sliding
   window, so the window across steps is still untested).
 - Even at reduced depth, this is agreement with independent transcriptions of the
