@@ -459,7 +459,7 @@ implementation commits in the same pull request.
 - Base: `Qwen/Qwen3-8B` — bf16, ~16 GB. Already loadable via
   `LoadQwen3ForCausalLMWeights`.
 - Heads: `Contrastive-LM/CLM-v0.1-8B` @ `e939398d4556fcd9400c76fa8c5a513202f42b0a`
-  — `CLM_v0.1-8B.pt` (torch save, 75557149 bytes, sha256
+  : `CLM_v0.1-8B.pt` (torch save, 75557149 bytes, sha256
   `b2b4a8c9c2d39263eff78a351eb909a342ce9b3bf21a3f07c1d1bf15f1c4eda5`),
   converted by `scripts/convert-clm.py` to `head.safetensors` plus `clm_*`
   keys in `config.json`. The repo carries no tokenizer; the converter copies
