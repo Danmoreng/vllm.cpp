@@ -9,7 +9,8 @@ one branch per item, local commits only, no pull request).
 
 ## Now
 
-`SPIKE`, unchanged. Scope 1-3 are done (see `## Evidence`). The secondary
+`SPIKE`, unchanged. Scope 1-3 are done as the amended `## Gates` define them
+(see `## Evidence`). The secondary
 llama.cpp gate passes, but the row's lifecycle stays where it is: its advance
 needs the bf16 gate against the vLLM pin (owed) and the `docs/STATUS.md` /
 `.agents/NOW.md` rows the matrix row already names.
@@ -32,9 +33,12 @@ needs the bf16 gate against the vLLM pin (owed) and the `docs/STATUS.md` /
    (`meta-models/Muse-Glimmer-30B-GGUF` @ `70bf1b61ac09f91b24d39038091b41c582bc5d7a`)
    through our loader and forward, compared token by token with the registered
    `llama-cpp` oracle at its pin `b10451` on the same file, CPU on both sides.
-   Every divergence is classified by the logit margin on both sides at the
-   first differing position: a near-tie (both margins small and the two argmax
-   tokens swapped) or a defect (a large margin on either side).
+   Every differing cell is classified the way the tree's paged-engine gates
+   classify it (`test_olmo3_paged_engine.cpp`): by the ORACLE's teacher-forced
+   gap on our prefix (its top logit minus its logit for our token), inside the
+   ratified 500 mnat band a near-tie, outside it a forward divergence. Our own
+   margin is not computed. (Amended 2026-09-30 after review: the first draft
+   promised margins on both sides, which the tree's gate form does not use.)
 
 Out of scope: the bf16 token gate against pinned vLLM (a ~60 GB checkpoint and
 a `dgx:gpu0` lease with an oracle build, owed), the image processor (no C++
@@ -84,18 +88,25 @@ and the tool/reasoning parser tests, already ported by the row).
 
 ## Gates
 
-- Vision (env-gated, real tensors): per-stage `patchify`, positional table,
-  `ln_pre`, block 0, tower output, adapter, projection; f32 arm relative max
-  error at the level the synthetic gate holds (1e-4), bf16 arm on the bf16
-  envelope with a per-row cosine floor.
-- Text (env-gated, real file): greedy token ids on the prompts the row already
-  uses, ours against llama.cpp, with both margins at the first divergence.
+- Vision (env-gated, real tensors): `ln_pre`, block 0, tower output, adapter
+  and the soft tokens (projection plus `perception_emb_norm`), relative max
+  error: `ln_pre` and block 0 under 1e-4, tower, adapter and soft tokens under
+  1e-3 in f32. `patchify` and the positional table are gated on the synthetic
+  fixture only; the real run checks them through `ln_pre`. The bf16 arm is
+  gated against the f32 truth, not against the reference's bf16 arm: its row
+  cosines (mean within 1e-3, worst within 0.02 of the reference bf16 arm's)
+  and its relative max error (at most twice the reference bf16 arm's, because
+  cosine cannot see a scale error).
+- Text (env-gated, real file): 16 prompts x 32 greedy tokens through the paged
+  engine; our ids equal the committed anchor exactly, and every cell that
+  differs from llama.cpp's greedy has an oracle teacher-forced gap within
+  500 mnats. The exact-match count is reported next to the pass.
 
 ## Work breakdown
 
 1. This spec, the issue and the record correction.
 2. The vision reference run: extend the reference script with a real-weights
-   mode and add the env-gated real arm to `test_muse_glimmer_vision`.
+   mode and add the env-gated `test_muse_glimmer_vision_real`.
 3. The GGUF comparison: a llama.cpp greedy driver that prints ids and margins,
    our side through the production GGUF load, and the classification.
 4. Records: the model page, FEATURES, the matrix row, `## Outcome`.
@@ -105,8 +116,9 @@ and the tool/reasoning parser tests, already ported by the row).
 - A transcription is not the runtime. The vision gate establishes agreement
   with the pinned formulas on real tensors, not image-to-text correctness.
 - A Q4_K_M comparison against llama.cpp can only show quantization-matched
-  agreement. A near-tie divergence is recorded as such and is not a pass; a
-  defect found is fixed in this branch only if it is inside this item.
+  agreement. A near-tie cell passes the gate (the tree's ratified band) but is
+  reported separately from an exact match, never folded into it; a defect
+  found is fixed in this branch only if it is inside this item.
 - Staging: the 16.76 GB GGUF and ~3.7 GB of vision tensors live on the NAS,
   because the development host has under 10 GB free.
 
@@ -119,9 +131,14 @@ All on CPU, 2026-09-30.
   from `scripts/mm/muse_glimmer_vision_ref.py --real-dir`): a 588x644 image,
   483 soft-token rows, weights through `LoadMuseGlimmerVisionTower` and soft
   tokens through `MuseGlimmerEncodePixelGroups`. f32 arm: `ln_pre` 1.22e-6,
-  tower 7.87e-5, soft tokens 4.07e-5 relative max error, row cosine 1.0. bf16
-  arm, gated against the f32 truth: ours worst row cosine 0.967, mean 0.99875;
-  the reference's own bf16 arm worst 0.970, mean 0.99856. PASS.
+  block 0 3.56e-6, tower 7.87e-5, adapter 4.58e-5, soft tokens 4.07e-5
+  relative max error, row cosine 1.0. bf16 arm, gated against the f32 truth:
+  ours worst row cosine 0.967, mean 0.99875, relative max error 0.0916; the
+  reference's own bf16 arm worst 0.970, mean 0.99856, 0.0837. PASS. Mutations
+  (restored): dropping the adapter's outer GELU, skipping
+  `perception_emb_norm` (now red in the bf16 arm too, through the magnitude
+  bound), and loading `ln_post.bias` from the `ln_pre.bias` slot each turn it
+  red.
 - **Text** (`test_muse_glimmer_gguf_paged_engine`, env `VLLM_MUSE_GGUF_PARITY`;
   golden `tests/parity/goldens/muse_glimmer_30b_q4km/`, file sha256
   `4cc57c0f51040a226e5a72cc47b7613f7772950e460a665f7083de89f183f60e`): 16

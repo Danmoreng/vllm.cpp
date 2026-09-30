@@ -137,20 +137,30 @@ TEST_CASE("muse glimmer vision REAL: tower, adapter, projection vs the pinned fo
     const std::vector<float> ln_pre_ref = ReadF32(g + "/ln_pre_" + arm + ".bin");
     REQUIRE(cap.ln_pre_out.size() == 1);
     const double e_ln = RelMaxErr(cap.ln_pre_out[0], ln_pre_ref);
+    const double e_block0 = RelMaxErr(cap.block0_out, ReadF32(g + "/block0_" + arm + ".bin"));
     const double e_tower = RelMaxErr(tower, ReadF32(g + "/tower_" + arm + ".bin"));
+    // The adapter on OUR tower output, so its error isolates the adapter only
+    // when the tower already agrees (the f32 arm).
+    const std::vector<float> adapted = vllm::multimodal::MuseGlimmerVisionAdapterForward(
+        tower, static_cast<int64_t>(tower.size()) / w.vision.cfg.output_dim, w.vision.adapter,
+        w.vision.cfg, *cpu);
+    const double e_adapter = RelMaxErr(adapted, ReadF32(g + "/adapter_" + arm + ".bin"));
     // The production entry point: encoder -> adapter -> projection -> norm.
     const std::vector<float> soft = vllm::MuseGlimmerEncodePixelGroups({image}, w, q);
     const std::vector<float> soft_ref = ReadF32(g + "/soft_" + arm + ".bin");
     const double e_soft = RelMaxErr(soft, soft_ref);
     const RowCosine cos_soft = RowCosines(soft, soft_ref, static_cast<size_t>(H));
-    MESSAGE(std::string(arm) << ": ln_pre rel " << e_ln << ", tower rel " << e_tower
+    MESSAGE(std::string(arm) << ": ln_pre rel " << e_ln << ", block0 rel " << e_block0
+                             << ", tower rel " << e_tower << ", adapter rel " << e_adapter
                              << ", soft tokens rel " << e_soft << ", soft-token cosine worst "
                              << cos_soft.worst << " mean " << cos_soft.mean << " over "
                              << soft.size() / static_cast<size_t>(H) << " rows");
     if (f32) {
       // The arithmetic gate: same bf16 weights, f32 math on both sides.
       CHECK(e_ln < 1e-4);
+      CHECK(e_block0 < 1e-4);
       CHECK(e_tower < 1e-3);
+      CHECK(e_adapter < 1e-3);
       CHECK(e_soft < 1e-3);
     } else {
       // 50 bf16 blocks move a few rows a long way from the f32 result on BOTH
@@ -166,6 +176,14 @@ TEST_CASE("muse glimmer vision REAL: tower, adapter, projection vs the pinned fo
                                                    << " mean " << theirs.mean);
       CHECK(ours.mean >= theirs.mean - 1e-3);
       CHECK(ours.worst >= theirs.worst - 0.02);
+      // Cosine is blind to scale (a dropped output norm keeps it high), so the
+      // magnitude is bounded too: our relative max error against the f32 truth
+      // may not exceed twice the reference bf16 arm's own.
+      const double e_ours = RelMaxErr(soft, truth);
+      const double e_theirs = RelMaxErr(soft_ref, truth);
+      MESSAGE("bf16 rel max err vs the f32 truth: ours " << e_ours << ", reference bf16 "
+                                                          << e_theirs);
+      CHECK(e_ours <= 2.0 * e_theirs);
     }
   }
 }
