@@ -48,8 +48,16 @@ checkpoints do not select (`min_num_patches` is in `vision_config.args`).
 
 ## Upstream chain
 
-vLLM `e126687a9a` (the parity pin), and torch v2.11.0 for the two
-`F.interpolate` calls the processor and the tower make.
+The authoritative vLLM parity pin is `a7c23ac96d` (`.agents/upstream-sync.md`,
+`vllm_commit`, advanced by `4f11dfc10`). The port was read, and every
+`file:line` in this spec and in the code is cited, at `e126687a9a`, the pin
+several records on `main` still name. Between the two revisions the files this
+port mirrors changed only in type annotations, docstrings, tuple construction
+and the LoRA / dummy-input plumbing (`git diff e126687a9a a7c23ac96d --
+vllm/model_executor/models/{radio,intern_vit,nano_nemotron_vl}.py
+vllm/transformers_utils/{configs/radio,processors/nano_nemotron_vl}.py
+vllm/ir/ops/layernorm.py`, reviewed 2026-09-30); no image-path semantics moved.
+torch v2.11.0 for the two `F.interpolate` calls the processor and the tower make.
 
 ## Port map
 
