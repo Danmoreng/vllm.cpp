@@ -336,16 +336,17 @@ than "it works", so it is worth stating precisely.
   HF's own `muse_glimmer` implementation. The full-depth 52-layer bf16 arm has
   generated once, 4 ungated tokens (2026-08-11); no bf16 token gate exists.
 - Those are argmax positions from a single prefill, not generated tokens.
-  **bf16 multi-step decode is ungated.** The GGUF Q4_K_M arm IS token-gated at
-  full depth against llama.cpp `b10451` (next section).
+  **bf16 multi-step decode is ungated**, and the sliding window across steps is
+  untested on either arm. The GGUF Q4_K_M arm IS token-gated at full depth
+  against llama.cpp `b10451` (next section).
 - Even at reduced depth this is agreement with independent transcriptions of the
   same upstream source, not agreement with the model's own runtime. The vLLM
   parity pin `a7c23ac96d` registers `muse_glimmer`, but no bf16 gate against it
   has run (it needs a GPU lease).
 - The perception encoder has **one reference run** on the released tensors
   (2026-09-30): f32 soft tokens within 4.07e-5 relative of a torch
-  transcription of the pinned formulas, bf16 within the reference's own bf16
-  envelope. The image processor is not ported, and no image-to-text result
+  transcription of the pinned formulas; bf16 within the gate's tolerance of the
+  reference's own bf16 arm (worst row cosine 0.967 vs 0.970). The image processor is not ported, and no image-to-text result
   exists.
 - Nothing has run end to end through the server, and **no speed number exists
   against vLLM**; a secondary llama.cpp bar exists (#333).
