@@ -61,7 +61,7 @@ void WriteNpyI32(const std::string& path, const std::vector<int32_t>& v, int n, 
   f.write(reinterpret_cast<const char*>(v.data()), static_cast<std::streamsize>(v.size() * 4));
 }
 
-// log-softmax value of `id` minus that of the argmax, and the argmax, in f64.
+// logit of the argmax minus the logit of `id` (>= 0), and the argmax, in f64.
 void Gap(const float* lg, int nv, int32_t id, int32_t* argmax, double* gap_nats) {
   int best = 0;
   for (int k = 1; k < nv; ++k)
