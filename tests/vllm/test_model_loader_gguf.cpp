@@ -204,6 +204,20 @@ TEST_CASE("a glm-dsa GGUF reaches ITS OWN builder through the dispatch") {
   CHECK(message.find("qwen3_5 gguf:") == std::string::npos);
 }
 
+TEST_CASE("a laguna GGUF reaches ITS OWN builder through the dispatch") {
+  // MODEL-TEXT-laguna-laguna-for-causal-lm, #2841: the registry's Laguna GGUF
+  // arm was unreachable from FromModelDir, which refused `laguna` as an
+  // unsupported architecture. Proven by the message, as the rows above are:
+  // only the Laguna resolve names `laguna.embedding_length` as its first
+  // missing key.
+  const std::string message = RefusalFor(GgufWithArchitecture("laguna"));
+  REQUIRE_FALSE(message.empty());
+  CHECK(message.find("laguna gguf: missing required key laguna.embedding_length") !=
+        std::string::npos);
+  CHECK(message.find("is not supported by this build") == std::string::npos);
+  CHECK(message.find("qwen3_5 gguf:") == std::string::npos);
+}
+
 TEST_CASE("FromModelDir rejects an unknown dense architecture before loading") {
   // The rejection must fire during architecture resolution, BEFORE any tokenizer
   // or weight I/O — so the arch must be one the registry does NOT know. (Note:

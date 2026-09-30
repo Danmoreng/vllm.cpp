@@ -247,3 +247,50 @@ TEST_CASE("LoadLagunaFromGguf: a TIED block-quantized token_embd still loads") {
   CHECK(w.lm_head.Empty());  // tied: the head IS `embed`
   CHECK(w.params.vocab_size == d.vocab);
 }
+
+// #2841: the config FromModelDir builds for a `laguna` GGUF. The engine sizes
+// its KV cache and scheduler from this HfConfig while the weight loader
+// resolves the file itself, so the two must agree on every field the forward
+// reads. The case pins that `ParseLagunaParams` on the built config recovers
+// the loader's own `LagunaParamsFromGguf`, and that the registry resolves it.
+TEST_CASE("LagunaHfConfigFromGguf: the engine config agrees with the loader's resolve") {
+  Dims d;
+  TempFile f(BuildGguf(d, /*q8_embed=*/true));
+  const vllm::GgufFile g = vllm::GgufFile::Open(f.path());
+  const vllm::LagunaParams want = vllm::LagunaParamsFromGguf(g);
+  const vllm::HfConfig c = vllm::LagunaHfConfigFromGguf(g);
+
+  REQUIRE(c.architectures.size() == 1);
+  CHECK(c.architectures[0] == "LagunaForCausalLM");
+  CHECK(c.hidden_size == d.H);
+  CHECK(c.num_hidden_layers == d.n_layer);
+  CHECK(c.num_key_value_heads == d.kv_heads);
+  CHECK(c.head_dim == d.head_dim);
+  // No `laguna.vocab_size` key in this file: the token table's rows answer.
+  CHECK(c.vocab_size == d.vocab);
+  CHECK(c.layer_types == want.layer_types);
+
+  const vllm::LagunaParams got = vllm::ParseLagunaParams(c);
+  CHECK(got.num_attention_heads == want.num_attention_heads);
+  CHECK(got.num_attention_heads_per_layer == want.num_attention_heads_per_layer);
+  CHECK(got.layer_types == want.layer_types);
+  CHECK(got.intermediate_size == want.intermediate_size);
+  CHECK(got.num_experts == want.num_experts);
+  CHECK(got.num_experts_per_tok == want.num_experts_per_tok);
+  CHECK(got.moe_intermediate_size == want.moe_intermediate_size);
+  CHECK(got.shared_expert_intermediate_size == want.shared_expert_intermediate_size);
+  CHECK(got.mlp_only_layers == want.mlp_only_layers);
+  CHECK(got.norm_topk_prob == want.norm_topk_prob);
+  CHECK(got.rotary_dim_full == want.rotary_dim_full);
+  CHECK(got.rotary_dim_sliding == want.rotary_dim_sliding);
+  CHECK(got.rope_theta_full == doctest::Approx(want.rope_theta_full));
+  CHECK(got.rope_theta_sliding == doctest::Approx(want.rope_theta_sliding));
+  CHECK(got.yarn_factor == doctest::Approx(want.yarn_factor));
+  CHECK(got.yarn_attn_factor == doctest::Approx(want.yarn_attn_factor));
+  CHECK(got.tie_word_embeddings == false);
+
+  // A tied file (no `output.weight`) is reported as tied.
+  TempFile tf(BuildGguf(d, /*q8_embed=*/true, /*tied=*/true));
+  const vllm::GgufFile tg = vllm::GgufFile::Open(tf.path());
+  CHECK(vllm::ParseLagunaParams(vllm::LagunaHfConfigFromGguf(tg)).tie_word_embeddings);
+}

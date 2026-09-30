@@ -39,6 +39,7 @@
 #include "vllm/model_executor/models/interfaces.h"  // #607 L3 SkipTowerForModalities
 #include "vllm/model_executor/models/glm5_next_weights.h"  // glm5next GGUF arm
 #include "vllm/model_executor/models/glm_moe_dsa.h"  // glm-dsa GGUF arm
+#include "vllm/model_executor/models/laguna.h"  // laguna GGUF arm
 #include "vllm/model_executor/models/muse_glimmer_gguf_weights.h"  // muse-glimmer GGUF arm
 #include "vllm/model_executor/models/qwen4_exp_gguf_weights.h"  // qwen4exp GGUF arm
 #include "vllm/model_executor/models/nemotron_h.h"  // the OWED nemotron_h* GGUF refusal (#809)
@@ -1250,6 +1251,11 @@ std::unique_ptr<vllm::v1::kv_offload::KVConnector> BuildKvConnector(
 //    the row that discharges O9: `scripts/convert-glm5-next-gguf.py` is the
 //    only writer of that container -- no upstream tool can produce one -- and
 //    until this row existed the file it wrote was refused as unrecognized.
+//  * `laguna` -> LagunaHfConfigFromGguf. The Laguna registry has carried a GGUF
+//    load arm (and `LagunaParamsFromGguf`) since W5, but no row here reached
+//    it, so every Laguna GGUF was refused at this table and only
+//    `examples/laguna_gen` could load one (#2841). The builder is derived from
+//    the loader's own GGUF resolve, so the two cannot disagree on geometry.
 struct GgufArchArm {
   const char* arch;
   HfConfig (*build)(const vllm::GgufFile&);
@@ -1265,6 +1271,7 @@ constexpr GgufArchArm kGgufArchArms[] = {
     {vllm::kQwen4ExpGgufArch, &vllm::Qwen4ExpHfConfigFromGguf},
     {vllm::kGlm5NextGgufArch, &vllm::Glm5NextHfConfigFromGguf},
     {vllm::kGlmMoeDsaGgufArch, &vllm::GlmMoeDsaHfConfigFromGguf},
+    {"laguna", &vllm::LagunaHfConfigFromGguf},
 };
 
 std::string SupportedGgufArchitectures() {
