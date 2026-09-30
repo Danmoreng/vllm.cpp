@@ -328,7 +328,8 @@ def encoder_forward(cfg, w, pixel_values, capture):
         hidden_states = F.linear(patched, w.conv1)          # bias=False (:710)
         pos = get_pos_emb(cfg, w.pos_emb, grid_height, grid_width)
         capture.setdefault("pos_emb", []).append(pos.reshape(-1))
-        hidden_states = hidden_states + pos.unsqueeze(0)
+        # `.to(dtype)` (_get_pos_emb is f32; the sum is in the tower dtype).
+        hidden_states = hidden_states + pos.unsqueeze(0).to(hidden_states.dtype)
         hidden_states = F.layer_norm(
             hidden_states.view(-1, cfg.hidden_size),
             (cfg.hidden_size,),
@@ -432,6 +433,141 @@ def emit_int(fh, name, values):
     fh.write("};\n\n")
 
 
+# --- REAL mode: the released tensors (a first reference run) ---------------
+# `--real-dir DIR` reads `config.json` and every `*.safetensors` in DIR whose
+# names start `model.vision_` (the tower from shard 1, the adapter and the
+# projection from shard 2 of meta-models/Muse-Glimmer-30B @ a4e59da5), runs the
+# SAME transcription on a deterministic pixel tensor in f32 and in the
+# production bf16, and writes raw little-endian f32 binaries to `--out-dir`
+# for the env-gated real arm of tests/vllm/models/test_muse_glimmer_vision.cpp.
+# The reference is the pinned vLLM `a7c23ac96d` formulas; their vision
+# semantics are unchanged from 075d645af (see .agents/specs/muse-glimmer-parity.md).
+def load_st_dir(path):
+    import glob
+    import json as _json
+    import struct as _struct
+
+    out = {}
+    for f in sorted(glob.glob(os.path.join(path, "*.safetensors"))):
+        with open(f, "rb") as fh:
+            n = _struct.unpack("<Q", fh.read(8))[0]
+            hdr = _json.loads(fh.read(n))
+            base = 8 + n
+            for k, v in hdr.items():
+                if k == "__metadata__" or not k.startswith("model.vision_"):
+                    continue
+                a, b = v["data_offsets"]
+                fh.seek(base + a)
+                raw = bytearray(fh.read(b - a))
+                dt = {"BF16": torch.bfloat16, "F32": torch.float32}[v["dtype"]]
+                out[k] = torch.frombuffer(raw, dtype=dt).reshape(v["shape"]).clone()
+    return out
+
+
+class RealCfg(Cfg):
+    pass
+
+
+def real_cfg(config_path):
+    import json as _json
+
+    c = _json.load(open(config_path))
+    v = c["vision_config"]
+    cfg = RealCfg()
+    cfg.hidden_size = v["hidden_size"]
+    cfg.num_attention_heads = v["num_attention_heads"]
+    cfg.num_hidden_layers = v["num_hidden_layers"]
+    cfg.intermediate_size = v["intermediate_size"]
+    cfg.patch_size = v["patch_size"]
+    cfg.patch_temporal = v["patch_temporal"]
+    cfg.merge_kernel_size = v["merge_size"]
+    cfg.pos_emb_height = v["pos_emb_height"]
+    cfg.pos_emb_width = v["pos_emb_width"]
+    cfg.adapter_dim = c["projector_hidden_size"]
+    cfg.layer_norm_eps = v["layer_norm_eps"]
+    cfg.layer_types = list(v["layer_types"])
+    text = c["text_config"]
+    cfg.text_hidden = text["hidden_size"]
+    cfg.rms_norm_eps = text["rms_norm_eps"]
+    # `normalize_tok_embeddings` defaults True when absent (configs/muse_glimmer.py:67)
+    cfg.normalize_tok_embeddings = text.get("normalize_tok_embeddings", True)
+    if cfg.normalize_tok_embeddings is None:
+        cfg.normalize_tok_embeddings = True
+    return cfg
+
+
+def real_weights(st, cfg, dtype):
+    w = Weights.__new__(Weights)
+    t = "model.vision_tower."
+    g = lambda k: st[k].to(torch.float32).to(dtype)  # noqa: E731
+    w.conv1 = g(t + "patch_embedder.patch_embedding.weight")
+    # The positional table stays f32-valued: upstream gathers it with f32
+    # fractions and casts the SUM to the activation dtype (_get_pos_emb + `.to(dtype)`).
+    w.pos_emb = st[t + "patch_embedder.position_embedding_table.weight"].to(torch.float32)
+    w.ln_pre_w, w.ln_pre_b = g(t + "ln_pre.weight"), g(t + "ln_pre.bias")
+    w.ln_post_w, w.ln_post_b = g(t + "ln_post.weight"), g(t + "ln_post.bias")
+    w.blocks = []
+    for l in range(cfg.num_hidden_layers):
+        p = f"{t}layers.{l}."
+        w.blocks.append(dict(
+            ln1_w=g(p + "norm1.weight"), ln1_b=g(p + "norm1.bias"),
+            ln2_w=g(p + "norm2.weight"), ln2_b=g(p + "norm2.bias"),
+            qkv_w=torch.cat([g(p + "attn.q_proj.weight"), g(p + "attn.k_proj.weight"),
+                             g(p + "attn.v_proj.weight")]),
+            qkv_b=torch.cat([g(p + "attn.q_proj.bias"), g(p + "attn.k_proj.bias"),
+                             g(p + "attn.v_proj.bias")]),
+            o_w=g(p + "attn.proj.weight"), o_b=g(p + "attn.proj.bias"),
+            fc_w=g(p + "mlp.fc1.weight"), fc_b=g(p + "mlp.fc1.bias"),
+            proj_w=g(p + "mlp.fc2.weight"), proj_b=g(p + "mlp.fc2.bias")))
+    w.ad_fc = g("model.vision_adapter.fc1.weight")
+    w.ad_proj = g("model.vision_adapter.fc2.weight")
+    w.projection = g("model.vision_projection.weight")
+    return w
+
+
+def real_pixels(h, wd):
+    """A deterministic 3-channel pixel tensor in the normalized range: an LCG
+    image in [0, 255] passed through the CLIP-style normalization the released
+    processor_config declares. The tower gate does not need the processor."""
+    raw = lcg(7777, 3 * h * wd, 1.0).view(1, 3, h, wd)
+    img = (raw + 1.0) * 127.5
+    mean = torch.tensor([0.48145466, 0.4578275, 0.40821073]).view(1, 3, 1, 1)
+    std = torch.tensor([0.26862954, 0.26130258, 0.27577711]).view(1, 3, 1, 1)
+    return (img / 255.0 - mean) / std
+
+
+def real_chain(cfg, w, pixels, dtype):
+    capture = {}
+    feats = encoder_forward(cfg, w, [pixels.to(dtype)], capture)
+    adapted = adapter_forward(w, feats)
+    soft = F.linear(adapted, w.projection)
+    if cfg.normalize_tok_embeddings:
+        x = soft.float()
+        soft = (x * torch.rsqrt(x.pow(2).mean(-1, keepdim=True) + cfg.rms_norm_eps)).to(soft.dtype)
+    return capture, feats, adapted, soft
+
+
+def real_main(real_dir, out_dir, h, wd):
+    cfg = real_cfg(os.path.join(real_dir, "config.json"))
+    st = load_st_dir(real_dir)
+    pixels = real_pixels(h, wd)
+    os.makedirs(out_dir, exist_ok=True)
+    pixels.reshape(-1).numpy().tofile(os.path.join(out_dir, "pixels_f32.bin"))
+    for name, dtype in (("f32", torch.float32), ("bf16", torch.bfloat16)):
+        w = real_weights(st, cfg, dtype)
+        cap, feats, adapted, soft = real_chain(cfg, w, pixels, dtype)
+        cap["ln_pre"][0].float().numpy().tofile(os.path.join(out_dir, f"ln_pre_{name}.bin"))
+        cap["block0"].float().numpy().tofile(os.path.join(out_dir, f"block0_{name}.bin"))
+        feats.float().reshape(-1).numpy().tofile(os.path.join(out_dir, f"tower_{name}.bin"))
+        adapted.float().reshape(-1).numpy().tofile(os.path.join(out_dir, f"adapter_{name}.bin"))
+        soft.float().reshape(-1).numpy().tofile(os.path.join(out_dir, f"soft_{name}.bin"))
+        print(name, "tower", tuple(feats.shape), "soft", tuple(soft.shape), flush=True)
+    import json as _json
+    with open(os.path.join(out_dir, "meta.json"), "w") as fh:
+        _json.dump({"height": h, "width": wd, "torch": torch.__version__,
+                    "normalize_tok_embeddings": bool(cfg.normalize_tok_embeddings)}, fh)
+
+
 def main():
     ap = argparse.ArgumentParser()
     default = os.path.join(
@@ -439,7 +575,13 @@ def main():
         "tests/vllm/models/muse_glimmer_vision_goldens.inc",
     )
     ap.add_argument("--out", default=default)
+    ap.add_argument("--real-dir")
+    ap.add_argument("--out-dir")
+    ap.add_argument("--image-hw", nargs=2, type=int, default=[336, 448])
     args = ap.parse_args()
+    if args.real_dir:
+        real_main(args.real_dir, args.out_dir, args.image_hw[0], args.image_hw[1])
+        return
 
     cfg, w = CFG, Weights(CFG)
     pixel_values = []

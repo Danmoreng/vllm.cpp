@@ -1031,6 +1031,10 @@ vllm_cpp_add_test(test_muse_glimmer_scaffold vllm/models/test_muse_glimmer_scaff
 vllm_cpp_add_test(test_muse_glimmer_vision vllm/models/test_muse_glimmer_vision.cpp)
 target_include_directories(test_muse_glimmer_vision PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/vllm/models)
+# The FIRST reference run of the perception encoder on the RELEASED tensors
+# (.agents/specs/muse-glimmer-parity.md): env-gated, the tensors are ~3.7 GB.
+vllm_cpp_add_test(test_muse_glimmer_vision_real vllm/models/test_muse_glimmer_vision_real.cpp)
+target_include_directories(test_muse_glimmer_vision_real PRIVATE ${CMAKE_SOURCE_DIR}/src)
 # Muse Glimmer W1 TEXT TOWER gate: the whole text forward vs an INDEPENDENT fp32
 # reference transcribed from vllm#51655 head 075d645af, plus a property test per
 # mechanism (weightless embed_norm, QK-norm, query pre-scale, the iRoPE NoPE/sliding
@@ -3889,6 +3893,14 @@ target_compile_definitions(test_phi3_paged_engine PRIVATE
 target_include_directories(test_phi3_paged_engine PRIVATE
   ${CMAKE_SOURCE_DIR}/tests/parity ${CMAKE_SOURCE_DIR}/src)
 
+# Muse Glimmer 30B Q4_K_M GGUF gate vs the registered llama.cpp oracle (b10451)
+# on the same file (.agents/specs/muse-glimmer-parity.md). Checkpoint-gated on
+# VLLM_MUSE_GGUF_PARITY.
+vllm_cpp_add_test(test_muse_glimmer_gguf_paged_engine parity/test_muse_glimmer_gguf_paged_engine.cpp)
+target_compile_definitions(test_muse_glimmer_gguf_paged_engine PRIVATE
+  PARITY_GOLDENS_DIR="${CMAKE_SOURCE_DIR}/tests/parity/goldens")
+target_include_directories(test_muse_glimmer_gguf_paged_engine PRIVATE
+  ${CMAKE_SOURCE_DIR}/tests/parity ${CMAKE_SOURCE_DIR}/src)
 vllm_cpp_add_test(test_olmo3_paged_engine parity/test_olmo3_paged_engine.cpp)
 target_compile_definitions(test_olmo3_paged_engine PRIVATE
   PARITY_GOLDENS_DIR="${CMAKE_SOURCE_DIR}/tests/parity/goldens")
