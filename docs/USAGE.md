@@ -863,6 +863,20 @@ it into its base. The [Nimble page](models/nimble.md) has the commands.
 GGUF k-quant arms are not implemented; `NimbleModel` refuses a GGUF source by
 name.
 
+### CLM: the exact weights
+
+CLM ships its two projection heads as a torch pickle beside an unmodified
+base, so it runs only after `scripts/convert-clm.py` writes a `ClmModel`
+directory. The [CLM page](models/clm.md) has the commands.
+
+| arm | repo @ revision | file | sha256 |
+|---|---|---|---|
+| base, BF16 | `Qwen/Qwen3-8B` @ `b968826d9c46dd6066d109eabc6255188de91218` | five `model-0000N-of-00005.safetensors` shards | as published at that revision |
+| heads, F32 | `Contrastive-LM/CLM-v0.1-8B` @ `e939398d4556fcd9400c76fa8c5a513202f42b0a` | `CLM_v0.1-8B.pt`, 75,557,149 bytes | `b2b4a8c9c2d39263eff78a351eb909a342ce9b3bf21a3f07c1d1bf15f1c4eda5` |
+
+GGUF k-quant arms are not implemented; `ClmModel` refuses a GGUF source by
+name.
+
 ## Muse Glimmer 30B from a GGUF k-quant
 
 The text tower loads from a `muse-glimmer`-architecture GGUF, so the 30B model
