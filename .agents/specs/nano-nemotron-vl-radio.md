@@ -51,23 +51,37 @@ checkpoints do not select (`min_num_patches` is in `vision_config.args`).
 The authoritative vLLM parity pin is `a7c23ac96d` (`.agents/upstream-sync.md`,
 `vllm_commit`, advanced by `4f11dfc10`). The port was read, and every
 `file:line` in this spec and in the code is cited, at `e126687a9a`, the pin
-several records on `main` still name. Between the two revisions the files this
-port mirrors changed only in type annotations, docstrings, tuple construction
-and the LoRA / dummy-input plumbing (`git diff e126687a9a a7c23ac96d --
+several records on `main` still name. The full diff between the two revisions
+of the files this port mirrors (`git diff e126687a9a a7c23ac96d --
 vllm/model_executor/models/{radio,intern_vit,nano_nemotron_vl}.py
 vllm/transformers_utils/{configs/radio,processors/nano_nemotron_vl}.py
-vllm/ir/ops/layernorm.py`, reviewed 2026-09-30). In `nano_nemotron_vl.py` that
-plumbing is: `SupportsLoRA` on `NemotronH_Nano_VL_V2`, covering the language
-model only, with the video indicator tokens embedded by the base weights; the
+vllm/ir/ops/layernorm.py`) was read on 2026-09-30. It touches type
+annotations, docstrings, tuple construction, the LoRA / dummy-input plumbing,
+the processor call path for audio in video, the audio input construction and
+the static-tile image arm. In `nano_nemotron_vl.py`, cited at `a7c23ac96d`,
+that is: `SupportsLoRA` on `NemotronH_Nano_VL_V2`, covering the language model
+only, with the video indicator tokens embedded by the base weights; the
 `video_embeds` input mode, now parsed and passed through; a
-`kwargs.pop("truncation", None)` in `get_hf_processor`; the `audio` to `audios`
-key rename in the new `_get_hf_mm_inputs`; and `image_embeds is not None` in
-place of the walrus truthiness test in `_parse_and_validate_image_input`. None
-of these touches the pixel-image path: the rename and the LoRA embedding are
-audio and video, the walrus change is the `image_embeds` arm, and the dynamic
-arm only moved from `**kwargs` to the same two named fields. No image-path
-semantics moved.
-torch v2.11.0 for the two `F.interpolate` calls the processor and the tower make.
+`kwargs.pop("truncation", None)` in `get_hf_processor`; the
+`_get_hf_processor_text` to `_get_hf_mm_text` rename (`:374`) and the `audio`
+to `audios` key rename in the new `_get_hf_mm_inputs`;
+`_extract_audio_from_videos` copying the metadata list, starting from
+`MultiModalDataItems()` and returning `new_mm_items` (`:679-697`); the
+`use_audio_in_video` bypass in `apply()` storing `_apply_hf_processor` in
+`mm_res` and passing `mm_res=` to `_maybe_apply_prompt_updates`, with the
+`_postprocess_prompt` call removed (`:767-787`); the audio inputs built from
+three named fields instead of `**kwargs` (`:1496-1507`); the static-tile arm
+dropping `**kwargs` (`:1172-1177`); `image_embeds is not None` in place of the
+walrus truthiness test in `_parse_and_validate_image_input`; and an
+`isinstance` test in place of the `self.dynamic_resolution` flag to select the
+dynamic arm (`:1529`). None of these touches the dynamic-resolution
+pixel-image path this port implements: the renames, the audio-in-video path,
+the audio fields and the LoRA embedding are audio and video, the walrus change
+is the `image_embeds` arm, the static-tile arm is not ported, the dispatch
+change selects the same arm for the same inputs, and the dynamic arm only moved
+from `**kwargs` to the same two named fields. No image-path semantics moved.
+The torch reference is v2.11.0, for the two `F.interpolate` calls the
+processor and the tower make.
 
 ## Port map
 
