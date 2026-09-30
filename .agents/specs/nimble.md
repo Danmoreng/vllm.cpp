@@ -10,7 +10,9 @@ the last prompt position, then `softmax(logits / T)`. It does not generate.
 
 ## Now
 
-`ACTIVE`. Spec committed; implementation follows in the same branch.
+`ACTIVE`. Implemented and CPU-verified: reference prompt and answer goldens,
+real-tokenizer ids, and a served end-to-end run on Qwen3.5-0.8B-Base with a
+synthetic LoRA. The gate on the published 9B checkpoint is `PENDING` (Owed).
 
 ## Scope
 

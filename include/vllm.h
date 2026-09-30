@@ -1275,7 +1275,8 @@ VLLM_API void vllm_ner_result_free(vllm_ner_result* out);
  *
  * vllm_decide runs the decision or scoring pipeline depending on the engine
  * architecture. A kev engine ("KevModel") or laya engine ("LayaModel") runs
- * the decision forward and returns the /v1/systemone JSON response. A cua-s1
+ * the decision forward and returns the /v1/systemone JSON response, as do
+ * "ClmModel", "SpanExtractor", "XorModel" and "NimbleModel". A cua-s1
  * engine ("CuaS1Forms") runs the score forward and returns the /v1/score JSON
  * response. Other architectures are refused by name.
  *

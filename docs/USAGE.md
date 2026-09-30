@@ -758,6 +758,43 @@ For a production deployment, use [LocalAI](https://localai.io), which can embed
 engines like this behind a model gallery, multi-model serving, the full OpenAI
 API surface, auth, and metrics.
 
+## System 1 decisions with `/v1/systemone`
+
+A decision model answers typed questions about a `state` without generating
+text. The server registers `POST /v1/systemone` when the model directory
+resolves to a decision architecture, and `vllm_decide` takes the same body
+through the C ABI ([C API reference](reference/c-api.md#decisions-and-option-scoring)).
+
+```sh
+curl http://localhost:8000/v1/systemone -H 'Content-Type: application/json' -d '{
+  "state": "I was charged twice. Please refund the duplicate.",
+  "questions": {
+    "refund": {"type": "noul", "instructions": "Does the user request a refund?"},
+    "department": {"type": "choice", "instructions": "Which department?",
+                   "criteria": {"billing": "Payments and refunds", "technical": "Software bugs"}},
+    "urgency": {"type": "score", "instructions": "How urgent is this?",
+                "criteria": ["Routine", "Urgent", "Emergency"]}}}'
+```
+
+Each model page carries its checkpoint, its answer semantics, and what is
+measured: [CLM](models/clm.md), [GLiNER2.5-Decide](models/gliner25-decide.md),
+[xor](models/xor.md), and [Nimble](models/nimble.md). Tev1 is also a decision
+model, but it answers through `/v1/chat/completions` ([Tev1](models/tev1.md)).
+
+### Nimble: the exact weights
+
+Nimble is an adapter, so it runs only after `scripts/convert-nimble.py` merges
+it into its base. The [Nimble page](models/nimble.md) has the commands.
+
+| arm | repo @ revision | file | sha256 |
+|---|---|---|---|
+| base, BF16 | `Qwen/Qwen3.5-9B` @ `c202236235762e1c871ad0ccb60c8ee5ba337b9a` | four `model.safetensors-0000N-of-00004` shards | as published at that revision |
+| adapter (Ollama `nimble`), T=1.0 | `bespokelabs/Bespoke-Nimble-9B` @ `bd792f44ec8e265be861bfcdf4e05967ffe0e858` | `adapter_model.safetensors`, 173,188,512 bytes | `29ef39b072dee97287947455337879c1e916705c2f727287922a2d81f5e2f20a` |
+| adapter (earlier release), T=2.179078721266035 | `bespokelabs/Bespoke-Nimble-9B-v2` @ `4b8c04d1ac2cea3e41e5e3c4d2130bcead2c0abe` | `adapter_model.safetensors`, 173,188,512 bytes | `1bd126be997be6d9a0c25ce483ccf858c31b3422d480c33f02ba47b614be68ae` |
+
+GGUF k-quant arms are not implemented; `NimbleModel` refuses a GGUF source by
+name.
+
 ## Muse Glimmer 30B from a GGUF k-quant
 
 The text tower loads from a `muse-glimmer`-architecture GGUF, so the 30B model

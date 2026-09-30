@@ -92,6 +92,7 @@ The loaded architecture selects the request format:
 | Architecture | Request format |
 |---|---|
 | `KevModel`, `LayaModel`, `ClmModel`, `SpanExtractor` (GLiNER2.5-Decide), `XorModel` | [`/v1/systemone`](../USAGE.md#system-1-decisions-with-v1systemone): `state` and a nonempty `questions` object with `choice`, `score`, or `noul` questions |
+| `NimbleModel` | The same `/v1/systemone` body, validated as Nimble's own server validates it (openjev): unknown keys are refused, and a field has at most 26 choices. Answers are unrounded and `confidence` is the normalized negative entropy. See [Nimble](../models/nimble.md) |
 | `CuaS1Forms` | [`/v1/score`](../USAGE.md#option-scoring-with-v1score): a `context` string and a nonempty `options` array of strings |
 
 Use the linked HTTP examples as request bodies, without the `curl` command.
