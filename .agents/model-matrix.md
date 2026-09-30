@@ -104,9 +104,9 @@ Rollup by lifecycle state (must equal the detailed per-state row counts):
 
 | State | Rows |
 |---|---|
-| INVENTORIED | 322 |
+| INVENTORIED | 321 |
 | PARTIAL | 23 |
-| ACTIVE | 17 |
+| ACTIVE | 18 |
 | SPIKE | 10 |
 | BLOCKED | 5 |
 | DONE | 3 |
