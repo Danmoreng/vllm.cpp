@@ -73,6 +73,7 @@
 #include "vllm/outputs.h"
 #include "vllm/sampling_params.h"
 #include "vllm/transformers_utils/hf_config.h"  // PeekHfArchitectures (v11)
+#include "vllm/transformers_utils/tokenizer_files.h"
 #include "vllm/version.h"
 #include "vllm/v1/engine/async_llm.h"
 
@@ -330,7 +331,8 @@ vllm::entrypoints::openai::ChatPromptFn ResolveChatPromptFn(
       // mirroring the server's --tokenizer-config.
       tmpl = vllm::entrypoints::LoadChatTemplateFromConfig(
           tokenizer_config_path.empty()
-              ? (fs::path(model_path) / "tokenizer_config.json").string()
+              ? vllm::ResolveTokenizerFile(model_path, "tokenizer_config.json")
+                    .string()
               : tokenizer_config_path);
     }
     if (out_raw_template != nullptr) *out_raw_template = tmpl;

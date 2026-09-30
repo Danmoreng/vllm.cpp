@@ -91,6 +91,7 @@
 #include "vllm/platform/console_shutdown.h"
 #include "vllm/platform/process.h"
 #include "vllm/transformers_utils/hf_config.h"
+#include "vllm/transformers_utils/tokenizer_files.h"
 #include "vllm/model_executor/models/model_registry.h"
 #include "vllm/model_executor/models/gliner2_ner.h"  // Gliner2NerInference (MODEL-GLINER25)
 #include "vllm/model_executor/models/cua_s1_inference.h"  // CuaS1ScoreInference (MODEL-CUA-S1-FORMS)
@@ -1075,10 +1076,13 @@ int VllmServerMain(int argc, char** argv) {
         config_path = rl_path;
       }
     }
-    const std::string tokenizer_path = PathUtf8(dir / "tokenizer.json");
+    // Root file, else the tokenizer/ subdirectory; the same resolution the
+    // loader applies (ISSUE-LOCAL-01M3SDXGYYTS9FDXKZDAE24N0R).
+    const std::string tokenizer_path =
+        PathUtf8(vllm::ResolveTokenizerFile(dir, "tokenizer.json"));
     const std::string tokenizer_config_path =
         args.tokenizer_config.empty()
-            ? PathUtf8(dir / "tokenizer_config.json")
+            ? PathUtf8(vllm::ResolveTokenizerFile(dir, "tokenizer_config.json"))
             : args.tokenizer_config;
     const std::string served_model_name =
         args.served_model_name.empty()

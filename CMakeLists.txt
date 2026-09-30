@@ -756,6 +756,7 @@ add_library(vllm STATIC
   src/vllm/config/speculative.cpp
   src/vllm/outputs.cpp
   src/vllm/transformers_utils/hf_config.cpp
+  src/vllm/transformers_utils/tokenizer_files.cpp
   # ENG-HF-MODEL-DOWNLOAD (#1280): the HuggingFace cache layout. Pure file
   # system, no transport, so it builds in every lane. The DFlash draft path
   # in model_loader.cpp reaches it and is not behind VLLM_CPP_SERVER.

@@ -49,6 +49,7 @@
 #include "vllm/model_executor/models/qwen3_dflash.h"  // SPEC-DFLASH D5 draft load
 #include "vllm/transformers_utils/hf_cache.h"  // ENG-HF-MODEL-DOWNLOAD (#1280)
 #include "vllm/transformers_utils/hf_config.h"  // SPEC-DFLASH D5 draft config
+#include "vllm/transformers_utils/tokenizer_files.h"
 #include "vllm/platforms/interface.h"  // CurrentPlatform() — SelectQueue
 #include "vllm/v1/core/hybrid_kv_budget.h"
 #include "vllm/v1/core/kv_cache_utils.h"  // check_enough_kv_cache_memory (M4)
@@ -3355,7 +3356,10 @@ std::unique_ptr<LoadedEngine> LoadedEngine::FromModelDir(
       config_path = rl_path;
     }
   }
-  const std::string tokenizer_path = (dir / "tokenizer.json").string();
+  // Root tokenizer.json, else tokenizer/tokenizer.json (MODEL-LAYA ships it
+  // there). ISSUE-LOCAL-01M3SDXGYYTS9FDXKZDAE24N0R.
+  const std::string tokenizer_path =
+      vllm::ResolveTokenizerFile(dir, "tokenizer.json").string();
 
   // Refuse-by-task (ARCH-ONE-SURFACE ROW 1), BEFORE the full HfConfig parse: a
   // SupportsTranscription-ONLY architecture (Parakeet CTC/RNNT/TDT) has no
