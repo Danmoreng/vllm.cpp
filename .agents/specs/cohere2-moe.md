@@ -97,7 +97,7 @@ sliding-window switch is `ENG-ATTENTION-WINDOW`.
 
 vLLM `e126687a9a` ships no `cohere2_moe` model test (`tests/models/` has no
 file naming it), and neither does `a7c23ac96d`. Its only test-side entry is
-`tests/models/registry.py:232-235` @ `a7c23ac96d`
+`tests/models/registry.py:232-237` @ `a7c23ac96d`
 (`_HfExamplesInfo("CohereLabs/North-Mini-Code", trust_remote_code=True,
 is_available_online=False, min_transformers_version="5.9.0")`),
 so upstream never runs the model in CI. The registry example-config coverage
