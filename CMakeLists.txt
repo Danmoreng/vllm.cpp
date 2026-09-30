@@ -880,6 +880,11 @@ add_library(vllm STATIC
   src/vllm/model_executor/models/muse_glimmer.cpp
   src/vllm/model_executor/models/muse_glimmer_vision.cpp
   src/vllm/model_executor/models/muse_glimmer_mm.cpp
+  # RADIO ViT-H tower + the Nemotron Nano VL projector (row
+  # MODEL-MM-nano-nemotron-vl-nemotron-h-nano-vl-v2).
+  src/vllm/model_executor/models/radio.cpp
+  src/vllm/model_executor/models/nano_nemotron_vl.cpp
+  src/vllm/model_executor/models/nano_nemotron_vl_registry.cpp
   src/vllm/model_executor/models/kimi_k3_registry.cpp
   src/vllm/model_executor/models/kimi_k3_weights.cpp
   src/vllm/model_executor/models/kimi_k3.cpp
@@ -1143,6 +1148,9 @@ add_library(vllm STATIC
   # cubic (dots3-note W6c, #2537).
   src/vllm/multimodal/pil_resize.cpp
   src/vllm/multimodal/qwen3vl_processor.cpp
+  # Nemotron Nano VL / Omni dynamic-resolution tiler and torch's antialiased
+  # bicubic resize (a third algorithm beside Pillow's and torchvision's).
+  src/vllm/multimodal/nano_nemotron_vl_processor.cpp
   src/vllm/multimodal/deepseek_v4_processor.cpp
   src/vllm/multimodal/audio_processor.cpp
   src/vllm/multimodal/audio_resample.cpp
@@ -1316,6 +1324,7 @@ add_library(vllm STATIC
   # SELF-REGISTERING and is reached through vllm's INTERFACE --whole-archive.
   src/vllm/entrypoints/openai/mm_chat_registry.cpp
   src/vllm/entrypoints/openai/mm_chat_deepseek_v4.cpp
+  src/vllm/entrypoints/openai/mm_chat_nano_nemotron_vl.cpp
   src/vllm/entrypoints/openai/mm_chat_dots3note.cpp
   src/vllm/entrypoints/openai/mm_chat_qwen3vl.cpp
   src/vllm/entrypoints/openai/serving_utils.cpp

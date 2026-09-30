@@ -2137,6 +2137,7 @@ int VllmServerMain(int argc, char** argv) {
     // The `--mmproj` second file, so a factory can refuse a tower-free load at
     // INSTALL rather than inside the engine's busy loop.
     mm_ctx.mmproj_path = args.mmproj_path;
+    mm_ctx.max_model_len = loaded->max_model_len();
     oai::InstallMultiModalChatSeam(chat, loaded->is_multimodal_model(), mm_ctx,
                                    std::cerr);
 

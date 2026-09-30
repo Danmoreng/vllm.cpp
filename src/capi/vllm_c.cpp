@@ -472,6 +472,7 @@ vllm::entrypoints::openai::OpenAIServingChat& EnsureChatServing(
     mm_ctx.mm_config = &engine->loaded->mm_config();
     mm_ctx.config = &engine->loaded->config();
     mm_ctx.mmproj_path = engine->mmproj_path;
+    mm_ctx.max_model_len = engine->loaded->max_model_len();
     // The install announces every outcome on the stream it is given, exactly as
     // it does for the server; there is no arm that installs nothing on a model
     // that says it is multimodal.

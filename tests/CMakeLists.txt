@@ -1037,6 +1037,23 @@ target_include_directories(test_muse_glimmer_vision PRIVATE
 # split, split pre/post eps, the offset-free final norm, the attention output gate,
 # the output multiplier and the soft-cap). CPU-only, no checkpoint. No speed axis
 # exists for this model — the pinned oracle cannot load it (specs/muse-glimmer.md §0).
+# Nemotron Nano VL / Omni image path (row
+# MODEL-MM-nano-nemotron-vl-nemotron-h-nano-vl-v2): the dynamic-resolution
+# processor, the RADIO tower and the mlp1 projector against a torch
+# transcription of vLLM e126687a9a (scripts/mm/nano_nemotron_vl_ref.py), plus
+# the released configs. The real-checkpoint arm is env-gated.
+vllm_cpp_add_test(test_nano_nemotron_vl_vision vllm/models/test_nano_nemotron_vl_vision.cpp)
+target_include_directories(test_nano_nemotron_vl_vision PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/vllm/models)
+target_compile_definitions(test_nano_nemotron_vl_vision PRIVATE
+  NANO_NEMOTRON_VL_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/vllm/models/fixtures")
+# The same row's REACHABILITY gate: a tiny Omni checkpoint loads through
+# ModelRegistry under the released name and an image decodes through the
+# runner (encode_mm -> embed_mm -> the paged NemotronH forward), token-equal to
+# an independent host reference and different from the text-only decode.
+vllm_cpp_add_test(test_nano_nemotron_vl_registry vllm/models/test_nano_nemotron_vl_registry.cpp)
+target_include_directories(test_nano_nemotron_vl_registry PRIVATE
+  ${CMAKE_SOURCE_DIR}/src)
 vllm_cpp_add_test(test_muse_glimmer_text vllm/models/test_muse_glimmer_text.cpp)
 # The DFlash drafter's RELEASED config.json, committed verbatim. It is the only
 # real artifact that OMITS qk_scale_factor / post_norm_eps / output_multiplier /
@@ -2649,6 +2666,12 @@ if(VLLM_CPP_SERVER)
   # different tokenizer fixture (one whose added tokens are the pinned DeepSeek
   # chat template's markers and the `<|deepseek_image|>` placeholder) and a
   # different processor.
+  # Nemotron Nano VL / Omni chat seam (row
+  # MODEL-MM-nano-nemotron-vl-nemotron-h-nano-vl-v2).
+  vllm_cpp_add_test(test_nano_nemotron_vl_mm_chat
+    vllm/entrypoints/openai/test_nano_nemotron_vl_mm_chat.cpp)
+  target_compile_definitions(test_nano_nemotron_vl_mm_chat PRIVATE
+    NANO_NEMOTRON_VL_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/vllm/models/fixtures")
   vllm_cpp_add_test(test_deepseek_v4_mm_chat
     vllm/entrypoints/openai/test_deepseek_v4_mm_chat.cpp)
   # The language and projector GGUF fixtures live beside the model gates, and
