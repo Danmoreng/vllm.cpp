@@ -276,6 +276,9 @@ TEST_CASE("cohere2_moe config: refusals by name") {
   r["shared_expert_combination_strategy"] = "max";
   refuses(r, "shared_expert_combination_strategy must be one of");
   r = base;
+  r["sliding_window"] = 4096.5;
+  refuses(r, "sliding_window must be an integer (got 4096.5)");
+  r = base;
   r["layer_types"] = nlohmann::json::array({"full_attention"});
   refuses(r, "layer_types must have num_hidden_layers entries");
 }
@@ -300,6 +303,10 @@ TEST_CASE("cohere2_moe config: absent keys take the Cohere2MoeConfig defaults") 
   CHECK_FALSE(p.window[4].has_value());
   CHECK(p.rope[0]);
   CHECK_FALSE(p.rope[4]);
+  // An integral float is the same window as the integer.
+  nlohmann::json f = ReleasedRaw();
+  f["sliding_window"] = 4096.0;
+  CHECK(vllm::ParseCohere2MoeParams(WithRaw(f)).window[1].value() == 4097);
 }
 
 TEST_CASE("cohere2_moe: GGUF weights are refused by name") {
@@ -336,6 +343,19 @@ TEST_CASE("cohere2_moe forward: config b (LayerNorm, shared average, NoPE prefix
 TEST_CASE("cohere2_moe forward: config c (softmax router, shared sum, defaults) vs the "
           "pinned transcription") {
   CheckConfig(c2m_golden::kConfig_c, c2m_golden::kLogitsF32_c, c2m_golden::kLogitsBf16_c, "c");
+}
+
+TEST_CASE("cohere2_moe forward: config d (non-contiguous dense layer is NoPE) vs the "
+          "pinned transcription") {
+  // Layer 2 is dense but not in the contiguous dense prefix, so force_rope is
+  // off and the full-attention layer is NoPE (is_prefix_dense_layer, :49-53).
+  const Cohere2MoeParams p =
+      vllm::ParseCohere2MoeParams(c2m_tiny::ConfigFromJson(c2m_golden::kConfig_d));
+  CHECK(p.dense[2]);
+  CHECK_FALSE(p.rope[2]);
+  CHECK(p.rope[0]);
+  CHECK(p.window[1].value() == 4);  // sliding_window 3.0 (an integral float) + 1
+  CheckConfig(c2m_golden::kConfig_d, c2m_golden::kLogitsF32_d, c2m_golden::kLogitsBf16_d, "d");
 }
 
 TEST_CASE("cohere2_moe forward: disable_sliding_window is refused by name") {

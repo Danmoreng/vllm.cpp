@@ -13,6 +13,7 @@
 // unreachable.
 #include "vllm/model_executor/models/model_registry.h"
 
+#include <cmath>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -261,7 +262,17 @@ Cohere2MoeParams ParseCohere2MoeParams(const HfConfig& config) {
   int64_t sliding_window = 4096;
   if (raw.contains("sliding_window")) {
     const nlohmann::json& sw = raw.at("sliding_window");
-    sliding_window = sw.is_number_integer() ? sw.get<int64_t>() : 0;
+    if (sw.is_null()) {
+      sliding_window = 0;
+    } else if (sw.is_number_integer()) {
+      sliding_window = sw.get<int64_t>();
+    } else {
+      // An integral float (4096.0) is the same window to Python's `+ 1`; a
+      // fractional or non-numeric value is not a window at all.
+      VT_CHECK(sw.is_number_float() && std::floor(sw.get<double>()) == sw.get<double>(),
+               "cohere2_moe: sliding_window must be an integer (got " + sw.dump() + ")");
+      sliding_window = static_cast<int64_t>(sw.get<double>());
+    }
   }
 
   p.window.assign(static_cast<size_t>(L), std::nullopt);

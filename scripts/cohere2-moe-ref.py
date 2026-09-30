@@ -113,6 +113,7 @@ class Params:
         if mt is None:  # cohere2_moe.py:410-418
             mt = ["dense"] * fk + ["sparse"] * (self.L - fk)
         sw = raw["sliding_window"] if "sliding_window" in raw else 4096
+        sw = int(sw) if sw is not None else None
         self.window, self.rope, self.dense = [], [], []
         for l in range(self.L):
             w = sw + 1 if lt[l] == "sliding_attention" else None       # :205-211
@@ -334,6 +335,17 @@ CONFIGS = {
               layer_types=["sliding_attention", "full_attention", "sliding_attention"],
               rms_norm_eps=1e-6, num_shared_experts=1,
               shared_expert_combination_strategy="sum"),
+    # A NON-contiguous dense layer: mlp_layer_types dense, sparse, dense with
+    # pattern 1. Layer 0 is the dense prefix (forced RoPE); layer 2 is dense but
+    # not in the contiguous prefix (is_prefix_dense_layer, cohere2_moe.py:49-53),
+    # so as a full-attention layer it is NoPE. sliding_window given as 3.0.
+    "d": dict(BASE, num_hidden_layers=4, sliding_window=3.0,
+              prefix_dense_intermediate_size=24, prefix_dense_sliding_window_pattern=1,
+              mlp_layer_types=["dense", "sparse", "dense", "sparse"],
+              layer_types=["full_attention", "sliding_attention", "full_attention",
+                           "sliding_attention"],
+              rms_norm_eps=1e-6, expert_selection_fn="sigmoid", norm_topk_prob=False,
+              logit_scale=0.5),
 }
 TOKENS = [5, 17, 42, 8, 61, 3, 88, 29, 71, 14, 50]
 GREEDY_PROMPT = [70, 29, 44, 29, 86, 28]
