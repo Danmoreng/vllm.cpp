@@ -18,6 +18,7 @@ which checkpoint was used, the exact command, and what has not been measured.
 | [Qwen3.5](qwen3-5.md) | The Qwen3.5 Gated DeltaNet family | The `output_gate_type` key, and one load refusal that is about this code |
 | [Qwen3-Next](qwen3-next.md) | The Qwen3-Next Gated DeltaNet family | The `output_gate_type` key and its refusals |
 | [Nemotron 3.5 Lightning](nemotron-3-5-lightning.md) | A 30B-A3B hybrid of attention, Mamba2, and MoE | Which arms run on the device, which run on the host, and what that costs per token |
+| [Nemotron 3 Nano Omni](nemotron-nano-omni.md) | The Nemotron-H hybrid with a RADIO image encoder | Which checkpoint loads, what the image path was checked against, and what is refused |
 | [Muse Glimmer](muse-glimmer.md) | A 30B multimodal model, text with image and video input | Running the text tower from a 17 GB GGUF, and how narrow the verified surface is |
 | [Gemma 4](gemma-4.md) | The Gemma 4 family | The ROCm RDNA4 dual-GPU FP8 recipe |
 

@@ -10,10 +10,14 @@ precedes the implementation commits on the same branch.
 
 ## Now
 
-`SPIKE`. The spec is committed. The implementation lands the image half of the
-architecture in slices, and the end-to-end token gate is owed (see `## Owed`).
+`ACTIVE`. The image path is implemented and reachable: both architecture names
+register, the BF16 checkpoint's language tower loads through the NemotronH
+loader under `language_model.`, `encode_mm` runs the RADIO tower and `mlp1`,
+`embed_mm` splices the rows, the paged NemotronH forward reads
+`inputs_embeds`, and `mm_chat_nano_nemotron_vl.cpp` serves `image_url` parts.
+Next: the end-to-end token gate on `dgx:gpu0` (see `## Owed`).
 
-## 1. Scope
+## Scope
 
 In scope, image modality only:
 
@@ -38,7 +42,12 @@ Out of scope, and refused by name: audio (`sound_encoder`, `sound_projection`,
 static-tile (non-dynamic) InternVL tiling arm, which the released Omni
 checkpoints do not select (`min_num_patches` is in `vision_config.args`).
 
-## 2. Upstream anchors (vLLM `e126687a9a`)
+## Upstream chain
+
+vLLM `e126687a9a` (the parity pin), and torch v2.11.0 for the two
+`F.interpolate` calls the processor and the tower make.
+
+## Port map
 
 | Ours | Upstream |
 |---|---|
@@ -62,7 +71,24 @@ downscale factor, weights normalized per output pixel, f32 throughout). It is
 NOT Pillow's resize (`pil_resize.h`), which rounds through uint8 between the
 two passes.
 
-## 3. Design
+## Our baseline
+
+At `b45a94273`: `NemotronHForCausalLM` is registered and forwards (paged and
+host), but nothing registers either wrapper name, no RADIO tower exists, and
+the NemotronH loader and forwards take neither a name prefix nor
+`inputs_embeds`.
+
+## Dependencies
+
+- The NemotronH language tower (`.agents/specs/nemotron-h-model.md`), reused
+  unchanged except for two additive seams: a loader name prefix and an
+  `inputs_embeds` input on both forwards.
+- The multimodal runner seam (`encode_mm` / `embed_mm`,
+  ENG-MM-INPUT-PIPELINE P2) and the per-architecture chat seam registry.
+- The shared ops `vt::MatmulBT`, `vt::LayerNorm`, `vt::GeluErf`,
+  `vt::AttentionDenseFlash`, `vt::RmsNorm`, `vt::MoeRelu2`.
+
+## Design
 
 - `include/vllm/model_executor/models/radio.h` + `src/.../radio.cpp`: the tower,
   composed from `vt::MatmulBT`, `vt::Add`, `vt::LayerNorm`, `vt::GeluErf`,
@@ -77,7 +103,9 @@ two passes.
 - `src/.../nano_nemotron_vl_registry.cpp`: the registration, `encode_mm`,
   `embed_mm`, and the forward, which delegates to the NemotronH forward.
 
-## 4. Risks (each is silent, so each is a gate)
+## Risks/decisions
+
+Each risk below is silent, so each is a gate.
 
 1. The CPE table is interpolated to a SQUARE `max(h, w)` grid and then cropped
    (`radio.py:401-410`). Interpolating straight to `(h, w)` keeps every shape.
@@ -91,7 +119,23 @@ two passes.
 5. The vision output is cast to bf16 before the pixel shuffle
    (`nano_nemotron_vl.py:1055`), and the projector runs in bf16.
 
-## 5. Tests and gates
+## Tests to port
+
+From `tests/models/multimodal/test_nano_nemotron_vl.py` @ `e126687a9a`:
+
+| Upstream case | Here |
+|---|---|
+| `test_nano_nemotron_vl_skips_multimodal_weights_in_text_only_mode` (:77-96) | ported to `test_nano_nemotron_vl_registry.cpp`: a `language_model_only` load reads no tower and `encode_mm` refuses by name. Adapted: a real tiny checkpoint instead of mocked modules |
+| `test_nano_nemotron_vl_loads_vision_weights_without_sound_encoder` (:99-121) | ported, same file: no `sound_config`, no sound tensor, the load succeeds |
+| `test_nano_nemotron_vl_requires_sound_encoder_for_sound_weights` (:124-136) | ported, same file: a sound tensor without `sound_config` is refused |
+| `test_extract_audio_from_videos_*` (:150-182) | not applicable: audio is refused by name |
+
+`tests/models/multimodal/pooling/test_radio.py` compares against the HF remote
+code on a GPU with a downloaded checkpoint and does not port to this harness as
+written. Its assertion (the tower matches a reference on the real weights) is
+carried by the REAL arm of `test_nano_nemotron_vl_vision.cpp`.
+
+## Gates
 
 - Stage gates against a torch transcription of the pinned vLLM formulas
   (`scripts/mm/nano_nemotron_vl_ref.py`), on the REAL checkpoint tensors
@@ -107,7 +151,16 @@ two passes.
   embed_mm through the registered architecture name).
 - Mutation: each risk in §4 is mutated by the fresh reviewer.
 
-## 6. Stop conditions
+## Work breakdown
+
+1. Spec and records (this file).
+2. Processor: tiler, antialiased resize, normalize, patchify, expansion.
+3. RADIO tower and `mlp1`, gated per stage on synthetic and real weights.
+4. Registration, loader prefix, `inputs_embeds` in the NemotronH forwards,
+   `encode_mm` / `embed_mm`, chat seam; reachability gate through the runner.
+5. Owed: the end-to-end token gate on `dgx:gpu0`.
+
+## Stop conditions
 
 - A language-tower format this tree cannot load (the NVFP4 Omni checkpoint's
   per-module scheme differs from Nemotron 3.5 Lightning's: FP8 `o_proj` and FP8
@@ -116,6 +169,24 @@ two passes.
 - The end-to-end token gate needs the pinned vLLM oracle and a GPU lease for a
   23 GB (NVFP4) or 62 GB (bf16) checkpoint. If that cannot run in this session,
   it stays owed.
+
+## Evidence (2026-09-30, CPU, this worktree)
+
+Reference: `scripts/mm/nano_nemotron_vl_ref.py`, torch `2.11.0+cu130`.
+Real tensors: the `vision_model.*` and `mlp1.*` entries of shard 1 of
+`nvidia/Nemotron-3-Nano-Omni-30B-A3B-Reasoning-BF16` @ `e5e99324`, cut by HTTP
+range into one 1 627 048 984-byte file (sha256 `314151d13e98016226d534a707e176f4`
+`9066e6fe3ad42dfb14f8501b86178383`), not committed.
+
+| Gate | Result |
+|---|---|
+| `test_nano_nemotron_vl_vision` (synthetic, CI) | 12/12 cases: tiler params exact, resize f32 max abs 2e-5 bound, bf16 pixels <= 1% one-ulp, CPE square-then-crop 1e-6, tower and projector f32 1e-4 and bf16 3e-2, shuffle order, expansion, template prefix, both released configs |
+| same, REAL arm (333x517 image, `max_model_len` 16384) | grid 26x42, 273 rows exact; pixels 344/838656 one-ulp; tower f32 rel 2.36e-5, bf16 4.71e-2; projector f32 4.40e-6, bf16 5.85e-3; end-to-end worst row cosine 0.99776 |
+| `test_nano_nemotron_vl_registry` (CI) | tiny Omni checkpoint loads under the released name; stray tensor refused; image decode through `GPUModelRunner` == independent host reference (4 tokens) and != the text-only decode; audio refused |
+| same, STRUCTURAL on the BF16 index | 6243/6243 language tensors claimed, 390/390 vision, 716 deferred by name, 0 unclaimed |
+| same, STRUCTURAL on the NVFP4 index @ `16993199` | FAILS as recorded: 5946 language tensors unclaimed, 60 enumerated-but-not-shipped (`ISSUE-LOCAL-01M3S07X6Y4ADHHQ02FYMR4RXF`) |
+| `test_nano_nemotron_vl_mm_chat` (CI, server build) | 5/5: seams for both names, one- and two-image prefix and expansion, text passthrough, refusal without `max_model_len` |
+| no-regression | `test_nemotron_h_paged_forward` 13/13, `test_nemotron_h_scaffold` 14/14, `test_nemotron_h_loader` 4/4, `test_model_registry` 24/24 |
 
 ## Owed
 
@@ -126,3 +197,13 @@ two passes.
   name. Tracked by the same issue.
 - The GGUF arm of the language tower (inherited from `NemotronHForCausalLM`,
   `.agents/specs/nemotron-h-model.md` §5b W7).
+- `ISSUE-LOCAL-01M3RZ6SFVDJRX1Z5GZG1CKJ7G`: `LoadHfConfig` cannot parse a
+  config.json that carries the Python JSON literal `Infinity`, which the 12B
+  `NemotronH_Nano_VL_V2` release does (`llm_config.time_step_limit`). Found by
+  this row, not fixed by it (developer direction: file, do not fix, anything
+  outside the item). The refusal test sanitizes the literal before parsing.
+- `ISSUE-LOCAL-01M3S07X6Y4ADHHQ02FYMR4RXF`: the NVFP4 Omni language tower. The
+  NemotronH loader does not resolve the ModelOpt scheme per module, so that
+  checkpoint is refused at load (row-owned issue, not an `_owed` one).
+- The static InternVL tiling arm (`NemotronH_Nano_VL_V2` 12B), refused by name
+  at config parse. Tracked by `ISSUE-LOCAL-01M3RY6G385D41W5SNF1C85RRS`.

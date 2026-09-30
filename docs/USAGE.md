@@ -352,6 +352,22 @@ than "it works", so it is worth stating precisely.
   defaults** — see [FEATURES.md](FEATURES.md) and
   [the spec](../.agents/specs/muse-glimmer.md) §6.7.
 
+### Nemotron 3 Nano Omni: which weights, and what has been checked
+
+`NemotronH_Nano_Omni_Reasoning_V3` serves IMAGE input over the OpenAI API. Audio
+and video are refused by name, and no end-to-end token gate against vLLM exists
+yet. See [the model page](models/nemotron-nano-omni.md) for the measured bounds.
+
+| Arm | Artifact | Size | Status |
+|---|---|---|---|
+| bf16 | [nvidia/Nemotron-3-Nano-Omni-30B-A3B-Reasoning-BF16](https://huggingface.co/nvidia/Nemotron-3-Nano-Omni-30B-A3B-Reasoning-BF16) @ `e5e9932441de940c9a62185c870ea5bcd4cd24e2`, 17 shards (shard 1 sha256 `de952574c9189925ad15f8cf164184117b6e5eec2d8b7f092e1268c1f0872244`) | 66 032 308 536 B (61.5 GiB) | loads; image path gated per stage on the real tensors |
+| NVFP4 | [nvidia/Nemotron-3-Nano-Omni-30B-A3B-Reasoning-NVFP4](https://huggingface.co/nvidia/Nemotron-3-Nano-Omni-30B-A3B-Reasoning-NVFP4) @ `16993199e436da4ba75ddc410855f87e0d996ee6` | 22 409 034 192 B (20.9 GiB) | **refused**: per-module ModelOpt scheme (FP8 `o_proj` and shared experts, bf16 `lm_head`) not resolved |
+| GGUF | none | | **refused**, as for `NemotronHForCausalLM` |
+| 12B VL V2 | [nvidia/NVIDIA-Nemotron-Nano-12B-v2-VL-BF16](https://huggingface.co/nvidia/NVIDIA-Nemotron-Nano-12B-v2-VL-BF16) @ `ca9543b126e8bf3176916d3d305ccc415f89fd4d` | | **refused**: static InternVL tiling not ported |
+
+The image processor sizes each image from the engine's `max_model_len`, as
+upstream does, so a short `--max-model-len` shrinks the patch grid.
+
 ## OpenAI-compatible server
 
 `vllm-server` is a small HTTP server speaking the OpenAI API. Source:
