@@ -28,7 +28,7 @@ which checkpoint was used, the exact command, and what has not been measured.
 | [CLM](clm.md) | A bi-encoder (Qwen3-8B + dual MLP heads) decision model | The projection-head conversion, the confidence formula, and what has not been measured |
 | [GLiNER2.5-Decide](gliner25-decide.md) | A DeBERTa-v3-large + classification head decision model | The checkpoint, the sequence layout, and what has not been measured |
 | [xor](xor.md) | A 35B MoE (Qwen3.6-35B-A3B) decision model with forward+reverse calibration | The checkpoint, the double-pass cost, and what has not been measured |
-| [Tev1](tev1.md) | An autoregressive (Qwen3.5-4B SFT) decision model | The chat-completions prompt format, the `enable_thinking=false` flag, and what has not been measured |
+| [Tev1](tev1.md) | An autoregressive decision model, 4B and 0.8B (Qwen3.5 SFTs) | The chat-completions prompt format, the `stop_token_ids` field it needs today, and the CPU argmax check against `transformers` |
 
 ## Speech, music, and video
 

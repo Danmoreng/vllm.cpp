@@ -612,6 +612,10 @@ vllm_cpp_add_test(test_qwen35_moe_gdn_ba_owner vllm/models/test_qwen35_moe_gdn_b
 # MoE vision tower (#891): the tower is loaded (and its ABSENCE refused by name)
 # and the forked VL forward actually CONSUMES the merger rows.
 vllm_cpp_add_test(test_qwen3_5_moe_vision vllm/models/test_qwen3_5_moe_vision.cpp)
+# Dense-arm vision tower (MODEL-QWEN35-DENSE-VL-EXL3) and the checkpoint-read
+# tower geometry (ISSUE-LOCAL-01M3RT4GVEY4QBE5AYBT8RDM89). This file landed in
+# 3edb37da9 without a target, so none of its cases ever ran.
+vllm_cpp_add_test(test_qwen3_5_dense_vision vllm/models/test_qwen3_5_dense_vision.cpp)
 # SPEC-MTP I5a: GDN layer spec routing (GdnBlockPaged spec branch) — needs the
 # internal header under src/ for the GdnBlockPagedForTest entry point.
 vllm_cpp_add_test(test_qwen3_5_gdn_spec_routing vllm/models/test_qwen3_5_gdn_spec_routing.cpp)
