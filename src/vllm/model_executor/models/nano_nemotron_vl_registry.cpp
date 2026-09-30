@@ -73,6 +73,7 @@ class NanoNemotronVLLoadedModel final : public LoadedModel {
   const NemotronHHostWeights& weights() const { return weights_; }
   NemotronHLoadReport& report() { return report_; }
   NanoNemotronVLVisionLoad& vision_load() { return vision_; }
+  const NanoNemotronVLVisionLoad& vision_load() const { return vision_; }
   // `load_multimodal_weights` false (nano_nemotron_vl.py:1500-1504): every
   // modality has limit 0, so no tower was read.
   bool text_only() const { return text_only_; }
@@ -387,6 +388,19 @@ const ModelFactory kNanoNemotronVLFactory{
 
 }  // namespace
 
+const NanoNemotronVLVisionLoad& NanoNemotronVLVisionLoadOf(const LoadedModel& model) {
+  const auto* m = dynamic_cast<const NanoNemotronVLLoadedModel*>(&model);
+  if (m == nullptr) {
+    throw std::runtime_error(
+        "NanoNemotronVLVisionLoadOf: this LoadedModel is not a NemotronH_Nano_VL_V2 model");
+  }
+  return m->vision_load();
+}
+
+// Upstream maps four names to this class (registry.py:512-515 @ e126687a9a).
+// `NemotronH_Super_Omni_Reasoning_V3` and `NemotronH_Omni_Reasoning_V3` have no
+// public checkpoint at the pin and are not registered; they are owed in
+// .agents/specs/nano-nemotron-vl-radio.md.
 REGISTER_VLLM_MODEL(nano_nemotron_vl_v2, "NemotronH_Nano_VL_V2", kNanoNemotronVLFactory,
                     kNanoNemotronVLInfo)
 REGISTER_VLLM_MODEL(nano_nemotron_omni_v3, "NemotronH_Nano_Omni_Reasoning_V3",

@@ -2787,6 +2787,13 @@ if(VLLM_CPP_SERVER)
   target_include_directories(test_serve_deepseek_v4_mm PRIVATE
     ${CMAKE_SOURCE_DIR}/src ${CMAKE_CURRENT_SOURCE_DIR}/vllm
     ${CMAKE_CURRENT_SOURCE_DIR}/vllm/models)
+  # MODEL-MM-nano-nemotron-vl-nemotron-h-nano-vl-v2: the engine's max_model_len
+  # reaching the Nemotron Nano VL chat install through the REAL VllmServerMain
+  # AND the C ABI's vllm_chat. Same re-exec shape as the row above; the tiny
+  # checkpoint is written as a model directory at run time.
+  vllm_cpp_add_test(test_serve_nano_nemotron_vl_mm
+    vllm/entrypoints/openai/test_serve_nano_nemotron_vl_mm.cpp)
+  target_include_directories(test_serve_nano_nemotron_vl_mm PRIVATE ${CMAKE_SOURCE_DIR}/src)
 endif()
 vllm_cpp_add_test(test_outputs vllm/test_outputs.cpp)
 

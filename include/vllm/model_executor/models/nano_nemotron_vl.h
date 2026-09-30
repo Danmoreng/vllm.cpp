@@ -37,6 +37,8 @@
 
 namespace vllm {
 
+class LoadedModel;
+
 struct NanoNemotronVLParams {
   std::string architecture;
   multimodal::RadioVisionConfig radio;
@@ -82,5 +84,13 @@ struct NanoNemotronVLVisionLoad {
 // embedder, whose modality is not ported).
 NanoNemotronVLVisionLoad LoadNanoNemotronVLVisionWeights(
     const std::vector<SafetensorsFile>& shards, const NanoNemotronVLParams& params);
+
+// The vision-side accounting of the load that produced `model`: zero shipped
+// and zero materialized when the engine loaded text-only (every modality's
+// limit is 0, nano_nemotron_vl.py:1500-1504), because no vision or `mlp1`
+// tensor was read. The load happens inside the type-erased
+// `ModelRegistry::Load` factory, so a gate has no other way to reach it, as
+// with `NemotronHLoadReportOf`. Throws if `model` is not this architecture.
+const NanoNemotronVLVisionLoad& NanoNemotronVLVisionLoadOf(const LoadedModel& model);
 
 }  // namespace vllm

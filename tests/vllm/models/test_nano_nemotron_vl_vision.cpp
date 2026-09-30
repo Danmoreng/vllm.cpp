@@ -336,11 +336,20 @@ TEST_CASE("nano-nemotron-vl pixel shuffle v2 keeps the image orientation") {
     for (int x = 0; x < 6; ++x) f.push_back(static_cast<float>(10 * y + x));
   const auto o = vllm::multimodal::NanoNemotronVLPixelShuffle(f, 4, 6, 1, 2);
   REQUIRE(o.size() == 24);
-  // output row (oy=1, ox=2) -> index 1*3+2 = 5 -> inputs (2,4),(2,5),(3,4),(3,5)
-  CHECK(o[5 * 4 + 0] == 24.0f);
-  CHECK(o[5 * 4 + 1] == 25.0f);
-  CHECK(o[5 * 4 + 2] == 34.0f);
-  CHECK(o[5 * 4 + 3] == 35.0f);
+  // Every output row, in the v2 order (nano_nemotron_vl.py:1028). The
+  // first and last rows are the same under v1's `permute(0, 3, 1, 2, 4, 5)`
+  // (:1026), so the off-diagonal rows are what tell the two apart: v1 puts
+  // inputs (2,0),(2,1),(3,0),(3,1) at output row 1, where v2 puts
+  // (0,2),(0,3),(1,2),(1,3).
+  const std::vector<float> want = {0,  1,  10, 11,   // (oy=0, ox=0)
+                                   2,  3,  12, 13,   // (oy=0, ox=1)
+                                   4,  5,  14, 15,   // (oy=0, ox=2)
+                                   20, 21, 30, 31,   // (oy=1, ox=0)
+                                   22, 23, 32, 33,   // (oy=1, ox=1)
+                                   24, 25, 34, 35};  // (oy=1, ox=2)
+  CHECK(o == want);
+  CHECK(o[1 * 4 + 0] == 2.0f);
+  CHECK(o[1 * 4 + 2] == 12.0f);
 }
 
 TEST_CASE("nano-nemotron-vl prompt expansion: <image> -> <img> <image>*N </img>") {

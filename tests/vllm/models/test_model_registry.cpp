@@ -110,7 +110,7 @@ TEST_CASE("registry_imports: every registered architecture has a complete factor
   // 54 -> 56 on MODEL-MM-nano-nemotron-vl-nemotron-h-nano-vl-v2
   // (ISSUE-LOCAL-01M3RY6G385D41W5SNF1C85RRS): `NemotronH_Nano_VL_V2` and
   // `NemotronH_Nano_Omni_Reasoning_V3`, one additive TU
-  // (nano_nemotron_vl_registry.cpp), upstream registry.py:511-512.
+  // (nano_nemotron_vl_registry.cpp), upstream registry.py:512-513 @ e126687a9a.
   REQUIRE(registrations.size() == 56);
 
   for (const ModelRegistration& registration : registrations) {
