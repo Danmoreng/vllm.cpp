@@ -1058,6 +1058,21 @@ target_compile_definitions(test_nano_nemotron_vl_vision PRIVATE
 vllm_cpp_add_test(test_nano_nemotron_vl_registry vllm/models/test_nano_nemotron_vl_registry.cpp)
 target_include_directories(test_nano_nemotron_vl_registry PRIVATE
   ${CMAKE_SOURCE_DIR}/src)
+# Cohere2MoeForCausalLM (North) gates (.agents/specs/cohere2-moe.md): the released
+# North-Mini-Code-1.0 config.json (committed verbatim) and its refusals; three tiny
+# checkpoints read back through the production loader against the torch
+# transcription of the pinned cohere2_moe.py (scripts/cohere2-moe-ref.py), f32 arm
+# tight and bf16 arm on the envelope; an env-gated real-tensor per-layer arm
+# (VLLM_COHERE2_MOE_REAL_DIR) and an env-gated structural arm over the released
+# index (VLLM_COHERE2_MOE_INDEX). CPU-only, no checkpoint needed in CI.
+vllm_cpp_add_test(test_cohere2_moe vllm/models/test_cohere2_moe.cpp)
+target_include_directories(test_cohere2_moe PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/vllm/models)
+target_compile_definitions(test_cohere2_moe PRIVATE
+  COHERE2_MOE_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/vllm/models/fixtures/north_mini_code_1_0")
+# ...and its reachability gate: ModelRegistry::Load under "Cohere2MoeForCausalLM"
+# and a greedy decode through GPUModelRunner, token-equal to the transcription.
+vllm_cpp_add_test(test_cohere2_moe_registry vllm/models/test_cohere2_moe_registry.cpp)
+target_include_directories(test_cohere2_moe_registry PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/vllm/models)
 vllm_cpp_add_test(test_muse_glimmer_text vllm/models/test_muse_glimmer_text.cpp)
 # The DFlash drafter's RELEASED config.json, committed verbatim. It is the only
 # real artifact that OMITS qk_scale_factor / post_norm_eps / output_multiplier /

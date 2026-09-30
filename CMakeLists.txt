@@ -1118,6 +1118,9 @@ add_library(vllm STATIC
   src/vllm/model_executor/models/commandr_registry.cpp
   src/vllm/model_executor/models/commandr_weights.cpp
   src/vllm/model_executor/models/commandr.cpp
+  src/vllm/model_executor/models/cohere2_moe_registry.cpp
+  src/vllm/model_executor/models/cohere2_moe_weights.cpp
+  src/vllm/model_executor/models/cohere2_moe.cpp
   src/vllm/model_executor/models/phi_registry.cpp
   src/vllm/model_executor/models/phi_weights.cpp
   src/vllm/model_executor/models/phi.cpp
