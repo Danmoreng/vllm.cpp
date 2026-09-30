@@ -98,7 +98,8 @@ sliding-window switch is `ENG-ATTENTION-WINDOW`.
 vLLM `e126687a9a` ships no `cohere2_moe` model test (`tests/models/` has no
 file naming it), and neither does `a7c23ac96d`. Its only test-side entry is
 `tests/models/registry.py:232-235` @ `a7c23ac96d`
-(`_HfExamplesInfo("CohereLabs/North-Mini-Code", is_available_online=False)`),
+(`_HfExamplesInfo("CohereLabs/North-Mini-Code", trust_remote_code=True,
+is_available_online=False, min_transformers_version="5.9.0")`),
 so upstream never runs the model in CI. The registry example-config coverage
 entry is ported by extending `test_model_registry`.
 
@@ -149,6 +150,9 @@ the rules"):
 - **`--disable-sliding-window` is refused by name** when any layer is sliding:
   `config/model.py:857-860` @ `a7c23ac96d` sets `sliding_window = None` and the
   model file then fails at `sliding_window + 1`.
+- **`sliding_window` as a float.** An integral float (`4096.0`) is the same
+  window to Python's `+ 1` and is accepted; a fractional value is refused by
+  name (`sliding_window must be an integer`).
 - **One full-attention KV group.** Upstream gives a sliding layer a
   `SlidingWindowSpec`; that only lets the allocator free blocks behind the
   window. The attended keys are set by the per-layer window at the kernel
@@ -189,7 +193,7 @@ the rules"):
 
 ## Owed
 
-Every item is tracked by `ISSUE-LOCAL-01M3S23H9B25EFPFJN75Y1XBWY`.
+Every item below is tracked by the row issue named in the header.
 
 - The end-to-end token gate against pinned vLLM `a7c23ac96d` (GPU lease, the
   56.8 GiB checkpoint).
@@ -220,7 +224,7 @@ Found during this work and not part of it:
 CPU build `build-cpu` (Release, `-Werror`), 2026-09-30. Commands run from the
 worktree root.
 
-- `./build-cpu/tests/test_cohere2_moe`: 12/12 cases pass (the real-tensor and
+- `./build-cpu/tests/test_cohere2_moe`: 13/13 cases pass (the real-tensor and
   structural arms print SKIP without their env). Synthetic arms, relative max
   error against `scripts/cohere2-moe-ref.py`:
 
@@ -229,6 +233,7 @@ worktree root.
   | a | RMSNorm (both eps keys), sigmoid no renorm, forced-RoPE dense prefix, window 4, NoPE full MoE, logit_scale 0.5 | 5.68e-7 | 5.68e-7 | 1.36e-2 |
   | b | LayerNorm, renormalized sigmoid, 2 shared experts averaged, derived layer_types, NoPE dense prefix (pattern 2) | 3.74e-7 | 3.74e-7 | 6.40e-3 |
   | c | softmax router, class defaults (norm_topk_prob, logit_scale), 1 shared expert summed, no dense prefix | 3.46e-7 | 3.46e-7 | 2.48e-2 |
+  | d | non-contiguous dense layer (dense, sparse, dense, sparse; pattern 1): layer 2 is dense, full attention and NoPE; `sliding_window` given as `3.0` | 3.84e-7 | 3.84e-7 | 6.96e-3 |
 
   Bounds: f32 2e-5, bf16 3e-2 (the reference's own bf16-vs-f32 distance on the
   configs whose bf16 routing agrees with f32 is 4.6e-3..2.6e-2).
@@ -264,6 +269,7 @@ restored byte-for-byte with a sha256 check):
 | window not applied at the kernel | forward a/b/c, runner |
 | RoPE on every layer (NoPE lost) | config fixture, defaults, forward a/b/c |
 | force_rope dropped on the dense prefix | config fixture, defaults, forward a, runner |
+| force_rope ignores prefix contiguity (a dense layer after a sparse one keeps RoPE) | forward d |
 | NeoX pairing instead of GPT-J | forward a/b/c, runner |
 | RMSNorm and LayerNorm arms swapped | config fixture, defaults, forward a/b/c, runner |
 | layer_norm_eps on the RMS arm | forward a |
