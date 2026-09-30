@@ -13,15 +13,15 @@ GPU (CUDA), OpenAI-compatible serving.
 
 ## Now
 
-`ACTIVE` (fidelity repair, ISSUE-LOCAL-01M3T6ZZ2WBM4FSMTQZAWM8974). The first
-landing (`ba8571340`, merged by `10b401f68`) compiled and passed 13 tests, but it
-did not implement the reference: no converter existed, the head tensor names,
-the head layer order, the scale clamp, the pooling normalization, the state
-text and the candidate texts all differed from `Contrastive-LM/CLM` @
-`bb42c6c`, and the HTTP path answered through the kev builder. Its tests used
-synthetic weights in the engine's own layout, so they could not see this. The
-repair is specified in `## Fidelity repair` below. Until it lands, no
-published checkpoint loads and nothing about CLM is measured.
+`ACTIVE`. The fidelity repair (ISSUE-LOCAL-01M3T6ZZ2WBM4FSMTQZAWM8974) is
+implemented and CPU-verified; see `## Fidelity repair`. On 2026-09-30 the
+published checkpoint, converted by `scripts/convert-clm.py` and served by
+`vllm-server` on CPU, matched the reference `Engine.answer` on 5 requests and
+8 questions: argmax 8/8, max probability difference 0.029 against the
+reference with a bf16 encoder (0.077 against fp32; the reference's own bf16
+versus fp32 difference is 0.049). The first port scored 5/8 and 0.98 on the
+same requests. The independent review of the repair, CUDA and GGUF are
+`PENDING`.
 
 ## Scope
 
@@ -285,6 +285,25 @@ Gate: on CPU, the real checkpoint served by `vllm-server` must pick the
 reference's argmax on every question, with the maximum probability difference
 recorded next to the reference's own bf16-versus-fp32 difference on the same
 requests.
+
+### Measured (2026-09-30, CPU)
+
+- Reference: `Engine.answer` @ `bb42c6c` with its own heads, schema and
+  answer code; encoder Qwen3-8B @ `b968826d` through `transformers` 5.3.0,
+  last token of the post-norm hidden state, L2-normalized (the stand-in for
+  `vllm serve --runner pooling`, which the reference's `Embedder` calls).
+- Engine: `vllm-server` Release CPU build of this branch, the converted
+  directory, `/v1/systemone`; the same numbers through `vllm_decide`
+  (`VLLM_CPP_CLM_MODEL_DIR`).
+- Result: argmax 8/8, max probability difference 0.0286 (bf16 reference),
+  0.0767 (fp32 reference). Reference bf16 versus fp32: 0.0491, 8/8.
+- Before the repair, with the reference tensors loaded under the names the
+  first port read: 5/8, 0.9808.
+- Mutation: reintroducing each first-port behavior (old tensor names, the
+  LayerNorm order, clamp before exp, the state without instructions, no
+  pooling normalization, `key: ` candidates, the first row pooled, and
+  deleting the `clm::Answer` call in `ClmDecide`) turns at least one
+  default-run case of `test_clm` red.
 
 ## Our baseline
 
