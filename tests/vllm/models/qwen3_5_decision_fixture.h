@@ -62,8 +62,10 @@ inline std::string CodepointToUtf8(uint32_t cp) {
   return out;
 }
 
-inline const Tokenizer& ByteTokenizer() {
-  static const Tokenizer tok = [] {
+// The tokenizer.json text of ByteTokenizer(), for a test that writes a model
+// directory the loader reads (test_clm).
+inline const std::string& ByteTokenizerJson() {
+  static const std::string json_text = [] {
     std::string vocab;
     for (int b = 0; b < 256; ++b) {
       if (b > 0) vocab += ',';
@@ -109,8 +111,14 @@ inline const Tokenizer& ByteTokenizer() {
             R"("continuing_subword_prefix":null,"end_of_word_suffix":null,)"
             R"("fuse_unk":false,"byte_fallback":false,"ignore_merges":false,)";
     json += "\"vocab\":{" + vocab + "},\"merges\":[]}}";
-    return Tokenizer::FromHfJsonBytes(json, "qwen3_5_decision_fixture");
+    return json;
   }();
+  return json_text;
+}
+
+inline const Tokenizer& ByteTokenizer() {
+  static const Tokenizer tok =
+      Tokenizer::FromHfJsonBytes(ByteTokenizerJson(), "qwen3_5_decision_fixture");
   return tok;
 }
 
