@@ -58,7 +58,14 @@ vllm/transformers_utils/{configs/radio,processors/nano_nemotron_vl}.py
 vllm/ir/ops/layernorm.py`) was read on 2026-09-30. It touches type
 annotations, docstrings, tuple construction, the LoRA / dummy-input plumbing,
 the processor call path for audio in video, the audio input construction and
-the static-tile image arm. In `nano_nemotron_vl.py`, cited at `a7c23ac96d`,
+the static-tile image arm, plus about 25 type-narrowing asserts that hold for
+every valid input: among them `nano_nemotron_vl.py:478` (dynamic-tiler
+placeholder replacement), `:1158` and `:1164-1165` (dynamic arm), the
+`multimodal_config is not None` asserts in `__init__` and `load_weights`, a
+`torch.is_tensor` to `isinstance(..., torch.Tensor)` swap on the video path,
+and `radio.py:551` (`assert self.img_size is not None`) in the hunk where
+`_init_img_size` now expands an int `patch_size` itself instead of the caller
+wrapping it in `to_2tuple` (`radio.py:577-594`, same tuple). In `nano_nemotron_vl.py`, cited at `a7c23ac96d`,
 that is: `SupportsLoRA` on `NemotronH_Nano_VL_V2`, covering the language model
 only, with the video indicator tokens embedded by the base weights; the
 `video_embeds` input mode, now parsed and passed through; a
@@ -78,8 +85,9 @@ dynamic arm (`:1529`). None of these touches the dynamic-resolution
 pixel-image path this port implements: the renames, the audio-in-video path,
 the audio fields and the LoRA embedding are audio and video, the walrus change
 is the `image_embeds` arm, the static-tile arm is not ported, the dispatch
-change selects the same arm for the same inputs, and the dynamic arm only moved
-from `**kwargs` to the same two named fields. No image-path semantics moved.
+change selects the same arm for the same inputs, and the dynamic arm moved from
+`**kwargs` to the same two named fields and gained type asserts that pass for
+valid inputs. No image-path semantics moved.
 The torch reference is v2.11.0, for the two `F.interpolate` calls the
 processor and the tower make.
 
