@@ -90,8 +90,9 @@ lists its ids keeps its stop set byte for byte.
 
 - Moving the primary EOS to the tokenizer for every model (full upstream
   parity), with its own survey of affected checkpoints.
-- `--tokenizer-config` pointing elsewhere: the fallback reads the sibling file
-  only.
+- `--tokenizer-config` (server) or `tokenizer_config_path` (C ABI) pointing
+  elsewhere: the fallback reads the sibling file only. It matters only on the
+  fallback path, where no other eos was found (fresh review of 53d58da46).
 
 ## Outcome
 
@@ -114,6 +115,11 @@ lists its ids keeps its stop set byte for byte.
   ISSUE-LOCAL-01M3RWMQD1RBNEGWZZRDSFTEPR), `test_model_loader_gguf` (a pinned
   architecture list that predates many registrations), and
   `test_bench_eos_chat_template` (vllm-bench has no `--no-ignore-eos`).
+- The fresh review of 53d58da46 FAILED it on one finding: the from_model_config
+  ids read the text config even when the outer config names an eos, so a nested
+  checkpoint with a top-level eos and no generation_config.json gained the
+  text config's id as a stop id. transformers lets the outer value win. Fixed
+  in the repair commit, with a test that is red on 53d58da46 and green after.
 - Real weights, CPU: both checkpoints (the 4B from its unmodified snapshot)
   answer the card's decision prompt with the letter alone, `finish_reason:
   stop`, `stop_reason: null` (the primary eos), with no `stop_token_ids`.

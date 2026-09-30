@@ -676,17 +676,24 @@ HfConfig ParseHfConfigDoc(nlohmann::json doc, const std::string& path,
                              e.what());
   }
 
-  // from_model_config's eos, read before `doc` moves into raw: the text
-  // config's eos_token_id (int or list), sorted and unique like the file's.
+  // from_model_config's eos, read before `doc` moves into raw, sorted and
+  // unique like the file's. The OUTER config's eos_token_id wins; the text
+  // config's is used only when the outer one is unset or null, as
+  // GenerationConfig.from_model_config resolves it.
   std::vector<int32_t> model_config_eos_ids;
   {
-    const auto it = text.find("eos_token_id");
-    if (it != text.end() && !it->is_null()) {
+    const auto named = [](const nlohmann::json& j) -> const nlohmann::json* {
+      const auto it = j.find("eos_token_id");
+      return (it == j.end() || it->is_null()) ? nullptr : &*it;
+    };
+    const nlohmann::json* eos = named(doc);
+    if (eos == nullptr) eos = named(text);
+    if (eos != nullptr) {
       std::set<int32_t> ids;
-      if (it->is_number_integer()) {
-        ids.insert(it->get<int32_t>());
-      } else if (it->is_array()) {
-        for (const auto& e : *it) {
+      if (eos->is_number_integer()) {
+        ids.insert(eos->get<int32_t>());
+      } else if (eos->is_array()) {
+        for (const auto& e : *eos) {
           if (e.is_number_integer()) ids.insert(e.get<int32_t>());
         }
       }
