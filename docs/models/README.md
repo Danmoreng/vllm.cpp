@@ -30,7 +30,7 @@ which checkpoint was used, the exact command, and what has not been measured.
 | [GLiNER2.5-Decide](gliner25-decide.md) | A DeBERTa-v3-large + classification head decision model | The checkpoint, the sequence layout, and what has not been measured |
 | [xor](xor.md) | A 35B MoE (Qwen3.6-35B-A3B) decision model with forward+reverse calibration | The checkpoint, the double-pass cost, and what has not been measured |
 | [Nimble](nimble.md) | A Qwen3.5-9B LoRA decision model that reads answer-letter logits (Ollama's `nimble`) | Converting the adapter, the openjev answer semantics, and why the 9B checkpoint is not yet measured end to end |
-| [Tev1](tev1.md) | An autoregressive decision model, 4B and 0.8B (Qwen3.5 SFTs) | The chat-completions prompt format, the `stop_token_ids` field it needs today, and the CPU argmax check against `transformers` |
+| [Tev1](tev1.md) | A decision model, 4B and 0.8B (Qwen3.5 SFTs), on `/v1/systemone`, `vllm_decide` and chat completions | Enabling the decision route, the prompt and where it differs from Ollama, the `stop_token_ids` field chat needs today, and the CPU check against `transformers` |
 
 ## Speech, music, and video
 

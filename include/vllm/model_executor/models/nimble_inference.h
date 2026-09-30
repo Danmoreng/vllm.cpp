@@ -16,12 +16,12 @@
 
 #include <cstdint>
 #include <memory>
-#include <stdexcept>
 #include <string>
 #include <vector>
 
 #include <nlohmann/json.hpp>
 
+#include "vllm/model_executor/models/decision_scorer.h"
 #include "vllm/model_executor/models/qwen3_5_dense.h"
 #include "vllm/transformers_utils/hf_config.h"
 #include "vt/device.h"
@@ -39,68 +39,39 @@ namespace nimble {
 // to extended_schema.py, which this port does not implement yet.
 inline constexpr int kMaxChoices = 26;
 // openjev defaults.py MAX_QUESTIONS and MAX_ANSWERS.
-inline constexpr int kMaxQuestions = 64;
-inline constexpr int kMaxAnswers = 64;
+inline constexpr int kMaxQuestions = decision_scorer::kMaxQuestions;
+inline constexpr int kMaxAnswers = decision_scorer::kMaxAnswers;
 // schema_config.json max_length; the converter records the checkpoint's own.
 inline constexpr int64_t kDefaultMaxLength = 8192;
 
 // parallel_schema.py SYSTEM_PROMPT, verbatim.
 extern const char* const kSystemPrompt;
 
-// A refusal of the request itself (HTTP 400, VLLM_ERR_INVALID_ARGUMENT).
-class RequestError : public std::invalid_argument {
- public:
-  using std::invalid_argument::invalid_argument;
-};
-
-// One schema field, compiled from one Jev question (compiler.py).
-struct Field {
-  std::string name;         // the question id
-  std::string type;         // "noul" | "choice" | "score"
-  std::string description;  // serialize(instructions)
-  // The schema values in candidate order: false/true for noul, the criteria
-  // keys for choice, "0".."L-1" for score.
-  std::vector<nlohmann::ordered_json> values;
-  // One description per value (compiler.py always supplies one).
-  std::vector<std::string> value_descriptions;
-  // Answer keys, in the same order: "false"/"true", criteria keys, "0"..
-  std::vector<std::string> keys;
-};
-
-struct Request {
-  std::string model;    // empty when the request names none
-  std::string context;  // serialize(state)
-  std::vector<Field> fields;
-};
+// The compilation, the answer and the refusal type are the shared scorer's
+// (decision_scorer.h); Nimble names them here so its callers read unchanged.
+using decision_scorer::AnswerFromLogits;
+using decision_scorer::EntropyConfidence;
+using decision_scorer::Field;
+using decision_scorer::Request;
+using decision_scorer::RequestError;
+using decision_scorer::Serialize;
 
 // Python json.dumps(ensure_ascii=False) with the default ", " / ": "
-// separators, then "<" and ">" replaced by < / > (safe_json).
+// separators, then "<" and ">" replaced by \u003c / \u003e (safe_json).
 std::string SafeJson(const nlohmann::ordered_json& value);
 
-// compiler.py serialize(): a string as-is, anything else json.dumps.
-std::string Serialize(const nlohmann::ordered_json& value);
-
-// Validate and compile a /v1/systemone body. Throws RequestError.
+// Validate and compile a /v1/systemone body with Nimble's 26-choice contract.
+// Throws RequestError.
 Request CompileRequest(const nlohmann::ordered_json& body);
 
 // The rendered chat prompt for every field, in field order.
 std::vector<std::string> BuildPrompts(const Request& request);
 
-// The openjev answer for one field from its candidate logits.
-nlohmann::ordered_json AnswerFromLogits(const Field& field,
-                                        const std::vector<double>& logits,
-                                        double temperature);
-
-// openjev confidence(): clamp(1 - H(p) / ln(n), 0, 1).
-double EntropyConfidence(const std::vector<double>& probabilities);
-
 }  // namespace nimble
 
-// The answers and token accounting for one request.
-struct NimbleResponse {
-  nlohmann::ordered_json answers = nlohmann::ordered_json::object();
-  int64_t input_tokens = 0;
-};
+// The answers and token accounting for one request. output_tokens is always 0
+// for Nimble: nothing is sampled.
+using NimbleResponse = decision_scorer::ScoredRequest;
 
 // Run a whole /v1/systemone request on a NimbleModel engine. Throws
 // nimble::RequestError for a request the reference refuses, and

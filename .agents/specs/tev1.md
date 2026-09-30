@@ -14,9 +14,16 @@ CPU + GPU (CUDA), OpenAI-compatible serving through `/v1/chat/completions`.
 
 `ACTIVE`. Phases 1-3 are on `main` (#3312, db5300836): the `Tev1Model`
 alias, the chat template, and `/v1/chat/completions`. Phase 6 (the SystemOne
-lane, below) and Phase 7 (the tokenizer EOS fallback,
-[`tev1-eos-fallback.md`](tev1-eos-fallback.md)) are the current work. The
-vLLM token gate (Phase 4) is still `PENDING`.
+lane) is implemented and CPU-verified on both checkpoints against
+`transformers` (4B argmax 7/7, 0.8B 6/7 with one near tie). Phase 7 (the
+tokenizer EOS fallback, [`tev1-eos-fallback.md`](tev1-eos-fallback.md)) is the
+current work. The vLLM gates (Phase 4, and Phase 6 against vLLM's generative
+scoring) are `PENDING`.
+
+Phase 6 found and fixed two engine defects on the way, each with its own
+issue: async scheduling dropped every sample logprob
+(ISSUE-LOCAL-01M3SE6RVKD6SCMA2YBS7F8X0R), which the lane reads, and a
+partial-UTF-8 top-k token made chat serialization answer HTTP 500 (same issue).
 
 ## Scope
 

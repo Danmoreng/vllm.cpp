@@ -843,8 +843,10 @@ curl http://localhost:8000/v1/systemone -H 'Content-Type: application/json' -d '
 
 Each model page carries its checkpoint, its answer semantics, and what is
 measured: [CLM](models/clm.md), [GLiNER2.5-Decide](models/gliner25-decide.md),
-[xor](models/xor.md), and [Nimble](models/nimble.md). Tev1 is also a decision
-model, but it answers through `/v1/chat/completions` ([Tev1](models/tev1.md)).
+[xor](models/xor.md), [Nimble](models/nimble.md), and [Tev1](models/tev1.md).
+Tev1 is a generation model: a directory whose `config.json` names `Tev1Model`
+serves `/v1/systemone` beside the chat routes, and scores each question's answer
+letters through the engine's own scheduler.
 
 ### Nimble: the exact weights
 

@@ -800,6 +800,12 @@ target_include_directories(test_tev1 PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/vllm/mo
 # and NimbleDecide over a synthetic Qwen3.5 dense model.
 vllm_cpp_add_test(test_nimble vllm/models/test_nimble.cpp)
 target_include_directories(test_nimble PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/vllm/models)
+# MODEL-TEV1 Phase 6: Tev1 on /v1/systemone and vllm_decide. Goldens from the
+# Ollama and togethercomputer/tev1 references (scripts/gen-tev1-goldens.py),
+# then Tev1Decide through a real synthetic engine and its C ABI handle.
+vllm_cpp_add_test(test_tev1_systemone vllm/models/test_tev1_systemone.cpp)
+target_include_directories(test_tev1_systemone PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/vllm/models ${CMAKE_SOURCE_DIR}/src)
 vllm_cpp_add_test(test_mistral_forward vllm/models/test_mistral_forward.cpp)
 target_include_directories(test_mistral_forward PRIVATE ${CMAKE_SOURCE_DIR}/src)
 vllm_cpp_add_test(test_gemma3_load vllm/models/test_gemma3_load.cpp)
