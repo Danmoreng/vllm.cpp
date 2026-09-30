@@ -5,7 +5,7 @@ Two modes.
 
 1. Synthetic (default). Emits `tests/vllm/models/cohere2_moe_goldens.inc`, the
    logits the C++ gate (`tests/vllm/models/test_cohere2_moe.cpp`) compares
-   against, for three tiny configs that between them switch every mechanism
+   against, for four tiny configs that between them switch every mechanism
    of the spec on and off. The weights are an explicit LCG rounded to bf16 that
    the C++ test reproduces bit-exactly, so no weight blob is committed. Each
    config has an f32 arm (bf16-valued weights, f32 arithmetic: the tight gate)
