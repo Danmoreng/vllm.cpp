@@ -31,13 +31,6 @@ namespace {
 
 using ojson = nlohmann::ordered_json;
 
-// decide.py tests `not o[k].strip()`.
-bool IsBlank(std::string_view s) {
-  return std::all_of(s.begin(), s.end(), [](unsigned char c) {
-    return c == ' ' || (c >= '\t' && c <= '\r') || (c >= 0x1c && c <= 0x1f);
-  });
-}
-
 }  // namespace
 
 Request CompileRequest(const ojson& body) {
@@ -49,7 +42,8 @@ Request CompileRequest(const ojson& body) {
                 "refuses a wider question instead of extrapolating to Y and Z"});
   for (const Field& f : r.fields) {
     for (const std::string& d : f.value_descriptions) {
-      if (IsBlank(d)) {
+      // decide.py tests `not o[k].strip()`.
+      if (decision_scorer::IsBlank(d)) {
         throw RequestError("question '" + f.name +
                            "': Tev1 needs a nonempty description for every "
                            "option (examples/decide.py)");

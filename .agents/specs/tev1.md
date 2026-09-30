@@ -223,6 +223,7 @@ in `docs/models/tev1.md`:
 | state | compacted JSON text as a string | the JSON value itself (string or object), as in training |
 | system prompt | the card's sentence with two line breaks inserted | the card's sentence verbatim (`decide.py`) |
 | widest field | 26 candidates | 24 (`decide.py`: labels A-X); 25 or 26 is refused by name |
+| blank description | Ollama accepts it | refused, as `decide.py` does; blank means ASCII whitespace only, so a description of only U+00A0 is accepted where Python's `strip()` would refuse it |
 
 **Mapping.** The question compilation is Nimble's (`compiler.py`, which matches
 Ollama's `compileField`): `choice` keys in order, a `null` description replaced
