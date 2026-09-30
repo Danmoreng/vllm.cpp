@@ -56,7 +56,17 @@ port mirrors changed only in type annotations, docstrings, tuple construction
 and the LoRA / dummy-input plumbing (`git diff e126687a9a a7c23ac96d --
 vllm/model_executor/models/{radio,intern_vit,nano_nemotron_vl}.py
 vllm/transformers_utils/{configs/radio,processors/nano_nemotron_vl}.py
-vllm/ir/ops/layernorm.py`, reviewed 2026-09-30); no image-path semantics moved.
+vllm/ir/ops/layernorm.py`, reviewed 2026-09-30). In `nano_nemotron_vl.py` that
+plumbing is: `SupportsLoRA` on `NemotronH_Nano_VL_V2`, covering the language
+model only, with the video indicator tokens embedded by the base weights; the
+`video_embeds` input mode, now parsed and passed through; a
+`kwargs.pop("truncation", None)` in `get_hf_processor`; the `audio` to `audios`
+key rename in the new `_get_hf_mm_inputs`; and `image_embeds is not None` in
+place of the walrus truthiness test in `_parse_and_validate_image_input`. None
+of these touches the pixel-image path: the rename and the LoRA embedding are
+audio and video, the walrus change is the `image_embeds` arm, and the dynamic
+arm only moved from `**kwargs` to the same two named fields. No image-path
+semantics moved.
 torch v2.11.0 for the two `F.interpolate` calls the processor and the tower make.
 
 ## Port map
@@ -198,7 +208,7 @@ range into one 1 627 048 984-byte file (sha256 `314151d13e98016226d534a707e176f4
 | same, STRUCTURAL on the BF16 index | 6243/6243 language tensors claimed, 390/390 vision, 716 deferred by name, 0 unclaimed |
 | same, STRUCTURAL on the NVFP4 index @ `16993199` | FAILS as recorded: 5946 language tensors unclaimed, 60 enumerated-but-not-shipped (`ISSUE-LOCAL-01M3S07X6Y4ADHHQ02FYMR4RXF`) |
 | `test_nano_nemotron_vl_mm_chat` (CI, server build) | 6/6: seams for both names, one- and two-image prefix and expansion, text passthrough, refusal without `max_model_len`, and the tiler's text length taken with no special tokens (`add_special_tokens=False`, processors/nano_nemotron_vl.py:689-692) on a BOS-prepending tokenizer |
-| `test_serve_nano_nemotron_vl_mm` (CI, server build) | 2/2: the tiny checkpoint as a model directory through the REAL `VllmServerMain` (seam wired, not UNAVAILABLE) and through `vllm_engine_load` + `vllm_chat` (an image request answered, 17 prompt tokens). Deleting either production `mm_ctx.max_model_len` assignment (`server_main.cpp`, `vllm_c.cpp`) reddens its case |
+| `test_serve_nano_nemotron_vl_mm` (CI, server build) | 3/3: the tiny checkpoint as a model directory through the REAL `VllmServerMain` (seam wired, not UNAVAILABLE) and through `vllm_engine_load` + `vllm_chat` (an image request answered, 17 prompt tokens at the default max_model_len 128; at max_model_len 16 the tiler budget 16 - 11 - 4 = 1 shrinks the grid to 2x2 and the prompt is 14 tokens). Deleting either production `mm_ctx.max_model_len` assignment (`server_main.cpp`, `vllm_c.cpp`) reddens its case. The C-ABI case proves the ENGINE's value is carried: a constant `1 << 20` in `vllm_c.cpp` reddens the max_model_len 16 case. The server case proves only that the value is supplied, because the server exits on the unbindable port before it serves a request and the install announcement does not print the budget |
 | no-regression | `test_nemotron_h_paged_forward` 13/13, `test_nemotron_h_scaffold` 14/14, `test_nemotron_h_loader` 4/4, `test_model_registry` 24/24 |
 
 ## Owed

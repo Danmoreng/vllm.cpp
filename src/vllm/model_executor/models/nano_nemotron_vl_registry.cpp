@@ -154,7 +154,7 @@ std::unique_ptr<LoadedModel> LoadNanoNemotronVL(const ModelRegistration& registr
       if (name.rfind("sound", 0) == 0) {
         // `is_sound_weights` is the bare `sound` prefix (:1516-1517), and a
         // sound tensor on a checkpoint whose config builds no sound encoder is
-        // an error there (`assert self.sound_encoder is not None`, :1555).
+        // an error there (`assert self.sound_encoder is not None`, :1546-1548).
         if (!text_only && !model->params().has_sound) {
           throw std::runtime_error("Model architecture " + arch + ": the checkpoint ships '" +
                                    name + "' but config.json carries no `sound_config`, "

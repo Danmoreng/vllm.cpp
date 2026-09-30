@@ -17,6 +17,15 @@
 // and each case enters through the real entry point with a real LoadedEngine
 // built from a tiny checkpoint directory.
 //
+// The two gates are not equally strong. The C-ABI side proves the field
+// carries the ENGINE's value: at max_model_len 16 the tiler shrinks the image
+// grid, so a constant in vllm_c.cpp reddens it. The server side proves only
+// that the field is SUPPLIED (a positive value, so the seam is wired). The
+// server exits on the unbindable port before it serves a request, and the
+// install announcement does not print the budget, so no server-side effect of
+// the value is observable here. Passing --max-model-len would change nothing
+// this case can see.
+//
 // The server case re-execs this binary into `VllmServerMain` exactly as
 // `test_serve_deepseek_v4_mm.cpp` does (ParseArgs can `std::exit`, and the
 // unbindable port makes the server exit right after the install announcement).
@@ -156,8 +165,9 @@ TEST_CASE("serve_nano_nemotron_vl_mm_child" * doctest::skip()) {
 
 // Delete `mm_ctx.max_model_len = loaded->max_model_len()` in server_main.cpp
 // and this reddens: the factory refuses a context without max_model_len, the
-// install announces UNAVAILABLE and names the missing field.
-TEST_CASE("serve: the Nemotron Nano Omni image seam is wired with the engine's max_model_len") {
+// install announces UNAVAILABLE and names the missing field. It proves the
+// field is supplied, not which value it carries (see the file header).
+TEST_CASE("serve: the Nemotron Nano Omni image seam is wired with a supplied max_model_len") {
   const ModelDir dir;
   const ChildRun run = RunServer("--model " + dir.path() + " --port " + kUnbindablePort);
   INFO("child output:\n" << run.output);
@@ -171,14 +181,23 @@ TEST_CASE("serve: the Nemotron Nano Omni image seam is wired with the engine's m
   CHECK(run.status == 0);
 }
 
-// Delete `mm_ctx.max_model_len = engine->loaded->max_model_len()` in
-// vllm_c.cpp and this reddens: the install wires the refusing seam, and the
-// image request comes back VLLM_ERR_INVALID_ARGUMENT instead of a completion.
-TEST_CASE("capi: vllm_chat answers an image request on the Nemotron Nano Omni checkpoint") {
+// One image request through `vllm_engine_load` + `vllm_chat` on the tiny
+// checkpoint. `max_model_len` <= 0 keeps the engine default, which is the
+// checkpoint's max_position_embeddings (128).
+namespace {
+
+struct CapiChat {
+  vllm_status status = VLLM_OK;
+  std::string error;
+  nlohmann::json out;
+};
+
+CapiChat CapiChatOneImage(int32_t max_model_len) {
   const ModelDir dir;
   const std::string path = dir.path();
   vllm_model_params mp = vllm_model_params_default();
   mp.model_path = path.c_str();
+  mp.max_model_len = max_model_len;
   vllm_engine* eng = nullptr;
   const vllm_status load = vllm_engine_load(&mp, &eng);
   {
@@ -198,19 +217,50 @@ TEST_CASE("capi: vllm_chat answers an image request on the Nemotron Nano Omni ch
   req["max_tokens"] = 2;
   const std::string body = req.dump();
   char* response = nullptr;
-  const vllm_status st = vllm_chat(eng, body.c_str(), &response);
-  const std::string err = vllm_last_error() == nullptr ? std::string() : vllm_last_error();
-  INFO("chat error: " << err);
-  CHECK(st == VLLM_OK);
-  CHECK_FALSE(Contains(err, "max_model_len"));
-  REQUIRE(response != nullptr);
-  const nlohmann::json out = nlohmann::json::parse(response);
-  CHECK(out.at("object") == "chat.completion");
+  CapiChat run;
+  run.status = vllm_chat(eng, body.c_str(), &response);
+  run.error = vllm_last_error() == nullptr ? std::string() : vllm_last_error();
+  if (response != nullptr) {
+    run.out = nlohmann::json::parse(response);
+    vllm_string_free(response);
+  }
+  vllm_engine_free(eng);
+  return run;
+}
+
+}  // namespace
+
+// Delete `mm_ctx.max_model_len = engine->loaded->max_model_len()` in
+// vllm_c.cpp and this reddens: the install wires the refusing seam, and the
+// image request comes back VLLM_ERR_INVALID_ARGUMENT instead of a completion.
+TEST_CASE("capi: vllm_chat answers an image request on the Nemotron Nano Omni checkpoint") {
+  const CapiChat run = CapiChatOneImage(0);
+  INFO("chat error: " << run.error);
+  CHECK(run.status == VLLM_OK);
+  CHECK_FALSE(Contains(run.error, "max_model_len"));
+  REQUIRE(run.out.is_object());
+  CHECK(run.out.at("object") == "chat.completion");
   // The image was expanded to <img> + 4 x <image> + </img>: a 48x48 image is a
   // 4x4 patch grid under the tiny config, 4 rows after the pixel shuffle. The
   // text part is "<image>\nwhat is it" (11 bytes after the one <image>), so the
   // prompt is 1 + 4 + 1 + 11 tokens.
-  CHECK(out.at("usage").at("prompt_tokens") == 17);
-  vllm_string_free(response);
-  vllm_engine_free(eng);
+  CHECK(run.out.at("usage").at("prompt_tokens") == 17);
+}
+
+// Setting the field is not enough: it must carry the ENGINE's value. Replace
+// the vllm_c.cpp assignment with any constant (say `1 << 20`) and the case
+// above stays green, because 128 already leaves the 48x48 image its full 4x4
+// grid. Here the engine runs at max_model_len 16, so upstream's budget
+// `max_model_len - text_prompt_length - 4` (processors/nano_nemotron_vl.py:
+// 330-331 @ e126687a9a) is 16 - 11 - 4 = 1 post-shuffle token, 4 patches: the
+// tiler shrinks the grid to 2x2, which is ONE <image> after the pixel shuffle,
+// and the prompt is 1 + 1 + 1 + 11 = 14 tokens. With the constant the tiler
+// keeps 4x4, the prompt is 17 tokens, and a 16-token engine refuses it.
+TEST_CASE("capi: the tiler budgets the image against the engine's max_model_len") {
+  const CapiChat run = CapiChatOneImage(16);
+  INFO("chat error: " << run.error);
+  CHECK(run.status == VLLM_OK);
+  REQUIRE(run.out.is_object());
+  CHECK(run.out.at("object") == "chat.completion");
+  CHECK(run.out.at("usage").at("prompt_tokens") == 14);
 }

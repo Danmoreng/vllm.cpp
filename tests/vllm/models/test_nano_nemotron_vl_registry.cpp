@@ -314,7 +314,7 @@ TEST_CASE("nano-nemotron-vl: an image reaches encode_mm, embed_mm and the paged 
 // Upstream's point is two facts about one load: the vision tower and `mlp1`
 // are never READ (the mocked module raises if it is inspected), and a
 // `sound_encoder.*` tensor on a model with NO sound encoder loads fine,
-// because text-only mode skips the sound arm before its assert (:1552-1555).
+// because text-only mode skips the sound arm before its assert (:1546-1548).
 // The checkpoint here carries no `sound_config` and ships a
 // `sound_encoder.encoder.weight` tensor, exactly as the upstream case does.
 TEST_CASE("nano-nemotron-vl (upstream): text-only mode skips the multimodal weights") {
