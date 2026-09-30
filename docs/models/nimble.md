@@ -102,13 +102,22 @@ On 2026-09-30, CPU:
   compiler and openjev: input tokens are equal (913 and 638), the argmax is
   equal on 5 of 5, and the largest probability difference is 0.0225 against
   the merged LoRA. HF's own merged and unmerged runs differ by up to 0.0317.
+- The published checkpoint, end to end: `bespokelabs/Bespoke-Nimble-9B` @
+  `bd792f44` converted onto `Qwen/Qwen3.5-9B` @ `c2022362` by
+  `convert-nimble.py`, served on `/v1/systemone`, against the model author's
+  own `parallel_schema.prepare_prompts`, `inference.candidate_logits` and
+  `inference.decision_result` over `transformers` 5.3.0 BF16 with the adapter
+  UNMERGED through PEFT 0.21.0. Five requests with seven questions (choice,
+  noul with and without criteria, score): argmax equal on 7 of 7, input tokens
+  equal on 5 of 5, largest probability difference 0.0054.
 
 ## What has not been measured
 
-The published 9B checkpoint has not been run end to end. Its base is 19.3 GB,
-and the host that did this work had 12 GB of free disk. The gate against the
-reference `inference.py` on `bespokelabs/Bespoke-Nimble-9B` is owed. The
-0.8B run above proves the pipeline, not the model's accuracy.
+The 9B comparison above ran on CPU on both sides. The reference runner
+(`inference.ParallelScorer`) refuses to start without a CUDA BF16 GPU, so its
+functions were called directly on CPU; a CUDA run of the reference, and CUDA
+serving here, are owed. Seven questions are a check, not an accuracy
+measurement, and `Bespoke-Nimble-9B-v2` (T=2.179) was not run.
 
 Also owed: fields with more than 26 choices (refused by name, the reference
 switches to a 255-code prompt), reuse of the shared prompt prefix across
