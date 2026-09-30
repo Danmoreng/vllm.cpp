@@ -373,6 +373,44 @@ yet. See [the model page](models/nemotron-nano-omni.md) for the measured bounds.
 The image processor sizes each image from the engine's `max_model_len`, as
 upstream does, so a short `--max-model-len` shrinks the patch grid.
 
+### North (`Cohere2MoeForCausalLM`): which weights, and what has been checked
+
+The port was built and gated against the first-party bf16 release. There is
+one arm; every other arm is refused at load with a message that names it.
+
+| artifact | size | source |
+|---|---|---|
+| `model-00001-of-00049.safetensors` ... `model-00049-of-00049.safetensors`, with `config.json`, `model.safetensors.index.json` and the tokenizer files | 60,968,607,744 bytes (56.8 GiB) of bf16 weights, 18,730 tensors | [CohereLabs/North-Mini-Code-1.0](https://huggingface.co/CohereLabs/North-Mini-Code-1.0) at revision `d11e61a842617a22dc328552fa5bb86231ee4f37` |
+
+The resident size is the weight size: 56.8 GiB of bf16, plus a 128 MiB RoPE
+table for the 500,000-position context. The loader copies each expert's gate
+and up rows into one owner, so plan for the whole checkpoint in host memory.
+
+Refused arms:
+
+- **GGUF.** llama.cpp `b10451` defines `cohere2moe`; the loader arm is owed.
+- **Quantized siblings** (FP8, W4A16, NVFP4, anything with a
+  `quantization_config`). Load the bf16 checkpoint.
+- **`use_qk_norm: true`.** The pinned vLLM `cohere2_moe.py` has no q/k norm.
+- **The EAGLE drafter** (`North-Mini-Code-1.0-eagle`) and the EAGLE3
+  auxiliary hidden states. Not ported.
+- **`--disable-sliding-window`.** The pinned model file computes
+  `sliding_window + 1` for every sliding layer and cannot run without it.
+
+What has been measured, on CPU only:
+
+- Three tiny checkpoints that switch every mechanism on and off, loaded through
+  the production loader, match a torch transcription of the pinned
+  `cohere2_moe.py` within 6e-7 relative in f32 and within the bf16 envelope in
+  bf16, for prefill and for decode through the paged cache past the window.
+- Layers 0 (dense, RoPE), 1 (sliding window, MoE) and 4 (full attention, NoPE,
+  MoE) of the real checkpoint, fetched by HTTP range, match the same
+  transcription within 8e-6 relative in f32.
+- The model loads through the engine registry and decodes through the runner.
+- **No token gate against vLLM exists yet**, and no speed number exists on any
+  axis. Both need a GPU lease and the full checkpoint
+  ([the spec](../.agents/specs/cohere2-moe.md) `## Owed`).
+
 ## OpenAI-compatible server
 
 `vllm-server` is a small HTTP server speaking the OpenAI API. Source:

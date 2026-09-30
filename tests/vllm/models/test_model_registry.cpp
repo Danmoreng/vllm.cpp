@@ -111,7 +111,11 @@ TEST_CASE("registry_imports: every registered architecture has a complete factor
   // (ISSUE-LOCAL-01M3RY6G385D41W5SNF1C85RRS): `NemotronH_Nano_VL_V2` and
   // `NemotronH_Nano_Omni_Reasoning_V3`, one additive TU
   // (nano_nemotron_vl_registry.cpp), upstream registry.py:512-513 @ e126687a9a.
-  REQUIRE(registrations.size() == 56);
+  // 54 -> 55 on MODEL-TEXT-cohere2-moe (ISSUE-LOCAL-01M3S23H9B25EFPFJN75Y1XBWY):
+  // `Cohere2MoeForCausalLM` (North), its own additive TU, registered upstream at
+  // `registry.py:86` @ `a7c23ac96d`. Its EAGLE drafter is not registered.
+  // Combined: 54 + 2 (Nemotron Nano VL/Omni) + 1 (Cohere2 North) = 57.
+  REQUIRE(registrations.size() == 57);
 
   for (const ModelRegistration& registration : registrations) {
     CAPTURE(registration.architecture);
@@ -181,6 +185,7 @@ TEST_CASE("self_registration: every arch self-registers from its own TU") {
   // forward/loader/registry TU + one REGISTER_VLLM_MODEL line, ZERO shared-array
   // edit — the cross-family dense/MoE seam absorbing the recent-model breadth pass.
   CHECK(has_arch("CohereForCausalLM"));        // Cohere Command-R
+  CHECK(has_arch("Cohere2MoeForCausalLM"));    // Cohere North (MoE, sliding window)
   CHECK(has_arch("GraniteForCausalLM"));       // IBM Granite-3
   CHECK(has_arch("InternLM2ForCausalLM"));     // InternLM2
   CHECK(has_arch("InternLM3ForCausalLM"));     // InternLM3 (reuses the Llama TU)
@@ -224,7 +229,7 @@ TEST_CASE("self_registration: every arch self-registers from its own TU") {
   // with the kExampleConfigArchitectures ledger; adding a model appends its two
   // entries here.
   const std::vector<std::string_view> supported = ModelRegistry::SupportedArchs();
-  REQUIRE(supported.size() == 56);
+  REQUIRE(supported.size() == 57);
   CHECK(std::is_sorted(supported.begin(), supported.end()));
   // The full byte-order sequence. Note "MiniCPM3" < "MiniCPMF" and "Phi3" <
   // "PhiF" ('3' 0x33 < 'F' 0x46); "OPT" < "Olmo" ('P' 0x50 < 'l' 0x6C); and among
@@ -237,6 +242,9 @@ TEST_CASE("self_registration: every arch self-registers from its own TU") {
       "BoundaryExtractor",
       // "ClmModel" (Cl) < "CohereForCausalLM" (Co): l=0x6C < o=0x6F.
       "ClmModel",
+      // "Cohere2Moe" < "CohereFor": they agree through "Cohere" and then
+      // differ at '2' 0x32 against 'F' 0x46.
+      "Cohere2MoeForCausalLM",
       "CohereForCausalLM",
       // 'C' 0x43: "CuaS1Forms" sorts after "CohereForCausalLM" ('u' 0x75 > 'o'
       // 0x6F) and before "DeepseekV2ForCausalLM" ('C' 0x43 < 'D' 0x44).
@@ -842,10 +850,13 @@ TEST_CASE("Qwen3.5 SSM cache dtype accepts upstream torch aliases exactly") {
 TEST_CASE("hf_registry_coverage: every registration has an example config fixture") {
   // C++ fixture registry for the currently implemented subset. Keep this list
   // alias-for-alias with the central ordered table, mirroring HF_EXAMPLE_MODELS.
-  constexpr std::array<std::string_view, 56> kExampleConfigArchitectures{
+  constexpr std::array<std::string_view, 57> kExampleConfigArchitectures{
       "BoundaryExtractor",
       // "ClmModel" (Cl) < "CohereForCausalLM" (Co): l=0x6C < o=0x6F.
       "ClmModel",
+      // "Cohere2Moe" < "CohereFor": they agree through "Cohere" and then
+      // differ at '2' 0x32 against 'F' 0x46.
+      "Cohere2MoeForCausalLM",
       "CohereForCausalLM",
       "CuaS1Forms",
       "DeepseekV2ForCausalLM",
@@ -979,7 +990,7 @@ TEST_CASE("raise_for_unsupported: subset default message and order match oracle"
       ModelRegistry::Resolve(unknown),
       "Model architectures ['Gemma4ForCausalLM'] are not supported for now. "
       "Supported architectures: "
-      "dict_keys(['BoundaryExtractor', 'ClmModel', 'CohereForCausalLM', 'CuaS1Forms', 'DeepseekV2ForCausalLM', "
+      "dict_keys(['BoundaryExtractor', 'ClmModel', 'Cohere2MoeForCausalLM', 'CohereForCausalLM', 'CuaS1Forms', 'DeepseekV2ForCausalLM', "
       "'DeepseekV41ForCausalLM', "
       "'DeepseekV4ForCausalLM', 'Dots3NoteForCausalLM', 'Gemma2ForCausalLM', 'Gemma3ForCausalLM', "
       "'Gemma4ForConditionalGeneration', 'Gemma4UnifiedForConditionalGeneration', 'GemmaForCausalLM', "
