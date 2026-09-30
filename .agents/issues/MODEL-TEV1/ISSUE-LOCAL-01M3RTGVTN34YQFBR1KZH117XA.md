@@ -1,14 +1,14 @@
 ID: ISSUE-LOCAL-01M3RTGVTN34YQFBR1KZH117XA
 Title: Tokenizer eos_token is not a stop token when config.json lacks it and no generation_config.json ships
 Row: MODEL-TEV1
-State: OPEN
+State: CLOSED
 Kind: bug
 GitHub: -
 Mirror: PENDING
 Availability: FULL
 Created: 2026-09-30
 Updated: 2026-09-30
-Closed: -
+Closed: 2026-09-30
 
 ## Problem
 
@@ -16,4 +16,4 @@ Upstream resolves the primary eos from the tokenizer (renderers/base.py:310-317 
 
 ## Resolution
 
--
+2026-09-30: when config.json and the tokenizer.json post_processor name no eos, InputProcessor takes tokenizer_config.json eos_token (string or AddedToken object, exactly one token) as the primary eos, vLLM's primary source; when no generation_config.json exists, the text config's eos_token_id is added as a secondary id (HfConfig::model_config_eos_ids, from_model_config). A checkpoint that already resolves an eos is unchanged; a pinned test proves it. test_input_processor: 3 new cases red before, 5/5 green after; test_hf_config and the touched suites unchanged. Tev1-0.8B and Tev1-4B (unmodified snapshot) on CPU: the decision prompt returns the letter alone with finish_reason stop and no stop_token_ids. Spec: .agents/specs/tev1-eos-fallback.md.

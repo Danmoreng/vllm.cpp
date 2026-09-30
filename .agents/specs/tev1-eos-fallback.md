@@ -8,7 +8,7 @@ spec and review. This is that spec. The parent spec is [`tev1.md`](tev1.md).
 
 ## Now
 
-`ACTIVE`.
+`DONE` on CPU (2026-09-30). See `## Outcome`.
 
 ## The defect
 
@@ -92,3 +92,28 @@ lists its ids keeps its stop set byte for byte.
   parity), with its own survey of affected checkpoints.
 - `--tokenizer-config` pointing elsewhere: the fallback reads the sibling file
   only.
+
+## Outcome
+
+- Implemented as designed, with one change: the from_model_config ids live in
+  their own `HfConfig::model_config_eos_ids` field instead of
+  `generation_config_eos_ids`. Writing them into the existing field turned the
+  existing strict test "absent generation_config.json leaves the list empty"
+  (`test_hf_config`) red, and this spec's stop condition forbids changing an
+  existing gate.
+- Red then green: of the five new `test_input_processor` cases, the pinned
+  "checkpoint that lists its ids" case and the "not one token" case passed
+  before the change and after it; the Tev1-shape, object-form and
+  generation-config-wins cases failed before (no primary eos) and pass after.
+- No existing gate changed: `test_input_processor` 22/22, `test_hf_config`
+  22/22, and the touched suites (`test_llm_engine`, `test_openai_*`,
+  `test_runner`, `test_async_*`, `test_loaded_engine_dense`, `test_nimble`,
+  `test_tev1`, `test_tev1_systemone`, `test_generation_config`,
+  `test_qwen3_8_text_only`, `test_llama_*`) are green. Three suites fail on this
+  branch for reasons that predate it: `test_capi` (GLiNER fixture,
+  ISSUE-LOCAL-01M3RWMQD1RBNEGWZZRDSFTEPR), `test_model_loader_gguf` (a pinned
+  architecture list that predates many registrations), and
+  `test_bench_eos_chat_template` (vllm-bench has no `--no-ignore-eos`).
+- Real weights, CPU: both checkpoints (the 4B from its unmodified snapshot)
+  answer the card's decision prompt with the letter alone, `finish_reason:
+  stop`, `stop_reason: null` (the primary eos), with no `stop_token_ids`.
