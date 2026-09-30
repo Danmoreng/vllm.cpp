@@ -7,7 +7,7 @@ wired, so an image or video prompt runs instead of being refused.
 **What has been measured is much narrower than "it works."** Read
 [what has actually been checked](#what-has-actually-been-checked) before you rely
 on any of it. Nothing has run end to end through the server, and no speed number
-exists for this model on any axis.
+exists against vLLM (a secondary llama.cpp bar exists, #333).
 
 ## Run the text tower from a GGUF
 
@@ -89,10 +89,13 @@ converter that emits `muse-glimmer.attention.post_norm_rms_epsilon` or
 - The text tower ran on real tensors from the released 30B checkpoint at
   **reduced depth, 4 of its 52 layers.** Its **5 prefill argmax positions** are
   identical to a standalone torch transcription of the upstream source and to
-  Hugging Face's own `muse_glimmer` implementation. The full-depth 52-layer arm
-  of this forward has **never run**.
+  Hugging Face's own `muse_glimmer` implementation. The full-depth 52-layer
+  bf16 safetensors arm has **never run**; the full-depth GGUF Q4_K_M arm has
+  (see the llama.cpp token gate above).
 - Those are argmax positions from a single prefill, not generated tokens.
-  **Multi-step decode is untested**, and so is the sliding window across steps.
+  **Multi-step decode on the bf16 safetensors arm is untested**; on the GGUF
+  arm it is gated for 32 tokens (prompts are far shorter than the sliding
+  window, so the window across steps is still untested).
 - Even at reduced depth, this is agreement with independent transcriptions of the
   same upstream source, not agreement with the model's own runtime. The vLLM
   parity pin `a7c23ac96d` registers `MuseGlimmerForConditionalGeneration`, but
