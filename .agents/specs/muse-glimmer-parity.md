@@ -9,14 +9,16 @@ one branch per item, local commits only, no pull request).
 
 ## Now
 
-`SPIKE`. This spec is committed before any gate code. The row does not change
-state until a token gate against a registered oracle passes.
+`SPIKE`, unchanged. Scope 1-3 are done (see `## Evidence`). The secondary
+llama.cpp gate passes, but the row's lifecycle stays where it is: its advance
+needs the bf16 gate against the vLLM pin (owed) and the `docs/STATUS.md` /
+`.agents/NOW.md` rows the matrix row already names.
 
 ## Scope
 
 1. **Record correction.** The row, `docs/models/muse-glimmer.md` and
    `docs/FEATURES.md` say the pinned vLLM oracle cannot load `muse_glimmer`.
-   That was true at `555967922`. The parity pin is now `e126687a9a`, which
+   That was true at `555967922`. The parity pin is now `a7c23ac96d`, which
    registers `MuseGlimmerForConditionalGeneration` and ships
    `vllm/model_executor/models/muse_glimmer.py`. The text is corrected; the
    oracle's gateability on this fleet stays unmeasured.
@@ -40,12 +42,15 @@ port exists; the tower is fed the reference's pixels), video, and speed.
 
 ## Upstream chain
 
-vLLM `e126687a9a`: `vllm/model_executor/models/muse_glimmer.py`. Its vision
-and text semantics are unchanged from vllm#51655 head `075d645af`, which the
-existing port and `scripts/mm/muse_glimmer_vision_ref.py` cite: the diff between
-the two revisions is line wrapping, the multimodal processor's call signature,
-`keep_on_cpu` metadata and `get_mm_mapping` (checked with
-`git diff 075d645af e126687a9a -- vllm/model_executor/models/muse_glimmer.py`).
+The authoritative vLLM parity pin is `a7c23ac96d` (`.agents/upstream-sync.md`,
+`vllm_commit`, advanced by `4f11dfc10`); several records on `main` still name
+`e126687a9a`. Both register `MuseGlimmerForConditionalGeneration` and ship
+`vllm/model_executor/models/muse_glimmer.py`. Its vision and text semantics are
+unchanged from vllm#51655 head `075d645af`, which the existing port and
+`scripts/mm/muse_glimmer_vision_ref.py` cite: `075d645af..e126687a9a` is line
+wrapping, the multimodal processor's call signature, `keep_on_cpu` metadata and
+`get_mm_mapping`, and `e126687a9a..a7c23ac96d` is type annotations and the
+processor's `_get_hf_mm_inputs` plumbing (both diffs read 2026-09-30).
 llama.cpp `b10451` (`10bf611`), `LLM_ARCH_MUSE_GLIMMER`, for the GGUF text path.
 
 ## Our baseline
@@ -57,7 +62,7 @@ with llama.cpp on the first token only (`docs/models/muse-glimmer.md`).
 
 ## Port map
 
-| Ours | Upstream (`muse_glimmer.py` @ `e126687a9a`) |
+| Ours | Upstream (`muse_glimmer.py` @ `a7c23ac96d`) |
 |---|---|
 | `MuseGlimmerVisionForward` | `MuseGlimmerVisionEncoder.forward` |
 | `MuseGlimmerVisionAdapterForward` | `MuseGlimmerVisionAdapter.forward` |
@@ -105,6 +110,29 @@ and the tool/reasoning parser tests, already ported by the row).
 - Staging: the 16.76 GB GGUF and ~3.7 GB of vision tensors live on the NAS,
   because the development host has under 10 GB free.
 
+## Evidence
+
+All on CPU, 2026-09-30.
+
+- **Vision** (`test_muse_glimmer_vision_real`, env
+  `MUSE_GLIMMER_VISION_REAL_DIR` / `MUSE_GLIMMER_VISION_REAL_GOLDEN`; goldens
+  from `scripts/mm/muse_glimmer_vision_ref.py --real-dir`): a 588x644 image,
+  483 soft-token rows, weights through `LoadMuseGlimmerVisionTower` and soft
+  tokens through `MuseGlimmerEncodePixelGroups`. f32 arm: `ln_pre` 1.22e-6,
+  tower 7.87e-5, soft tokens 4.07e-5 relative max error, row cosine 1.0. bf16
+  arm, gated against the f32 truth: ours worst row cosine 0.967, mean 0.99875;
+  the reference's own bf16 arm worst 0.970, mean 0.99856. PASS.
+- **Text** (`test_muse_glimmer_gguf_paged_engine`, env `VLLM_MUSE_GGUF_PARITY`;
+  golden `tests/parity/goldens/muse_glimmer_30b_q4km/`, file sha256
+  `4cc57c0f51040a226e5a72cc47b7613f7772950e460a665f7083de89f183f60e`): 16
+  prompts x 32 greedy tokens through `LoadedEngine::FromModelDir`, against the
+  llama.cpp `b10451` oracle on the same file. 10/16 token-exact; the other 6
+  stay inside the 500 mnat band at every cell (max teacher-forced gap 93 mnats,
+  prompt 15 token 8); zero forward-divergent cells. Anchor: our ids equal the
+  committed `our_ids.npy`. Gate run: "16/16 prompts PASS (token-exact 10/16; near-tie band only 6/16; max gap 0.093 nats @ prompt[15] tok=8; 0 forward-divergent)", 45 min on a shared 20-core host.
+- **Record correction**: the model page, FEATURES and the matrix row no longer
+  say the pinned oracle cannot load `muse_glimmer`.
+
 ## Stop conditions
 
 - The vision tensors or the GGUF cannot be staged.
@@ -113,5 +141,5 @@ and the tool/reasoning parser tests, already ported by the row).
 
 ## Owed
 
-- The bf16 token gate against pinned vLLM `e126687a9a` on a GPU lease.
+- The bf16 token gate against pinned vLLM `a7c23ac96d` on a GPU lease.
   Tracked by `ISSUE-LOCAL-01M3S0ZTRRVQWCZ35W33AJJNN8`.
