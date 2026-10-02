@@ -435,11 +435,20 @@ inline Tensor ResidentWeightF32(Dev d, const OwnedTensor& w, const std::vector<i
 // The two dim-1 unbind slices of the flash KV cache (num_blocks, 2, block_size,
 // Hkv, Dh): a rank-4 strided view (block stride 2*bs*Hkv*Dh). Mirrors
 // qwen3_5.cpp KvSlice.
+//
+// MiMoV2: when `head_size_v` is set and non-zero, the V slice (`which == 1`)
+// uses `head_size_v` for the head dimension and its strides. The K slice
+// (`which == 0`) always uses `head_size`. The page layout is
+// [K: bs*Hkv*Dh_k | V: bs*Hkv*Dh_v] per block, so the V offset already
+// accounts for the K region size.
 inline Tensor KvSlice(const PagedKvCache& kv, vt::Device dev, int which) {
-  const int64_t bs = kv.block_size, h = kv.num_kv_heads, dd = kv.head_size;
+  const int64_t bs = kv.block_size, h = kv.num_kv_heads;
+  const int64_t dd_k = kv.head_size;
+  const int64_t dd_v = (kv.head_size_v > 0) ? kv.head_size_v : kv.head_size;
+  const int64_t dd = (which == 1) ? dd_v : dd_k;
   Tensor t;
   t.data = static_cast<char*>(kv.data) +
-           static_cast<size_t>(which) * static_cast<size_t>(bs * h * dd) *
+           static_cast<size_t>(which) * static_cast<size_t>(bs * h * dd_k) *
                vt::SizeOf(kv.dtype);
   t.dtype = kv.dtype;
   t.device = dev;
@@ -448,8 +457,8 @@ inline Tensor KvSlice(const PagedKvCache& kv, vt::Device dev, int which) {
   t.shape[1] = bs;
   t.shape[2] = h;
   t.shape[3] = dd;
-  t.stride[0] = 2 * bs * h * dd;
-  t.stride[1] = h * dd;
+  t.stride[0] = bs * h * dd_k + bs * h * dd_v;  // block stride = K region + V region
+  t.stride[1] = h * dd;  // within-block stride uses THIS slice's head dim
   t.stride[2] = dd;
   t.stride[3] = 1;
   return t;

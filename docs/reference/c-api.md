@@ -44,10 +44,10 @@ int main(void) {
 }
 ```
 
-The ABI covers engine lifecycle, completion, chat, embeddings, transcription,
-media generation, speech generation, memory helpers, and diagnostics. It also
-exposes blocking, streaming, and concurrent request interfaces. The current
-version is `VLLM_ABI_VERSION 26`.
+The ABI covers engine lifecycle, completion, chat, embeddings, entity extraction,
+transcription, media generation, speech generation, decisions, option scoring, memory helpers,
+and diagnostics. It also exposes blocking, streaming, and concurrent request
+interfaces. The current version is `VLLM_ABI_VERSION 29`.
 
 Read [`include/vllm.h`](../../include/vllm.h) for the fields and functions in
 the current ABI. Call `vllm_abi_version()` at runtime to detect a header and
@@ -74,6 +74,43 @@ individual fields.
   `1` disables the model-level window, and `2` explicitly enables it.
   Other values return `VLLM_ERR_INVALID_ARGUMENT` during loading.
   Per-layer windows take precedence. Models without a window ignore this control.
+- **ABI 27: `vllm_gliner_ner()`.** Run blocking named entity recognition on a
+  GLiNER2.5 engine with text, entity labels, a threshold, and a maximum span width.
+  Each result contains the label, text, confidence, and token and character offsets.
+  The caller owns the result struct. The library allocates its entity array and strings.
+  Call `vllm_ner_result_free()` to release those allocations and zero the struct.
+  A non-GLiNER2 engine returns `VLLM_ERR_INVALID_ARGUMENT`.
+  On failure, the function zeroes a non-null output and sets `vllm_last_error()`.
+  See the [GLiNER C API example](../USAGE.md#through-the-c-abi-v27) for loading, calling, and cleanup.
+
+## Decisions and option scoring
+
+ABI 29 adds the blocking `vllm_decide(engine, request_json, &out_json)` call.
+Load the model with `vllm_engine_load()` and pass a NUL-terminated JSON request.
+The loaded architecture selects the request format:
+
+| Architecture | Request format |
+|---|---|
+| `KevModel`, `LayaModel`, `SpanExtractor` (GLiNER2.5-Decide), `XorModel` | [`/v1/systemone`](../USAGE.md#system-1-decisions-with-v1systemone): `state` and a nonempty `questions` object with `choice`, `score`, or `noul` questions |
+| `NimbleModel` | The same `/v1/systemone` body, validated as Nimble's own server validates it (openjev): unknown keys are refused, and a field has at most 26 choices. Answers are unrounded and `confidence` is the normalized negative entropy. See [Nimble](../models/nimble.md) |
+| `ClmModel` | The same `/v1/systemone` body plus an optional `temperature` in (0, 100], validated and answered as the CLM reference server does: unrounded probabilities, margin `confidence`, no `confidence` on a `noul` answer, and `usage.billing_units`. See [CLM](../models/clm.md) |
+| `Tev1Model` | The same `/v1/systemone` body, with at most 24 options per question and a nonempty description for each. The engine scores each question's answer letters through its own scheduler (one sampled token per question, counted in `usage.output_tokens`), so the call can run beside `vllm_chat` on the same handle. See [Tev1](../models/tev1.md) |
+| `CuaS1Forms` | [`/v1/score`](../USAGE.md#option-scoring-with-v1score): a `context` string and a nonempty `options` array of strings |
+
+Use the linked HTTP examples as request bodies, without the `curl` command.
+Decision responses contain `answers`, keyed by question ID. Option scoring returns
+`probabilities`, `winner`, and `confidence`. Both include `model`, `usage`, and `latency_ms`.
+A plain Qwen3.5 engine is refused, and the refusal names `Tev1Model`. `vllm_decide` also rejects the
+`BoundaryExtractor` NER architecture, although its server can expose `/v1/systemone`.
+
+On `VLLM_OK`, `out_json` owns a library-allocated, NUL-terminated response.
+Release it with `vllm_decide_free(out_json)`. Passing `NULL` to that free function is safe.
+On failure, a non-NULL output pointer receives `NULL`. Read `vllm_last_error()` for details.
+
+Null arguments, unsupported architectures, malformed JSON, and invalid request fields
+return `VLLM_ERR_INVALID_ARGUMENT`. Inference exceptions derived from `std::exception`
+and response allocation failures return `VLLM_ERR_RUNTIME`. Other inference exceptions
+return `VLLM_ERR_UNKNOWN`.
 
 ## Consuming it from C++
 

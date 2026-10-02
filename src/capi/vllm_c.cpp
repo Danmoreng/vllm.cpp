@@ -15,6 +15,7 @@
 #include <cstring>
 #include <exception>
 #include <filesystem>
+#include <iostream>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -40,6 +41,7 @@
 #include "vllm/entrypoints/model_loader.h"
 #include "vllm/entrypoints/openai/protocol.h"
 #include "vllm/config/generation.h"
+#include "vllm/entrypoints/openai/mm_chat_registry.h"
 #include "vllm/entrypoints/openai/serving_chat.h"
 #include "vllm/entrypoints/openai/serving_utils.h"
 #include "vllm/entrypoints/openai/tool_parsers/abstract.h"  // get_tool_parser
@@ -49,14 +51,20 @@
 #include "vllm/model_executor/models/model_registry.h"  // refuse-by-task (v11)
 #include "vllm/model_executor/models/gliner2_ner.h"  // Gliner2NerInference (v27)
 #include "vllm/model_executor/models/kev_inference.h"      // KevInference (v28)
+#include "vllm/model_executor/models/nimble_inference.h"   // NimbleDecide (MODEL-NIMBLE)
+#include "vllm/model_executor/models/tev1_inference.h"     // Tev1Decide (MODEL-TEV1)
 #include "vllm/model_executor/models/laya_inference.h"      // LayaInference (v28)
 #include "vllm/model_executor/models/cua_s1_inference.h"    // CuaS1ScoreInference (v28)
-#include "vllm/model_executor/models/clm_inference.h"        // ClmInference (v29)
+#include "vllm/model_executor/models/clm_inference.h"        // ClmDecide (MODEL-CLM)
 #include "vllm/model_executor/models/gliner25_decide_inference.h"  // Gliner25DecideInference (v29)
 #include "vllm/model_executor/models/xor_inference.h"        // XorInference (v29)
 #include "vllm/entrypoints/openai/systemone.h"  // shared SystemOne helpers (v28)
 #include "vllm/model_executor/models/minimax_h3.h"    // mux argv (v12)
 #include "vllm/multimodal/parakeet_transcription.h"     // vllm_transcribe (v11)
+#ifdef VLLM_WITH_DIARIZATION
+#include "parakeet_capi.h"           // parakeet_ctx, parakeet_capi_* (v30)
+#include "vllm/multimodal/diarization.h"  // Diarizer, TranscribeAndDiarize (v30)
+#endif
 #include "vllm/multimodal/minimax_h3_video.h"          // vllm_video_* (v12)
 #include "vllm/multimodal/video_engine.h"              // the v18 family registry
 #include "vllm/multimodal/speech_engine.h"             // vllm_speech_* (v20)
@@ -66,6 +74,7 @@
 #include "vllm/outputs.h"
 #include "vllm/sampling_params.h"
 #include "vllm/transformers_utils/hf_config.h"  // PeekHfArchitectures (v11)
+#include "vllm/transformers_utils/tokenizer_files.h"
 #include "vllm/version.h"
 #include "vllm/v1/engine/async_llm.h"
 
@@ -80,6 +89,13 @@ struct vllm_engine {
   // ABI v11 transcription stack (the ONE library seam the server route and the
   // parakeet-transcribe example also drive). Null for text engines.
   std::unique_ptr<vllm::multimodal::ParakeetTranscriber> transcriber;
+#ifdef VLLM_WITH_DIARIZATION
+  // ABI v30 diarization: a parakeet_ctx loaded from a diarization GGUF.
+  parakeet_ctx* diarizer_ctx = nullptr;
+  // A parakeet_ctx for the ASR model (for SAS composition).
+  parakeet_ctx* parakeet_asr_ctx = nullptr;
+  std::unique_ptr<vllm::multimodal::Diarizer> diarizer;
+#endif
   // Monotonic per-handle request-id source. Each vllm_complete[_stream] call
   // uses a FRESH id so a request left in-flight by a mid-call exception can never
   // collide with a later call's id — a collision would make LLMEngine.add_request
@@ -97,6 +113,13 @@ struct vllm_engine {
   // <model_path>/tokenizer_config.json default. Ignored for a .gguf model_path
   // (its template lives in GGUF metadata).
   std::string tokenizer_config_path;
+  // ABI v22 vllm_model_params.mmproj_path: the SECOND GGUF this engine was
+  // loaded with, empty when none. Kept because the multimodal chat seam's
+  // install context carries it: for a two-file vehicle it is the only thing
+  // that can say whether the vision half arrived, and an architecture whose
+  // string names both a text and a vision checkpoint cannot answer that
+  // itself (MODEL-MM-deepseek-v4, #2411).
+  std::string mmproj_path;
   // Test-hook override for the chat-prompt seam (MakeEngineHandle overload):
   // when set, chat_serving is built with it instead of the resolved template.
   vllm::entrypoints::openai::ChatPromptFn test_prompt_fn;
@@ -309,7 +332,8 @@ vllm::entrypoints::openai::ChatPromptFn ResolveChatPromptFn(
       // mirroring the server's --tokenizer-config.
       tmpl = vllm::entrypoints::LoadChatTemplateFromConfig(
           tokenizer_config_path.empty()
-              ? (fs::path(model_path) / "tokenizer_config.json").string()
+              ? vllm::ResolveTokenizerFile(model_path, "tokenizer_config.json")
+                    .string()
               : tokenizer_config_path);
     }
     if (out_raw_template != nullptr) *out_raw_template = tmpl;
@@ -391,6 +415,10 @@ vllm::entrypoints::openai::OpenAIServingChat& EnsureChatServing(
         engine->model_path.empty()
             ? std::string("model")
             : std::filesystem::path(engine->model_path).filename().string();
+    // Copied before the move: the multimodal install context below needs both,
+    // and `OpenAIServingChat` publishes neither.
+    const std::string served_name_copy = served_name;
+    const vllm::entrypoints::openai::ChatPromptFn prompt_fn_copy = prompt_fn;
     engine->chat_serving =
         std::make_unique<vllm::entrypoints::openai::OpenAIServingChat>(
             engine->loaded->async_engine(), std::move(served_name),
@@ -406,6 +434,52 @@ vllm::entrypoints::openai::OpenAIServingChat& EnsureChatServing(
     engine->chat_serving->set_default_sampling_params(
         vllm::GetDiffSamplingParam(engine->loaded->config(),
                                    vllm::kGenerationConfigAuto));
+
+    // ── THE MULTIMODAL CHAT SEAM, on the ABI's own chat handler ─────────────
+    //
+    // MODEL-MM-deepseek-v4 W5 (#2411). `include/vllm.h` said for four ABI
+    // versions that this library had NO multimodal chat request path: a chat
+    // body carrying an `image_url` content part was answered as TEXT, with the
+    // part silently dropped, because `server_main.cpp` was the only caller of
+    // `InstallMultiModalChatSeam` and `vllm_chat` never installed one. That
+    // made every shipped multimodal capability reachable only from the bundled
+    // HTTP server, which AGENTS.md "Shared seams" does not allow: the ABI is
+    // the surface and the server is a client of it.
+    //
+    // It is the SAME function `server_main.cpp` calls, given the SAME context,
+    // including the same `DefaultImageCodec` -- two entry points of one library
+    // must not accept different containers.
+    //
+    // A TEXT architecture is byte-identical. `is_multimodal_model()` is the
+    // architecture's own declaration, and the install's `kTextOnlyModel` arm
+    // wires nothing at all, so `serving_chat.cpp`'s `if (mm_chat_fn_)` gate is
+    // never taken and the chat path is exactly what it was.
+    vllm::entrypoints::openai::MultiModalChatContext mm_ctx;
+    mm_ctx.architecture = std::string(engine->loaded->architecture());
+    // For a `.gguf` model_path the "directory" is the file's parent, which is
+    // what a factory reading a sibling config by name expects; for a directory
+    // it is the directory itself.
+    const std::filesystem::path model_path(engine->model_path);
+    mm_ctx.model_dir =
+        std::filesystem::is_directory(model_path)
+            ? model_path.string()
+            : model_path.parent_path().string();
+    mm_ctx.config_path = (std::filesystem::path(mm_ctx.model_dir) /
+                          "config.json").string();
+    mm_ctx.served_model_name = served_name_copy;
+    mm_ctx.tokenizer = &engine->loaded->tokenizer();
+    mm_ctx.prompt_fn = prompt_fn_copy;
+    mm_ctx.codec = vllm::entrypoints::openai::DefaultImageCodec();
+    mm_ctx.mm_config = &engine->loaded->mm_config();
+    mm_ctx.config = &engine->loaded->config();
+    mm_ctx.mmproj_path = engine->mmproj_path;
+    mm_ctx.max_model_len = engine->loaded->max_model_len();
+    // The install announces every outcome on the stream it is given, exactly as
+    // it does for the server; there is no arm that installs nothing on a model
+    // that says it is multimodal.
+    (void)vllm::entrypoints::openai::InstallMultiModalChatSeam(
+        *engine->chat_serving, engine->loaded->is_multimodal_model(), mm_ctx,
+        std::cerr);
   }
   return *engine->chat_serving;
 }
@@ -824,6 +898,10 @@ VLLM_API vllm_status vllm_engine_load(const vllm_model_params* params,
                 vllm::multimodal::ParakeetTranscriber::FromDir(
                     params->model_path));
         handle->model_path = params->model_path;
+#ifdef VLLM_WITH_DIARIZATION
+        // Also load a parakeet_ctx for SAS composition
+        handle->parakeet_asr_ctx = parakeet_capi_load(params->model_path);
+#endif
         *out = handle;
         ClearError();
         return VLLM_OK;
@@ -834,6 +912,7 @@ VLLM_API vllm_status vllm_engine_load(const vllm_model_params* params,
     auto* handle = new vllm_engine;
     handle->loaded = std::move(loaded);
     handle->model_path = params->model_path;
+    if (params->mmproj_path != nullptr) handle->mmproj_path = params->mmproj_path;
     // ABI v9: an explicit tokenizer_config.json override for the chat template.
     if (params->tokenizer_config_path != nullptr)
       handle->tokenizer_config_path = params->tokenizer_config_path;
@@ -853,7 +932,14 @@ VLLM_API vllm_status vllm_engine_load(const vllm_model_params* params,
   }
 }
 
-VLLM_API void vllm_engine_free(vllm_engine* engine) { delete engine; }
+VLLM_API void vllm_engine_free(vllm_engine* engine) {
+  if (engine == nullptr) return;
+#ifdef VLLM_WITH_DIARIZATION
+  if (engine->diarizer_ctx) parakeet_capi_free(engine->diarizer_ctx);
+  if (engine->parakeet_asr_ctx) parakeet_capi_free(engine->parakeet_asr_ctx);
+#endif
+  delete engine;
+}
 
 // ABI v25 (row `SPEC-DFLASH2`, issue #2832): the engine's own speculative
 // acceptance counters, read back. THIS FUNCTION COMPUTES NOTHING. All three
@@ -1439,6 +1525,313 @@ VLLM_API void vllm_transcription_free(vllm_transcription* out) {
   out->has_text = 0;
 }
 
+// ── Speaker diarization (ABI v30) ──────────────────────────────────────────
+
+// ── Speaker diarization (ABI v30) ──────────────────────────────────────────
+
+VLLM_API vllm_engine* vllm_diarization_load(const char* gguf_path) {
+  if (gguf_path == nullptr) {
+    SetError("vllm_diarization_load: gguf_path is null");
+    return nullptr;
+  }
+#ifdef VLLM_WITH_DIARIZATION
+  parakeet_ctx* diar_ctx = parakeet_capi_load(gguf_path);
+  if (diar_ctx == nullptr) {
+    SetError(std::string("vllm_diarization_load: parakeet_capi_load failed: ")
+             + gguf_path);
+    return nullptr;
+  }
+  auto* handle = new vllm_engine;
+  handle->diarizer_ctx = diar_ctx;
+  handle->model_path = gguf_path;
+  ClearError();
+  return handle;
+#else
+  SetError("vllm_diarization_load: diarization not compiled in");
+  return nullptr;
+#endif
+}
+
+#ifdef VLLM_WITH_DIARIZATION
+// Parse parakeet.cpp diarization JSON into vllm_speaker_segment array.
+// JSON format: {"segments": [{"speaker": N, "start": S, "end": E}, ...]}
+static vllm_status ParseDiarizationJson(
+    const char* json_str, vllm_diarization* out) {
+  if (!json_str) return VLLM_ERR_RUNTIME;
+  auto j = nlohmann::json::parse(json_str);
+  int n = 0;
+  if (j.contains("segments")) n = j["segments"].size();
+  auto* segs = static_cast<vllm_speaker_segment*>(
+      std::malloc(n == 0 ? 1 : n * sizeof(vllm_speaker_segment)));
+  if (segs == nullptr) return VLLM_ERR_RUNTIME;
+  for (int i = 0; i < n; ++i) {
+    segs[i].speaker = j["segments"][i].value("speaker", -1);
+    segs[i].start = j["segments"][i].value("start", 0.0f);
+    segs[i].end = j["segments"][i].value("end", 0.0f);
+  }
+  out->segments = segs;
+  out->n_segments = n;
+  return VLLM_OK;
+}
+#endif
+
+VLLM_API vllm_status vllm_diarize_path(vllm_engine* diar_engine,
+                                       const char* wav_path,
+                                       vllm_diarization* out) {
+  if (out == nullptr) {
+    SetError("vllm_diarize_path: out is null");
+    return VLLM_ERR_INVALID_ARGUMENT;
+  }
+  out->segments = nullptr;
+  out->n_segments = 0;
+  if (diar_engine == nullptr || wav_path == nullptr) {
+    SetError("vllm_diarize_path: engine or wav_path is null");
+    return VLLM_ERR_INVALID_ARGUMENT;
+  }
+#ifdef VLLM_WITH_DIARIZATION
+  if (diar_engine->diarizer_ctx == nullptr) {
+    SetError("vllm_diarize_path: engine is not a diarization engine");
+    return VLLM_ERR_INVALID_ARGUMENT;
+  }
+  try {
+    char* json = parakeet_capi_diarize_path(
+        diar_engine->diarizer_ctx, wav_path);
+    if (json == nullptr) {
+      SetError("vllm_diarize_path: diarize returned null");
+      return VLLM_ERR_RUNTIME;
+    }
+    auto status = ParseDiarizationJson(json, out);
+    parakeet_capi_free_string(json);
+    if (status != VLLM_OK) {
+      SetError("vllm_diarize_path: failed to parse diarization JSON");
+      return status;
+    }
+    ClearError();
+    return VLLM_OK;
+  } catch (const std::exception& e) {
+    SetError(std::string("vllm_diarize_path: ") + e.what());
+    return VLLM_ERR_RUNTIME;
+  }
+#else
+  SetError("vllm_diarize_path: diarization not compiled in");
+  return VLLM_ERR_INVALID_ARGUMENT;
+#endif
+}
+
+VLLM_API vllm_status vllm_diarize_pcm(vllm_engine* diar_engine,
+                                      const float* pcm, int64_t n_samples,
+                                      int32_t sample_rate,
+                                      vllm_diarization* out) {
+  (void)sample_rate;  // used only in the VLLM_WITH_DIARIZATION path
+  if (out == nullptr) {
+    SetError("vllm_diarize_pcm: out is null");
+    return VLLM_ERR_INVALID_ARGUMENT;
+  }
+  out->segments = nullptr;
+  out->n_segments = 0;
+  if (diar_engine == nullptr || pcm == nullptr || n_samples <= 0) {
+    SetError("vllm_diarize_pcm: invalid arguments");
+    return VLLM_ERR_INVALID_ARGUMENT;
+  }
+#ifdef VLLM_WITH_DIARIZATION
+  if (diar_engine->diarizer_ctx == nullptr) {
+    SetError("vllm_diarize_pcm: engine is not a diarization engine");
+    return VLLM_ERR_INVALID_ARGUMENT;
+  }
+  try {
+    char* json = parakeet_capi_diarize_pcm(
+        diar_engine->diarizer_ctx, pcm, (int)n_samples, sample_rate);
+    if (json == nullptr) {
+      SetError("vllm_diarize_pcm: diarize returned null");
+      return VLLM_ERR_RUNTIME;
+    }
+    auto status = ParseDiarizationJson(json, out);
+    parakeet_capi_free_string(json);
+    if (status != VLLM_OK) {
+      SetError("vllm_diarize_pcm: failed to parse diarization JSON");
+      return status;
+    }
+    ClearError();
+    return VLLM_OK;
+  } catch (const std::exception& e) {
+    SetError(std::string("vllm_diarize_pcm: ") + e.what());
+    return VLLM_ERR_RUNTIME;
+  }
+#else
+  SetError("vllm_diarize_pcm: diarization not compiled in");
+  return VLLM_ERR_INVALID_ARGUMENT;
+#endif
+}
+
+VLLM_API void vllm_diarization_free(vllm_diarization* out) {
+  if (out == nullptr) return;
+  std::free(out->segments);
+  out->segments = nullptr;
+  out->n_segments = 0;
+}
+
+// ── Speaker-attributed ASR (ABI v30) ────────────────────────────────────────
+
+VLLM_API vllm_status vllm_transcribe_and_diarize(
+    vllm_engine* asr_engine, vllm_engine* diar_engine,
+    const char* wav_path,
+    vllm_sas_result* out) {
+  if (out == nullptr) {
+    SetError("vllm_transcribe_and_diarize: out is null");
+    return VLLM_ERR_INVALID_ARGUMENT;
+  }
+  out->utterances = nullptr;
+  out->n_utterances = 0;
+  if (asr_engine == nullptr || diar_engine == nullptr || wav_path == nullptr) {
+    SetError("vllm_transcribe_and_diarize: null argument");
+    return VLLM_ERR_INVALID_ARGUMENT;
+  }
+#ifdef VLLM_WITH_DIARIZATION
+  if (asr_engine->transcriber == nullptr) {
+    SetError("vllm_transcribe_and_diarize: asr_engine is not a transcription engine");
+    return VLLM_ERR_INVALID_ARGUMENT;
+  }
+  if (diar_engine->diarizer_ctx == nullptr) {
+    SetError("vllm_transcribe_and_diarize: diar_engine is not a diarization engine");
+    return VLLM_ERR_INVALID_ARGUMENT;
+  }
+  try {
+    // Read WAV into PCM inline (ReadWavPcm16Mono is static in diarization.cpp)
+    std::vector<float> pcm;
+    {
+      FILE* f = std::fopen(wav_path, "rb");
+      if (!f) {
+        SetError("vllm_transcribe_and_diarize: cannot open WAV");
+        return VLLM_ERR_RUNTIME;
+      }
+      char hdr[44];
+      if (std::fread(hdr, 1, 44, f) != 44) {
+        std::fclose(f);
+        SetError("vllm_transcribe_and_diarize: WAV too short");
+        return VLLM_ERR_RUNTIME;
+      }
+      std::fseek(f, 44, SEEK_SET);
+      int16_t sample;
+      while (std::fread(&sample, 2, 1, f) == 1)
+        pcm.push_back(static_cast<float>(sample) / 32768.0f);
+      std::fclose(f);
+    }
+    int n_sas = 0;
+    parakeet_sas_result* sas = parakeet_capi_transcribe_and_diarize(
+        asr_engine->parakeet_asr_ctx, diar_engine->diarizer_ctx,
+        pcm.data(), (int)pcm.size(), 16000, &n_sas);
+    if (sas == nullptr || n_sas == 0) {
+      ClearError();
+      return VLLM_OK;
+    }
+    auto* utts = static_cast<vllm_speaker_utterance*>(
+        std::malloc(n_sas * sizeof(vllm_speaker_utterance)));
+    if (utts == nullptr) {
+      for (int i = 0; i < n_sas; ++i)
+        if (sas[i].text) parakeet_capi_free_string(sas[i].text);
+      parakeet_capi_free_sas_results(sas);
+      SetError("vllm_transcribe_and_diarize: out-of-memory");
+      return VLLM_ERR_RUNTIME;
+    }
+    for (int i = 0; i < n_sas; ++i) {
+      utts[i].speaker = sas[i].speaker;
+      utts[i].text = sas[i].text ? DupString(sas[i].text) : nullptr;
+      utts[i].start = sas[i].start;
+      utts[i].end = sas[i].end;
+      utts[i].conf = sas[i].conf;
+      if (sas[i].text) parakeet_capi_free_string(sas[i].text);
+    }
+    parakeet_capi_free_sas_results(sas);
+    out->utterances = utts;
+    out->n_utterances = n_sas;
+    ClearError();
+    return VLLM_OK;
+  } catch (const std::exception& e) {
+    SetError(std::string("vllm_transcribe_and_diarize: ") + e.what());
+    return VLLM_ERR_RUNTIME;
+  }
+#else
+  SetError("vllm_transcribe_and_diarize: diarization not compiled in");
+  return VLLM_ERR_INVALID_ARGUMENT;
+#endif
+}
+
+VLLM_API vllm_status vllm_transcribe_and_diarize_pcm(
+    vllm_engine* asr_engine, vllm_engine* diar_engine,
+    const float* pcm, int64_t n_samples, int32_t sample_rate,
+    vllm_sas_result* out) {
+  (void)sample_rate;  // used only in the VLLM_WITH_DIARIZATION path
+  if (out == nullptr) {
+    SetError("vllm_transcribe_and_diarize_pcm: out is null");
+    return VLLM_ERR_INVALID_ARGUMENT;
+  }
+  out->utterances = nullptr;
+  out->n_utterances = 0;
+  if (asr_engine == nullptr || diar_engine == nullptr ||
+      pcm == nullptr || n_samples <= 0) {
+    SetError("vllm_transcribe_and_diarize_pcm: invalid arguments");
+    return VLLM_ERR_INVALID_ARGUMENT;
+  }
+#ifdef VLLM_WITH_DIARIZATION
+  if (asr_engine->transcriber == nullptr) {
+    SetError("vllm_transcribe_and_diarize_pcm: asr_engine is not a transcription engine");
+    return VLLM_ERR_INVALID_ARGUMENT;
+  }
+  if (diar_engine->diarizer_ctx == nullptr) {
+    SetError("vllm_transcribe_and_diarize_pcm: diar_engine is not a diarization engine");
+    return VLLM_ERR_INVALID_ARGUMENT;
+  }
+  try {
+    int n_sas = 0;
+    parakeet_sas_result* sas = parakeet_capi_transcribe_and_diarize(
+        asr_engine->parakeet_asr_ctx, diar_engine->diarizer_ctx,
+        pcm, (int)n_samples, sample_rate, &n_sas);
+    if (sas == nullptr || n_sas == 0) {
+      ClearError();
+      return VLLM_OK;
+    }
+    auto* utts = static_cast<vllm_speaker_utterance*>(
+        std::malloc(n_sas * sizeof(vllm_speaker_utterance)));
+    if (utts == nullptr) {
+      for (int i = 0; i < n_sas; ++i)
+        if (sas[i].text) parakeet_capi_free_string(sas[i].text);
+      parakeet_capi_free_sas_results(sas);
+      SetError("vllm_transcribe_and_diarize_pcm: out-of-memory");
+      return VLLM_ERR_RUNTIME;
+    }
+    for (int i = 0; i < n_sas; ++i) {
+      utts[i].speaker = sas[i].speaker;
+      utts[i].text = sas[i].text ? DupString(sas[i].text) : nullptr;
+      utts[i].start = sas[i].start;
+      utts[i].end = sas[i].end;
+      utts[i].conf = sas[i].conf;
+      if (sas[i].text) parakeet_capi_free_string(sas[i].text);
+    }
+    parakeet_capi_free_sas_results(sas);
+    out->utterances = utts;
+    out->n_utterances = n_sas;
+    ClearError();
+    return VLLM_OK;
+  } catch (const std::exception& e) {
+    SetError(std::string("vllm_transcribe_and_diarize_pcm: ") + e.what());
+    return VLLM_ERR_RUNTIME;
+  }
+#else
+  SetError("vllm_transcribe_and_diarize_pcm: diarization not compiled in");
+  return VLLM_ERR_INVALID_ARGUMENT;
+#endif
+}
+
+VLLM_API void vllm_sas_result_free(vllm_sas_result* out) {
+  if (out == nullptr) return;
+  for (int i = 0; i < out->n_utterances; ++i) {
+    std::free(out->utterances[i].text);
+  }
+  std::free(out->utterances);
+  out->utterances = nullptr;
+  out->n_utterances = 0;
+}
+
 // ── Embeddings (ABI v15, ARCH-ONE-SURFACE ROW 6) ────────────────────────────
 // The pooling slice of the ONE surface: the SAME registry forward +
 // PoolingRunner engine step the server's /v1/embeddings drives
@@ -1717,19 +2110,129 @@ VLLM_API vllm_status vllm_decide(vllm_engine* engine,
   const bool is_clm = (arch == "ClmModel");
   const bool is_gliner25_decide = (arch == "SpanExtractor");
   const bool is_xor = (arch == "XorModel");
+  const bool is_nimble = (arch == "NimbleModel");
+  const bool is_tev1 = (arch == "Tev1Model");
   if (!is_kev && !is_laya && !is_cua_s1 && !is_clm && !is_gliner25_decide &&
-      !is_xor) {
+      !is_xor && !is_nimble && !is_tev1) {
     SetError(
         "vllm_decide: this engine's architecture is '" + arch +
         "', not 'KevModel', 'LayaModel', 'CuaS1Forms', 'ClmModel', "
-        "'SpanExtractor', or 'XorModel'; "
-        "use vllm_complete / vllm_embed");
+        "'SpanExtractor', 'XorModel', 'NimbleModel', or 'Tev1Model'; "
+        "use vllm_complete / vllm_embed. A Tev1 checkpoint opts in by naming "
+        "'Tev1Model' in config.json architectures");
     return VLLM_ERR_INVALID_ARGUMENT;
   }
   namespace so = vllm::entrypoints::openai::systemone;
 
-  if (is_kev || is_laya || is_clm || is_gliner25_decide || is_xor) {
-    // ── Decision pipeline (kev / laya / clm / gliner25_decide / xor) ──
+  if (is_clm) {
+    // ── Request-level CLM (MODEL-CLM): ClmDecide is the same seam the
+    // server registers, and it answers in the reference's shape, usage
+    // included.
+    nlohmann::ordered_json body;
+    try {
+      body = nlohmann::ordered_json::parse(request_json);
+    } catch (const std::exception& e) {
+      SetError(std::string("vllm_decide: invalid JSON body: ") + e.what());
+      return VLLM_ERR_INVALID_ARGUMENT;
+    }
+    try {
+      const auto start = std::chrono::steady_clock::now();
+      nlohmann::ordered_json r;
+      {
+        std::lock_guard<std::mutex> lock(engine->embed_mutex);
+        r = vllm::ClmDecide(engine->loaded->loaded_model(),
+                            engine->loaded->tokenizer(), body);
+      }
+      const double latency_ms = std::chrono::duration<double, std::milli>(
+                                    std::chrono::steady_clock::now() - start)
+                                    .count();
+      nlohmann::ordered_json out = nlohmann::ordered_json::object();
+      out["model"] = (body.contains("model") && body["model"].is_string())
+                         ? body["model"].get<std::string>()
+                         : engine->model_path;
+      out["answers"] = std::move(r["answers"]);
+      out["usage"] = std::move(r["usage"]);
+      out["latency_ms"] = so::R2(latency_ms);
+      char* dup = DupString(out.dump());
+      if (dup == nullptr) {
+        SetError("vllm_decide: out-of-memory allocating response");
+        return VLLM_ERR_RUNTIME;
+      }
+      *out_json = dup;
+      ClearError();
+      return VLLM_OK;
+    } catch (const vllm::clm::RequestError& e) {
+      SetError(std::string("vllm_decide: ") + e.what());
+      return VLLM_ERR_INVALID_ARGUMENT;
+    } catch (const std::exception& e) {
+      SetError(std::string("vllm_decide: ") + e.what());
+      return VLLM_ERR_RUNTIME;
+    } catch (...) {
+      SetError("vllm_decide: unknown error");
+      return VLLM_ERR_UNKNOWN;
+    }
+  }
+
+  if (is_nimble || is_tev1) {
+    // ── Request-level decision pipeline (MODEL-NIMBLE, MODEL-TEV1) ──
+    // NimbleDecide / Tev1Decide own parsing and validation: the request
+    // contract is openjev's and Ollama's, and a question is one prompt.
+    nlohmann::ordered_json body;
+    try {
+      body = nlohmann::ordered_json::parse(request_json);
+    } catch (const std::exception& e) {
+      SetError(std::string("vllm_decide: invalid JSON body: ") + e.what());
+      return VLLM_ERR_INVALID_ARGUMENT;
+    }
+    try {
+      const auto start = std::chrono::steady_clock::now();
+      vllm::decision_scorer::ScoredRequest r;
+      if (is_nimble) {
+        // Nimble runs its own forward beside the engine, one call at a time.
+        std::lock_guard<std::mutex> lock(engine->embed_mutex);
+        r = vllm::NimbleDecide(engine->loaded->loaded_model(),
+                               engine->loaded->tokenizer(), body);
+      } else {
+        // Tev1 scores through this handle's AsyncLLM (generative scoring), so
+        // it interleaves with vllm_chat / vllm_complete in the scheduler and
+        // needs no lock of its own.
+        r = vllm::Tev1Decide(engine->loaded->async_engine(),
+                             engine->loaded->tokenizer(),
+                             engine->loaded->max_model_len(), body);
+      }
+      const double latency_ms = std::chrono::duration<double, std::milli>(
+                                    std::chrono::steady_clock::now() - start)
+                                    .count();
+      nlohmann::ordered_json out = nlohmann::ordered_json::object();
+      out["model"] = (body.contains("model") && body["model"].is_string())
+                         ? body["model"].get<std::string>()
+                         : engine->model_path;
+      out["answers"] = std::move(r.answers);
+      out["usage"] = {{"input_tokens", r.input_tokens},
+                      {"output_tokens", r.output_tokens}};
+      out["latency_ms"] = so::R2(latency_ms);
+      char* dup = DupString(out.dump());
+      if (dup == nullptr) {
+        SetError("vllm_decide: out-of-memory allocating response");
+        return VLLM_ERR_RUNTIME;
+      }
+      *out_json = dup;
+      ClearError();
+      return VLLM_OK;
+    } catch (const vllm::decision_scorer::RequestError& e) {
+      SetError(std::string("vllm_decide: ") + e.what());
+      return VLLM_ERR_INVALID_ARGUMENT;
+    } catch (const std::exception& e) {
+      SetError(std::string("vllm_decide: ") + e.what());
+      return VLLM_ERR_RUNTIME;
+    } catch (...) {
+      SetError("vllm_decide: unknown error");
+      return VLLM_ERR_UNKNOWN;
+    }
+  }
+
+  if (is_kev || is_laya || is_gliner25_decide || is_xor) {
+    // ── Decision pipeline (kev / laya / gliner25_decide / xor) ──
     nlohmann::ordered_json body;
     try {
       body = nlohmann::ordered_json::parse(request_json);
@@ -1761,12 +2264,6 @@ VLLM_API vllm_status vllm_decide(vllm_engine* engine,
           dr.scores = std::move(result.scores);
           dr.act_logits = std::move(result.act_logits);
           dr.prompt_tokens = result.prompt_tokens;
-        } else if (is_clm) {
-          vllm::ClmDecisionResult result =
-              vllm::ClmInference(model, tokenizer, parsed.text,
-                                  q.type, q.instructions, options);
-          dr.scores = std::move(result.scores);
-          dr.prompt_tokens = result.prompt_tokens;
         } else if (is_gliner25_decide) {
           vllm::Gliner25DecideResult result =
               vllm::Gliner25DecideInference(model, tokenizer, parsed.text,
@@ -1788,9 +2285,7 @@ VLLM_API vllm_status vllm_decide(vllm_engine* engine,
           dr.prompt_tokens = result.prompt_tokens;
         }
         total_tokens += dr.prompt_tokens;
-        answers[q.id] = is_clm
-            ? so::BuildSystemOneAnswerClm(q, dr)
-            : so::BuildSystemOneAnswerDecision(q, dr);
+        answers[q.id] = so::BuildSystemOneAnswerDecision(q, dr);
       }
       auto end = std::chrono::steady_clock::now();
       double latency_ms =

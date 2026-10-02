@@ -27,6 +27,9 @@ agent_record = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = agent_record
 SPEC.loader.exec_module(agent_record)
 
+# The restructured checker owns `check_issue_records` itself (it composes the
+# issue_records primitives); the tests call it through the checker as before.
+
 
 def with_field(row, field: str, value: str):
     index = agent_record.field_index(row.header, field)
@@ -570,6 +573,14 @@ class AgentRecordMutationTests(unittest.TestCase):
                 agent_record.check_model_invariants(errors)
 
         require(errors, r"model inventory .*expected")
+
+    # DELETED with the retired capability: `test_kernel_row_ratchet_matches_
+    # the_current_inventory` and `test_matrix_row_ratchets_match_the_current_
+    # inventory` pinned the per-matrix row-count constants (`MATRICES[name]
+    # = (path, count)`). The reviewed ENG-RECORD-CONFLICT-SURFACES restructure
+    # (a9f6186c2, lost in the 40990825d merge and restored here) DERIVES every
+    # matrix count from its rows, so there is no constant to ratchet and the
+    # mutation these tests performed no longer exists.
 
     def test_engine_summary_rejects_stale_area_rollup(self) -> None:
         source = agent_record.ENGINE_MATRIX.read_text(encoding="utf-8")
@@ -1956,15 +1967,19 @@ class DerivedMatrixMembershipTests(unittest.TestCase):
                 agent_record.check_matrices(errors)
         return errors
 
-    def test_matrix_registry_contains_only_paths(self) -> None:
-        """Each matrix registry value is its owning path."""
+    def test_matrix_registry_maps_each_prefix_to_its_owning_path(self) -> None:
+        """Each matrix registry value is its owning path (counts are derived)."""
         self.assertTrue(agent_record.MATRICES)
         for prefix, path in agent_record.MATRICES.items():
             with self.subTest(prefix=prefix):
                 self.assertIsInstance(path, Path)
 
     def test_a_valid_unique_matrix_row_needs_no_checker_constant(self) -> None:
-        """Adding a valid keyed row does not require editing the checker."""
+        """Adding a valid keyed row does not require editing the checker.
+
+        The restructured checker DERIVES every matrix count from its rows, so
+        a new valid row is accepted with no constant bump anywhere.
+        """
         source = (ROOT / ".agents/kernel-matrix.md").read_text(encoding="utf-8")
         template = next(
             line for line in source.splitlines()
@@ -1983,11 +1998,11 @@ class DerivedMatrixMembershipTests(unittest.TestCase):
                 matrix if path == agent_record.MATRICES["KERNEL"] else path
                 for path in agent_record.MATRIX_PATHS
             ]
-            matrices = dict(agent_record.MATRICES)
-            matrices["KERNEL"] = matrix
             errors: list[str] = []
+            matrices = dict(agent_record.MATRICES)
             with mock.patch.object(agent_record, "MATRIX_PATHS", paths), \
-                 mock.patch.object(agent_record, "MATRICES", matrices):
+                 mock.patch.object(agent_record, "MATRICES",
+                                   {**matrices, "KERNEL": matrix}):
                 rows, by_id = agent_record.check_matrices(errors)
         self.assertEqual(errors, [])
         self.assertIn("KERNEL-TEST-DERIVED-ROW", by_id)
@@ -2015,6 +2030,54 @@ class DerivedMatrixMembershipTests(unittest.TestCase):
         malformed = template.rsplit(" | ", 1)[0] + " |"
         errors = self._check_kernel_source(source.replace(template, malformed, 1))
         require(errors, r"KERNEL-CPU-A76-Q8-DOT has 7 cells; header has 8")
+
+    def test_malformed_row_is_kept_so_the_ratchet_does_not_corrupt(self) -> None:
+        """A dropped row silently moved the ratchet and hid the next defect.
+
+        The ORPHAN-MODEL-ROWS repair hit exactly this: two one-cell-short
+        rows were dropped from the parse, so the ratchet counted a bogus
+        total AND every downstream contract check on those rows never ran;
+        each fix exposed the next defect only after another run
+        (ISSUE-LOCAL-01M3NC14GE995V9E6F7GTYSQJ3). The malformed row must
+        still be counted -- no ratchet error may appear, or the shape error
+        and the count error fight over which defect gets reported.
+        """
+        source = (ROOT / ".agents/kernel-matrix.md").read_text(encoding="utf-8")
+        template = next(
+            line for line in source.splitlines()
+            if line.startswith("| `KERNEL-CPU-A76-Q8-DOT` |")
+        )
+        malformed = template.rsplit(" | ", 1)[0] + " |"
+        errors = self._check_kernel_source(source.replace(template, malformed, 1))
+        require(errors, r"KERNEL-CPU-A76-Q8-DOT has 7 cells; header has 8")
+        self.assertFalse(
+            any(re.search(r"KERNEL rows; expected", error) for error in errors),
+            "dropping the malformed row corrupted the ratchet count",
+        )
+
+    def test_malformed_row_is_still_seen_downstream(self) -> None:
+        """A malformed duplicate is reported as both malformed AND duplicate.
+
+        Under the drop rule the shape error fired and the duplicate was
+        invisible: parse_claim_rows discarded the row before duplicate
+        detection ever saw it. One run must name both, no re-run ladder.
+
+        The restructured checker derives every matrix count from its rows, so
+        there is no count constant for the extra row to break; the malformed
+        row is kept and the duplicate detection still sees it, which is the
+        downstream visibility this test exists to pin.
+        """
+        source = (ROOT / ".agents/kernel-matrix.md").read_text(encoding="utf-8")
+        template = next(
+            line for line in source.splitlines()
+            if line.startswith("| `KERNEL-CPU-A76-Q8-DOT` |")
+        )
+        malformed = template.rsplit(" | ", 1)[0] + " |"
+        errors = self._check_kernel_source(
+            source.replace(template, template + "\n" + malformed, 1)
+        )
+        require(errors, r"KERNEL-CPU-A76-Q8-DOT has 7 cells; header has 8")
+        require(errors, r"duplicate ID KERNEL-CPU-A76-Q8-DOT")
 
     def test_retired_history_payload_is_self_validating(self) -> None:
         self._assert_history_integrity(self.HISTORY.read_text(encoding="utf-8"))
@@ -2069,7 +2132,9 @@ class DerivedMatrixMembershipTests(unittest.TestCase):
                 continue
             try:
                 source = path.read_text(encoding="utf-8")
-            except UnicodeDecodeError:
+            except (UnicodeDecodeError, IsADirectoryError):
+                # Binary payload or a tracked symlink dereferenced to a
+                # directory: neither carries a checker line citation.
                 continue
             for match in citation.finditer(source):
                 start = int(match.group(1))
@@ -2087,12 +2152,12 @@ class DerivedMatrixMembershipTests(unittest.TestCase):
         # predecessor positions prove that padding was restored at each site,
         # rather than merely appended at end of file.
         expected_lines = {
-            1078: '"""Blank out fenced blocks and inline code, preserving line and column count.',
-            1169: "if source.is_relative_to(ISSUES_ROOT):",
-            1712: "baseline = load_record_anchor_baseline()",
-            1960: "errors.append(",
-            2000: "expected = {",
-            2018: 'pipes = len(re.findall(r"(?<!\\\\)\\|", line))',
+            1095: '"""Blank out fenced blocks and inline code, preserving line and column count.',
+            1186: "if source.is_relative_to(ISSUES_ROOT):",
+            1729: "baseline = load_record_anchor_baseline()",
+            1975: "errors.append(f\"active claim {claim} references unknown row {item_id}\")",
+            2017: "expected = {",
+            2035: 'pipes = len(re.findall(r"(?<!\\\\)\\|", line))',
         }
         for line_no, expected in expected_lines.items():
             with self.subTest(line_no=line_no):

@@ -185,6 +185,16 @@ vllm_cpp_add_test(test_model_loader_gguf vllm/test_model_loader_gguf.cpp)
 # test_dots3_note_scaffold uses.
 target_include_directories(test_model_loader_gguf PRIVATE ${CMAKE_SOURCE_DIR}/src)
 vllm_cpp_add_test(test_model_registry vllm/models/test_model_registry.cpp)
+# MODEL-TEXT-mimo-v2 W1 gate (ISSUE-LOCAL-01M3F82S8ZYCTTDSKPFF5PGAH7):
+# config parses, KV-cache spec builds, model is discoverable.
+vllm_cpp_add_test(test_mimov2_w1 vllm/models/test_mimov2_w1.cpp)
+# mimo_v2_weights.h is a MODEL-PRIVATE header under src/, not include/vllm/.
+vllm_cpp_add_test(test_mimov2_w2 vllm/models/test_mimov2_w2.cpp)
+target_include_directories(test_mimov2_w2 PRIVATE ${CMAKE_SOURCE_DIR}/src)
+# MODEL-TEXT-mimo-v2 W5 gate (ISSUE-LOCAL-01M3F82S8ZYCTTDSKPFF5PGAH7):
+# end-to-end forward through the production registry entry point.
+vllm_cpp_add_test(test_mimov2_forward vllm/models/test_mimov2_forward.cpp)
+target_include_directories(test_mimov2_forward PRIVATE ${CMAKE_SOURCE_DIR}/src)
 vllm_cpp_add_test(test_vocoder1d vllm/models/test_vocoder1d.cpp)
 # For src/vt/cpu/cpu_conv1d_block.h: the multi-block case asserts the geometry
 # it claims rather than assuming it (#1664). Same reach as test_host_parallel.
@@ -670,6 +680,9 @@ vllm_cpp_add_test(test_qwen35_moe_gdn_ba_owner vllm/models/test_qwen35_moe_gdn_b
 # MoE vision tower (#891): the tower is loaded (and its ABSENCE refused by name)
 # and the forked VL forward actually CONSUMES the merger rows.
 vllm_cpp_add_test(test_qwen3_5_moe_vision vllm/models/test_qwen3_5_moe_vision.cpp)
+# Dense-arm vision tower (MODEL-QWEN35-DENSE-VL-EXL3) and the checkpoint-read
+# tower geometry (ISSUE-LOCAL-01M3RT4GVEY4QBE5AYBT8RDM89). This file landed in
+# 3edb37da9 without a target, so none of its cases ever ran.
 vllm_cpp_add_test(test_qwen3_5_dense_vision vllm/models/test_qwen3_5_dense_vision.cpp)
 # SPEC-MTP I5a: GDN layer spec routing (GdnBlockPaged spec branch) — needs the
 # internal header under src/ for the GdnBlockPagedForTest entry point.
@@ -847,6 +860,16 @@ vllm_cpp_add_test(test_xor vllm/models/test_xor.cpp)
 target_include_directories(test_xor PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/vllm/models)
 vllm_cpp_add_test(test_tev1 vllm/models/test_tev1.cpp)
 target_include_directories(test_tev1 PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/vllm/models)
+# MODEL-NIMBLE: reference prompt/answer goldens (scripts/gen-nimble-goldens.py)
+# and NimbleDecide over a synthetic Qwen3.5 dense model.
+vllm_cpp_add_test(test_nimble vllm/models/test_nimble.cpp)
+target_include_directories(test_nimble PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/vllm/models)
+# MODEL-TEV1 Phase 6: Tev1 on /v1/systemone and vllm_decide. Goldens from the
+# Ollama and togethercomputer/tev1 references (scripts/gen-tev1-goldens.py),
+# then Tev1Decide through a real synthetic engine and its C ABI handle.
+vllm_cpp_add_test(test_tev1_systemone vllm/models/test_tev1_systemone.cpp)
+target_include_directories(test_tev1_systemone PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/vllm/models ${CMAKE_SOURCE_DIR}/src)
 vllm_cpp_add_test(test_mistral_forward vllm/models/test_mistral_forward.cpp)
 target_include_directories(test_mistral_forward PRIVATE ${CMAKE_SOURCE_DIR}/src)
 vllm_cpp_add_test(test_gemma3_load vllm/models/test_gemma3_load.cpp)
@@ -888,6 +911,13 @@ target_include_directories(test_deepseek_v2_forward PRIVATE ${CMAKE_SOURCE_DIR}/
 vllm_cpp_add_test(test_deepseek_v4_scaffold vllm/models/test_deepseek_v4_scaffold.cpp)
 target_include_directories(test_deepseek_v4_scaffold PRIVATE ${CMAKE_SOURCE_DIR}/src)
 
+# KV-DSV4-MULTICACHE W8 slice 4 + slice 6 (#2455): the fp8_ds_mla BRIDGE — the
+# published byte page is actually written and read, and `--kv-cache-dtype auto`
+# stops refusing the layout the model's own factory declared.
+vllm_cpp_add_test(test_deepseek_v4_fp8_ds_mla_bridge
+  vllm/models/test_deepseek_v4_fp8_ds_mla_bridge.cpp)
+target_include_directories(test_deepseek_v4_fp8_ds_mla_bridge
+                           PRIVATE ${CMAKE_SOURCE_DIR}/src)
 # DeepSeek-V4.1-Flash (DeepseekV41ForCausalLM) W1 scaffolding gate: the arch
 # RESOLVES through the registry, the REAL published config.json descends and
 # validates through ParseDeepseekV41Params (nested text_config/vision_config ->
@@ -1012,6 +1042,26 @@ vllm_cpp_add_test(test_deepseek_v4_dspark_entry vllm/models/test_deepseek_v4_dsp
 vllm_cpp_add_test(test_deepseek_v4_exl3_loader vllm/models/test_deepseek_v4_exl3_loader.cpp)
 target_include_directories(test_deepseek_v4_exl3_loader PRIVATE ${CMAKE_SOURCE_DIR}/src)
 
+# MODEL-MM-deepseek-v4 W3B (#2411) — `exp_probs_b_vl`, the per-layer MoE routing
+# bias DeepSeek-V4-Flash-Vision adds for image tokens. Drives BOTH weight arms
+# (the `deepseek4` GGUF and the safetensors loader) over hermetic fixtures that
+# carry the tensor on every layer, and pins the text checkpoint's inertness when
+# it is absent. See .agents/specs/deepseek-v4-flash-vision.md.
+vllm_cpp_add_test(test_deepseek_v4_mm_loader vllm/models/test_deepseek_v4_mm_loader.cpp)
+# MODEL-MM-deepseek-v4 (#2411): the pinned OFFICIAL artifact's own metadata,
+# committed verbatim. `config.json` is the released file; the two manifests are
+# derived from it and from shard 1's safetensors HEADER by
+# `scripts/check-deepseek-v4-vision-manifests.py`, which reads two HTTP ranges
+# and never a weight payload. They are what ties this tree's derived tensor map
+# to the 156.287 GiB checkpoint nobody here can stage, so the loader gate can
+# ask a real question about an artifact it cannot open.
+target_compile_definitions(test_deepseek_v4_mm_loader PRIVATE
+  DEEPSEEK_V4_VISION_CONFIG="${CMAKE_SOURCE_DIR}/tests/parity/goldens/deepseek_v4_vision/config.json"
+  DEEPSEEK_V4_VISION_INDEX_MANIFEST="${CMAKE_SOURCE_DIR}/tests/parity/goldens/deepseek_v4_vision/index_manifest.json"
+  DEEPSEEK_V4_VISION_HEADER_MANIFEST="${CMAKE_SOURCE_DIR}/tests/parity/goldens/deepseek_v4_vision/shard1_header_manifest.json")
+target_include_directories(test_deepseek_v4_mm_loader PRIVATE
+                           ${CMAKE_CURRENT_SOURCE_DIR}/vllm ${CMAKE_SOURCE_DIR}/src)
+
 vllm_cpp_add_test(test_deepseek_v4_exl3_device_residency
                   vllm/models/test_deepseek_v4_exl3_device_residency.cpp)
 target_include_directories(test_deepseek_v4_exl3_device_residency
@@ -1051,12 +1101,48 @@ vllm_cpp_add_test(test_muse_glimmer_scaffold vllm/models/test_muse_glimmer_scaff
 vllm_cpp_add_test(test_muse_glimmer_vision vllm/models/test_muse_glimmer_vision.cpp)
 target_include_directories(test_muse_glimmer_vision PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/vllm/models)
+# The FIRST reference run of the perception encoder on the RELEASED tensors
+# (.agents/specs/muse-glimmer-parity.md): env-gated, the tensors are ~3.7 GB.
+vllm_cpp_add_test(test_muse_glimmer_vision_real vllm/models/test_muse_glimmer_vision_real.cpp)
+target_include_directories(test_muse_glimmer_vision_real PRIVATE ${CMAKE_SOURCE_DIR}/src)
 # Muse Glimmer W1 TEXT TOWER gate: the whole text forward vs an INDEPENDENT fp32
 # reference transcribed from vllm#51655 head 075d645af, plus a property test per
 # mechanism (weightless embed_norm, QK-norm, query pre-scale, the iRoPE NoPE/sliding
 # split, split pre/post eps, the offset-free final norm, the attention output gate,
 # the output multiplier and the soft-cap). CPU-only, no checkpoint. No speed axis
 # exists for this model — the pinned oracle cannot load it (specs/muse-glimmer.md §0).
+# Nemotron Nano VL / Omni image path (row
+# MODEL-MM-nano-nemotron-vl-nemotron-h-nano-vl-v2): the dynamic-resolution
+# processor, the RADIO tower and the mlp1 projector against a torch
+# transcription of vLLM e126687a9a (scripts/mm/nano_nemotron_vl_ref.py), plus
+# the released configs. The real-checkpoint arm is env-gated.
+vllm_cpp_add_test(test_nano_nemotron_vl_vision vllm/models/test_nano_nemotron_vl_vision.cpp)
+target_include_directories(test_nano_nemotron_vl_vision PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/vllm/models)
+target_compile_definitions(test_nano_nemotron_vl_vision PRIVATE
+  NANO_NEMOTRON_VL_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/vllm/models/fixtures")
+# The same row's REACHABILITY gate: a tiny Omni checkpoint loads through
+# ModelRegistry under the released name and an image decodes through the
+# runner (encode_mm -> embed_mm -> the paged NemotronH forward), token-equal to
+# an independent host reference and different from the text-only decode.
+vllm_cpp_add_test(test_nano_nemotron_vl_registry vllm/models/test_nano_nemotron_vl_registry.cpp)
+target_include_directories(test_nano_nemotron_vl_registry PRIVATE
+  ${CMAKE_SOURCE_DIR}/src)
+# Cohere2MoeForCausalLM (North) gates (.agents/specs/cohere2-moe.md): the released
+# North-Mini-Code-1.0 config.json (committed verbatim) and its refusals; three tiny
+# checkpoints read back through the production loader against the torch
+# transcription of the pinned cohere2_moe.py (scripts/cohere2-moe-ref.py), f32 arm
+# tight and bf16 arm on the envelope; an env-gated real-tensor per-layer arm
+# (VLLM_COHERE2_MOE_REAL_DIR) and an env-gated structural arm over the released
+# index (VLLM_COHERE2_MOE_INDEX). CPU-only, no checkpoint needed in CI.
+vllm_cpp_add_test(test_cohere2_moe vllm/models/test_cohere2_moe.cpp)
+target_include_directories(test_cohere2_moe PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/vllm/models)
+target_compile_definitions(test_cohere2_moe PRIVATE
+  COHERE2_MOE_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/vllm/models/fixtures/north_mini_code_1_0")
+# ...and its reachability gate: ModelRegistry::Load under "Cohere2MoeForCausalLM"
+# and a greedy decode through GPUModelRunner, token-equal to the transcription.
+vllm_cpp_add_test(test_cohere2_moe_registry vllm/models/test_cohere2_moe_registry.cpp)
+target_include_directories(test_cohere2_moe_registry PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/vllm/models)
 vllm_cpp_add_test(test_muse_glimmer_text vllm/models/test_muse_glimmer_text.cpp)
 # The DFlash drafter's RELEASED config.json, committed verbatim. It is the only
 # real artifact that OMITS qk_scale_factor / post_norm_eps / output_multiplier /
@@ -1769,6 +1855,40 @@ vllm_cpp_add_test(test_kv_offload_connector vllm/v1/test_kv_offload_connector.cp
 vllm_cpp_add_test(test_lmcache_codec vllm/v1/kv_offload/lmcache/test_lmcache_codec.cpp)
 target_compile_definitions(test_lmcache_codec PRIVATE
   TEST_FIXTURES_DIR="${CMAKE_SOURCE_DIR}/tests/fixtures")
+# DeepSeek-V4 Vision W1: pinned prompt encoding and image preprocessing.
+vllm_cpp_add_test(test_deepseek_v4_encoding
+                  vllm/multimodal/test_deepseek_v4_encoding.cpp)
+vllm_cpp_add_test(test_deepseek_v4_image_processor
+                  vllm/multimodal/test_deepseek_v4_image_processor.cpp)
+# DeepSeek-V4 Vision W2: pinned reduced-shape ViT and aligner stage parity.
+vllm_cpp_add_test(test_deepseek_v4_vision
+                  vllm/models/test_deepseek_v4_vision.cpp)
+target_compile_definitions(test_deepseek_v4_vision PRIVATE
+  DEEPSEEK_V4_VISION_GOLDEN="${CMAKE_SOURCE_DIR}/tests/parity/goldens/deepseek_v4_vision/goldens.json")
+# DeepSeek-V4 Vision W3A: the `deepseek4v` arm of the `clip` mmproj reader. It
+# gates the four layout mismatches between what `mmproj-BF16.gguf` stores and
+# what the W2 tower consumes, and every one of them is a silent wrong answer
+# rather than a crash. It proves nothing about reachability: W4 owns the
+# production call site.
+vllm_cpp_add_test(test_deepseek_v4_mmproj
+                  vllm/models/test_deepseek_v4_mmproj.cpp)
+target_include_directories(test_deepseek_v4_mmproj PRIVATE
+                           ${CMAKE_CURRENT_SOURCE_DIR}/vllm/models)
+
+vllm_cpp_add_test(test_deepseek_v4_mm_reach
+                  vllm/models/test_deepseek_v4_mm_reach.cpp)
+target_include_directories(test_deepseek_v4_mm_reach PRIVATE
+                           ${CMAKE_CURRENT_SOURCE_DIR}/vllm/models
+                           ${CMAKE_CURRENT_SOURCE_DIR}/vllm)
+# MODEL-MM-deepseek-v4 (#2411): can a checkpoint whose published KV cache groups
+# DISAGREE about their block size be served at all? It enters at
+# `LoadedEngine::FromModelDir` on the DEFAULT configuration, so it needs the
+# language GGUF fixture beside the model gates, exactly as the suite above does.
+vllm_cpp_add_test(test_deepseek_v4_multigroup_kv
+                  vllm/entrypoints/test_deepseek_v4_multigroup_kv.cpp)
+target_include_directories(test_deepseek_v4_multigroup_kv PRIVATE
+                           ${CMAKE_CURRENT_SOURCE_DIR}/vllm/models
+                           ${CMAKE_CURRENT_SOURCE_DIR}/vllm)
 # Multimodal M1 processor-parity gate: C++ Qwen3-VL image pipeline
 # (pixel_values/grid/mm-hash/placeholder-expansion) BIT-identical to the vLLM
 # 0.25.0 oracle fixture (tests/vllm/multimodal/fixtures/qwen3vl).
@@ -2040,6 +2160,11 @@ target_include_directories(test_weight_residency_reach PRIVATE ${CMAKE_SOURCE_DI
 vllm_cpp_add_test(test_placement_reach
   vllm/entrypoints/test_placement_reach.cpp)
 target_include_directories(test_placement_reach PRIVATE ${CMAKE_SOURCE_DIR}/src)
+
+# ISSUE-LOCAL-01M3SDXGYYTS9FDXKZDAE24N0R: the loader's tokenizer/ subdirectory
+# fallback (MODEL-LAYA), entered through LoadedEngine::FromModelDir.
+vllm_cpp_add_test(test_tokenizer_subdir
+  vllm/entrypoints/test_tokenizer_subdir.cpp)
 
 vllm_cpp_add_test(test_placement_dump_dtype
   vllm/model_executor/test_placement_dump_dtype.cpp)
@@ -2627,6 +2752,23 @@ if(VLLM_CPP_SERVER)
   # added tokens are dots3-note's own image markers).
   vllm_cpp_add_test(test_openai_api_server_dots3_mm_forward
     vllm/entrypoints/openai/test_api_server_dots3_mm_forward.cpp)
+  # MODEL-MM-deepseek-v4 W5 (#2411): the REQUEST path for the third multimodal
+  # architecture. Its own target for the reason the two above have one: a
+  # different tokenizer fixture (one whose added tokens are the pinned DeepSeek
+  # chat template's markers and the `<|deepseek_image|>` placeholder) and a
+  # different processor.
+  # Nemotron Nano VL / Omni chat seam (row
+  # MODEL-MM-nano-nemotron-vl-nemotron-h-nano-vl-v2).
+  vllm_cpp_add_test(test_nano_nemotron_vl_mm_chat
+    vllm/entrypoints/openai/test_nano_nemotron_vl_mm_chat.cpp)
+  target_compile_definitions(test_nano_nemotron_vl_mm_chat PRIVATE
+    NANO_NEMOTRON_VL_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/vllm/models/fixtures")
+  vllm_cpp_add_test(test_deepseek_v4_mm_chat
+    vllm/entrypoints/openai/test_deepseek_v4_mm_chat.cpp)
+  # The language and projector GGUF fixtures live beside the model gates, and
+  # they are shared with the W3B/W4 suites so the artifact is described once.
+  target_include_directories(test_deepseek_v4_mm_chat PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/vllm ${CMAKE_CURRENT_SOURCE_DIR}/vllm/models)
   target_compile_definitions(test_openai_api_server_dots3_mm_forward PRIVATE
     DOTS3_NOTE_CKPT_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/vllm/models/fixtures/dots3_note_prev")
   # The tiny-checkpoint fixture header lives beside the model gates, and
@@ -2726,6 +2868,23 @@ if(VLLM_CPP_SERVER)
   vllm_cpp_add_test(test_serve_kv_cache_dtype
     vllm/entrypoints/openai/test_serve_kv_cache_dtype.cpp)
   target_include_directories(test_serve_kv_cache_dtype PRIVATE ${CMAKE_SOURCE_DIR}/src)
+  # MODEL-MM-deepseek-v4 W5 (#2411): --mmproj and the resolved model config
+  # reaching the multimodal chat install through the REAL VllmServerMain. Same
+  # shape and the same reason as the two rows above; it also needs the GGUF
+  # fixtures beside the model gates, because the two lines it holds are only
+  # observable on a checkpoint whose architecture declares multimodal support.
+  vllm_cpp_add_test(test_serve_deepseek_v4_mm
+    vllm/entrypoints/openai/test_serve_deepseek_v4_mm.cpp)
+  target_include_directories(test_serve_deepseek_v4_mm PRIVATE
+    ${CMAKE_SOURCE_DIR}/src ${CMAKE_CURRENT_SOURCE_DIR}/vllm
+    ${CMAKE_CURRENT_SOURCE_DIR}/vllm/models)
+  # MODEL-MM-nano-nemotron-vl-nemotron-h-nano-vl-v2: the engine's max_model_len
+  # reaching the Nemotron Nano VL chat install through the REAL VllmServerMain
+  # AND the C ABI's vllm_chat. Same re-exec shape as the row above; the tiny
+  # checkpoint is written as a model directory at run time.
+  vllm_cpp_add_test(test_serve_nano_nemotron_vl_mm
+    vllm/entrypoints/openai/test_serve_nano_nemotron_vl_mm.cpp)
+  target_include_directories(test_serve_nano_nemotron_vl_mm PRIVATE ${CMAKE_SOURCE_DIR}/src)
 endif()
 vllm_cpp_add_test(test_outputs vllm/test_outputs.cpp)
 
@@ -3103,6 +3262,7 @@ vllm_cpp_add_test(test_exl3_vulkan vt/test_exl3_vulkan.cpp)
 vllm_cpp_add_test(test_cast_f16 vt/test_cast_f16.cpp)
 vllm_cpp_add_test(test_exl3_linear_method vllm/model_executor/layers/test_exl3_linear_method.cpp)
 vllm_cpp_add_test(test_exl3_native_loader vllm/model_executor/layers/test_exl3_native_loader.cpp)
+vllm_cpp_add_test(test_exl3_checkpoint vllm/model_executor/layers/test_exl3_checkpoint.cpp)
 # The decode against REAL exllamav3 data (#2181): the gate whose absence let a
 # wrong codebook ship.
 vllm_cpp_add_test(test_exl3_real_decode vt/test_exl3_real_decode.cpp)
@@ -3828,6 +3988,14 @@ target_compile_definitions(test_phi3_paged_engine PRIVATE
 target_include_directories(test_phi3_paged_engine PRIVATE
   ${CMAKE_SOURCE_DIR}/tests/parity ${CMAKE_SOURCE_DIR}/src)
 
+# Muse Glimmer 30B Q4_K_M GGUF gate vs the registered llama.cpp oracle (b10451)
+# on the same file (.agents/specs/muse-glimmer-parity.md). Checkpoint-gated on
+# VLLM_MUSE_GGUF_PARITY.
+vllm_cpp_add_test(test_muse_glimmer_gguf_paged_engine parity/test_muse_glimmer_gguf_paged_engine.cpp)
+target_compile_definitions(test_muse_glimmer_gguf_paged_engine PRIVATE
+  PARITY_GOLDENS_DIR="${CMAKE_SOURCE_DIR}/tests/parity/goldens")
+target_include_directories(test_muse_glimmer_gguf_paged_engine PRIVATE
+  ${CMAKE_SOURCE_DIR}/tests/parity ${CMAKE_SOURCE_DIR}/src)
 vllm_cpp_add_test(test_olmo3_paged_engine parity/test_olmo3_paged_engine.cpp)
 target_compile_definitions(test_olmo3_paged_engine PRIVATE
   PARITY_GOLDENS_DIR="${CMAKE_SOURCE_DIR}/tests/parity/goldens")
