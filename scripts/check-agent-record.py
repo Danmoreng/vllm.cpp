@@ -1054,18 +1054,35 @@ def parse_claim_rows(path: Path, errors: list[str]) -> list[ClaimRow]:
         item_id = cells[0].strip().strip("`")
         if not ID_RE.fullmatch(item_id):
             continue
+        # A row that fails its shape check is REPORTED and still parsed, never
+        # dropped: dropping it hid every downstream contract defect behind the
+        # shape error and corrupted the matrix ratchet counts, so each fix
+        # exposed the next defect only after another run (three defects masked
+        # this way in the ORPHAN-MODEL-ROWS repair;
+        # ISSUE-LOCAL-01M3NC14GE995V9E6F7GTYSQJ3). The one error list reports
+        # the shape and the contracts in the same run.
+        malformed = False
         if len(cells) != len(header):
             errors.append(
                 f"{path.relative_to(ROOT)}:{line_no}: {item_id} has {len(cells)} cells; "
                 f"header has {len(header)}"
             )
-            continue
+            malformed = True
         state_index = field_index(header, "state")
         state_cell = cells[state_index] if state_index is not None else ""
         state_matches = STATE_RE.findall(state_cell)
         if len(state_matches) != 1:
             errors.append(
                 f"{path.relative_to(ROOT)}:{line_no}: {item_id} must have exactly one canonical state"
+            )
+            malformed = True
+        if malformed:
+            # Parsed with an empty state so the ratchet, duplicate detection
+            # and the summary rollups still see the row; no state-conditional
+            # contract can fire on the empty state, so the reported defects
+            # stay the shape ones.
+            rows.append(
+                ClaimRow(path, line_no, item_id, state_matches[0] if state_matches else "", header, tuple(cells), line)
             )
             continue
         rows.append(
@@ -1983,26 +2000,26 @@ def check_model_invariants(errors: list[str]) -> None:
         "targets": len({target for _, target in rows}),
         "modules": len({target.split("::", 1)[0] for _, target in rows}),
     }
-    # `targets` 310 -> 309 and `modules` 261 -> 245 on 2026-09-05 (#2819). NOT a
-    # change of inventory: `rows`, `memberships` and `architectures` are all
-    # unchanged, because no row was added, removed, merged or re-aliased. Twenty
-    # rows had their upstream anchor re-pointed because the module each one cited
-    # no longer exists at the `e126687a9a` pin. Eighteen of them now cite
-    # `vllm/model_executor/models/registry.py::<Arch>` -- the only place the
-    # architecture string survives upstream, in `_PREVIOUSLY_SUPPORTED_MODELS`
-    # for a retired arch or `_TRANSFORMERS_SUPPORTED_MODELS` for one migrated to
-    # the generic Transformers backend -- which is why 18 distinct modules
-    # collapse into 1. The remaining two are shipped models whose implementation
-    # merely moved: `KimiLinearForCausalLM` to
-    # `vllm/models/kimi_k3/nvidia/model.py` and the OLMo row to
-    # `vllm/model_executor/models/transformers/__init__.py`, a module the matrix
-    # already cited. Net: 19 targets out, 18 in; 18 modules out, 2 in.
+    # `targets` 310 -> 309 and `modules` 261 -> 245 on 2026-09-05 (#2819): the
+    # anchor re-point recorded below. Regenerated 2026-09-27 (record-rot repair,
+    # issue ISSUE-LOCAL-01M3JMSD9P7REKNQVEG9HCEWTD): rows 325 -> 324,
+    # memberships 374 -> 373, architectures 357 -> 356, `targets` 309 kept and
+    # `modules` 245 kept. The SystemOne decision rows (`MODEL-LAYA`,
+    # `MODEL-KEV`, `MODEL-CUA-S1-FORMS`, `MODEL-CLM`, `MODEL-TEV1`,
+    # `MODEL-XOR`, `MODEL-JEV`, `MODEL-GLINER25-DECIDE`) that bc5dbc367 closed
+    # were dropped from the matrix rather than carried as DONE rows, and
+    # a3b33bb20 regenerated `targets` / `modules` from that tree; the remaining
+    # counters are regenerated the same way: from the rows, never to make a
+    # transition pass.
+    # Citation-preserving padding; retired detail lives in the completed
+    # archive and the commit message. Do not remove.
+    #
     expected = {
-        "rows": 325,
-        "memberships": 374,
-        "architectures": 357,
-        "targets": 310,
-        "modules": 246,
+        "rows": 324,
+        "memberships": 373,
+        "architectures": 356,
+        "targets": 309,
+        "modules": 245,
     }
     if actual != expected:
         errors.append(f"{path.relative_to(ROOT)}: model inventory {actual}, expected {expected}")

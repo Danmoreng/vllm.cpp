@@ -112,6 +112,10 @@ void PagedAttentionKernel(Queue&, Tensor& out, const Tensor& query, const Tensor
   const int64_t num_reqs = seq_lens.shape[0];
   const int64_t total_q = query.shape[0];
   const int64_t hq = query.shape[1], d = query.shape[2];
+  // MiMoV2: V head dim can differ from K head dim (v_head_dim=128 vs
+  // head_dim=192). d == K head dim (QK dot-product width); d_v is the V
+  // accumulation width, read from v_cache.shape[3].
+  const int64_t d_v = v_cache.shape[3];
   const int64_t block_size = k_cache.shape[1];
   const int64_t num_kv_heads = k_cache.shape[2];
   const int64_t qpk = hq / num_kv_heads;  // q-heads per kv-head (GQA ratio)
@@ -123,6 +127,15 @@ void PagedAttentionKernel(Queue&, Tensor& out, const Tensor& query, const Tensor
       args.window_size.has_value() ? args.window_size->left : -1;
   const int64_t window_right =
       args.window_size.has_value() ? args.window_size->right : -1;
+
+  // MiMoV2: attention sink bias. A per-q-head scalar that joins the softmax
+  // denominator and contributes NO value — expressed by seeding the running
+  // max at the sink and the running denominator at exp(0)=1. Absent
+  // (attn_sink == nullptr, every caller before MiMoV2) the seeds stay -inf
+  // and 0, so the loop, the reduction ORDER and the output are
+  // bit-identical to the pre-sink kernel.
+  const float* sink_p =
+      args.attn_sink != nullptr ? args.attn_sink->Ptr<float>() : nullptr;
 
   const int32_t* qsl = query_start_loc.Ptr<int32_t>();
   const int32_t* slens = seq_lens.Ptr<int32_t>();
@@ -236,10 +249,17 @@ void PagedAttentionKernel(Queue&, Tensor& out, const Tensor& query, const Tensor
         }
         for (int64_t h = 0; h < hq; ++h) {
           const int64_t g = h / qpk;
-          const int64_t qoff = (t * hq + h) * d;
+          const int64_t qoff = (t * hq + h) * d_v;
           const float* q = qtok + h * d;  // == &query[(t*hq+h)*d], as f32
           // Pass 1: scores + running max.
-          float m = -std::numeric_limits<float>::infinity();
+          // SEEDED BY THE PER-Q-HEAD ATTENTION SINK when one is present.
+          // A sink is one extra logit that joins the DENOMINATOR and
+          // contributes NO value — expressed by starting the running max at
+          // the sink and the running denominator at exp(0)=1. Absent
+          // (sink_p == nullptr, every caller before MiMoV2) the seeds stay
+          // -inf and 0, so the loop and output are bit-identical to the
+          // pre-sink kernel.
+          float m = sink_p != nullptr ? sink_p[h] : -std::numeric_limits<float>::infinity();
           for (int64_t j = jmin; j <= jmax; ++j) {
             const int64_t blk = btab[r * bt_row + (j / block_size) * bt_col];
             const int64_t off = j % block_size;
@@ -253,8 +273,9 @@ void PagedAttentionKernel(Queue&, Tensor& out, const Tensor& query, const Tensor
             probs[static_cast<size_t>(j - jmin)] = dot;
             if (dot > m) m = dot;
           }
-          // Pass 2: exp + denominator.
-          float denom = 0.0f;
+          // Pass 2: exp + denominator. Seeded at 1.0 when a sink is
+          // present (the sink's own exp(sink - m) contribution).
+          float denom = sink_p != nullptr ? 1.0f : 0.0f;
           for (int64_t j = jmin; j <= jmax; ++j) {
             const float e = std::exp(probs[static_cast<size_t>(j - jmin)] - m);
             probs[static_cast<size_t>(j - jmin)] = e;
@@ -262,17 +283,17 @@ void PagedAttentionKernel(Queue&, Tensor& out, const Tensor& query, const Tensor
           }
           const float inv = 1.0f / denom;  // every valid decoder/encoder window has >= 1 key
           // Pass 3: weighted sum of V (f32 accumulation), stored at out's dtype.
-          for (int64_t e = 0; e < d; ++e) acc[static_cast<size_t>(e)] = 0.0f;
+          for (int64_t e = 0; e < d_v; ++e) acc[static_cast<size_t>(e)] = 0.0f;
           for (int64_t j = jmin; j <= jmax; ++j) {
             const float pw = probs[static_cast<size_t>(j - jmin)] * inv;
             const int64_t blk = btab[r * bt_row + (j / block_size) * bt_col];
             const int64_t off = j % block_size;
             const int64_t vbase = blk * vc_blk + off * vc_pg + g * vc_hd;
-            for (int64_t e = 0; e < d; ++e)
+            for (int64_t e = 0; e < d_v; ++e)
               acc[static_cast<size_t>(e)] +=
                   pw * KvElem<decltype(kv_tag)::value>(v_base, vbase + e, v_scale);
           }
-          StoreRowF32(out, qoff, d, acc.data());
+          StoreRowF32(out, qoff, d_v, acc.data());
         }
       }
     });

@@ -778,6 +778,7 @@ add_library(vllm STATIC
   src/vllm/config/speculative.cpp
   src/vllm/outputs.cpp
   src/vllm/transformers_utils/hf_config.cpp
+  src/vllm/transformers_utils/tokenizer_files.cpp
   # ENG-HF-MODEL-DOWNLOAD (#1280): the HuggingFace cache layout. Pure file
   # system, no transport, so it builds in every lane. The DFlash draft path
   # in model_loader.cpp reaches it and is not behind VLLM_CPP_SERVER.
@@ -827,6 +828,7 @@ add_library(vllm STATIC
   src/vllm/model_executor/models/deepseek_v2_weights.cpp
   src/vllm/model_executor/models/deepseek_v2.cpp
   src/vllm/model_executor/models/deepseek_v4_registry.cpp
+  src/vllm/model_executor/models/deepseek_v4_mm.cpp
   # DeepSeek-V4.1 is a SIBLING of V4, not a widening of it: upstream forked
   # `vllm/models/deepseek_v4_1/` from `vllm/models/deepseek_v4/`, and the two
   # disagree on values the V4 parser hard-validates (compress_ratios {0,1,2}
@@ -840,6 +842,7 @@ add_library(vllm STATIC
   # `## Owed`).
   src/vllm/model_executor/models/deepseek_v4_1_indexer.cpp
   src/vllm/model_executor/models/deepseek_v4_weights.cpp
+  src/vllm/model_executor/models/deepseek_v4_vision_weights.cpp
   src/vllm/model_executor/models/deepseek_v4.cpp
   src/vllm/model_executor/models/deepseek_v4_dsa.cpp
   src/vllm/model_executor/models/deepseek_v4_dspark.cpp
@@ -856,6 +859,9 @@ add_library(vllm STATIC
   src/vllm/model_executor/models/dots3_note_vision.cpp
   src/vllm/model_executor/models/dots3_note_audio.cpp
   src/vllm/model_executor/models/dots3_note_registry.cpp
+  src/vllm/model_executor/models/mimo_v2_registry.cpp
+  src/vllm/model_executor/models/mimo_v2_weights.cpp
+  src/vllm/model_executor/models/mimo_v2.cpp
   src/vllm/model_executor/models/qwen4_exp_ple.cpp
   src/vllm/model_executor/models/qwen4_exp.cpp
   src/vllm/model_executor/models/qwen4_exp_weights.cpp
@@ -897,6 +903,11 @@ add_library(vllm STATIC
   src/vllm/model_executor/models/muse_glimmer.cpp
   src/vllm/model_executor/models/muse_glimmer_vision.cpp
   src/vllm/model_executor/models/muse_glimmer_mm.cpp
+  # RADIO ViT-H tower + the Nemotron Nano VL projector (row
+  # MODEL-MM-nano-nemotron-vl-nemotron-h-nano-vl-v2).
+  src/vllm/model_executor/models/radio.cpp
+  src/vllm/model_executor/models/nano_nemotron_vl.cpp
+  src/vllm/model_executor/models/nano_nemotron_vl_registry.cpp
   src/vllm/model_executor/models/kimi_k3_registry.cpp
   src/vllm/model_executor/models/kimi_k3_weights.cpp
   src/vllm/model_executor/models/kimi_k3.cpp
@@ -1088,6 +1099,10 @@ add_library(vllm STATIC
   src/vllm/model_executor/models/gliner25_decide_registry.cpp
   src/vllm/model_executor/models/xor_registry.cpp
   src/vllm/model_executor/models/tev1_registry.cpp
+  src/vllm/model_executor/models/tev1_inference.cpp
+  src/vllm/model_executor/models/decision_scorer.cpp
+  src/vllm/model_executor/models/nimble_inference.cpp
+  src/vllm/model_executor/models/nimble_registry.cpp
   src/vllm/model_executor/models/llama_weights.cpp
   src/vllm/model_executor/models/mistral_registry.cpp
   src/vllm/model_executor/models/mistral_weights.cpp
@@ -1128,6 +1143,9 @@ add_library(vllm STATIC
   src/vllm/model_executor/models/commandr_registry.cpp
   src/vllm/model_executor/models/commandr_weights.cpp
   src/vllm/model_executor/models/commandr.cpp
+  src/vllm/model_executor/models/cohere2_moe_registry.cpp
+  src/vllm/model_executor/models/cohere2_moe_weights.cpp
+  src/vllm/model_executor/models/cohere2_moe.cpp
   src/vllm/model_executor/models/phi_registry.cpp
   src/vllm/model_executor/models/phi_weights.cpp
   src/vllm/model_executor/models/phi.cpp
@@ -1139,6 +1157,7 @@ add_library(vllm STATIC
   # SAME Qwen3VLVisionWeights from a SECOND GGUF file beside the language one.
   src/vllm/model_executor/models/clip_mmproj_gguf.cpp
   src/vllm/model_executor/models/gemma4_vision.cpp
+  src/vllm/model_executor/models/deepseek_v4_vision.cpp
   src/vllm/model_executor/models/gemma4_audio.cpp
   src/vllm/model_executor/models/whisper_audio.cpp
   src/vllm/model_executor/models/qwen3_vl_text.cpp
@@ -1157,6 +1176,10 @@ add_library(vllm STATIC
   # cubic (dots3-note W6c, #2537).
   src/vllm/multimodal/pil_resize.cpp
   src/vllm/multimodal/qwen3vl_processor.cpp
+  # Nemotron Nano VL / Omni dynamic-resolution tiler and torch's antialiased
+  # bicubic resize (a third algorithm beside Pillow's and torchvision's).
+  src/vllm/multimodal/nano_nemotron_vl_processor.cpp
+  src/vllm/multimodal/deepseek_v4_processor.cpp
   src/vllm/multimodal/audio_processor.cpp
   src/vllm/multimodal/audio_resample.cpp
   # Parakeet / FastConformer audio encoder + CTC head + its log-mel front end
@@ -1179,6 +1202,9 @@ add_library(vllm STATIC
   # Parakeet head archs so config.json RESOLVES (SupportsTranscription mirror).
   src/vllm/multimodal/parakeet_transcription.cpp
   src/vllm/model_executor/models/parakeet_registry.cpp
+  # Diarization seam (wraps parakeet.cpp's C-API). Gated by
+  # VLLM_CPP_WITH_DIARIZATION; the .cpp compiles as stubs when disabled.
+  src/vllm/multimodal/diarization.cpp
   # The ONE video-generation seam every consumer drives (C ABI vllm_video_*,
   # the server's /v1/videos, the minimax-h3-gen example) — ARCH-ONE-SURFACE
   # ROW 2: absorbs the assembly pipeline examples/minimax_h3_gen and the
@@ -1273,6 +1299,8 @@ add_library(vllm STATIC
   src/vllm/v1/attention/backends/utils.cpp
   src/vllm/v1/attention/backends/cpu_attn.cpp
   src/vllm/v1/attention/backends/gdn_attn.cpp
+  src/vllm/v1/attention/backends/mla/sparse_swa.cpp
+  src/vllm/v1/attention/backends/mla/indexer.cpp
   src/vllm/v1/structured_output/backend_types.cpp
   src/vllm/v1/structured_output/backend_native.cpp
   src/vllm/v1/structured_output/backend_xgrammar.cpp
@@ -1323,6 +1351,8 @@ add_library(vllm STATIC
   # registry, and Qwen3-VL's registration into it. The registration TU is
   # SELF-REGISTERING and is reached through vllm's INTERFACE --whole-archive.
   src/vllm/entrypoints/openai/mm_chat_registry.cpp
+  src/vllm/entrypoints/openai/mm_chat_deepseek_v4.cpp
+  src/vllm/entrypoints/openai/mm_chat_nano_nemotron_vl.cpp
   src/vllm/entrypoints/openai/mm_chat_dots3note.cpp
   src/vllm/entrypoints/openai/mm_chat_qwen3vl.cpp
   src/vllm/entrypoints/openai/serving_utils.cpp
@@ -1590,6 +1620,64 @@ target_compile_definitions(blake3_vendored PRIVATE
 target_include_directories(blake3_vendored PUBLIC third_party/blake3)
 set_target_properties(blake3_vendored PROPERTIES POSITION_INDEPENDENT_CODE ON)
 target_link_libraries(vllm PUBLIC blake3_vendored)
+
+# --- Parakeet.cpp dependency (diarization + SAS) -----------------------------
+# parakeet.cpp provides the Nemotron-3-Diarization Sortformer encoder, speaker
+# head, streaming diarization (AOSC), and speaker-attributed ASR (SAS) merge.
+# vllm.cpp's own ParakeetTranscriber handles ASR; this adds the diarization
+# side through parakeet.cpp's C-API (parakeet_capi.h).
+option(VLLM_CPP_WITH_DIARIZATION "Enable diarization support via parakeet.cpp" ON)
+if(VLLM_CPP_WITH_DIARIZATION)
+  set(VLLM_CPP_PARAKEET_CPP_DIR "" CACHE PATH
+    "Path to a parakeet.cpp source tree. If empty, FetchContent from GitHub.")
+  # parakeet.cpp builds its own ggml; we only need libparakeet.a and the
+  # headers. Suppress its tests, CLI and server to keep the build lean.
+  set(PARAKEET_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+  set(PARAKEET_BUILD_CLI OFF CACHE BOOL "" FORCE)
+  set(PARAKEET_BUILD_SERVER OFF CACHE BOOL "" FORCE)
+  # Link parakeet.cpp's ggml statically. Its default is shared, which made
+  # libvllm.so NEED libggml*.so.0 through a RUNPATH into this build tree, so the
+  # library stopped being self-contained. Same save-and-restore as boringssl.
+  set(_vllm_saved_shared ${BUILD_SHARED_LIBS})
+  set(BUILD_SHARED_LIBS OFF)
+  # parakeet.cpp forces GGML_NATIVE (-march=native) unless the caller sets it.
+  # A release library must run on hosts other than the builder; this project
+  # selects ISA per file instead (see the -mavx2 sources above).
+  if(NOT DEFINED GGML_NATIVE)
+    set(GGML_NATIVE OFF CACHE BOOL "ggml: optimize the build for the current system")
+  endif()
+  if(VLLM_CPP_PARAKEET_CPP_DIR)
+    set(parakeet_cpp_SOURCE_DIR "${VLLM_CPP_PARAKEET_CPP_DIR}")
+    # Setting the source dir alone defines no `parakeet` target, so the link
+    # below would fall back to a bare -lparakeet. Build the local tree.
+    add_subdirectory("${parakeet_cpp_SOURCE_DIR}"
+      "${CMAKE_BINARY_DIR}/_deps/parakeet_cpp-build" EXCLUDE_FROM_ALL)
+  else()
+    include(FetchContent)
+    # Pinned to the commit the seam in src/vllm/multimodal/diarization.cpp and
+    # src/capi/vllm_c.cpp was written and compiled against (ABI v8 on the
+    # parakeet.cpp feat/diarization-sas branch). A branch name is not a pin:
+    # `main` does not exist there (the default branch is `master`), and master
+    # changed the signatures of parakeet_capi_transcribe_and_diarize and
+    # parakeet_capi_free_sas_results after this seam was written. Move the pin
+    # only together with the seam. GIT_SHALLOW stays off because a shallow
+    # clone cannot check out an arbitrary commit hash.
+    FetchContent_Declare(parakeet_cpp
+      GIT_REPOSITORY https://github.com/mudler/parakeet.cpp.git
+      GIT_TAG        394d270fabb1d6125f05c772aa3ca078a574b19d)
+    FetchContent_MakeAvailable(parakeet_cpp)
+  endif()
+  set(BUILD_SHARED_LIBS ${_vllm_saved_shared})
+  # parakeet.cpp finds dr_wav.h through ${CMAKE_SOURCE_DIR}/third_party, which
+  # is this project's root when it is built as a subproject. Add its own
+  # third_party directory so audio_io.cpp compiles here.
+  target_include_directories(parakeet PRIVATE
+    ${parakeet_cpp_SOURCE_DIR}/third_party)
+  target_include_directories(vllm PUBLIC
+    ${parakeet_cpp_SOURCE_DIR}/include)
+  target_link_libraries(vllm PUBLIC parakeet)
+  target_compile_definitions(vllm PUBLIC VLLM_WITH_DIARIZATION=1)
+endif()
 if(WIN32)
   target_link_libraries(vllm PUBLIC ws2_32)
 endif()
