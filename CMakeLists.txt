@@ -64,19 +64,23 @@ endif()
 option(VLLM_CPP_BUILD_TESTS "Build tests" ON)
 option(VLLM_CPP_XPU "Build the native SYCL/Level Zero XPU backend (requires icpx)" OFF)
 option(VLLM_CPP_XPU_GPTQ4 "Enable the pinned oneDNN XPU GPTQ W4A16 and dense F16 operators" OFF)
-set(VLLM_CPP_SYCL_TLA_DIR "" CACHE PATH "Pinned SYCL-TLA checkout for B70 Xe2 FP8 prefill")
+set(VLLM_CPP_SYCL_TLA_DIR "" CACHE PATH "Pinned SYCL-TLA checkout for B70 Xe2 kernels")
 set(_vt_xe2_prefill_default OFF)
 if(VLLM_CPP_XPU AND VLLM_CPP_SYCL_TLA_DIR)
   set(_vt_xe2_prefill_default ON)
 endif()
 option(VLLM_CPP_XPU_XE2_PREFILL "Build B70 Xe2 FP8 prefill when the pinned SYCL-TLA checkout is provided" ${_vt_xe2_prefill_default})
 unset(_vt_xe2_prefill_default)
+option(VLLM_CPP_XPU_XE2_GDN "Build B70 Xe2 GDN independently of FP8 prefill" OFF)
 option(VLLM_CPP_XPU_XE2_PREFILL_PREFETCH "Keep explicit prefetch in the Xe2 FP8 policy" OFF)
 if(VLLM_CPP_XPU_GPTQ4 AND NOT VLLM_CPP_XPU)
   message(FATAL_ERROR "VLLM_CPP_XPU_GPTQ4 requires VLLM_CPP_XPU=ON")
 endif()
 if(VLLM_CPP_XPU_XE2_PREFILL AND NOT VLLM_CPP_XPU)
   message(FATAL_ERROR "VLLM_CPP_XPU_XE2_PREFILL requires VLLM_CPP_XPU=ON")
+endif()
+if(VLLM_CPP_XPU_XE2_GDN AND NOT VLLM_CPP_XPU)
+  message(FATAL_ERROR "VLLM_CPP_XPU_XE2_GDN requires VLLM_CPP_XPU=ON")
 endif()
 option(VLLM_CPP_BUILD_EXAMPLES "Build examples" ON)
 # The OpenAI HTTP server (M3.1 Task 4) is gated so the core build stays lean when
@@ -1440,6 +1444,7 @@ add_library(vllm STATIC
   src/vt/communicator.cpp
   src/vt/ops.cpp
   src/vt/exl3_policy.cpp
+  src/vt/exl3_grouped.cpp
   src/vt/fused_ops.cpp
   src/vt/merged_gemm.cpp
   src/vt/cpu/cpu_backend.cpp
@@ -1826,9 +1831,14 @@ if(VLLM_CPP_XPU)
     src/vt/xpu/xpu_elementwise.cpp src/vt/xpu/xpu_norm.cpp
     src/vt/xpu/xpu_sampling.cpp src/vt/xpu/xpu_ops.cpp src/vt/xpu/xpu_exl3.cpp
     src/vt/xpu/xpu_gdn.cpp src/vt/xpu/xpu_attention.cpp src/vt/xpu/xpu_exl3_prefill.cpp
+    src/vt/xpu/xpu_exl3_smallm.cpp
     src/vt/xpu/xpu_gdn_chunked.cpp src/vt/xpu/xpu_attention_split.cpp
     src/vt/xpu/xpu_attention_prefill.cpp)
-  if(VLLM_CPP_XPU_XE2_PREFILL)
+  # The pinned producer builds these ESIMD kernels with -ffast-math. Scope it
+  # to this port; unrelated native model/operators retain their own numerics.
+  set_source_files_properties(src/vt/xpu/xpu_exl3_smallm.cpp PROPERTIES
+    COMPILE_OPTIONS "-ffast-math")
+  if(VLLM_CPP_XPU_XE2_PREFILL OR VLLM_CPP_XPU_XE2_GDN)
     if(NOT EXISTS "${VLLM_CPP_SYCL_TLA_DIR}/include/cutlass/cutlass.h")
       message(FATAL_ERROR "VLLM_CPP_SYCL_TLA_DIR must name the pinned SYCL-TLA checkout")
     endif()
@@ -1837,8 +1847,12 @@ if(VLLM_CPP_XPU)
       OUTPUT_VARIABLE _vt_sycl_tla_commit OUTPUT_STRIP_TRAILING_WHITESPACE
       ERROR_QUIET)
     if(NOT _vt_sycl_tla_commit STREQUAL "87f6850680a580654b9ea2c80dbc01aeb36ad231")
-      message(FATAL_ERROR "Xe2 prefill requires SYCL-TLA 87f6850680a580654b9ea2c80dbc01aeb36ad231")
+      message(FATAL_ERROR "Xe2 kernels require SYCL-TLA 87f6850680a580654b9ea2c80dbc01aeb36ad231")
     endif()
+    target_link_options(vllm PUBLIC -flink-huge-device-code -Xspirv-translator
+      "-spirv-ext=+SPV_INTEL_split_barrier,+SPV_INTEL_2d_block_io,+SPV_INTEL_subgroup_matrix_multiply_accumulate")
+  endif()
+  if(VLLM_CPP_XPU_XE2_PREFILL)
     add_library(vllm_xpu_xe2_prefill OBJECT src/vt/xpu/xpu_attention_xe2.cpp)
     set_target_properties(vllm_xpu_xe2_prefill PROPERTIES POSITION_INDEPENDENT_CODE ON)
     target_include_directories(vllm_xpu_xe2_prefill PRIVATE include src)
@@ -1864,9 +1878,21 @@ if(VLLM_CPP_XPU)
     target_compile_definitions(vllm_xpu_xe2_verify PRIVATE
       CUTLASS_ENABLE_SYCL SYCL_INTEL_TARGET VLLM_XPU_ENABLE_XE2)
     target_compile_options(vllm_xpu_xe2_verify PRIVATE -fsycl)
+    target_compile_definitions(vllm_xpu PRIVATE VLLM_CPP_XPU_XE2_PREFILL
+      VLLM_CPP_XPU_XE2_VERIFY)
+    target_sources(vllm PRIVATE $<TARGET_OBJECTS:vllm_xpu_xe2_prefill>
+      $<TARGET_OBJECTS:vllm_xpu_xe2_verify>)
+  endif()
+  # Preserve the existing prefill build while allowing focused GDN builds.
+  if(VLLM_CPP_XPU_XE2_PREFILL OR VLLM_CPP_XPU_XE2_GDN)
     # Torch-free GDN experiment from the same pinned Xe2/SYCL-TLA stack.
     # Its runtime selector is off until the real-layer and model gates pass.
-    add_library(vllm_xpu_xe2_gdn OBJECT src/vt/xpu/xpu_gdn_xe2.cpp)
+    add_library(vllm_xpu_xe2_gdn OBJECT src/vt/xpu/xpu_gdn_xe2.cpp
+      src/vt/xpu/xpu_gdn_fp16_producer.cpp)
+    # Match the original icpx default math model (verified with -###).
+    # Scope it to this producer port; norm and other ops stay strict.
+    set_source_files_properties(src/vt/xpu/xpu_gdn_fp16_producer.cpp PROPERTIES
+      COMPILE_OPTIONS "-fp-model=fast")
     set_target_properties(vllm_xpu_xe2_gdn PROPERTIES POSITION_INDEPENDENT_CODE ON)
     target_include_directories(vllm_xpu_xe2_gdn PRIVATE include src)
     target_include_directories(vllm_xpu_xe2_gdn SYSTEM PRIVATE
@@ -1879,13 +1905,7 @@ if(VLLM_CPP_XPU)
       CUTLASS_VERSIONS_GENERATED VLLM_XPU_ENABLE_XE2)
     target_compile_options(vllm_xpu_xe2_gdn PRIVATE -fsycl)
     target_compile_definitions(vllm_xpu PRIVATE VLLM_CPP_XPU_XE2_GDN)
-    target_compile_definitions(vllm_xpu PRIVATE VLLM_CPP_XPU_XE2_PREFILL)
-    target_compile_definitions(vllm_xpu PRIVATE VLLM_CPP_XPU_XE2_VERIFY)
-    target_sources(vllm PRIVATE $<TARGET_OBJECTS:vllm_xpu_xe2_prefill>)
-    target_sources(vllm PRIVATE $<TARGET_OBJECTS:vllm_xpu_xe2_verify>)
     target_sources(vllm PRIVATE $<TARGET_OBJECTS:vllm_xpu_xe2_gdn>)
-    target_link_options(vllm PUBLIC -flink-huge-device-code -Xspirv-translator
-      "-spirv-ext=+SPV_INTEL_split_barrier,+SPV_INTEL_2d_block_io,+SPV_INTEL_subgroup_matrix_multiply_accumulate")
   endif()
   if(VLLM_CPP_XPU_GPTQ4)
     find_package(dnnl 3.13.0 EXACT CONFIG REQUIRED)

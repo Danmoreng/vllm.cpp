@@ -33,11 +33,16 @@ struct Registrar {
     XPU_OP(kApplyAllowedTokenIds, ApplyAllowedTokenIdsFn, ApplyAllowedTokenIdsKernel);
     XPU_OP(kExl3HadR128, Exl3HadR128Fn, Exl3HadR128Kernel);
     XPU_OP(kExl3Gemm, Exl3GemmFn, Exl3GemmKernel);
+    XPU_OP(kExl3GroupedLinear, Exl3GroupedLinearFn, Exl3GroupedLinearKernel);
     XPU_OP(kCausalConv1dFwd, CausalConv1dFwdFn, CausalConv1dFwdKernel);
     XPU_OP(kCausalConv1dUpdate, CausalConv1dUpdateFn, CausalConv1dUpdateKernel);
     XPU_OP(kCausalConv1dSpecUpdate, CausalConv1dSpecUpdateFn, CausalConv1dSpecUpdateKernel);
     XPU_OP(kGdnPostConv, GdnPostConvFn, GdnPostConvKernel);
     XPU_OP(kGdnPrefill, GdnPrefillFn, GdnPrefillKernel);
+#ifdef VLLM_CPP_XPU_XE2_GDN
+    XPU_OP(kGdnPrefillRawGate, GdnPrefillRawGateFn, GdnPrefillRawGateKernel);
+    XPU_OP(kGdnPackedDecode, GdnPackedDecodeFn, GdnPackedDecodeKernel);
+#endif
     XPU_OP(kGdnDecode, GdnDecodeFn, GdnDecodeKernel);
     XPU_OP(kGdnSpecDecode, GdnSpecDecodeFn, GdnSpecDecodeKernel);
     XPU_OP(kRmsNormGated, RmsNormGatedFn, RmsNormGatedKernel);
@@ -50,6 +55,7 @@ struct Registrar {
     XPU_OP(kRopeFromCache, RopeFromCacheFn, RopeFromCacheKernel);
     XPU_OP(kReshapeAndCache, ReshapeAndCacheFn, ReshapeAndCacheKernel);
     XPU_OP(kReshapeAndCacheFp8, ReshapeAndCacheFp8Fn, ReshapeAndCacheFp8Kernel);
+    XPU_OP(kAttention, AttentionFn, AttentionKernel);
     XPU_OP(kPagedAttention, PagedAttentionFn, PagedAttentionKernel);
 #undef XPU_OP
   }

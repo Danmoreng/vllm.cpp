@@ -11,6 +11,14 @@ endif()
 find_package(Python3 COMPONENTS Interpreter REQUIRED)
 add_test(NAME test_b70_inventory COMMAND ${Python3_EXECUTABLE}
   "${CMAKE_SOURCE_DIR}/tests/scripts/test_b70_inventory.py")
+add_test(NAME test_exl3_projection_extract COMMAND ${Python3_EXECUTABLE}
+  "${CMAKE_SOURCE_DIR}/tests/scripts/test_exl3_projection_extract.py")
+add_test(NAME test_exl3_projection_capture COMMAND ${Python3_EXECUTABLE}
+  "${CMAKE_SOURCE_DIR}/tests/scripts/test_exl3_projection_capture.py")
+add_test(NAME test_exl3_projection_compare COMMAND ${Python3_EXECUTABLE}
+  "${CMAKE_SOURCE_DIR}/tests/scripts/test_exl3_projection_compare.py")
+add_test(NAME test_exl3_runtime_layout COMMAND ${Python3_EXECUTABLE}
+  "${CMAKE_SOURCE_DIR}/tests/scripts/test_exl3_runtime_layout.py")
 add_executable(b70_provider_trace_probe
   vt/b70_provider_trace_probe.cpp
   ${CMAKE_SOURCE_DIR}/src/vt/op_provider.cpp
@@ -78,6 +86,7 @@ if(VLLM_CPP_XPU)
   vllm_cpp_add_test(test_xpu_sampling vt/test_xpu_sampling.cpp)
   vllm_cpp_add_test(test_xpu_async_output vllm/v1/worker/test_xpu_async_output.cpp)
   vllm_cpp_add_test(test_xpu_exl3 vt/test_xpu_exl3.cpp)
+  vllm_cpp_add_test(test_xpu_exl3_smallm vt/test_xpu_exl3_smallm.cpp)
   target_include_directories(test_xpu_exl3 PRIVATE ${CMAKE_SOURCE_DIR}/src)
   vllm_cpp_add_test(test_xpu_exl3_prefill vt/test_xpu_exl3_prefill.cpp)
   target_include_directories(test_xpu_exl3_prefill PRIVATE ${CMAKE_SOURCE_DIR}/src)
@@ -98,6 +107,7 @@ if(VLLM_CPP_XPU)
   vllm_cpp_add_test(test_xpu_attention vt/test_xpu_attention.cpp)
   vllm_cpp_add_test(test_xpu_attention_fast vt/test_xpu_attention_fast.cpp)
   vllm_cpp_add_test(test_xpu_qwen_checkpoint vllm/models/test_xpu_qwen_checkpoint.cpp)
+  vllm_cpp_add_test(test_xpu_qwen_exl3_fp16 vllm/models/test_xpu_qwen_exl3_fp16.cpp)
   vllm_cpp_add_test(test_xpu_qwen_parity vllm/models/test_xpu_qwen_parity.cpp)
   vllm_cpp_add_test(test_xpu_platform vllm/platforms/test_xpu_platform.cpp)
 endif()
@@ -3262,6 +3272,9 @@ vllm_cpp_add_test(test_exl3_vulkan vt/test_exl3_vulkan.cpp)
 vllm_cpp_add_test(test_cast_f16 vt/test_cast_f16.cpp)
 vllm_cpp_add_test(test_exl3_linear_method vllm/model_executor/layers/test_exl3_linear_method.cpp)
 vllm_cpp_add_test(test_exl3_native_loader vllm/model_executor/layers/test_exl3_native_loader.cpp)
+vllm_cpp_add_test(test_exl3_mul1_marker vllm/model_executor/layers/test_exl3_mul1_marker.cpp)
+vllm_cpp_add_test(test_dense_f16_loader vllm/model_executor/layers/test_dense_f16_loader.cpp)
+vllm_cpp_add_test(test_qwen_exl3_precision vllm/models/test_qwen_exl3_precision.cpp)
 vllm_cpp_add_test(test_exl3_checkpoint vllm/model_executor/layers/test_exl3_checkpoint.cpp)
 # The decode against REAL exllamav3 data (#2181): the gate whose absence let a
 # wrong codebook ship.

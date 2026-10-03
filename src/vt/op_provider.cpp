@@ -367,6 +367,8 @@ const char* OpNameImpl(OpId op) {
       return "RmsNormGated";
     case OpId::kGdnPrefill:
       return "GdnPrefill";
+    case OpId::kGdnPrefillRawGate:
+      return "GdnPrefillRawGate";
     case OpId::kGdnDecode:
       return "GdnDecode";
     case OpId::kGdnSpecDecode:
@@ -650,6 +652,8 @@ const char* OpNameImpl(OpId op) {
       return "Exl3HadR128";
     case OpId::kExl3Gemm:
       return "Exl3Gemm";
+    case OpId::kExl3GroupedLinear:
+      return "Exl3GroupedLinear";
     case OpId::kExl3ReconstructGemm:
       return "Exl3ReconstructGemm";
     case OpId::kExl3MoeMlp:

@@ -925,6 +925,8 @@ enum class OpId : uint8_t {
   // GPTQ oneDNN operators are appended so existing op ids remain stable.
   kMatmulGptq4W4A16,
   kMatmulDenseF16,
+  kExl3GroupedLinear,
+  kGdnPrefillRawGate,
   kCount
 };
 
@@ -1204,6 +1206,10 @@ struct RopeArgs {
   float llama3_low_freq_factor = 0.0f;   // rope_scaling "low_freq_factor"
   float llama3_high_freq_factor = 0.0f;  // rope_scaling "high_freq_factor"
   float llama3_orig_max_position = 0.0f;  // "original_max_position_embeddings"
+  // XPU producer FP16 preamble/cache consumer: round normalized inputs,
+  // coefficients and each rotation product before add/subtract. Default
+  // preserves the legacy F32 intermediate arithmetic on every backend.
+  bool fp16_intermediates = false;
 };
 
 // GDN op args (.agents/specs/gdn-semantics.md is the formula reference; sections
@@ -1259,6 +1265,17 @@ struct Qwen4ExpPleGateArgs {
 
 struct L2NormArgs {
   float eps = 1e-6f;  // upstream default (gdn-semantics.md §4)
+};
+
+// The XPU producer's FP16 prefill normalizes unrounded FP32 Conv output
+// and folds Dk^-0.5 into Q before storing FP16. Other GDN routes retain
+// their separate normalization/recurrence-scale boundary.
+struct GdnPostConvArgs {
+  float eps = 1e-6f;
+  bool xpu_fp16_prefill = false;
+  GdnPostConvArgs() = default;
+  GdnPostConvArgs(L2NormArgs norm) : eps(norm.eps) {}
+  GdnPostConvArgs(float epsilon, bool prefill) : eps(epsilon), xpu_fp16_prefill(prefill) {}
 };
 
 // Geometry of one Gated DeltaNet V-head re-indexing. See `vt::VHeadPermute`.
@@ -2447,10 +2464,10 @@ using GdnConvSplitFn = void (*)(Queue&, Tensor&, Tensor&, Tensor&, const Tensor&
 using QkvSplitFn = void (*)(Queue&, Tensor&, Tensor&, Tensor&, const Tensor&);
 // Fused GDN post-conv prep (mirror of fla fused_gdn_prefill_post_conv):
 // conv-split + q/k l2norm + g/beta gating in ONE launch. eps travels in
-// L2NormArgs (the q/k l2norm eps; softplus threshold 20 baked in as in GdnGBeta).
+// GdnPostConvArgs (eps and explicit producer prefill precision boundary).
 using GdnPostConvFn = void (*)(Queue&, Tensor&, Tensor&, Tensor&, Tensor&, Tensor&, const Tensor&,
                                const Tensor&, const Tensor&, const Tensor&, const Tensor&,
-                               const L2NormArgs&);
+                               const GdnPostConvArgs&);
 // Per-step RoPE cos|sin cache fill (fused-attn-preamble prep): cos_sin[T,rot] f32
 // from positions[T] (RopeArgs.base/rotary_dim). Cols [0,rot/2)=cos, [rot/2,rot)=sin.
 using RopeCosSinCacheFn = void (*)(Queue&, Tensor&, const Tensor&, const RopeArgs&);
@@ -2537,6 +2554,9 @@ using RmsNormGatedFn = void (*)(Queue&, Tensor&, const Tensor&, const Tensor&, c
 using GdnPrefillFn = void (*)(Queue&, Tensor&, const Tensor&, const Tensor&, const Tensor&,
                               const Tensor&, const Tensor&, Tensor&, const Tensor&,
                               const GdnArgs&);
+using GdnPrefillRawGateFn = void (*)(Queue&, Tensor&, const Tensor&, const Tensor&,
+    const Tensor&, const Tensor&, const Tensor&, const Tensor&, const Tensor&,
+    Tensor&, const Tensor&, const GdnArgs&);
 using GdnDecodeFn = void (*)(Queue&, Tensor&, const Tensor&, const Tensor&, const Tensor&,
                              const Tensor&, const Tensor&, Tensor&, const Tensor*,
                              const GdnArgs&);
@@ -4133,6 +4153,16 @@ void RmsNormGated(Queue& q, Tensor& out, const Tensor& x, const Tensor& gate,
 void GdnPrefill(Queue& q, Tensor& out, const Tensor& q_in, const Tensor& k, const Tensor& v,
                 const Tensor& g, const Tensor& beta, Tensor& state,
                 const Tensor& query_start_loc, const GdnArgs& args);
+
+// Pinned XPU FP16 chunk recurrence: q is already normalized AND scaled;
+// raw_a is the FP16 gate projection, beta is FP32 sigmoid(b), and a_log/bias
+// are FP32 checkpoint weights (bias rounds to the producer's FP16 boundary).
+// state is FP32 in/out, zeroed by the caller for a fresh sequence. This op
+// prepares the prefix directly from raw_a; rounded per-token g cannot replace it.
+void GdnPrefillRawGate(Queue&, Tensor& out, const Tensor& q, const Tensor& k,
+    const Tensor& v, const Tensor& raw_a, const Tensor& beta, const Tensor& a_log,
+    const Tensor& dt_bias, Tensor& state, const Tensor& query_start_loc,
+    const GdnArgs& args);
 
 // Kimi Delta Attention (KDA) gated-delta recurrence — the PER-K-CHANNEL-DECAY
 // variant of GdnPrefill. Ported 1:1 from FLA's
@@ -6027,7 +6057,7 @@ void QkvSplit(Queue& q, Tensor& q_out, Tensor& k_out, Tensor& v_out, const Tenso
 // share f32 or bf16 dtype and may have a padded row stride; all gate math is f32.
 void GdnPostConv(Queue& q, Tensor& q_out, Tensor& k_out, Tensor& v_out, Tensor& g_out,
                  Tensor& beta_out, const Tensor& conv, const Tensor& araw, const Tensor& braw,
-                 const Tensor& a_log, const Tensor& dt_bias, const L2NormArgs& args);
+                 const Tensor& a_log, const Tensor& dt_bias, const GdnPostConvArgs& args);
 
 // out[t,c] = F32ToBF16(sigmoid(gl[t]) * sd[t*H+c]); out bf16 [T,H], sd f32
 // [T,H], gl f32 with T elements (shape [T] or [T,1]). The shared-expert

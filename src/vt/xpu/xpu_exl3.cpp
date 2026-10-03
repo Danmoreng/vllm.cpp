@@ -246,8 +246,9 @@ void Exl3HadR128Kernel(Queue& q, Tensor& out, const Tensor& in, const Exl3HadArg
   }
 }
 
-void Exl3GemmKernel(Queue& q, Tensor& out, const Tensor& in, const Tensor& trellis,
-                    const Tensor& suh, const Tensor& svh, Tensor& in_had, const Exl3GemmArgs& args) {
+static void Exl3GemmImpl(Queue& q, Tensor& out, const Tensor& in, const Tensor& trellis,
+                         const Tensor& suh, const Tensor& svh, Tensor& in_had,
+                         const Exl3GemmArgs& args, Tensor* replay_raw) {
   const ProfileMatrixScope profile_matrix(args.debug_name);
   TraceXpuOp(OpId::kExl3Gemm, q, {&out, &in, &trellis, &suh, &svh, &in_had});
   const int64_t m = in.shape[0], k = in.shape[1], n = out.shape[1];
@@ -256,11 +257,6 @@ void Exl3GemmKernel(Queue& q, Tensor& out, const Tensor& in, const Tensor& trell
            "XPU EXL3 input scratch may not overwrite weights");
   VT_CHECK(!Overlap(out, trellis) && !Overlap(out, suh) && !Overlap(out, svh),
            "XPU EXL3 output may not overwrite weights");
-  if (args.fuse_casts && in.dtype != DType::kF16) {
-    WithOutput(q, in_had, {&in, &suh}, [&](Tensor& target) {
-      Had<false, true>(q, target, in, &suh, nullptr, kInvSqrt128, "exl3_input_hadamard");
-    });
-  } else Exl3HadR128Kernel(q, in_had, in, Exl3HadArgs{&suh, nullptr, 1.0f});
   const auto* ah = static_cast<const sycl::half*>(in_had.data);
   const auto* packed = static_cast<const unsigned char*>(trellis.data);
   const int bits = args.bits, cb = args.codebook;
@@ -272,6 +268,21 @@ void Exl3GemmKernel(Queue& q, Tensor& out, const Tensor& in, const Tensor& trell
   if (strategy == Strategy::kPrefillAllRows && m < 512) strategy = Strategy::kAuto;
   if (strategy == Strategy::kAuto)
     strategy = AutomaticStrategy(q, bits, k, n, m, out.dtype == DType::kBF16 ? DType::kF32 : out.dtype);
+  if (replay_raw) {
+    VT_CHECK(strategy == Strategy::kPacked || strategy == Strategy::kReference,
+             "EXL3 replay cannot capture fused/prefill intermediates; dispatch was not changed");
+    VT_CHECK(replay_raw->device == q.device && replay_raw->dtype == DType::kF32 &&
+                 replay_raw->rank == 2 && replay_raw->shape[0] == m && replay_raw->shape[1] == n &&
+                 replay_raw->IsContiguous(), "EXL3 replay requires contiguous F32[M,N] on the owning device");
+    for (const Tensor* tensor : std::initializer_list<const Tensor*>{&out, &in, &trellis, &suh, &svh, &in_had})
+      VT_CHECK(!Overlap(*replay_raw, *tensor), "EXL3 replay raw storage may not overlap operands");
+    RecordGraphWrite(q, replay_raw->data, Span(*replay_raw));
+  }
+  if (args.fuse_casts && in.dtype != DType::kF16) {
+    WithOutput(q, in_had, {&in, &suh}, [&](Tensor& target) {
+      Had<false, true>(q, target, in, &suh, nullptr, kInvSqrt128, "exl3_input_hadamard");
+    });
+  } else Exl3HadR128Kernel(q, in_had, in, Exl3HadArgs{&suh, nullptr, 1.0f});
   const bool specialized = strategy != Strategy::kReference && cb == 2 && bits >= 3 && bits <= 6 &&
       reinterpret_cast<uintptr_t>(packed) % alignof(uint32_t) == 0;
   if (specialized && (strategy == Strategy::kPrefill || strategy == Strategy::kPanel ||
@@ -340,6 +351,10 @@ void Exl3GemmKernel(Queue& q, Tensor& out, const Tensor& in, const Tensor& trell
     }
     Had(q, out, raw, nullptr, &svh, kInvSqrt128, "exl3_output_hadamard");
   };
+  if (replay_raw) {
+    launch(replay_raw->data);
+    return;
+  }
   // Reuse the same bounded buffer as prefill. Decode graphs retain its address
   // and the backend orders all eager/graph users across queues. Larger eager
   // shapes or tight budgets keep the original temporary-buffer fallback.
@@ -349,5 +364,16 @@ void Exl3GemmKernel(Queue& q, Tensor& out, const Tensor& in, const Tensor& trell
   launch(storage.data);
   // Free is conservative and waits all owned queues; surface errors explicitly.
   GetBackend(q.device).Synchronize(q);
+}
+
+void Exl3GemmKernel(Queue& q, Tensor& out, const Tensor& in, const Tensor& trellis,
+                    const Tensor& suh, const Tensor& svh, Tensor& in_had, const Exl3GemmArgs& args) {
+  Exl3GemmImpl(q, out, in, trellis, suh, svh, in_had, args, nullptr);
+}
+
+void Exl3GemmReplayKernel(Queue& q, Tensor& out, const Tensor& in, const Tensor& trellis,
+                          const Tensor& suh, const Tensor& svh, Tensor& in_had,
+                          const Exl3GemmArgs& args, Tensor& raw) {
+  Exl3GemmImpl(q, out, in, trellis, suh, svh, in_had, args, &raw);
 }
 }  // namespace vt::xpu

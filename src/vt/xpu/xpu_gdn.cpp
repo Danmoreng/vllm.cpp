@@ -219,12 +219,70 @@ void CausalConv1dSpecUpdateKernel(Queue& q, Tensor& out, const Tensor& x,
 }
 void GdnPostConvKernel(Queue& q, Tensor& qo, Tensor& ko, Tensor& vo, Tensor& go, Tensor& bo,
                         const Tensor& conv, const Tensor& araw, const Tensor& braw,
-                        const Tensor& alog, const Tensor& bias, const L2NormArgs& args) {
+                        const Tensor& alog, const Tensor& bias, const GdnPostConvArgs& args) {
   TraceXpuOp(OpId::kGdnPostConv, q, {&qo, &ko, &vo, &go, &bo, &conv, &araw, &braw, &alog, &bias});
   const int64_t tokens = conv.shape[0], hk = qo.shape[1], dk = qo.shape[2];
   const int64_t hv = vo.shape[1], dv = vo.shape[2], keys = hk * dk, values = hv * dv;
   const View src(conv), qs(qo), ks(ko), vs(vo), gs(go), bs(bo), a(araw), b(braw), al(alog), dt(bias);
   const float eps = args.eps;
+  if (args.xpu_fp16_prefill) {
+    // The pinned _xpu_C Conv binary uses SIMD32 (its launch lambda does not
+    // inherit the source functor's SIMD16 annotation). Each Q/K head occupies
+    // one subgroup with four contiguous FP32 features per lane. The separate
+    // libgdn_attn recurrence kernels do use SIMD16; do not conflate the two.
+    const auto event = NativeQueue(q).submit([&](sycl::handler& handler) {
+      handler.parallel_for(sycl::nd_range<1>(tokens * (hk + hv) * 64, 64),
+          [=](sycl::nd_item<1> item) [[sycl::reqd_sub_group_size(32)]] {
+        const int64_t group = item.get_group(0);
+        const int64_t token = group / (hk + hv), head = group % (hk + hv);
+        const int lane = item.get_local_id(0);
+        const int64_t base = token * (2 * keys + values);
+        if (head < hk) {
+          const bool is_q = lane < 32;
+          const int feature = (lane % 32) * 4;
+          float value[4];
+          for (int i = 0; i < 4; ++i) {
+            value[i] = Load(src, base + (is_q ? 0 : keys) + head * dk + feature + i);
+          }
+          // Both pinned Q/K quadratsums square feature 1 before contracting
+          // feature 0, then 2 and 3. The independent FP32 producer replay
+          // distinguishes this from starting with feature 0.
+          float square = value[1] * value[1];
+          square = sycl::fma(value[0], value[0], square);
+          square = sycl::fma(value[2], value[2], square);
+          square = sycl::fma(value[3], value[3], square);
+          const auto sg = item.get_sub_group();
+          const float total = sycl::reduce_over_group(sg, square, sycl::plus<float>());
+          // Match the pinned Conv binary, not just its source expression:
+          // Q uses SQRT(sum+eps), SQRT(D), MUL, then INV; K uses RSQRT.
+          // The producer executes these as subgroup-uniform scalar math.
+          // On B70, varying RSQRT differs even for identical input bits.
+          // Compute on the leader and broadcast to preserve its rounding.
+          float inv = 0;
+          if (sg.get_local_linear_id() == 0)
+            inv = is_q
+                ? sycl::native::recip(sycl::native::sqrt(total + eps) *
+                                      sycl::native::sqrt(float(dk)))
+                : sycl::rsqrt(total + eps);
+          inv = sycl::group_broadcast(sg, inv, 0);
+          for (int i = 0; i < 4; ++i)
+            Store(is_q ? qs : ks, (token * hk + head) * dk + feature + i, value[i] * inv);
+        } else {
+          const int64_t h = head - hk;
+          for (int i = lane; i < dv; i += 64)
+            Store(vs, (token * hv + h) * dv + i, Load(src, base + 2 * keys + h * dv + i));
+          if (lane == 0) {
+            const float x = Load(a, token * a.stride[0] + h) + Load(dt, h);
+            const float softplus = x < 20.0f ? sycl::log(1.0f + sycl::exp(x)) : x;
+            Store(gs, token * hv + h, softplus * -sycl::exp(Load(al, h)));
+            Store(bs, token * hv + h, 1.0f / (1.0f + sycl::exp(-Load(b, token * b.stride[0] + h))));
+          }
+        }
+      });
+    });
+    RecordProfileEvent(q, "gdn_postconv_fp16_prefill", event);
+    return;
+  }
   const char* subgroup_setting = std::getenv("VT_XPU_GDN_POSTCONV_SUBGROUP");
   const auto device = NativeQueue(q).get_device();
   const bool subgroup = (!subgroup_setting ||

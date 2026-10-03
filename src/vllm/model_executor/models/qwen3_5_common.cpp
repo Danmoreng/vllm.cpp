@@ -6,7 +6,9 @@
 #include <cstdlib>
 #include <optional>
 
+#include "vllm/model_executor/layers/quantization/exl3_checkpoint.h"
 #include "vllm/model_executor/models/qwen3_5.h"           // ForwardLogits
+#include "vllm/model_executor/models/qwen3_5_dense.h"     // DenseExecutionPrecision
 #include "vllm/model_executor/models/qwen3_5_internal.h"  // ResolveMambaSsmCacheDType
 #include "vllm/v1/kv_cache_dtype.h"
 #include "vllm/v1/kv_cache_interface.h"
@@ -50,14 +52,19 @@ v1::KVCacheConfig MakeQwen3_5KVCacheSpec(const HfConfig& config, int block_size,
       config.raw.contains("quantization_config") &&
       config.raw["quantization_config"].is_object() &&
       config.raw["quantization_config"].value("quant_method", std::string()) == "gptq";
+  const bool exl3_f16 = IsExl3Checkpoint(config);
+  const bool explicit_f16 = gptq_f16 || exl3_f16;
+  const auto precision =
+      ResolveQwen3_5DensePrecision(config, gptq_f16, exl3_f16);
 
   // Diagnostic state-storage overrides belong to planning, not allocation:
   // the MambaSpec must describe the exact bytes the runner will consume.
-  vt::DType conv_dtype = gptq_f16 ? vt::DType::kF16 : vt::DType::kBF16;
+  vt::DType conv_dtype = precision.gdn_conv_state;
   vt::DType ssm_dtype =
-      detail::ResolveMambaSsmCacheDType(config, conv_dtype);
+      explicit_f16 ? precision.gdn_recurrent_state
+                   : detail::ResolveMambaSsmCacheDType(config, conv_dtype);
   if (const char* state_dtype = std::getenv("VT_GDN_STATE_BF16");
-      state_dtype != nullptr && !gptq_f16) {
+      state_dtype != nullptr && !explicit_f16) {
     if (state_dtype[0] == '0') {
       conv_dtype = vt::DType::kF32;
       ssm_dtype = vt::DType::kF32;
@@ -71,8 +78,8 @@ v1::KVCacheConfig MakeQwen3_5KVCacheSpec(const HfConfig& config, int block_size,
   kv.num_blocks = num_blocks;
   const vt::DType default_kv_dtype = v1::ResolveKvCacheDType();
   const vt::DType kv_dtype =
-      gptq_f16 && default_kv_dtype != vt::DType::kF32
-          ? vt::DType::kF16 : default_kv_dtype;
+      explicit_f16 && default_kv_dtype != vt::DType::kF32
+          ? precision.kv_auto : default_kv_dtype;
   kv.kv_cache_groups.emplace_back(
       std::vector<std::string>{"fa"},
       // The spec is the SINGLE source of truth for the paged-KV storage dtype

@@ -1,5 +1,7 @@
 # B70 GPTQ INT4 reference
 
+> Historical GPTQ diagnostic tooling. Active work follows the [B70 EXL3 migration plan](../../docs/B70-EXL3-Migration-and-Parity-Plan.md). Preserve existing captures and failed gates; the old GPTQ performance campaign is not the production objective.
+
 This directory contains the pinned Python reference controls for the GPTQ INT4
 branch. The model, image, and operators below were inspected on 2026-09-24.
 

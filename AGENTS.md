@@ -1,8 +1,10 @@
 # AGENTS.md: local B70 development
 
 This checkout is a direct collaboration with the developer. Work on the current
-branch and follow `docs/B70-SYCL-Qwen38-EXL3-Implementation-Plan.md` in small,
+branch and follow `docs/B70-EXL3-Migration-and-Parity-Plan.md` in small,
 reviewable steps. The developer's current instructions take priority.
+Start with S0a in that plan; archived EXL3/GPTQ plans are historical references,
+not active task instructions. GPTQ remains a diagnostic reference only.
 
 ## How we work
 
@@ -33,9 +35,14 @@ reviewable steps. The developer's current instructions take priority.
 
 - Use the local Intel Arc Pro B70 directly when the current focused step needs
   it. Do not use resource-controller leases or GPU lock files.
-- Do not stop services, change drivers or power settings, install large
-  dependencies, download model weights, or run long benchmarks without the
-  developer's direction.
+- The developer authorizes exclusive GPU use for this migration. Keep the
+  production `b70-qwen38-vllm.service` stopped while working. No other vLLM
+  instance may run on the card alongside the instance being built/tested.
+  Focused GPU tests and isolated pinned-oracle captures are authorized; run
+  oracle and native GPU work sequentially, and leave production stopped.
+- Do not change drivers or power settings, install large dependencies,
+  download model weights, or run long benchmarks without the developer's
+  direction.
 - Use vLLM source and the pinned model as behavior references where relevant.
   State any untested assumption or observed difference plainly.
 

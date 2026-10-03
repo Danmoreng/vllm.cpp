@@ -50,22 +50,7 @@ OwnedTensor LoadGptqF16(const TensorResolver& get, const std::string& name,
   const StTensor& t = get(name);
   VT_CHECK(t.dtype == "F16" && t.shape == shape,
            "gptq4: expected F16 tensor with configured shape for " + name);
-  size_t numel = 1;
-  for (int64_t dim : shape) {
-    VT_CHECK(dim > 0 && numel <= std::numeric_limits<size_t>::max() /
-                                    static_cast<size_t>(dim),
-             "gptq4: invalid FP16 tensor shape for " + name);
-    numel *= static_cast<size_t>(dim);
-  }
-  VT_CHECK(numel <= std::numeric_limits<size_t>::max() / 2 &&
-               t.nbytes == numel * 2 && t.data != nullptr,
-           "gptq4: invalid FP16 byte span for " + name);
-  OwnedTensor out;
-  if (!BorrowStTensorBytes(out, t, vt::DType::kF16, shape)) {
-    out = MakeOwned(vt::DType::kF16, shape);
-    std::memcpy(out.bytes.data(), t.data, t.nbytes);
-    MaybeReleaseSourcePages(t.data, t.nbytes);
-  }
+  OwnedTensor out = dense_loaders::LoadF16Direct(get, name, shape);
   out.nk = nk;
   return out;
 }
@@ -157,22 +142,12 @@ OwnedTensor LoadModelBf16Direct(
   return o;
 }
 
-// MODEL-QWEN35-EXL3 (#2495 item 3): the SAME model-dtype vector, read from a
-// checkpoint whose unquantized remainder is F16 rather than BF16/F32.
-//
-// The F16 arm is reached ONLY when the caller has already established that this
-// projection group is EXL3, and that scoping is deliberate. Teaching
-// `LoadModelBf16Direct` F16 outright would widen acceptance for every dense
-// model in the tree through a conversion that drops three mantissa bits, which
-// is the argument `dense_loaders::LoadF16AsBf16Direct` makes at its own
-// declaration. Inside an EXL3 load the conversion is the right polarity: the
-// config's `torch_dtype` is bfloat16, exllamav3 merely stores the remainder at
-// its own fp16 runtime dtype, and bf16 is the MODEL dtype every layer inherits.
+// EXL3 uses the pinned FP16 model policy even when its exported config says
+// BF16. Preserve F16 and cast BF16/F32 directly at this explicit boundary.
 OwnedTensor LoadModelVectorForScheme(const TensorResolver& get, bool exl3,
                                      const std::string& name,
                                      const std::vector<int64_t>& shape = {}) {
-  if (exl3 && get(name).dtype == "F16")
-    return dense_loaders::LoadF16AsBf16Direct(get, name, shape);
+  if (exl3) return dense_loaders::LoadF16Direct(get, name, shape);
   return LoadModelBf16Direct(get, name, shape);
 }
 
@@ -619,32 +594,28 @@ bool IsFp8BlockProjection(const TensorExists& has, const std::string& proj,
   return true;
 }
 
-// MODEL-QWEN35-GDN-EXL3 (#2495 item 4): the GDN tensors that NO arm quantizes,
-// loaded once for every arm rather than copied into each. `in_proj_ba`,
-// `conv1d`, `A_log`, `dt_bias` and `norm.weight` are stored the same way on a
-// bf16, an FP8, an NVFP4 and an EXL3 checkpoint, and a second copy of this
-// sequence beside the trellis rung is where the two arms drift.
-//
-// `allow_f16` is the ONE difference between the arms, and it is the EXL3
-// artifact's own: `Mia-AiLab/Qwen3.8-27B-EXL3-3.5bpw` stores `in_proj_a` and
-// `in_proj_b` at F16 while storing every other tensor here at BF16.
+// Shared unquantized GDN parameters. The explicit EXL3 policy loads BA, Conv
+// and gated norm as FP16, independently of their stored remainder dtype.
+// A_log and dt_bias are retained as FP32 computation inputs; recurrent state
+// precision is resolved separately. Other schemes keep their existing reader.
 void LoadGdnSmallTensors(const TensorResolver& get, const std::string& la,
                          bool allow_f16, GdnLayerWeights& g) {
   // QUALIFIED: `qwen3_5_dense.h` declares a two-argument `vllm::`
   // LoadMergedBf16RawNK forwarder for the focused loader contract, and
   // unqualified lookup finds that one first.
-  g.in_proj_ba = dense_loaders::LoadMergedBf16RawNK(
-      get, {la + "in_proj_b.weight", la + "in_proj_a.weight"},
-      /*tp=*/nullptr, allow_f16);
+  g.in_proj_ba = allow_f16
+      ? dense_loaders::LoadMergedF16RawNK(get, {la + "in_proj_b.weight", la + "in_proj_a.weight"})
+      : dense_loaders::LoadMergedBf16RawNK(get, {la + "in_proj_b.weight", la + "in_proj_a.weight"});
   // conv1d.weight ships [conv_dim,1,K]; collapse the singleton to [conv_dim,K].
   const StTensor& conv = get(la + "conv1d.weight");
   VT_CHECK(conv.shape.size() == 3 && conv.shape[1] == 1,
            "qwen3_5 dense: unexpected conv1d shape");
-  g.conv1d_weight =
-      LoadBf16Direct(get, la + "conv1d.weight", {conv.shape[0], conv.shape[2]});
+  g.conv1d_weight = allow_f16
+      ? dense_loaders::LoadF16Direct(get, la + "conv1d.weight", {conv.shape[0], conv.shape[2]})
+      : LoadBf16Direct(get, la + "conv1d.weight", {conv.shape[0], conv.shape[2]});
   g.a_log = LoadToF32(get, la + "A_log");
   g.dt_bias = LoadToF32(get, la + "dt_bias");
-  g.norm_weight = LoadModelBf16Direct(get, la + "norm.weight");
+  g.norm_weight = LoadModelVectorForScheme(get, allow_f16, la + "norm.weight");
 }
 
 GdnLayerWeights LoadGdnDense(const TensorResolver& get, const TensorExists& has,
@@ -820,9 +791,9 @@ DenseMlpWeights LoadDenseMlp(const TensorResolver& get, const TensorExists& has,
   DenseMlpWeights m;
   // MODEL-QWEN35-EXL3 (#2495 item 3). FIRST and exclusive, for the same reason
   // the attention arm is: an EXL3 projection ships no `.weight`, so every probe
-  // below reads a tensor that is not there. gate and up stay SEPARATE and
-  // `layers::Exl3MlpGateUpMethod` consumes the pair on the shared
-  // `MlpGateUpMethodBase` seam.
+  // below reads a tensor that is not there. Keep the checkpoint shards here;
+  // the scoped FP16 method lazily builds the model-owned packed gate/up group
+  // before its first GPU use.
   if (dense_loaders::IsExl3Projection(has, mlp + "gate_proj")) {
     m.gate_proj_exl3 = dense_loaders::LoadExl3(get, has, mlp + "gate_proj");
     m.up_proj_exl3 = dense_loaders::LoadExl3(get, has, mlp + "up_proj");
@@ -1037,15 +1008,16 @@ std::vector<DenseGptq4LayerWeights> LoadQwen3_5DenseGptq4TextProjections(
 }
 
 DenseExecutionPrecision ResolveQwen3_5DensePrecision(
-    const HfConfig& config, bool gptq4_checkpoint) {
+    const HfConfig& config, bool gptq4_checkpoint, bool exl3_checkpoint) {
   DenseExecutionPrecision policy;
-  if (!gptq4_checkpoint) return policy;  // preserve every existing dense arm
-  VT_CHECK(config.torch_dtype == "float16",
+  VT_CHECK(!(gptq4_checkpoint && exl3_checkpoint), "dense: conflicting GPTQ/EXL3 precision policy");
+  if (!gptq4_checkpoint && !exl3_checkpoint) return policy;
+  VT_CHECK(!gptq4_checkpoint || config.torch_dtype == "float16",
            "gptq4: expected declared text dtype float16, got '" +
                config.torch_dtype + "' from " + config.dtype_source);
   VT_CHECK(config.mamba_ssm_dtype == "float32" ||
                config.mamba_ssm_dtype == "float",
-           "gptq4: expected FP32 recurrent state from mamba_ssm_dtype");
+           "dense FP16: expected FP32 recurrent state from mamba_ssm_dtype");
   policy.activation = vt::DType::kF16;
   policy.dense_weight = vt::DType::kF16;
   policy.kv_auto = vt::DType::kF16;
@@ -1530,7 +1502,6 @@ Qwen3_5DenseWeights LoadQwen3_5Dense(const std::vector<SafetensorsFile>& shards,
   }
 
   Qwen3_5DenseWeights w;
-  w.precision = ResolveQwen3_5DensePrecision(config, false);
 
   // MODEL-QWEN35-DENSE-VL-EXL3 (ISSUE-LOCAL-01M3AHX9DQX8HNE32G80C9VGMJ). THE
   // SILENT DROP STOPS HERE, and BEFORE any backbone read, so an incomplete
@@ -1560,12 +1531,11 @@ Qwen3_5DenseWeights LoadQwen3_5Dense(const std::vector<SafetensorsFile>& shards,
       dense_loaders::IsExl3Projection(has,
                                       backbone + "layers.0.self_attn.q_proj") ||
       dense_loaders::IsExl3Projection(has, "lm_head");
-  w.embed_tokens =
-      (exl3_checkpoint &&
-       get(backbone + "embed_tokens.weight").dtype == "F16")
-          ? dense_loaders::LoadF16AsBf16Direct(
-                get, backbone + "embed_tokens.weight")
-          : LoadBf16Direct(get, backbone + "embed_tokens.weight");
+  w.exl3_checkpoint = exl3_checkpoint;
+  w.precision = ResolveQwen3_5DensePrecision(config, false, exl3_checkpoint);
+  w.embed_tokens = exl3_checkpoint
+      ? dense_loaders::LoadF16Direct(get, backbone + "embed_tokens.weight")
+      : LoadBf16Direct(get, backbone + "embed_tokens.weight");
   w.final_norm =
       LoadModelVectorForScheme(get, exl3_checkpoint, backbone + "norm.weight");
   // The 27B owns an explicit head; smaller Qwen3.5 checkpoints tie logits to
