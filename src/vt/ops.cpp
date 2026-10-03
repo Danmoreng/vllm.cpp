@@ -1217,6 +1217,12 @@ void RmsNorm(Queue& q, Tensor& out, const Tensor& x, const Tensor& weight,
   }
   VT_CHECK(x.device == out.device && weight.device == x.device && x.device == q.device,
            "rmsnorm: device mismatch (x/out/weight/queue)");
+  VT_CHECK(!args.qk_fp16 ||
+               (q.device.type == DeviceType::kXPU && x.shape[1] == 256 &&
+                out.dtype == DType::kF16 && weight.dtype == DType::kF32 &&
+                (x.dtype == DType::kF16 || x.dtype == DType::kF32) &&
+                args.gemma && residual == nullptr),
+           "rmsnorm: producer Q/K requires XPU D256, F16/F32 input, F16 output, F32 Gemma weight and no residual");
   reinterpret_cast<RmsNormFn>(GetOp(OpId::kRmsNorm, q.device.type))(q, out, x, weight, args,
                                                                     residual);
 }
