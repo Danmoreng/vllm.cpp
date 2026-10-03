@@ -37,6 +37,9 @@
 
 ## News
 
+- **2026-09** **Tev1 serves typed decisions and chat from one engine.**
+  The decision route returns probabilities for each question. See the
+  [Tev1 recipe](docs/models/tev1.md) for activation, CPU comparisons, and remaining validation gaps.
 - **2026-09** **Multimodal chat reaches the model through HTTP.** Qwen3-VL accepts images;
   dots3-note also accepts audio and multiple media items. CPU tests use synthetic weights;
   real-checkpoint token parity remains unverified. See the [input guide](docs/guides/multimodal-input.md)
