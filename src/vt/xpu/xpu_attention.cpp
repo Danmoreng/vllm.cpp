@@ -1,11 +1,15 @@
 #include "xpu_common.h"
 #include "xpu_kernels.h"
 #include "xpu_fp8.h"
+#include <sycl/ext/intel/math.hpp>
 #include <algorithm>
+#include <atomic>
 #include <cstdio>
 #include <limits>
 #include <cstdlib>
+#include <memory>
 #include <string_view>
+#include <vector>
 
 namespace vt::xpu {
 namespace {
@@ -44,6 +48,62 @@ void CopyElement(View dst, int64_t to, View src, int64_t from) {
   else
     static_cast<uint16_t*>(dst.data)[to] = static_cast<const uint16_t*>(src.data)[from];
 }
+
+// Pinned Torch XPU mean for contiguous F32 squares at D256: four adjacent
+// registers per virtual lane, then its ascending-offset subgroup tree.
+// At >=32 outputs the reduction has 32 lanes and two vectors per lane;
+// smaller output counts have >=64 lanes and combine vectors after summing
+// their registers. All wider geometries have the same active 64 vectors.
+float ProducerQkPartial256(View src, int64_t base, int lane, bool paired_vectors) {
+  float sums[4];
+  for (int j = 0; j < 4; ++j) {
+    const float first = Load(src, base + 4 * lane + j);
+    sums[j] = first * first;
+    if (paired_vectors) {
+      const float second = Load(src, base + 128 + 4 * lane + j);
+      sums[j] += second * second;
+    }
+  }
+  return ((sums[0] + sums[1]) + sums[2]) + sums[3];
+}
+
+float ProducerQkMean256(View src, int64_t base, sycl::sub_group group,
+                       int lane, int64_t outputs) {
+  const bool paired = outputs >= 32;
+  float first = ProducerQkPartial256(src, base, lane, paired);
+  float second = ProducerQkPartial256(src, base, lane + 16, paired);
+  if (!paired) {
+    first += ProducerQkPartial256(src, base, lane + 32, false);
+    second += ProducerQkPartial256(src, base, lane + 48, false);
+  }
+  for (int offset = 1; offset < 16; offset *= 2) {
+    first += sycl::shift_group_left(group, first, offset);
+    second += sycl::shift_group_left(group, second, offset);
+  }
+  return sycl::group_broadcast(group, first + second, 0) / 256.0f;
+}
+
+float ProducerQkMean256Scalar(View src, int64_t base, int64_t outputs) {
+  const bool paired = outputs >= 32;
+  float partials[32];
+  for (int lane = 0; lane < 32; ++lane) {
+    partials[lane] = ProducerQkPartial256(src, base, lane, paired);
+    if (!paired) partials[lane] += ProducerQkPartial256(src, base, lane + 32, false);
+  }
+  for (int offset = 1; offset < 32; offset *= 2)
+    for (int lane = 0; lane + offset < 32; ++lane)
+      partials[lane] += partials[lane + offset];
+  return partials[0] / 256.0f;
+}
+
+float ProducerQkNormValue(float value, float inverse, float weight, bool gemma) {
+  // Original eager IR materializes each F32 multiply before narrowing to
+  // F16. Request both boundaries explicitly in this fused kernel.
+  const float effective_weight = gemma
+      ? sycl::ext::intel::math::fadd_rn(1.0f, weight) : weight;
+  const float normalized = sycl::ext::intel::math::fmul_rn(value, inverse);
+  return sycl::ext::intel::math::fmul_rn(normalized, effective_weight);
+}
 }
 void AttnGateSplitKernel(Queue& q, Tensor& queries, Tensor& gates, const Tensor& packed) {
   TraceXpuOp(OpId::kAttnGateSplit, q, {&queries, &gates, &packed});
@@ -79,6 +139,28 @@ void AttnQkNormRopeGateKernel(Queue& q, Tensor& q_out, Tensor& k_out,
   const float eps = norm_args.eps;
   const bool gemma = norm_args.gemma;
   const bool fp16 = rope_args.fp16_intermediates;
+  // Optional focused observer of the actual kernel's mean/inverse boundary.
+  // No allocation or synchronization when unset; never overwrite a receipt.
+  const char* probe_prefix = std::getenv("VT_XPU_ATTN_NORM_PROBE");
+  auto free_probe = [&q](float* p) { if (p) sycl::free(p, NativeQueue(q)); };
+  std::unique_ptr<float, decltype(free_probe)> probe_owner(nullptr, free_probe);
+  if (probe_prefix) probe_owner.reset(sycl::malloc_shared<float>(3 * tokens * (hq + hk), NativeQueue(q)));
+  float* probe = probe_owner.get();
+  VT_CHECK(!probe_prefix || probe != nullptr, "XPU attention norm probe allocation failed");
+  const auto finish_probe = [&](sycl::event event) {
+    if (!probe_prefix) return;
+    event.wait_and_throw();
+    static std::atomic<uint64_t> sequence{0};
+    const std::string path = std::string(probe_prefix) + "." +
+        std::to_string(sequence.fetch_add(1)) + ".t" + std::to_string(tokens) + ".f32";
+    // Ordinary host storage is required for file I/O on Level Zero USM.
+    const std::vector<float> host(probe, probe + 3 * tokens * (hq + hk));
+    std::FILE* file = std::fopen(path.c_str(), "wbx");
+    VT_CHECK(file != nullptr, "XPU attention norm probe requires a new writable path");
+    const size_t written = std::fwrite(host.data(), sizeof(float), host.size(), file);
+    const int closed = std::fclose(file);
+    VT_CHECK(written == host.size() && closed == 0, "XPU attention norm probe write failed");
+  };
   enum class PreambleMode { kAuto, kReference, kSubgroup };
   static const PreambleMode mode = [] {
     const char* value = std::getenv("VT_XPU_ATTN_PREAMBLE");
@@ -120,11 +202,20 @@ void AttnQkNormRopeGateKernel(Queue& q, Tensor& q_out, Tensor& k_out,
         sum += values[j] * values[j];
       }
       sum = sycl::reduce_over_group(item.get_sub_group(), sum, sycl::plus<float>());
-      const float inv = 1.0f / sycl::sqrt(sum / static_cast<float>(dim) + eps);
+      const float mean = fp16 ? ProducerQkMean256(src, src_base, item.get_sub_group(),
+                                                 lane, tokens * (query ? hq : hk))
+                              : sum / static_cast<float>(dim);
+      const float variance = mean + eps;
+      // Reproduce the observed pinned Torch XPU inverse-root boundary.
+      const float inv = fp16 ? sycl::native::rsqrt(variance) : 1.0f / sycl::sqrt(variance);
+      if (probe && lane == 0) {
+        probe[3 * index] = mean; probe[3 * index + 1] = variance; probe[3 * index + 2] = inv;
+      }
       for (int j = 0; j < tile; ++j) {
         const int col = lane + lanes * j;
         const float w = Load(weight, col);
-        norm[j] = values[j] * inv * (gemma ? 1.0f + w : w);
+        norm[j] = fp16 ? ProducerQkNormValue(values[j], inv, w, gemma)
+                       : values[j] * inv * (gemma ? 1.0f + w : w);
         if (fp16) norm[j] = Round(DType::kF16, norm[j]);
       }
       for (int j = 0; j < tile; ++j) {
@@ -149,6 +240,7 @@ void AttnQkNormRopeGateKernel(Queue& q, Tensor& q_out, Tensor& k_out,
       }
     });
     RecordProfileEvent(q, "attn_qk_norm_rope_gate_subgroup", event);
+    finish_probe(event);
     return;
   }
   const auto event = NativeQueue(q).parallel_for(
@@ -166,11 +258,19 @@ void AttnQkNormRopeGateKernel(Queue& q, Tensor& q_out, Tensor& k_out,
       const float value = Load(src, src_base + i);
       sum += value * value;
     }
-    const float inv = 1.0f / sycl::sqrt(sum / static_cast<float>(dim) + eps);
+    const float mean = fp16 && dim == 256
+        ? ProducerQkMean256Scalar(src, src_base, tokens * (query ? hq : hk))
+        : sum / static_cast<float>(dim);
+    const float variance = mean + eps;
+    const float inv = fp16 ? sycl::native::rsqrt(variance) : 1.0f / sycl::sqrt(variance);
+    if (probe) {
+      probe[3 * item[0]] = mean; probe[3 * item[0] + 1] = variance; probe[3 * item[0] + 2] = inv;
+    }
     for (int64_t i = 0; i < dim; ++i) {
       const auto norm = [&](int64_t col) {
         const float w = Load(weight, col);
-        const float value = Load(src, src_base + col) * inv * (gemma ? 1.0f + w : w);
+        const float value = fp16 ? ProducerQkNormValue(Load(src, src_base + col), inv, w, gemma)
+                                 : Load(src, src_base + col) * inv * (gemma ? 1.0f + w : w);
         return fp16 ? Round(DType::kF16, value) : value;
       };
       float value = norm(i);
@@ -190,6 +290,7 @@ void AttnQkNormRopeGateKernel(Queue& q, Tensor& q_out, Tensor& k_out,
     }
   });
   RecordProfileEvent(q, "attn_qk_norm_rope_gate", event);
+  finish_probe(event);
 }
 void RopeNeoxKernel(Queue& q, Tensor& queries, Tensor& keys, const Tensor& positions, const RopeArgs& args) {
   TraceXpuOp(OpId::kRopeNeox, q, {&queries, &keys, &positions});
@@ -218,13 +319,18 @@ void RopeCosSinCacheKernel(Queue& q, Tensor& cache, const Tensor& positions, con
       // Round both pow and its reciprocal to F32 before the F32 angle.
       // B70 FP64 avoids the larger device float-pow approximation.
       const float exponent = float(2 * pair) / float(rot);
-      // Original EXL3 cache construction executes pow/reciprocal on FP32
-      // XPU tensors. Its half-coefficient boundary can distinguish that from
-      // the legacy high-precision cache producer.
+      // The pinned Torch XPU regeneration uses F32 power and reciprocal.
+      // Its half-coefficient boundary distinguishes this from the legacy
+      // high-precision power. Cache initialization device is not witnessed.
       const float power = args.fp16_intermediates
           ? sycl::pow(args.base, exponent)
           : float(sycl::pow(double(args.base), double(exponent)));
-      const float inv = args.fp16_intermediates ? 1.0f / power : float(1.0 / double(power));
+      // Request round-to-nearest explicitly at the producer F32 reciprocal
+      // boundary. Ordinary division (even widened to F64) did not preserve
+      // that boundary in the fused cache kernel on the pinned B70 toolchain.
+      const float inv = args.fp16_intermediates
+          ? sycl::ext::intel::math::fdiv_rn(1.0f, power)
+          : float(1.0 / double(power));
       const float angle = (float(p) / args.linear_scaling_factor) * inv;
       c = sycl::cos(angle); s = sycl::sin(angle);
     } else {

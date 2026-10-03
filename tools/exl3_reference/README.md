@@ -255,6 +255,18 @@ add/subtract on those captured operands; its focused host check is
 `tests/scripts/test_exl3_attention_rope.py`. Native case
 `XPU EXL3 attention RoPE: actual FP16 operands and coefficients` compares
 these operands, the explicit fused primitive and generated coefficients.
-The current checkpoint passes37/38 assertions: captured-coefficient rotation
-is exact, but two generated FP16 coefficients differ. The new mode is not yet
-selected by actual model execution; the complete mixer gate remains open.
+The qualified bounded primitive passes38/38 assertions: captured-coefficient
+rotation and all generated half coefficients at positions0-128 are exact.
+The mode is now selected in scoped XPU FP16 EXL3 model execution. The actual
+model-owned mixer passes655/657 assertions: numerical bands pass, but one
+K-byte difference from normalization persists through P128/D1. The complete
+mixer gate remains open; see the execution map for retained failed attempts.
+
+
+For the focused fused-preamble diagnostic, set `VT_XPU_ATTN_NORM_PROBE` to a
+new writable file prefix. The observer waits for that kernel and writes
+`PREFIX.SEQUENCE.tTOKENS.f32` without overwriting files. Current output is
+little-endian F32 `[T,Hq+Hkv,3]`: Q heads then K heads, with mean, mean plus
+epsilon, and inverse root. Unset the variable for ordinary execution. The
+current actual-kernel means and variances match the bounded Torch replay;
+inverse-root differences and the exact mixer K-byte failure remain open.

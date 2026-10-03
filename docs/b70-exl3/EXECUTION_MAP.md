@@ -1265,3 +1265,110 @@ fixture and receipts are recorded in
 commit/push of the intermediate implementation. **Next:** resolve generated
 coefficients, select the qualified mode in scoped EXL3 model execution and
 rerun the unchanged mixer/cache gate. S1 and S2-S6 remain incomplete.
+
+## 33. Qualified bounded FP16 RoPE cache and primitive
+
+Production systemd was inactive after resumption, but its container/worker
+was running. The explicitly authorized container stop completed before GPU
+work; no production worker remains. Pinned Torch regeneration on explicit
+CPU/XPU gives9/0 half-coefficient differences against the unchanged new
+fixture. This is a value comparison, not a direct initialization-device witness.
+
+Native v5 diagnostics identify the2 differences at (position65,column3) and
+(121,3). Ordinary division widened to F64 (v6) still fails. Explicit Intel
+round-to-nearest `fdiv_rn` at the scoped producer F32 reciprocal boundary
+resolves them. **v7 focused build exit0; native auto1case/38assertions pass,
+exit0**, with zero different half coefficients at positions0-128. Same-operand
+rotation remains byte-exact. Fused P128 Q/K retain16/5 half differences within
+the fixed band; D1 Q/K are exact. Scalar variant also passes38 assertions,
+but its normalization produces more nonexact half values within the fixed band.
+
+Two existing default SG16 preamble/cached-RoPE regressions pass115 assertions,
+exit0. All failed attempts, bounded Torch/SYCL probe sources/results and
+qualified source snapshots are retained in
+`reference_B.S1_attention3_FP16_RoPE_qualified_P128_D1`. No frozen gate changed.
+**Next:** select this mode in scoped native EXL3 model attention and rerun the
+unchanged model-owned mixer/cache test. Long positions, GDN state, D64 and
+remaining S1/S2-S6 are not qualified by these bounded checks.
+
+## 34. Model FP16 RoPE wiring and remaining K normalization byte
+
+FullAttnRopeArgs now selects producer boundaries only for XPU F16 activation
+and an EXL3-declared checkpoint. Cache build/refill and paged/unpaged consumers
+share it. The unfused path also consumes rounded coefficients. Its first D1
+check exposed absolute positions indexing a per-step selected cache; row-index
+lookup fixes that exception. The temporary unfused row-index allocation/upload
+is not graph/lifetime/performance qualification and remains later work.
+
+Focused model build exits0. The frozen old48-tensor fixture, original input-norm
+values and own poisoned native cache remain unchanged. Model-owned P128/D1
+now passes **655/657 assertions,exit1**: all original Q/K/core/gated/mixer
+numerical bands pass; K-byte differences fall122->1 at P128 and persist into
+D1. V and inactive capacity remain exact. Q/K differ19/9 P128 half values and
+are exact at D1. The unfused route after index correction also passes655/657,
+retaining the same1 K byte. Two synthetic paged/unpaged model regressions
+pass4303 assertions,exit0, before the subsequent v8/v9 inverse-root variants.
+
+The K difference is unrotated (row116,head3,channel213): native1.4375 lies
+on an E4M3 midpoint (byte60), original1.4365234375 rounds to captured byte59.
+Pinned Torch IR source uses mean of squares then rsqrt. On identical old
+captured QKV, the literal Torch expression reproduces every original K-norm
+half exactly; replacing rsqrt with1/sqrt differs9 halves including this point.
+Native ordinary/approximate SYCL rsqrt variants v8/v9 do not remove the byte.
+A bounded reconstruction of the SG16 reduction gives mean2.6682863235473633
+versus original Torch2.6682865619659424. This probe is not instrumentation of
+the actual kernel; it narrows the next reduction/root investigation.
+
+Final v9 combined primitive/mixer run: **2cases,693/695 assertions,exit1**.
+Primitive38/38 still passes, mixer retains2 K-byte failures. Trace has zero
+BF16 arguments/CPU reference selections. All failures and stage dumps are
+retained in `reference_B.S1_attention3_model_FP16_RoPE_and_remaining_K_byte`.
+Old/new full original captures differ upstream beginning at row100 and are
+not substituted for one another. **Next:** reproduce original mean/root
+rounding on identical QKV and resolve that byte in fused/unfused execution.
+Then rerun real target/state/D64 gates; S1 and S2-S6 remain incomplete.
+Production remains stopped; all current GPU/build processes are terminal.
+
+
+## 35. Source-matched Q/K mean and actual inverse-root checkpoint
+
+The pinned Torch XPU D256 reduction uses four adjacent registers per virtual
+lane and an ascending-offset subgroup tree. The scoped FP16 fused preamble now
+reproduces that order, including the different active-vector grouping at small
+output counts. Explicit F32 Gemma-weight addition and multiplication boundaries
+are retained. The legacy mode keeps its existing arithmetic.
+
+A bounded literal Torch replay on the unchanged old QKV reproduces all original
+normalized half values. The corresponding host reduction and standalone native
+helper replay match the recorded means; the corrected standalone native replay
+also matches all512 K inverses and131072 normalized half values. Its first
+attempt wrote an empty output before host staging was added; that receipt is
+retained as failed evidence. These helper replays do not qualify the actual mixer.
+
+Optional VT_XPU_ATTN_NORM_PROBE instrumentation now observes the actual fused
+kernel. With it unset there is no observer allocation or explicit event wait.
+The final v13 observer writes F32 [T,28,3] values (mean,mean+epsilon,inverse),
+with24 Q heads followed by4 K heads per row. Both mean and variance match the
+same-input Torch replay exactly in all3612 heads at P128/D1. Inverses still
+differ in891 Q/171 K heads at P128 and10 Q/1 K heads at D1. At the remaining
+K-byte point, mean2.6682865619659424 and variance2.668287515640259 match;
+native inverse0.6121864318847656 differs from original0.6121863722801208.
+The standalone helper produces the original inverse on that same input. The
+cause of the different actual-kernel root result is not yet established.
+
+Focused v10/v11 builds exit0; combined primitive/mixer checks each pass
+693/695 assertions,exit1. The initial v12 observer build failed on a const SYCL
+event; v12b corrected that compile error. Final v13 focused build exits0 and
+actual mixer test passes **655/657 assertions,exit1**. All fixed numerical bands
+pass; the unchanged exact K-cache checks still fail once at P128 and once at D1.
+V and inactive capacity remain exact. No threshold or frozen fixture is changed.
+The source-matched mean has not yet been integrated into generic unfused RMS.
+Final scalar/legacy regressions and whole-target/state/D64 reruns are pending.
+
+The developer requested this interrupted work be committed and pushed as a
+checkpoint. Sources, failed attempts and final observations are recorded in
+`reference_B.S1_attention3_source_matched_mean_and_actual_inverse_checkpoint`.
+Production is inactive and no native/oracle job remains running. **Next:** isolate
+the actual-kernel inverse-root difference on identical variance inputs, resolve
+the remaining K byte, qualify fused/scalar/unfused paths, then rerun the real
+target/state/D64 gates. S1 and all S2-S6 remain incomplete.

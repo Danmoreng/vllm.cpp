@@ -17359,10 +17359,11 @@
           "sha256": "6ac86f25169c7c32c8c5cd5d45165c278ca3ea9d0da9d61792d42b6239ae773c"
         },
         {
-          "status": "verified",
+          "status": "historical_observation",
           "path": "/home/sebastian/LocalLLM/vllm.cpp/src/vllm/model_executor/models/qwen3_5.cpp",
           "bytes": 731421,
-          "sha256": "cf53fd86b4c14cb25f338f5b47e03c10ff712066c1e3459de09193f116dcb43e"
+          "sha256": "cf53fd86b4c14cb25f338f5b47e03c10ff712066c1e3459de09193f116dcb43e",
+          "current_identity_status": "Changed by model FP16 RoPE/normalization wiring; original hash and preserved snapshots retained."
         },
         {
           "status": "historical_observation",
@@ -17623,10 +17624,11 @@
           "sha256": "419fa8a87f5f8b8385fa37e42ccff645d8ae691927480ea0ae55e9b795cb7109"
         },
         {
-          "status": "verified",
+          "status": "historical_observation",
           "path": "/home/sebastian/LocalLLM/vllm.cpp/tests/vllm/models/test_xpu_qwen_exl3_fp16.cpp",
           "bytes": 70617,
-          "sha256": "d9a9e4240a187c4b219cbc0cf8173b28aac8833d16460beb5a6ce33a5473fc7f"
+          "sha256": "d9a9e4240a187c4b219cbc0cf8173b28aac8833d16460beb5a6ce33a5473fc7f",
+          "current_identity_status": "Changed by qualified RoPE v7; original hash retained and preserved snapshots remain unchanged."
         },
         {
           "status": "verified",
@@ -17647,16 +17649,18 @@
           "sha256": "2edcae8d20a51bd5f62f3fb0c1eab4db5a17d08fc5a7e563392fc3e240f3a6ee"
         },
         {
-          "status": "verified",
+          "status": "historical_observation",
           "path": "/home/sebastian/LocalLLM/vllm.cpp/src/vt/xpu/xpu_attention.cpp",
           "bytes": 28479,
-          "sha256": "275af2668f938b03bc2be64e8f0daadfef2127e6ba914bff55d2802a89988b26"
+          "sha256": "275af2668f938b03bc2be64e8f0daadfef2127e6ba914bff55d2802a89988b26",
+          "current_identity_status": "Changed by qualified RoPE v7; original hash retained and preserved snapshots remain unchanged."
         },
         {
-          "status": "verified",
+          "status": "historical_observation",
           "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/engine-build/tests/test_xpu_qwen_exl3_fp16",
           "bytes": 32346608,
-          "sha256": "90cd77357802225e27f8d4aeba647db8e80e534056299cd964323f2d5d8fc564"
+          "sha256": "90cd77357802225e27f8d4aeba647db8e80e534056299cd964323f2d5d8fc564",
+          "current_identity_status": "Changed by qualified RoPE v7; original hash retained and preserved snapshots remain unchanged."
         }
       ],
       "preserved_source_snapshots": [
@@ -17901,6 +17905,2116 @@
         "Existing actual mixer 5 failures and GDN-state/D64 failures remain open."
       ],
       "next_step": "Resolve the two remaining generated FP16 RoPE coefficient differences, then select the qualified rounding only in the native EXL3 model path and rerun the unchanged model-owned mixer/cache gate. Preserve GDN-state/D64 failures and finish remaining S1 and S2-S6."
+    },
+    "S1_attention3_FP16_RoPE_qualified_P128_D1": {
+      "observed_date": "2026-10-03",
+      "scope": "Bounded primitive/cache correction at P128/D1 before model wiring. Does not qualify full model or long positions.",
+      "status": "verified_within_scope",
+      "current_source_and_build_artifacts": [
+        {
+          "status": "historical_observation",
+          "path": "/home/sebastian/LocalLLM/vllm.cpp/src/vt/xpu/xpu_attention.cpp",
+          "bytes": 28818,
+          "sha256": "c6c053bc9f25939530bf4432620efcd0779bf2ec7a237ed3d3f63d75c885ec5b",
+          "current_identity_status": "Changed by model FP16 RoPE/normalization wiring; original hash and preserved snapshots retained."
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/vllm.cpp/tests/vllm/models/test_xpu_qwen_exl3_fp16.cpp",
+          "bytes": 71066,
+          "sha256": "14c957a702f9b23ac2b8fb7d5a27638668e10cffe5d20fb5ebd892338363c6bc"
+        },
+        {
+          "status": "historical_observation",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/engine-build/tests/test_xpu_qwen_exl3_fp16",
+          "bytes": 32356048,
+          "sha256": "4e899b491f7347655a367a614e51746662131e1a7ccffe769b1404c5cc771551",
+          "current_identity_status": "Changed by model FP16 RoPE/normalization wiring; original hash and preserved snapshots retained."
+        }
+      ],
+      "preserved_source_snapshots": [
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-rope-qualified-v7-xpu_attention.cpp",
+          "bytes": 28818,
+          "sha256": "c6c053bc9f25939530bf4432620efcd0779bf2ec7a237ed3d3f63d75c885ec5b"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-rope-qualified-v7-test_xpu_qwen_exl3_fp16.cpp",
+          "bytes": 71066,
+          "sha256": "14c957a702f9b23ac2b8fb7d5a27638668e10cffe5d20fb5ebd892338363c6bc"
+        }
+      ],
+      "preserved_receipts": [
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-rope-cache-device-probe.json",
+          "bytes": 459119,
+          "sha256": "8faec1edc0e6e25b1181533eb541608ab36615c7cd296799df4b14e8e66cd7f9"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-rope-cache-device-probe.log",
+          "bytes": 5423,
+          "sha256": "380c9e51f3d98f3ee8cedf3e31946d1f7bb3671c28eec3e8da4e525ee7ea3367"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-rope-cache-device-probe.py",
+          "bytes": 1625,
+          "sha256": "b89d0724498db34b805f091fd56aad3748f44a19f5dd0fc5c448b0b9efc6cb4f"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-rope-legacy-build-v7.log",
+          "bytes": 148,
+          "sha256": "00f1e424293629dcf50e288204de6a26a42c7e82adc5a97b16030330f63ed3e9"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-rope-legacy-test-v7.log",
+          "bytes": 298,
+          "sha256": "de2eb14aecea1e619652b9af5433468e606ad49ec781ecf7042e40f1344eba09"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-rope-native-build-v5.log",
+          "bytes": 172,
+          "sha256": "f24f3c41f51b0ae2cb8c6d384e9523334eabed6095b267200703fda703753d27"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-rope-native-build-v6.log",
+          "bytes": 183,
+          "sha256": "17a64654c7de7ec6b37cb32659fd4862374894830fa0f82744bc04ab47072504"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-rope-native-build-v7.log",
+          "bytes": 183,
+          "sha256": "17a64654c7de7ec6b37cb32659fd4862374894830fa0f82744bc04ab47072504"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-rope-native-test-v5.log",
+          "bytes": 1354,
+          "sha256": "f7163f52bcc55b6911d47de732381fc3bcc8d6ae5a6963241e6d1519935383a2"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-rope-native-test-v6.log",
+          "bytes": 1354,
+          "sha256": "f7163f52bcc55b6911d47de732381fc3bcc8d6ae5a6963241e6d1519935383a2"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-rope-native-test-v7-scalar.log",
+          "bytes": 749,
+          "sha256": "c1bab9b6956e20105007b8fcd765c3accd165b900b2b3b5de5308708f3ad47b8"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-rope-native-test-v7.log",
+          "bytes": 702,
+          "sha256": "0646dec485ecdc380cf2ba843a22c6bac0c1f429ab7cf34bfe433dccc4cf7085"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-rope-native-trace-v5.jsonl",
+          "bytes": 2836,
+          "sha256": "e096a5bc0b91dd005bce499996a0869a1d74c8397e61612fd50c7cab7d39d963"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-rope-native-trace-v6.jsonl",
+          "bytes": 2836,
+          "sha256": "e096a5bc0b91dd005bce499996a0869a1d74c8397e61612fd50c7cab7d39d963"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-rope-native-trace-v7-scalar.jsonl",
+          "bytes": 2836,
+          "sha256": "e096a5bc0b91dd005bce499996a0869a1d74c8397e61612fd50c7cab7d39d963"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-rope-native-trace-v7.jsonl",
+          "bytes": 2836,
+          "sha256": "e096a5bc0b91dd005bce499996a0869a1d74c8397e61612fd50c7cab7d39d963"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-rope-qualified-v7-test_xpu_qwen_exl3_fp16.cpp",
+          "bytes": 71066,
+          "sha256": "14c957a702f9b23ac2b8fb7d5a27638668e10cffe5d20fb5ebd892338363c6bc"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-rope-qualified-v7-xpu_attention.cpp",
+          "bytes": 28818,
+          "sha256": "c6c053bc9f25939530bf4432620efcd0779bf2ec7a237ed3d3f63d75c885ec5b"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-rope-sycl-math-probe",
+          "bytes": 44872,
+          "sha256": "fefe76f32ace6b9aa591f97659edb805f2e97b617fa9ff287c25931bc4547f35"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-rope-sycl-math-probe-build-v2.log",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-rope-sycl-math-probe-build-v3.log",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-rope-sycl-math-probe-build.log",
+          "bytes": 364,
+          "sha256": "2fe58faa8feb9643ba8b8f265a86b67be7eb0b30620c839f3778b415f7f51632"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-rope-sycl-math-probe-run.log",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-rope-sycl-math-probe-v3",
+          "bytes": 44872,
+          "sha256": "e13abcf7683a8f31c6f7c5d1f781ff1c6398a43d204dbca81de619fa67e1fe74"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-rope-sycl-math-probe-v3-run.log",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-rope-sycl-math-probe-v3.json",
+          "bytes": 3347,
+          "sha256": "0d0400728ca7ef446ca4e4a98c93e9918686f5c032088e7943e3808c1dd3932b"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-rope-sycl-math-probe.cpp",
+          "bytes": 848,
+          "sha256": "5b3933dd302dfcc553401b08f5b3682870c03b493f2f3b5cfb5094ee78423d44"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-rope-sycl-math-probe.json",
+          "bytes": 3347,
+          "sha256": "0d0400728ca7ef446ca4e4a98c93e9918686f5c032088e7943e3808c1dd3932b"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-rope-torch-math-source.txt",
+          "bytes": 4507,
+          "sha256": "00bd8eb9c10f564acd4523dc1306edbf258195d6c414d08a39658ee65271f137"
+        }
+      ],
+      "pinned_Torch_regeneration": {
+        "exit_code": 0,
+        "CPU_half_coefficient_differences": 9,
+        "XPU_half_coefficient_differences": 0,
+        "original_initialization_device_directly_witnessed": false
+      },
+      "correction": "Explicit fdiv_rn for the scoped F32 reciprocal boundary. Widening ordinary division alone did not remove the two differences; failed v5/v6 retained.",
+      "native_auto": {
+        "build_exit_code": 0,
+        "test_exit_code": 0,
+        "cases": 1,
+        "assertions_passed": 38,
+        "half_coefficient_differences": 0,
+        "same_operand_Q_K_rotation_bit_exact": true,
+        "p128_fused_Q_half_differences": 16,
+        "p128_fused_K_half_differences": 5,
+        "d1_fused_Q_K_bit_exact": true
+      },
+      "native_scalar": {
+        "test_exit_code": 0,
+        "cases": 1,
+        "assertions_passed": 38,
+        "half_coefficient_differences": 0,
+        "fused_Q_K_fixed_band_pass": true,
+        "fused_Q_K_bit_exact": false
+      },
+      "legacy_regression": {
+        "build_exit_code": 0,
+        "test_exit_code": 0,
+        "cases": 2,
+        "assertions_passed": 115,
+        "scope": "Existing SG16 preamble and cached RoPE cases only."
+      },
+      "next_step": "Select the qualified FP16 mode in scoped XPU EXL3 model attention, then rerun the unchanged model-owned mixer/cache gate. Remaining strict GDN state, D64 and S2-S6 stay open."
+    },
+    "S1_attention3_model_FP16_RoPE_and_remaining_K_byte": {
+      "observed_date": "2026-10-03",
+      "status": "in_progress",
+      "scope": "Actual model-owned layer3 P128/D1 from unchanged 48-tensor original input-norm and own persistent poisoned native cache. Numerical bands pass; exact K-byte gate still fails.",
+      "current_source_and_build_artifacts": [
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/vllm.cpp/src/vllm/model_executor/models/qwen3_5.cpp",
+          "bytes": 732571,
+          "sha256": "5babc24e9bcdb3d72eead6cd88e85ec3268622383f28da8c9ce0ea9374276b0a"
+        },
+        {
+          "status": "historical_observation",
+          "path": "/home/sebastian/LocalLLM/vllm.cpp/src/vt/xpu/xpu_attention.cpp",
+          "bytes": 29119,
+          "sha256": "90b8f347b6c1871a364fbc469f35e44f5ed0be33a6cbb7d76eb7fb60f6821640",
+          "current_identity_status": "Changed by the source-matched mean/observer checkpoint; historical identity retained. Preserved snapshots and receipts remain unchanged."
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/vllm.cpp/tests/vllm/models/test_xpu_qwen_exl3_fp16.cpp",
+          "bytes": 71066,
+          "sha256": "14c957a702f9b23ac2b8fb7d5a27638668e10cffe5d20fb5ebd892338363c6bc"
+        },
+        {
+          "status": "historical_observation",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/engine-build/tests/test_xpu_qwen_exl3_fp16",
+          "bytes": 32360648,
+          "sha256": "e078c60de2f9ddcfe19e69b1be65e5aa7a5ddb1b6752d0322918bbc4e3f8dfb1",
+          "current_identity_status": "Changed by the source-matched mean/observer checkpoint; historical identity retained. Preserved snapshots and receipts remain unchanged."
+        }
+      ],
+      "preserved_source_snapshots": [
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-v9-source-qwen3_5.cpp",
+          "bytes": 732571,
+          "sha256": "5babc24e9bcdb3d72eead6cd88e85ec3268622383f28da8c9ce0ea9374276b0a"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-v9-source-xpu_attention.cpp",
+          "bytes": 29119,
+          "sha256": "90b8f347b6c1871a364fbc469f35e44f5ed0be33a6cbb7d76eb7fb60f6821640"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-v9-source-test_xpu_qwen_exl3_fp16.cpp",
+          "bytes": 71066,
+          "sha256": "14c957a702f9b23ac2b8fb7d5a27638668e10cffe5d20fb5ebd892338363c6bc"
+        }
+      ],
+      "preserved_receipts": [
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-build-v2.log",
+          "bytes": 193,
+          "sha256": "054dc03114f181783f92d7cbf15454eaeb443ebd438c7d876d820ce28831113a"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-build.log",
+          "bytes": 193,
+          "sha256": "054dc03114f181783f92d7cbf15454eaeb443ebd438c7d876d820ce28831113a"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-localized.json",
+          "bytes": 4871,
+          "sha256": "0136a13038f84d6a1a2696b97c0474476bcf421815c737fef901b98c30e11208"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-model-regression.log",
+          "bytes": 351,
+          "sha256": "e1ef7c8778840d80833d90b0568c681d94e0854c7a37d4cb13bb0de480a003c7"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native/manifest.tsv",
+          "bytes": 884,
+          "sha256": "860432d776df3071079b1900a84d70d3674d4194127ceb255c2547fe2a3b543f"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native/s0_l3_attn_core.bin",
+          "bytes": 1572864,
+          "sha256": "da0c6b5d1577609152cbfe97245dfe72c3e710dac65c2e48bf4e613821c8676b"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native/s0_l3_attn_gate.bin",
+          "bytes": 3145728,
+          "sha256": "4d219bd6a2cbd48bc95ae94d374a1a86f2814623a8da0a7e927961bad528d036"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native/s0_l3_attn_gated.bin",
+          "bytes": 1572864,
+          "sha256": "c25eb15218af86808fbb0a646fb20c2f1e30b48fd1dc2b670123fe8b4dfc1fd5"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native/s0_l3_attn_k_rope.bin",
+          "bytes": 262144,
+          "sha256": "756e8e0b0cf9fea156af584e954ba1de24942847e6572c2ff549ac8c900c6784"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native/s0_l3_attn_key_raw.bin",
+          "bytes": 262144,
+          "sha256": "40f4af973117b82fbd8caea1cc18b9eca682dd4b4811eb8eeca8539bbb9889a8"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native/s0_l3_attn_q_rope.bin",
+          "bytes": 1572864,
+          "sha256": "49a25b267d6a6a22b37ab0285e167c0b94db1790af928a3017b4204d7a6e7826"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native/s0_l3_attn_qgate.bin",
+          "bytes": 3145728,
+          "sha256": "5b6abd040d6cd3b5cd34b64319c22de968701eda45418a49d63119979c5fdef3"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native/s0_l3_attn_value.bin",
+          "bytes": 262144,
+          "sha256": "af7c36101b4702d5dd855f0b6172d62f2ece5473d0562619784a1386835ce167"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native/s1_l3_attn_core.bin",
+          "bytes": 12288,
+          "sha256": "0cfbb93baa3730ebe26787320a571d671f5eb684884e399602a210a71eb1483f"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native/s1_l3_attn_gate.bin",
+          "bytes": 24576,
+          "sha256": "1ed1b529d2823431c1ecdd3ec441e589f5bbc4fbaa684d368c014bc01b8408cd"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native/s1_l3_attn_gated.bin",
+          "bytes": 12288,
+          "sha256": "ace150d35eac24020d73aa30b131054885f30e6016c1388e6e71f8d73fe1c12a"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native/s1_l3_attn_k_rope.bin",
+          "bytes": 2048,
+          "sha256": "24aa601ee695eca6ef821883f37596a1bfcac4d534d3d487a2b68671606adb92"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native/s1_l3_attn_key_raw.bin",
+          "bytes": 2048,
+          "sha256": "d86f738dbb4f54b7753b74c6cef2c661edf98208c61d4dac15705c4e7ba16cc9"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native/s1_l3_attn_q_rope.bin",
+          "bytes": 12288,
+          "sha256": "58ec51d328fde26d9ffb67706e8a02bb711c6b46caa87edf272cf6082230251f"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native/s1_l3_attn_qgate.bin",
+          "bytes": 24576,
+          "sha256": "4379c25d2e78654042d12364add75885f7c46513217d9b8ff18f5c8a633034a7"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native/s1_l3_attn_value.bin",
+          "bytes": 2048,
+          "sha256": "3650686e31e4eaf4b55c3f83999acfc287ac5c4dde019be3ef160d75ea6ef149"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v8/manifest.tsv",
+          "bytes": 884,
+          "sha256": "860432d776df3071079b1900a84d70d3674d4194127ceb255c2547fe2a3b543f"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v8/s0_l3_attn_core.bin",
+          "bytes": 1572864,
+          "sha256": "da0c6b5d1577609152cbfe97245dfe72c3e710dac65c2e48bf4e613821c8676b"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v8/s0_l3_attn_gate.bin",
+          "bytes": 3145728,
+          "sha256": "4d219bd6a2cbd48bc95ae94d374a1a86f2814623a8da0a7e927961bad528d036"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v8/s0_l3_attn_gated.bin",
+          "bytes": 1572864,
+          "sha256": "c25eb15218af86808fbb0a646fb20c2f1e30b48fd1dc2b670123fe8b4dfc1fd5"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v8/s0_l3_attn_k_rope.bin",
+          "bytes": 262144,
+          "sha256": "756e8e0b0cf9fea156af584e954ba1de24942847e6572c2ff549ac8c900c6784"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v8/s0_l3_attn_key_raw.bin",
+          "bytes": 262144,
+          "sha256": "40f4af973117b82fbd8caea1cc18b9eca682dd4b4811eb8eeca8539bbb9889a8"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v8/s0_l3_attn_q_rope.bin",
+          "bytes": 1572864,
+          "sha256": "49a25b267d6a6a22b37ab0285e167c0b94db1790af928a3017b4204d7a6e7826"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v8/s0_l3_attn_qgate.bin",
+          "bytes": 3145728,
+          "sha256": "5b6abd040d6cd3b5cd34b64319c22de968701eda45418a49d63119979c5fdef3"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v8/s0_l3_attn_value.bin",
+          "bytes": 262144,
+          "sha256": "af7c36101b4702d5dd855f0b6172d62f2ece5473d0562619784a1386835ce167"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v8/s1_l3_attn_core.bin",
+          "bytes": 12288,
+          "sha256": "0cfbb93baa3730ebe26787320a571d671f5eb684884e399602a210a71eb1483f"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v8/s1_l3_attn_gate.bin",
+          "bytes": 24576,
+          "sha256": "1ed1b529d2823431c1ecdd3ec441e589f5bbc4fbaa684d368c014bc01b8408cd"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v8/s1_l3_attn_gated.bin",
+          "bytes": 12288,
+          "sha256": "ace150d35eac24020d73aa30b131054885f30e6016c1388e6e71f8d73fe1c12a"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v8/s1_l3_attn_k_rope.bin",
+          "bytes": 2048,
+          "sha256": "24aa601ee695eca6ef821883f37596a1bfcac4d534d3d487a2b68671606adb92"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v8/s1_l3_attn_key_raw.bin",
+          "bytes": 2048,
+          "sha256": "d86f738dbb4f54b7753b74c6cef2c661edf98208c61d4dac15705c4e7ba16cc9"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v8/s1_l3_attn_q_rope.bin",
+          "bytes": 12288,
+          "sha256": "58ec51d328fde26d9ffb67706e8a02bb711c6b46caa87edf272cf6082230251f"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v8/s1_l3_attn_qgate.bin",
+          "bytes": 24576,
+          "sha256": "4379c25d2e78654042d12364add75885f7c46513217d9b8ff18f5c8a633034a7"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v8/s1_l3_attn_value.bin",
+          "bytes": 2048,
+          "sha256": "3650686e31e4eaf4b55c3f83999acfc287ac5c4dde019be3ef160d75ea6ef149"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v9/manifest.tsv",
+          "bytes": 884,
+          "sha256": "860432d776df3071079b1900a84d70d3674d4194127ceb255c2547fe2a3b543f"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v9/s0_l3_attn_core.bin",
+          "bytes": 1572864,
+          "sha256": "da0c6b5d1577609152cbfe97245dfe72c3e710dac65c2e48bf4e613821c8676b"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v9/s0_l3_attn_gate.bin",
+          "bytes": 3145728,
+          "sha256": "4d219bd6a2cbd48bc95ae94d374a1a86f2814623a8da0a7e927961bad528d036"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v9/s0_l3_attn_gated.bin",
+          "bytes": 1572864,
+          "sha256": "c25eb15218af86808fbb0a646fb20c2f1e30b48fd1dc2b670123fe8b4dfc1fd5"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v9/s0_l3_attn_k_rope.bin",
+          "bytes": 262144,
+          "sha256": "756e8e0b0cf9fea156af584e954ba1de24942847e6572c2ff549ac8c900c6784"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v9/s0_l3_attn_key_raw.bin",
+          "bytes": 262144,
+          "sha256": "40f4af973117b82fbd8caea1cc18b9eca682dd4b4811eb8eeca8539bbb9889a8"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v9/s0_l3_attn_q_rope.bin",
+          "bytes": 1572864,
+          "sha256": "49a25b267d6a6a22b37ab0285e167c0b94db1790af928a3017b4204d7a6e7826"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v9/s0_l3_attn_qgate.bin",
+          "bytes": 3145728,
+          "sha256": "5b6abd040d6cd3b5cd34b64319c22de968701eda45418a49d63119979c5fdef3"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v9/s0_l3_attn_value.bin",
+          "bytes": 262144,
+          "sha256": "af7c36101b4702d5dd855f0b6172d62f2ece5473d0562619784a1386835ce167"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v9/s1_l3_attn_core.bin",
+          "bytes": 12288,
+          "sha256": "0cfbb93baa3730ebe26787320a571d671f5eb684884e399602a210a71eb1483f"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v9/s1_l3_attn_gate.bin",
+          "bytes": 24576,
+          "sha256": "1ed1b529d2823431c1ecdd3ec441e589f5bbc4fbaa684d368c014bc01b8408cd"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v9/s1_l3_attn_gated.bin",
+          "bytes": 12288,
+          "sha256": "ace150d35eac24020d73aa30b131054885f30e6016c1388e6e71f8d73fe1c12a"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v9/s1_l3_attn_k_rope.bin",
+          "bytes": 2048,
+          "sha256": "24aa601ee695eca6ef821883f37596a1bfcac4d534d3d487a2b68671606adb92"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v9/s1_l3_attn_key_raw.bin",
+          "bytes": 2048,
+          "sha256": "d86f738dbb4f54b7753b74c6cef2c661edf98208c61d4dac15705c4e7ba16cc9"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v9/s1_l3_attn_q_rope.bin",
+          "bytes": 12288,
+          "sha256": "58ec51d328fde26d9ffb67706e8a02bb711c6b46caa87edf272cf6082230251f"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v9/s1_l3_attn_qgate.bin",
+          "bytes": 24576,
+          "sha256": "4379c25d2e78654042d12364add75885f7c46513217d9b8ff18f5c8a633034a7"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v9/s1_l3_attn_value.bin",
+          "bytes": 2048,
+          "sha256": "3650686e31e4eaf4b55c3f83999acfc287ac5c4dde019be3ef160d75ea6ef149"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-norm-source.txt",
+          "bytes": 9502,
+          "sha256": "db3ba04d3a3f34c707476778d781d43f0cae6b330e607046a73f1d87ed0162a8"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-rms-ir-source.txt",
+          "bytes": 9203,
+          "sha256": "a9a75e9b1c8093f126c080bdf1bdc9089d395ee87ac8ef84f27cd7acd60267f3"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-rms-probe.json",
+          "bytes": 2104,
+          "sha256": "29ab4ea2a7c086cbcbeed38ec4a66b14f460ac889641c93693c74e5046918582"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-rms-probe.log",
+          "bytes": 2104,
+          "sha256": "29ab4ea2a7c086cbcbeed38ec4a66b14f460ac889641c93693c74e5046918582"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-rms-probe.py",
+          "bytes": 1820,
+          "sha256": "b9e3eeeb72aec460ba328929224051eae04c4c80ece927a47b1028b9d6a0ff18"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-rms-sycl-input.bin",
+          "bytes": 1024,
+          "sha256": "2698545a325a21b7ccc8efe006bef6eedbd7cacad7a1ce18c700e8c52b7463d8"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-rms-sycl-probe-build.log",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-rms-sycl-probe-run.log",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-rms-sycl-probe.cpp",
+          "bytes": 1064,
+          "sha256": "4cef36ccaf88df60049a0a50ab75a73605afe15c36c1546ccb81b86c03c20a53"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-rms-sycl-probe.json",
+          "bytes": 93,
+          "sha256": "9a3becc1a49cd8bc06478a1afd7f07562a138765c2c3cda8433be398530d5bd6"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-test-v8.log",
+          "bytes": 2573,
+          "sha256": "24107a0fcad92e3158738dabd3ff1562828ee8ea6e2978c417cd4170fab5c3a2"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-test-v9.log",
+          "bytes": 2573,
+          "sha256": "24107a0fcad92e3158738dabd3ff1562828ee8ea6e2978c417cd4170fab5c3a2"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-test.log",
+          "bytes": 2166,
+          "sha256": "d5bb57a00c8964c6a60338559ec413e1849ad052433bdbb2156ea22a086a84a5"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-trace-v8.jsonl",
+          "bytes": 18471,
+          "sha256": "9c717e209b341edbdfcb476536eaa8d313ebf649fe99005bc629d810d0c91b68"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-trace-v9.jsonl",
+          "bytes": 18471,
+          "sha256": "9c717e209b341edbdfcb476536eaa8d313ebf649fe99005bc629d810d0c91b68"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-trace.jsonl",
+          "bytes": 15630,
+          "sha256": "5fd4fd01073cf781337e66fa49fe3f900a43019d398b46ac8d4c2e9c17fa66aa"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-unfused-native/manifest.tsv",
+          "bytes": 620,
+          "sha256": "6bc5b1a6fed8ff050aacebab779b51851b3a50c9621f930f7135d7a7139011b1"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-unfused-native/s0_l3_attn_core.bin",
+          "bytes": 1572864,
+          "sha256": "8463d89fbaea9ee2aae5ee8e3b1a7c2c6dbcb697bf7d4522f0672f84652631f2"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-unfused-native/s0_l3_attn_gate.bin",
+          "bytes": 3145728,
+          "sha256": "4d219bd6a2cbd48bc95ae94d374a1a86f2814623a8da0a7e927961bad528d036"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-unfused-native/s0_l3_attn_gated.bin",
+          "bytes": 1572864,
+          "sha256": "8b3e11e8e3589bdc22935728e35883ca05cb038bf3ddd814cd20e23a4c5403df"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-unfused-native/s0_l3_attn_k_rope.bin",
+          "bytes": 262144,
+          "sha256": "8f16a85815de865b452227f40b56275830994f09fdf55b1146c559a0945f240b"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-unfused-native/s0_l3_attn_key_raw.bin",
+          "bytes": 262144,
+          "sha256": "40f4af973117b82fbd8caea1cc18b9eca682dd4b4811eb8eeca8539bbb9889a8"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-unfused-native/s0_l3_attn_q_rope.bin",
+          "bytes": 1572864,
+          "sha256": "9d3e7822e287b6bfe584323cbc8ca92e34d931392203743d72fbd9ba07991c89"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-unfused-native/s0_l3_attn_qgate.bin",
+          "bytes": 3145728,
+          "sha256": "5b6abd040d6cd3b5cd34b64319c22de968701eda45418a49d63119979c5fdef3"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-unfused-native/s0_l3_attn_value.bin",
+          "bytes": 262144,
+          "sha256": "af7c36101b4702d5dd855f0b6172d62f2ece5473d0562619784a1386835ce167"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-unfused-native/s1_l3_attn_key_raw.bin",
+          "bytes": 2048,
+          "sha256": "d86f738dbb4f54b7753b74c6cef2c661edf98208c61d4dac15705c4e7ba16cc9"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-unfused-native/s1_l3_attn_qgate.bin",
+          "bytes": 24576,
+          "sha256": "4379c25d2e78654042d12364add75885f7c46513217d9b8ff18f5c8a633034a7"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-unfused-native/s1_l3_attn_value.bin",
+          "bytes": 2048,
+          "sha256": "3650686e31e4eaf4b55c3f83999acfc287ac5c4dde019be3ef160d75ea6ef149"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-unfused-native-v2/manifest.tsv",
+          "bytes": 884,
+          "sha256": "860432d776df3071079b1900a84d70d3674d4194127ceb255c2547fe2a3b543f"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-unfused-native-v2/s0_l3_attn_core.bin",
+          "bytes": 1572864,
+          "sha256": "8463d89fbaea9ee2aae5ee8e3b1a7c2c6dbcb697bf7d4522f0672f84652631f2"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-unfused-native-v2/s0_l3_attn_gate.bin",
+          "bytes": 3145728,
+          "sha256": "4d219bd6a2cbd48bc95ae94d374a1a86f2814623a8da0a7e927961bad528d036"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-unfused-native-v2/s0_l3_attn_gated.bin",
+          "bytes": 1572864,
+          "sha256": "8b3e11e8e3589bdc22935728e35883ca05cb038bf3ddd814cd20e23a4c5403df"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-unfused-native-v2/s0_l3_attn_k_rope.bin",
+          "bytes": 262144,
+          "sha256": "8f16a85815de865b452227f40b56275830994f09fdf55b1146c559a0945f240b"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-unfused-native-v2/s0_l3_attn_key_raw.bin",
+          "bytes": 262144,
+          "sha256": "40f4af973117b82fbd8caea1cc18b9eca682dd4b4811eb8eeca8539bbb9889a8"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-unfused-native-v2/s0_l3_attn_q_rope.bin",
+          "bytes": 1572864,
+          "sha256": "9d3e7822e287b6bfe584323cbc8ca92e34d931392203743d72fbd9ba07991c89"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-unfused-native-v2/s0_l3_attn_qgate.bin",
+          "bytes": 3145728,
+          "sha256": "5b6abd040d6cd3b5cd34b64319c22de968701eda45418a49d63119979c5fdef3"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-unfused-native-v2/s0_l3_attn_value.bin",
+          "bytes": 262144,
+          "sha256": "af7c36101b4702d5dd855f0b6172d62f2ece5473d0562619784a1386835ce167"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-unfused-native-v2/s1_l3_attn_core.bin",
+          "bytes": 12288,
+          "sha256": "0cfbb93baa3730ebe26787320a571d671f5eb684884e399602a210a71eb1483f"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-unfused-native-v2/s1_l3_attn_gate.bin",
+          "bytes": 24576,
+          "sha256": "1ed1b529d2823431c1ecdd3ec441e589f5bbc4fbaa684d368c014bc01b8408cd"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-unfused-native-v2/s1_l3_attn_gated.bin",
+          "bytes": 12288,
+          "sha256": "ace150d35eac24020d73aa30b131054885f30e6016c1388e6e71f8d73fe1c12a"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-unfused-native-v2/s1_l3_attn_k_rope.bin",
+          "bytes": 2048,
+          "sha256": "24aa601ee695eca6ef821883f37596a1bfcac4d534d3d487a2b68671606adb92"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-unfused-native-v2/s1_l3_attn_key_raw.bin",
+          "bytes": 2048,
+          "sha256": "d86f738dbb4f54b7753b74c6cef2c661edf98208c61d4dac15705c4e7ba16cc9"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-unfused-native-v2/s1_l3_attn_q_rope.bin",
+          "bytes": 12288,
+          "sha256": "58ec51d328fde26d9ffb67706e8a02bb711c6b46caa87edf272cf6082230251f"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-unfused-native-v2/s1_l3_attn_qgate.bin",
+          "bytes": 24576,
+          "sha256": "4379c25d2e78654042d12364add75885f7c46513217d9b8ff18f5c8a633034a7"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-unfused-native-v2/s1_l3_attn_value.bin",
+          "bytes": 2048,
+          "sha256": "3650686e31e4eaf4b55c3f83999acfc287ac5c4dde019be3ef160d75ea6ef149"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-unfused-test-v2.log",
+          "bytes": 2166,
+          "sha256": "e102955ecde12ad65b020fc9acb2913ea5ad7ee8380b1a1b46b0a9d11ea449ac"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-unfused-test.log",
+          "bytes": 1535,
+          "sha256": "ea09d8802895a98a88e513f19dc7a1e8fe9f8970e58e8242605262188f101fc2"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-unfused-trace-v2.jsonl",
+          "bytes": 20172,
+          "sha256": "c0b9d22b4165eac9e4e1ba990bbfd2c1d0868334f4ddfc336bf6cbe6808608c6"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-unfused-trace.jsonl",
+          "bytes": 15384,
+          "sha256": "db9329c3c55a30aeb02953e209a9c1785716a5bba144810bdfd28c1f5b596eeb"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-v9-source-qwen3_5.cpp",
+          "bytes": 732571,
+          "sha256": "5babc24e9bcdb3d72eead6cd88e85ec3268622383f28da8c9ce0ea9374276b0a"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-v9-source-test_xpu_qwen_exl3_fp16.cpp",
+          "bytes": 71066,
+          "sha256": "14c957a702f9b23ac2b8fb7d5a27638668e10cffe5d20fb5ebd892338363c6bc"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-v9-source-xpu_attention.cpp",
+          "bytes": 29119,
+          "sha256": "90b8f347b6c1871a364fbc469f35e44f5ed0be33a6cbb7d76eb7fb60f6821640"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-rope-native-build-v8.log",
+          "bytes": 183,
+          "sha256": "17a64654c7de7ec6b37cb32659fd4862374894830fa0f82744bc04ab47072504"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-rope-native-build-v9.log",
+          "bytes": 183,
+          "sha256": "17a64654c7de7ec6b37cb32659fd4862374894830fa0f82744bc04ab47072504"
+        }
+      ],
+      "model_selection": "FullAttnRopeArgs gates producer rounding on XPU + F16 activation + IsExl3Checkpoint. Cache producer/refill and paged/unpaged consumers share args; unfused cache lookup now uses step-row indices, not absolute positions.",
+      "native_v9": {
+        "build_exit_code": 0,
+        "combined_test_exit_code": 1,
+        "combined_cases": 2,
+        "combined_assertions_passed": 693,
+        "combined_assertions_failed": 2,
+        "primitive_assertions_passed": 38,
+        "mixer_assertions_passed": 655,
+        "mixer_assertions_failed": 2,
+        "all_fixed_numerical_bands_pass": true,
+        "p128_Q_half_differences": 19,
+        "p128_K_half_differences": 9,
+        "d1_Q_K_bit_exact": true,
+        "p128_key_byte_differences": 1,
+        "d1_key_byte_differences": 1,
+        "value_byte_differences": 0,
+        "inactive_byte_differences": 0,
+        "selection_counts": {
+          "RopeFromCache": 2,
+          "AttnQkNormRopeGate": 4,
+          "RopeCosSinCache": 3,
+          "Exl3GroupedLinear": 4,
+          "Copy": 18,
+          "ReshapeAndCacheFp8": 2,
+          "PagedAttention": 2,
+          "SigmoidGateBf16": 2
+        },
+        "BF16_arguments": 0,
+        "CPU_reference_selections": 0
+      },
+      "unfused_v2": {
+        "build_exit_code": 0,
+        "test_exit_code": 1,
+        "assertions_passed": 655,
+        "assertions_failed": 2,
+        "p128_and_d1_reached": true,
+        "all_fixed_numerical_bands_pass": true,
+        "key_byte_differences_each_phase": 1,
+        "earlier_absolute_position_lookup_failure_retained": true
+      },
+      "synthetic_model_regression": {
+        "test_exit_code": 0,
+        "cases": 2,
+        "assertions_passed": 4303,
+        "scope": "Paged hybrid and unpaged model/head checks before v8/v9 reciprocal-root variants; not whole real model parity."
+      },
+      "localized_key_byte": {
+        "row": 116,
+        "head": 3,
+        "channel": 213,
+        "rotated": false,
+        "native_half": 1.4375,
+        "original_half": 1.4365234375,
+        "native_E4M3_reference_round": 60,
+        "captured_original_byte": 59
+      },
+      "original_same_operand_norm_probe": {
+        "scope": "Pinned Torch expression from original IR on identical old captured QKV; not a replacement fixture.",
+        "capture_sha256": "05ffbe48817830a0175cedbf4f86fb81369b2288b3fce3adcfe6bdc280d8f5c3",
+        "key_shape": [
+          128,
+          4,
+          256
+        ],
+        "key_stride": [
+          14336,
+          256,
+          1
+        ],
+        "point": {
+          "row": 116,
+          "head": 3,
+          "channel": 213,
+          "raw_value": 1.88671875,
+          "weight_plus_one": 1.244140625,
+          "variance": 2.6682865619659424,
+          "rsqrt": 0.6121863722801208,
+          "divsqrt": 0.6121864318847656,
+          "captured_norm": 1.4365234375
+        },
+        "rsqrt": {
+          "different_halves": 0,
+          "point_norm": 1.4365234375,
+          "differences": []
+        },
+        "divsqrt": {
+          "different_halves": 9,
+          "point_norm": 1.4375,
+          "differences": [
+            {
+              "row": 8,
+              "head": 0,
+              "channel": 165,
+              "generated": 0.0572509765625,
+              "captured": 0.057220458984375
+            },
+            {
+              "row": 49,
+              "head": 3,
+              "channel": 134,
+              "generated": -0.57275390625,
+              "captured": -0.5732421875
+            },
+            {
+              "row": 55,
+              "head": 2,
+              "channel": 242,
+              "generated": 0.254150390625,
+              "captured": 0.25390625
+            },
+            {
+              "row": 56,
+              "head": 3,
+              "channel": 144,
+              "generated": -2.408203125,
+              "captured": -2.41015625
+            },
+            {
+              "row": 75,
+              "head": 2,
+              "channel": 59,
+              "generated": 2.78125,
+              "captured": 2.779296875
+            },
+            {
+              "row": 84,
+              "head": 0,
+              "channel": 118,
+              "generated": 0.492431640625,
+              "captured": 0.49267578125
+            },
+            {
+              "row": 110,
+              "head": 2,
+              "channel": 123,
+              "generated": -0.9912109375,
+              "captured": -0.99169921875
+            },
+            {
+              "row": 112,
+              "head": 3,
+              "channel": 16,
+              "generated": -0.089599609375,
+              "captured": -0.08953857421875
+            },
+            {
+              "row": 116,
+              "head": 3,
+              "channel": 213,
+              "generated": 1.4375,
+              "captured": 1.4365234375
+            }
+          ]
+        }
+      },
+      "native_reduction_probe": {
+        "scope": "Bounded reconstruction of the native SG16 formula, not an instrumented actual kernel.",
+        "original_Torch_mean": 2.6682865619659424,
+        "reconstructed_SG16_mean": 2.6682863235473633,
+        "reconstructed_inverse_root": 0.6121864318847656,
+        "original_Torch_rsqrt": 0.6121863722801208,
+        "ordinary_SYCL_and_native_rsqrt_variants_did_not_resolve_frozen_gate": true
+      },
+      "limitations": [
+        "Old/new full original captures differ upstream from row100; they are not interchangeable. Frozen mixer uses old original inputs and gates.",
+        "Unfused row indices currently allocated/uploaded per layer; graph/lifetime/performance qualification remains later work.",
+        "Whole real target/GDN-state/D64 gates have not been rerun after this model attention change.",
+        "No long-position, multimodal, MTP, graph or S2-S6 qualification."
+      ],
+      "next_step": "Reproduce the original XPU Q/K RMS mean reduction and rsqrt boundary on identical captured inputs, resolve the remaining FP8 K byte without weakening the frozen mixer/cache gate, including the unfused route. Then rerun eager target/state/D64 checks and finish remaining S1 and S2-S6."
+    },
+    "S1_attention3_source_matched_mean_and_actual_inverse_checkpoint": {
+      "observed_date": "2026-10-03",
+      "status": "in_progress",
+      "scope": "Scoped fused XPU FP16 Q/K mean and actual kernel observer. Unchanged model-owned P128/D1 mixer gate still fails; no whole-model parity claim.",
+      "current_source_and_build_artifacts": [
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/vllm.cpp/src/vt/xpu/xpu_attention.cpp",
+          "bytes": 33825,
+          "sha256": "0244c1ef7da2120e98216e7172d2a6b740712415f6e11e49376164194b5ada60"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/vllm.cpp/src/vllm/model_executor/models/qwen3_5.cpp",
+          "bytes": 732571,
+          "sha256": "5babc24e9bcdb3d72eead6cd88e85ec3268622383f28da8c9ce0ea9374276b0a"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/vllm.cpp/tests/vllm/models/test_xpu_qwen_exl3_fp16.cpp",
+          "bytes": 71066,
+          "sha256": "14c957a702f9b23ac2b8fb7d5a27638668e10cffe5d20fb5ebd892338363c6bc"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/engine-build/tests/test_xpu_qwen_exl3_fp16",
+          "bytes": 32424440,
+          "sha256": "078cf3f4a776438446c8c68fcc623f2e604483fcf4ee05bd1ef42ce51651bd1f"
+        }
+      ],
+      "preserved_source_snapshots": [
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-v13-checkpoint-source-xpu_attention.cpp",
+          "bytes": 33825,
+          "sha256": "0244c1ef7da2120e98216e7172d2a6b740712415f6e11e49376164194b5ada60"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-v13-checkpoint-source-qwen3_5.cpp",
+          "bytes": 732571,
+          "sha256": "5babc24e9bcdb3d72eead6cd88e85ec3268622383f28da8c9ce0ea9374276b0a"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-v13-checkpoint-source-test_xpu_qwen_exl3_fp16.cpp",
+          "bytes": 71066,
+          "sha256": "14c957a702f9b23ac2b8fb7d5a27638668e10cffe5d20fb5ebd892338363c6bc"
+        }
+      ],
+      "unchanged_fixtures": [
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/real_attention3_oracle.safetensors",
+          "bytes": 22460520,
+          "sha256": "05ffbe48817830a0175cedbf4f86fb81369b2288b3fce3adcfe6bdc280d8f5c3"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/real_attention3_rope_oracle.safetensors",
+          "bytes": 24326888,
+          "sha256": "36852e1f13d014943f70eb84ee06478b4aa87fbcd1fae394da592dff1d1f59c2"
+        }
+      ],
+      "preserved_receipts": [
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-actual-norm-v12b/mean_inv.0.t128.f32",
+          "bytes": 28672,
+          "sha256": "4b37839e5a6d60a1709f5b154476b6b218ff1872371ba3dab549141a1077fd97"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-actual-norm-v12b/mean_inv.1.t1.f32",
+          "bytes": 224,
+          "sha256": "1b715b00355cb04e34f91268316dbd97d5f51477d8498ef90d66fea3cdd782bb"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-actual-norm-v12b-compare.json",
+          "bytes": 2235,
+          "sha256": "8388ad986172180df240f878d47faa1eaebc353c02eeb76f34f8d608e93bfc75"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-actual-norm-v13/mean_var_inv.0.t128.f32",
+          "bytes": 43008,
+          "sha256": "99a6eecdf627714dd3bafb2a26ed4be19ae1df4c77b8aea389f63301e3c9ca39"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-actual-norm-v13/mean_var_inv.1.t1.f32",
+          "bytes": 336,
+          "sha256": "b96840419245d8e038f85c584169827e96bbe76559b309a4f1db605b15fe8dbf"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-actual-norm-v13-compare.json",
+          "bytes": 2760,
+          "sha256": "7feea58533ded88c0de3dc7dd0d59835d25bdd4ad1e3a60e4ee8901bdde8a446"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v10/manifest.tsv",
+          "bytes": 884,
+          "sha256": "860432d776df3071079b1900a84d70d3674d4194127ceb255c2547fe2a3b543f"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v10/s0_l3_attn_core.bin",
+          "bytes": 1572864,
+          "sha256": "9a48fe55a178028fd433be62a5c40327293c917ab08bc26f156d36854d94862b"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v10/s0_l3_attn_gate.bin",
+          "bytes": 3145728,
+          "sha256": "4d219bd6a2cbd48bc95ae94d374a1a86f2814623a8da0a7e927961bad528d036"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v10/s0_l3_attn_gated.bin",
+          "bytes": 1572864,
+          "sha256": "e6797b51e93608441481327ea3b2a94c23a8b5e73ffff41b5b9e0fcd7e4485cd"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v10/s0_l3_attn_k_rope.bin",
+          "bytes": 262144,
+          "sha256": "cf46352abf1f205200e2fef7ab1409fd26bc7f48d09a55d63e6e092f4679ef95"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v10/s0_l3_attn_key_raw.bin",
+          "bytes": 262144,
+          "sha256": "40f4af973117b82fbd8caea1cc18b9eca682dd4b4811eb8eeca8539bbb9889a8"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v10/s0_l3_attn_q_rope.bin",
+          "bytes": 1572864,
+          "sha256": "880c8af31efddd55b9eff570220ec36bbd7cc56b00781bc0160b2ef48cdcb260"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v10/s0_l3_attn_qgate.bin",
+          "bytes": 3145728,
+          "sha256": "5b6abd040d6cd3b5cd34b64319c22de968701eda45418a49d63119979c5fdef3"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v10/s0_l3_attn_value.bin",
+          "bytes": 262144,
+          "sha256": "af7c36101b4702d5dd855f0b6172d62f2ece5473d0562619784a1386835ce167"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v10/s1_l3_attn_core.bin",
+          "bytes": 12288,
+          "sha256": "0cfbb93baa3730ebe26787320a571d671f5eb684884e399602a210a71eb1483f"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v10/s1_l3_attn_gate.bin",
+          "bytes": 24576,
+          "sha256": "1ed1b529d2823431c1ecdd3ec441e589f5bbc4fbaa684d368c014bc01b8408cd"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v10/s1_l3_attn_gated.bin",
+          "bytes": 12288,
+          "sha256": "ace150d35eac24020d73aa30b131054885f30e6016c1388e6e71f8d73fe1c12a"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v10/s1_l3_attn_k_rope.bin",
+          "bytes": 2048,
+          "sha256": "24aa601ee695eca6ef821883f37596a1bfcac4d534d3d487a2b68671606adb92"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v10/s1_l3_attn_key_raw.bin",
+          "bytes": 2048,
+          "sha256": "d86f738dbb4f54b7753b74c6cef2c661edf98208c61d4dac15705c4e7ba16cc9"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v10/s1_l3_attn_q_rope.bin",
+          "bytes": 12288,
+          "sha256": "58ec51d328fde26d9ffb67706e8a02bb711c6b46caa87edf272cf6082230251f"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v10/s1_l3_attn_qgate.bin",
+          "bytes": 24576,
+          "sha256": "4379c25d2e78654042d12364add75885f7c46513217d9b8ff18f5c8a633034a7"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v10/s1_l3_attn_value.bin",
+          "bytes": 2048,
+          "sha256": "3650686e31e4eaf4b55c3f83999acfc287ac5c4dde019be3ef160d75ea6ef149"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v11/manifest.tsv",
+          "bytes": 884,
+          "sha256": "860432d776df3071079b1900a84d70d3674d4194127ceb255c2547fe2a3b543f"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v11/s0_l3_attn_core.bin",
+          "bytes": 1572864,
+          "sha256": "9a48fe55a178028fd433be62a5c40327293c917ab08bc26f156d36854d94862b"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v11/s0_l3_attn_gate.bin",
+          "bytes": 3145728,
+          "sha256": "4d219bd6a2cbd48bc95ae94d374a1a86f2814623a8da0a7e927961bad528d036"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v11/s0_l3_attn_gated.bin",
+          "bytes": 1572864,
+          "sha256": "e6797b51e93608441481327ea3b2a94c23a8b5e73ffff41b5b9e0fcd7e4485cd"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v11/s0_l3_attn_k_rope.bin",
+          "bytes": 262144,
+          "sha256": "cf46352abf1f205200e2fef7ab1409fd26bc7f48d09a55d63e6e092f4679ef95"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v11/s0_l3_attn_key_raw.bin",
+          "bytes": 262144,
+          "sha256": "40f4af973117b82fbd8caea1cc18b9eca682dd4b4811eb8eeca8539bbb9889a8"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v11/s0_l3_attn_q_rope.bin",
+          "bytes": 1572864,
+          "sha256": "880c8af31efddd55b9eff570220ec36bbd7cc56b00781bc0160b2ef48cdcb260"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v11/s0_l3_attn_qgate.bin",
+          "bytes": 3145728,
+          "sha256": "5b6abd040d6cd3b5cd34b64319c22de968701eda45418a49d63119979c5fdef3"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v11/s0_l3_attn_value.bin",
+          "bytes": 262144,
+          "sha256": "af7c36101b4702d5dd855f0b6172d62f2ece5473d0562619784a1386835ce167"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v11/s1_l3_attn_core.bin",
+          "bytes": 12288,
+          "sha256": "0cfbb93baa3730ebe26787320a571d671f5eb684884e399602a210a71eb1483f"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v11/s1_l3_attn_gate.bin",
+          "bytes": 24576,
+          "sha256": "1ed1b529d2823431c1ecdd3ec441e589f5bbc4fbaa684d368c014bc01b8408cd"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v11/s1_l3_attn_gated.bin",
+          "bytes": 12288,
+          "sha256": "ace150d35eac24020d73aa30b131054885f30e6016c1388e6e71f8d73fe1c12a"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v11/s1_l3_attn_k_rope.bin",
+          "bytes": 2048,
+          "sha256": "24aa601ee695eca6ef821883f37596a1bfcac4d534d3d487a2b68671606adb92"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v11/s1_l3_attn_key_raw.bin",
+          "bytes": 2048,
+          "sha256": "d86f738dbb4f54b7753b74c6cef2c661edf98208c61d4dac15705c4e7ba16cc9"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v11/s1_l3_attn_q_rope.bin",
+          "bytes": 12288,
+          "sha256": "58ec51d328fde26d9ffb67706e8a02bb711c6b46caa87edf272cf6082230251f"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v11/s1_l3_attn_qgate.bin",
+          "bytes": 24576,
+          "sha256": "4379c25d2e78654042d12364add75885f7c46513217d9b8ff18f5c8a633034a7"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v11/s1_l3_attn_value.bin",
+          "bytes": 2048,
+          "sha256": "3650686e31e4eaf4b55c3f83999acfc287ac5c4dde019be3ef160d75ea6ef149"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v12b/manifest.tsv",
+          "bytes": 884,
+          "sha256": "860432d776df3071079b1900a84d70d3674d4194127ceb255c2547fe2a3b543f"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v12b/s0_l3_attn_core.bin",
+          "bytes": 1572864,
+          "sha256": "9a48fe55a178028fd433be62a5c40327293c917ab08bc26f156d36854d94862b"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v12b/s0_l3_attn_gate.bin",
+          "bytes": 3145728,
+          "sha256": "4d219bd6a2cbd48bc95ae94d374a1a86f2814623a8da0a7e927961bad528d036"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v12b/s0_l3_attn_gated.bin",
+          "bytes": 1572864,
+          "sha256": "e6797b51e93608441481327ea3b2a94c23a8b5e73ffff41b5b9e0fcd7e4485cd"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v12b/s0_l3_attn_k_rope.bin",
+          "bytes": 262144,
+          "sha256": "cf46352abf1f205200e2fef7ab1409fd26bc7f48d09a55d63e6e092f4679ef95"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v12b/s0_l3_attn_key_raw.bin",
+          "bytes": 262144,
+          "sha256": "40f4af973117b82fbd8caea1cc18b9eca682dd4b4811eb8eeca8539bbb9889a8"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v12b/s0_l3_attn_q_rope.bin",
+          "bytes": 1572864,
+          "sha256": "880c8af31efddd55b9eff570220ec36bbd7cc56b00781bc0160b2ef48cdcb260"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v12b/s0_l3_attn_qgate.bin",
+          "bytes": 3145728,
+          "sha256": "5b6abd040d6cd3b5cd34b64319c22de968701eda45418a49d63119979c5fdef3"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v12b/s0_l3_attn_value.bin",
+          "bytes": 262144,
+          "sha256": "af7c36101b4702d5dd855f0b6172d62f2ece5473d0562619784a1386835ce167"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v12b/s1_l3_attn_core.bin",
+          "bytes": 12288,
+          "sha256": "0cfbb93baa3730ebe26787320a571d671f5eb684884e399602a210a71eb1483f"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v12b/s1_l3_attn_gate.bin",
+          "bytes": 24576,
+          "sha256": "1ed1b529d2823431c1ecdd3ec441e589f5bbc4fbaa684d368c014bc01b8408cd"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v12b/s1_l3_attn_gated.bin",
+          "bytes": 12288,
+          "sha256": "ace150d35eac24020d73aa30b131054885f30e6016c1388e6e71f8d73fe1c12a"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v12b/s1_l3_attn_k_rope.bin",
+          "bytes": 2048,
+          "sha256": "24aa601ee695eca6ef821883f37596a1bfcac4d534d3d487a2b68671606adb92"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v12b/s1_l3_attn_key_raw.bin",
+          "bytes": 2048,
+          "sha256": "d86f738dbb4f54b7753b74c6cef2c661edf98208c61d4dac15705c4e7ba16cc9"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v12b/s1_l3_attn_q_rope.bin",
+          "bytes": 12288,
+          "sha256": "58ec51d328fde26d9ffb67706e8a02bb711c6b46caa87edf272cf6082230251f"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v12b/s1_l3_attn_qgate.bin",
+          "bytes": 24576,
+          "sha256": "4379c25d2e78654042d12364add75885f7c46513217d9b8ff18f5c8a633034a7"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v12b/s1_l3_attn_value.bin",
+          "bytes": 2048,
+          "sha256": "3650686e31e4eaf4b55c3f83999acfc287ac5c4dde019be3ef160d75ea6ef149"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v13/manifest.tsv",
+          "bytes": 884,
+          "sha256": "860432d776df3071079b1900a84d70d3674d4194127ceb255c2547fe2a3b543f"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v13/s0_l3_attn_core.bin",
+          "bytes": 1572864,
+          "sha256": "9a48fe55a178028fd433be62a5c40327293c917ab08bc26f156d36854d94862b"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v13/s0_l3_attn_gate.bin",
+          "bytes": 3145728,
+          "sha256": "4d219bd6a2cbd48bc95ae94d374a1a86f2814623a8da0a7e927961bad528d036"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v13/s0_l3_attn_gated.bin",
+          "bytes": 1572864,
+          "sha256": "e6797b51e93608441481327ea3b2a94c23a8b5e73ffff41b5b9e0fcd7e4485cd"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v13/s0_l3_attn_k_rope.bin",
+          "bytes": 262144,
+          "sha256": "cf46352abf1f205200e2fef7ab1409fd26bc7f48d09a55d63e6e092f4679ef95"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v13/s0_l3_attn_key_raw.bin",
+          "bytes": 262144,
+          "sha256": "40f4af973117b82fbd8caea1cc18b9eca682dd4b4811eb8eeca8539bbb9889a8"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v13/s0_l3_attn_q_rope.bin",
+          "bytes": 1572864,
+          "sha256": "880c8af31efddd55b9eff570220ec36bbd7cc56b00781bc0160b2ef48cdcb260"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v13/s0_l3_attn_qgate.bin",
+          "bytes": 3145728,
+          "sha256": "5b6abd040d6cd3b5cd34b64319c22de968701eda45418a49d63119979c5fdef3"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v13/s0_l3_attn_value.bin",
+          "bytes": 262144,
+          "sha256": "af7c36101b4702d5dd855f0b6172d62f2ece5473d0562619784a1386835ce167"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v13/s1_l3_attn_core.bin",
+          "bytes": 12288,
+          "sha256": "0cfbb93baa3730ebe26787320a571d671f5eb684884e399602a210a71eb1483f"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v13/s1_l3_attn_gate.bin",
+          "bytes": 24576,
+          "sha256": "1ed1b529d2823431c1ecdd3ec441e589f5bbc4fbaa684d368c014bc01b8408cd"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v13/s1_l3_attn_gated.bin",
+          "bytes": 12288,
+          "sha256": "ace150d35eac24020d73aa30b131054885f30e6016c1388e6e71f8d73fe1c12a"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v13/s1_l3_attn_k_rope.bin",
+          "bytes": 2048,
+          "sha256": "24aa601ee695eca6ef821883f37596a1bfcac4d534d3d487a2b68671606adb92"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v13/s1_l3_attn_key_raw.bin",
+          "bytes": 2048,
+          "sha256": "d86f738dbb4f54b7753b74c6cef2c661edf98208c61d4dac15705c4e7ba16cc9"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v13/s1_l3_attn_q_rope.bin",
+          "bytes": 12288,
+          "sha256": "58ec51d328fde26d9ffb67706e8a02bb711c6b46caa87edf272cf6082230251f"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v13/s1_l3_attn_qgate.bin",
+          "bytes": 24576,
+          "sha256": "4379c25d2e78654042d12364add75885f7c46513217d9b8ff18f5c8a633034a7"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v13/s1_l3_attn_value.bin",
+          "bytes": 2048,
+          "sha256": "3650686e31e4eaf4b55c3f83999acfc287ac5c4dde019be3ef160d75ea6ef149"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-rms-sycl-probe-no-prec",
+          "bytes": 37736,
+          "sha256": "af0b6c35bc30fdd167e01a2cb8739458a579685dbd736f4b450612032e2b669f"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-rms-sycl-probe-no-prec-run.log",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-rms-sycl-probe-no-prec.json",
+          "bytes": 129,
+          "sha256": "39a288ad32d68d15fe72ba37e27c37b2e4cdaf6b3fc74814a6cf6fbd1a97300d"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-rms-sycl-probe-v2",
+          "bytes": 37736,
+          "sha256": "20f956c144627147a6469b541a92b09047acf20a28f24cc316e6ec710b4262d6"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-rms-sycl-probe-v2-run.log",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-rms-sycl-probe-v2.cpp",
+          "bytes": 1221,
+          "sha256": "82308033248cc833307e1d9fceb467ea7d97c09c96cabc0b934bf75bfcf45c4c"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-rms-sycl-probe-v2.json",
+          "bytes": 129,
+          "sha256": "f0acd5eece90d837b0786b43067d3b38171e331bf760c111e508c470b02ce725"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-test-v10.log",
+          "bytes": 2574,
+          "sha256": "024fe0adcf7c42483ff2eab716b9735a37d8e81df27b601b8c616934fed32ec4"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-test-v11.log",
+          "bytes": 2574,
+          "sha256": "024fe0adcf7c42483ff2eab716b9735a37d8e81df27b601b8c616934fed32ec4"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-test-v12b.log",
+          "bytes": 2165,
+          "sha256": "089645d1997e9679a1539ace225bcfb360a3b775440099c6133497521a8b8cd2"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-test-v13.log",
+          "bytes": 2165,
+          "sha256": "089645d1997e9679a1539ace225bcfb360a3b775440099c6133497521a8b8cd2"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-trace-v10.jsonl",
+          "bytes": 18471,
+          "sha256": "9c717e209b341edbdfcb476536eaa8d313ebf649fe99005bc629d810d0c91b68"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-trace-v11.jsonl",
+          "bytes": 18471,
+          "sha256": "9c717e209b341edbdfcb476536eaa8d313ebf649fe99005bc629d810d0c91b68"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-trace-v12b.jsonl",
+          "bytes": 15630,
+          "sha256": "5fd4fd01073cf781337e66fa49fe3f900a43019d398b46ac8d4c2e9c17fa66aa"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-trace-v13.jsonl",
+          "bytes": 15630,
+          "sha256": "5fd4fd01073cf781337e66fa49fe3f900a43019d398b46ac8d4c2e9c17fa66aa"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-rms-mean-compare.json",
+          "bytes": 1985,
+          "sha256": "f52686c5cf9582b7180d130a83178484e723d05be3714dede3e9d07685af849f"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-rms-mean-compare.log",
+          "bytes": 1985,
+          "sha256": "f52686c5cf9582b7180d130a83178484e723d05be3714dede3e9d07685af849f"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-rms-mean-compare.py",
+          "bytes": 2118,
+          "sha256": "16fa223f1bdc1b46e634250c2cd973b1872023e73f612f1e7c67b3b49d98b2f8"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-rms-mean-replay.json",
+          "bytes": 202809,
+          "sha256": "01250dae3774cd170091449ad85cfccfbecef2646b78cc6ce9ce3b019bf5fafb"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-rms-mean-replay.log",
+          "bytes": 1775,
+          "sha256": "97ff47cb4b2bf3d2e61c961064a51eb31575dba5e9173ce35878a938c035b126"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-rms-mean-replay.py",
+          "bytes": 1822,
+          "sha256": "f65826574c2869e549cd81ed88ecc70db314b93d4dff47c6673e08d5d180c9ac"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-rms-multiply-order.json",
+          "bytes": 417,
+          "sha256": "53dacf5daca8666f3ea9cfa6fdd5a069c24c8abcd97c57ddb2abc6536e8327ee"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-rms-native-mean-compare-v2.json",
+          "bytes": 370,
+          "sha256": "0a47846b484b8d59d1d34d74b51db29bff92fe597518767639f3d19729ded93d"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-rms-native-mean-input.bin",
+          "bytes": 525312,
+          "sha256": "8dd9c9e3364ed7c365330ec8157332c3a94dd45530a6c25293b0b2a4a144c468"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-rms-native-mean-output-v2.bin",
+          "bytes": 528384,
+          "sha256": "2f8e5147fa67bfea5c0a40de8a4e562496e279989569c0de1c3075d6001020c4"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-rms-native-mean-output-v3.bin",
+          "bytes": 528384,
+          "sha256": "2f8e5147fa67bfea5c0a40de8a4e562496e279989569c0de1c3075d6001020c4"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-rms-native-mean-output.bin",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-rms-native-mean-probe",
+          "bytes": 42672,
+          "sha256": "62a7b31b53c3d21fe0e4bb11dec81f28d4207b4cdda6d4dfc0b80f2587ac2105"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-rms-native-mean-probe-build-v2.log",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-rms-native-mean-probe-build-v3.log",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-rms-native-mean-probe-build.log",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-rms-native-mean-probe-run.log",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-rms-native-mean-probe-v2",
+          "bytes": 121256,
+          "sha256": "d2e45f02ea8955dab295889f81f873c9f1daf2229d970e019a0929fd2d25bbd6"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-rms-native-mean-probe-v2-run.log",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-rms-native-mean-probe-v2.cpp",
+          "bytes": 2237,
+          "sha256": "71b8e6035739cafb10af0db8594d5581574a634264a8016c86ed88226e4eef97"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-rms-native-mean-probe-v3",
+          "bytes": 121256,
+          "sha256": "fdd7aa6429ddc00cdbc49095f7a25d58ef1596df6e24d6571a1534f8d5181aa1"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-rms-native-mean-probe-v3-run.log",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-rms-native-mean-probe-v3.cpp",
+          "bytes": 2330,
+          "sha256": "b88d96307d0019b5e7fd3b802875e8e0176a3fe7e45134329a9b18009acd863a"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-rms-native-mean-probe.cpp",
+          "bytes": 2034,
+          "sha256": "177e5a115fe79b6bfd648faf2f4d62501867e4049d8d076b0e2b514b1d889b8f"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-torch-device-source.txt",
+          "bytes": 145,
+          "sha256": "be941c263a49f9836b20596aa3b3f6d213cfcc52dffd818b25b409597b94008b"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-torch-memory-source.txt",
+          "bytes": 21006,
+          "sha256": "f37aaa30b0230efb97aeb4d5b237d525d87deea5ec5c4e292f11900407684a6b"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-torch-reduction-source.txt",
+          "bytes": 54585,
+          "sha256": "49c7b319ebeb11c199a1821c03e54a5751cdb08cea07a47823231afc2ece2905"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-rope-native-build-v10.log",
+          "bytes": 183,
+          "sha256": "17a64654c7de7ec6b37cb32659fd4862374894830fa0f82744bc04ab47072504"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-rope-native-build-v11.log",
+          "bytes": 183,
+          "sha256": "17a64654c7de7ec6b37cb32659fd4862374894830fa0f82744bc04ab47072504"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-rope-native-build-v12.log",
+          "bytes": 1502,
+          "sha256": "cffdda050a8cefba92efd0efb3815cf95790460e8acd285f84d1b64e8de58399"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-rope-native-build-v12b.log",
+          "bytes": 183,
+          "sha256": "17a64654c7de7ec6b37cb32659fd4862374894830fa0f82744bc04ab47072504"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-rope-native-build-v13.log",
+          "bytes": 183,
+          "sha256": "17a64654c7de7ec6b37cb32659fd4862374894830fa0f82744bc04ab47072504"
+        }
+      ],
+      "arithmetic": "Pinned Torch D256 vec4 ascending-offset mean reduction emulated on SG16/scalar. F32 weight addition and multiplication boundaries explicit. Generic unfused RMS not changed.",
+      "bounded_replay": {
+        "original_IR_norm_half_differences": 0,
+        "standalone_native_K_heads": 512,
+        "standalone_native_mean_differences": 0,
+        "standalone_native_inverse_differences": 0,
+        "standalone_native_norm_half_differences": 0,
+        "normalized_half_values": 131072,
+        "first_standalone_attempt": "Empty output; failed evidence retained. Subsequent host staging corrected file I/O.",
+        "scope": "Same-input bounded helpers; not live original-worker mean instrumentation or actual mixer qualification."
+      },
+      "actual_kernel_observation": {
+        "scope": "Actual fused kernel observer against bounded same-input pinned Torch replay; not live original-worker internal instrumentation.",
+        "stages": {
+          "p128_q": {
+            "mean_differences": 0,
+            "first_mean": [],
+            "variance_differences": 0,
+            "first_variance": [],
+            "inverse_differences": 891,
+            "first_inverse": [
+              [
+                5,
+                1.7748339176177979,
+                1.7748340368270874
+              ],
+              [
+                6,
+                1.534503698348999,
+                1.5345038175582886
+              ],
+              [
+                8,
+                1.2464063167572021,
+                1.2464061975479126
+              ],
+              [
+                10,
+                1.416607141494751,
+                1.4166072607040405
+              ],
+              [
+                13,
+                1.470686435699463,
+                1.4706865549087524
+              ]
+            ]
+          },
+          "p128_k": {
+            "mean_differences": 0,
+            "first_mean": [],
+            "variance_differences": 0,
+            "first_variance": [],
+            "inverse_differences": 171,
+            "first_inverse": [
+              [
+                3,
+                1.1469026803970337,
+                1.1469025611877441
+              ],
+              [
+                4,
+                0.8116861581802368,
+                0.8116862177848816
+              ],
+              [
+                7,
+                0.6280672550201416,
+                0.6280671954154968
+              ],
+              [
+                9,
+                0.7345081567764282,
+                0.7345080971717834
+              ],
+              [
+                11,
+                0.8209230899810791,
+                0.8209230303764343
+              ]
+            ]
+          },
+          "d1_q": {
+            "mean_differences": 0,
+            "first_mean": [],
+            "variance_differences": 0,
+            "first_variance": [],
+            "inverse_differences": 10,
+            "first_inverse": [
+              [
+                4,
+                0.8975263237953186,
+                0.8975263833999634
+              ],
+              [
+                6,
+                0.9182701706886292,
+                0.9182701110839844
+              ],
+              [
+                9,
+                1.2614492177963257,
+                1.2614493370056152
+              ],
+              [
+                10,
+                1.033144474029541,
+                1.0331443548202515
+              ],
+              [
+                11,
+                0.9594107866287231,
+                0.9594107270240784
+              ]
+            ]
+          },
+          "d1_k": {
+            "mean_differences": 0,
+            "first_mean": [],
+            "variance_differences": 0,
+            "first_variance": [],
+            "inverse_differences": 1,
+            "first_inverse": [
+              [
+                2,
+                0.878532886505127,
+                0.8785328269004822
+              ]
+            ]
+          }
+        },
+        "point": {
+          "mean": {
+            "actual": 2.6682865619659424,
+            "expected": 2.6682865619659424
+          },
+          "variance": {
+            "actual": 2.668287515640259,
+            "expected": 2.668287515640259
+          },
+          "inverse": {
+            "actual": 0.6121864318847656,
+            "expected": 0.6121863722801208
+          }
+        }
+      },
+      "observer": {
+        "environment": "VT_XPU_ATTN_NORM_PROBE",
+        "format": "Little-endian F32 [T,Hq+Hkv,3], Q then K heads; mean, mean+eps, inverse. Version v12b had only [mean,inverse].",
+        "file_creation": "Exclusive; sequence and token count appended to prefix.",
+        "when_unset": "No observer allocation or explicit event wait."
+      },
+      "checks": {
+        "v10_v11": {
+          "build_exit": 0,
+          "cases": 2,
+          "passed_assertions": 693,
+          "assertions": 695,
+          "test_exit": 1
+        },
+        "v12": {
+          "build_exit": 1,
+          "reason": "const sycl::event cannot call nonconst wait_and_throw; fixed in v12b."
+        },
+        "v12b_v13": {
+          "build_exit": 0,
+          "cases": 1,
+          "passed_assertions": 655,
+          "assertions": 657,
+          "test_exit": 1,
+          "key_byte_differences": {
+            "p128": 1,
+            "d1": 1
+          },
+          "value_byte_differences": 0,
+          "inactive_byte_differences": 0,
+          "numerical_band_failures": 0
+        }
+      },
+      "limitations": [
+        "Actual fused inverse-root differences remain despite exact mean/variance; cause unproven.",
+        "Generic unfused producer mean integration and final scalar/legacy regressions pending.",
+        "Whole-target/state/D64 not rerun after model RoPE wiring; earlier failures remain open.",
+        "No S1 completion or S2-S6 qualification."
+      ],
+      "next_step": "Isolate actual-kernel inverse-root differences on identical variances; resolve frozen K-byte gate and qualify fused/scalar/unfused, then real target/state/D64."
     }
   },
   "native_build_environment": {
@@ -18630,13 +20744,13 @@
   "S1_result": {
     "status": "in_progress",
     "complete": false,
-    "completed_scope": "Current native shared reader accepts all409 pinned EXL3 modules including8MTP with verbatim mapped packed/scaling bytes; exact mul1 marker validation added and host-tested. FP16 shared reader/merged BA and explicit EXL3 parameter storage policy host-tested; all64 real native target layer loads verify FP16 norms/Conv/BA. Regular XPU/oneDNN engine library and selected targets build; explicit EXL3 gate/up policy passes M1/M4 B70 checks, and config-declared EXL3 cache planning uses F16 Conv/F32 recurrence with focused spec tests. DenseDev and shared EXL3 output/BA/head boundaries wired; synthetic two-layer B70 paged P4/D1 in merged/split BA subcases passes1066 assertions with60 traced F16 Packed EXL3 calls, no BF16 args or CPU-reference selections. Four alternate dense/pooling entries now resolve scoped F16; pooling gather owner fixed and native unpaged Attention registered. Extended synthetic B70 model check passes3891 assertions (2cases), CPU-agreement unpaged Attention case206, legacy CPU regression242, all exit0. Trace witnesses128 F16 Packed calls and zero BF16/CPU-reference arguments. Typed grouped VT SmallM4/6 port now passes222 assertions: three real M1/M4 fixtures are bit-exact through input Hadamard, split Partials and output; synthetic separate-source groups at M1/4/12/16/128 pass. Scoped native model single projections use producer SmallM; synthetic hybrid/model check passes4287 assertions with129 SmallM calls, no Packed operator selections, BF16 or CPU fallback. Linear-method8/1565 regression passes. Actual model-owned gate/up packed grouping now passes9/1717 focused assertions and2/4287 synthetic model assertions. Trace shows111 native SmallM calls including18 two-source gate/up groups (M4=14,M1=4), down from129 separate calls, with zero BF16/CPU-reference/old Packed selections. Merged host staging is released after first upload and resident packed/map handles are reused. Real layer0 full Gate/Up S2/K5120/N34816 at M1/4/12/16/128 now passes1case/112assertions against the unchanged pinned producer: merged packed operands, active source Hadamards, F32 parts and F16 output are bit-exact (relative/max0), including actual model-resident wrapper reuse. Producer splits are4/3/3/3/1; all10 replay calls native, zero BF16/CPU/Packed. Model-owned grouped QKVZ S2 and QKV S3 are now wired into actual paged/unpaged model calls, with owned packed outputs and native copies where consumers require contiguous Q/K/V. Synthetic test3/4357 passes; direct M1/M4 group/copy checks match each source exactly. Actual model trace84 SmallM calls including9 QKV S3,9 QKVZ S2 and18 Gate/Up S2, zero BF16/CPU/Packed; source resident absence asserted. Real full layer0 QKVZ and layer3 QKV now pass1case/248assertions at M1/4/12/16/128 against unchanged producer, with exact packed merge/active Hadamards/F32 parts/F16 output and actual lazy model seam; relative/max0. Trace20 native calls (10S2/10S3), zero BF16/CPU/Packed. Source mapping survives file destruction; cache reused without source GPU duplicates. Complete6bpw target head K5120/N248320 at M1/4/12/16/128 now passes1case/125assertions against the pinned producer. Exact953548800 packed GPU bytes checked in64MiB chunks, active Hadamards/F32 parts/F16 outputs bit-exact; relative/max0. Actual model linear reuses one packed resident and leaves dense head empty. Trace10 native calls,2 GEMV/8 DPAS,P1all,zero BF16/CPU/Packed. Real layer0 SwiGLU eager gate now passes1case/105assertions at M1/4/12/16/128, bit-exact actual model GateUp and direct SiLU output against resolved pinned forward_native/custom_ops none. FP16 SiLU intermediate confirmed; unrounded diagnostic differs. Trace5 SmallM plus10 SiLU native calls,zero BF16/CPU/Packed. No activation arithmetic change needed. Actual layer0 eager P128/D1 capture now contains44 verified tensors with active Conv/FP32 state continuity exact between P128 after and D1 before; observer greedy IDs13/198 match ordinary. Native FP16 Gemma residual norm fixed to normalize unrounded FP32 sum while storing FP16 residual separately. Regression witness failed8assertions before and now2cases/89pass; actual P128/D1 norm stages meet unchanged producer IR tolerance with exact residuals. P128 post differing halves drop186652 to44; D1 post2368 to0. Synthetic paged model1/1602 and legacy norm1/63928 pass. Traces zero BF16/CPU/Packed; full real block/state still pending. Real layer0 full MLP SwiGLU/down now passes bit-exact at captured P128/D1. Original fused/split GDN replay matches all8 full-worker endpoints exactly; 28 intermediate tensors independently captured and verified. Actual native GDN P128 state remains failing, and explicit prep prototype now passes6154 exact assertions for Q/K/V/Beta after uniform scalar root/order correction; original Torch-free FP16 recurrence and raw gate prefix body replay is bit-exact at P128, but neither is wired/qualified as actual model execution; these are not S1/block/model passes. Native P128 raw-gate operator now qualifies on identical original inputs (1case/11assertions, exact core/state), with genuinely pinned SYCL-TLA and scoped producer math. Actual paged EXL3 path uses qualified FP32 Conv/prep/recurrence; dense BA first differs (genericA20/B21, native oneDNNA3/B3), strict state still fails and D1 is not reached. Default paged regression1case/1602passes. Actual live-worker BA operands/layout/selection still require observation; S1 and all S2-S6 remain incomplete. Actual worker BA input is exact input-norm output, weight bytes exact checkpoint F16 B/A, but identical live operand P128 replays differ5halves; original-original state fails122 values in the unchanged strict band. Native FP16 packed D1 original body integrated: own-state P128->D1 chain1case/19passes with zero output/state/inactive differences; actual paged D1 block from matched original states1case/26passes with exact mixer/Conv/SSM values; default paged regression1case/1602passes. These do not qualify full native P128 block or the eager target. Complete native eager P128/D1 target runs all64 layers/full6bpw248320 head:1case/195assertions pass fixed TV.02/KL.002/top10>=9 triggers against3 original repeats. Native greedy13/198, maxTV.00398878/maxKL.0000512979/top10all10. Trace514 grouped linears,48RawGate/48PackedDecode,32FP8writers,2headM1 calls; zero BF16 args/CPU-reference/old scalar Exl3Gemm. Original repeat maxTV.00265848/maxKL.0000223777/top10all10; some strict state values differ. D64 and full state/block/attention/S1 qualification remain incomplete. Native P128/D64 now executes all65 whole-target steps from own state, all native greedy IDs equal the initial observed original sequence;1case/804of807pass,exit1, with TV failuresD11/D29 and KLD29. Trace65 M1 full-head calls,48RawGate/3072PackedDecode,zeroBF16/CPU/scalarPacked. Original trace replays directly prove all65 actual token prefixes and3position axes match in each of3 repeats; original itself fails frozen distribution triggers (maxTV.135296/maxKL.0868866/top10min9). Native-to-these195 comparisons retain8triggers; no threshold or failed fixture was changed. Strict P128 state/full attention/block/S1 and all S2-S6 remain incomplete. Actual original layer3 now has48 captured P128/D1 tensors and exact active FP8 continuity. Native same-input post-RoPE Q/K/V writer/core1case37assertions passes with byte-exact active writes/untouched capacity and fixed attention band. XPU interleaved-head stride support added; three existing focused cache/attention regressions2275assertions pass. Native QKV/norm/RoPE/complete mixer and all earlier state/D64 failures remain open. Actual model-owned layer3 full-attention P128/D1 now executes on captured input-norm with own native cache:652of657assertions pass,exit1. QKV and gate exact; first differences in fused QK/RoPE (mostly rotated dimensions),122 K byte differences persist and fixed core bands fail2088/5values. Mixer output within unchanged band does not waive these failures. Original normalized FP16 Q/K and actual FP16 cos/sin captured separately (54 tensors). Independent half replay and native RopeFromCache on identical operands are bit-exact at P128/D1. Explicit fused FP16 primitive meets frozen band; focused v4 test37/38 assertions passes, exit1, retaining2 generated half-coefficient differences (down from9). New primitive is not yet selected in actual model; earlier mixer failures remain open.",
+    "completed_scope": "Current native shared reader accepts all409 pinned EXL3 modules including8MTP with verbatim mapped packed/scaling bytes; exact mul1 marker validation added and host-tested. FP16 shared reader/merged BA and explicit EXL3 parameter storage policy host-tested; all64 real native target layer loads verify FP16 norms/Conv/BA. Regular XPU/oneDNN engine library and selected targets build; explicit EXL3 gate/up policy passes M1/M4 B70 checks, and config-declared EXL3 cache planning uses F16 Conv/F32 recurrence with focused spec tests. DenseDev and shared EXL3 output/BA/head boundaries wired; synthetic two-layer B70 paged P4/D1 in merged/split BA subcases passes1066 assertions with60 traced F16 Packed EXL3 calls, no BF16 args or CPU-reference selections. Four alternate dense/pooling entries now resolve scoped F16; pooling gather owner fixed and native unpaged Attention registered. Extended synthetic B70 model check passes3891 assertions (2cases), CPU-agreement unpaged Attention case206, legacy CPU regression242, all exit0. Trace witnesses128 F16 Packed calls and zero BF16/CPU-reference arguments. Typed grouped VT SmallM4/6 port now passes222 assertions: three real M1/M4 fixtures are bit-exact through input Hadamard, split Partials and output; synthetic separate-source groups at M1/4/12/16/128 pass. Scoped native model single projections use producer SmallM; synthetic hybrid/model check passes4287 assertions with129 SmallM calls, no Packed operator selections, BF16 or CPU fallback. Linear-method8/1565 regression passes. Actual model-owned gate/up packed grouping now passes9/1717 focused assertions and2/4287 synthetic model assertions. Trace shows111 native SmallM calls including18 two-source gate/up groups (M4=14,M1=4), down from129 separate calls, with zero BF16/CPU-reference/old Packed selections. Merged host staging is released after first upload and resident packed/map handles are reused. Real layer0 full Gate/Up S2/K5120/N34816 at M1/4/12/16/128 now passes1case/112assertions against the unchanged pinned producer: merged packed operands, active source Hadamards, F32 parts and F16 output are bit-exact (relative/max0), including actual model-resident wrapper reuse. Producer splits are4/3/3/3/1; all10 replay calls native, zero BF16/CPU/Packed. Model-owned grouped QKVZ S2 and QKV S3 are now wired into actual paged/unpaged model calls, with owned packed outputs and native copies where consumers require contiguous Q/K/V. Synthetic test3/4357 passes; direct M1/M4 group/copy checks match each source exactly. Actual model trace84 SmallM calls including9 QKV S3,9 QKVZ S2 and18 Gate/Up S2, zero BF16/CPU/Packed; source resident absence asserted. Real full layer0 QKVZ and layer3 QKV now pass1case/248assertions at M1/4/12/16/128 against unchanged producer, with exact packed merge/active Hadamards/F32 parts/F16 output and actual lazy model seam; relative/max0. Trace20 native calls (10S2/10S3), zero BF16/CPU/Packed. Source mapping survives file destruction; cache reused without source GPU duplicates. Complete6bpw target head K5120/N248320 at M1/4/12/16/128 now passes1case/125assertions against the pinned producer. Exact953548800 packed GPU bytes checked in64MiB chunks, active Hadamards/F32 parts/F16 outputs bit-exact; relative/max0. Actual model linear reuses one packed resident and leaves dense head empty. Trace10 native calls,2 GEMV/8 DPAS,P1all,zero BF16/CPU/Packed. Real layer0 SwiGLU eager gate now passes1case/105assertions at M1/4/12/16/128, bit-exact actual model GateUp and direct SiLU output against resolved pinned forward_native/custom_ops none. FP16 SiLU intermediate confirmed; unrounded diagnostic differs. Trace5 SmallM plus10 SiLU native calls,zero BF16/CPU/Packed. No activation arithmetic change needed. Actual layer0 eager P128/D1 capture now contains44 verified tensors with active Conv/FP32 state continuity exact between P128 after and D1 before; observer greedy IDs13/198 match ordinary. Native FP16 Gemma residual norm fixed to normalize unrounded FP32 sum while storing FP16 residual separately. Regression witness failed8assertions before and now2cases/89pass; actual P128/D1 norm stages meet unchanged producer IR tolerance with exact residuals. P128 post differing halves drop186652 to44; D1 post2368 to0. Synthetic paged model1/1602 and legacy norm1/63928 pass. Traces zero BF16/CPU/Packed; full real block/state still pending. Real layer0 full MLP SwiGLU/down now passes bit-exact at captured P128/D1. Original fused/split GDN replay matches all8 full-worker endpoints exactly; 28 intermediate tensors independently captured and verified. Actual native GDN P128 state remains failing, and explicit prep prototype now passes6154 exact assertions for Q/K/V/Beta after uniform scalar root/order correction; original Torch-free FP16 recurrence and raw gate prefix body replay is bit-exact at P128, but neither is wired/qualified as actual model execution; these are not S1/block/model passes. Native P128 raw-gate operator now qualifies on identical original inputs (1case/11assertions, exact core/state), with genuinely pinned SYCL-TLA and scoped producer math. Actual paged EXL3 path uses qualified FP32 Conv/prep/recurrence; dense BA first differs (genericA20/B21, native oneDNNA3/B3), strict state still fails and D1 is not reached. Default paged regression1case/1602passes. Actual live-worker BA operands/layout/selection still require observation; S1 and all S2-S6 remain incomplete. Actual worker BA input is exact input-norm output, weight bytes exact checkpoint F16 B/A, but identical live operand P128 replays differ5halves; original-original state fails122 values in the unchanged strict band. Native FP16 packed D1 original body integrated: own-state P128->D1 chain1case/19passes with zero output/state/inactive differences; actual paged D1 block from matched original states1case/26passes with exact mixer/Conv/SSM values; default paged regression1case/1602passes. These do not qualify full native P128 block or the eager target. Complete native eager P128/D1 target runs all64 layers/full6bpw248320 head:1case/195assertions pass fixed TV.02/KL.002/top10>=9 triggers against3 original repeats. Native greedy13/198, maxTV.00398878/maxKL.0000512979/top10all10. Trace514 grouped linears,48RawGate/48PackedDecode,32FP8writers,2headM1 calls; zero BF16 args/CPU-reference/old scalar Exl3Gemm. Original repeat maxTV.00265848/maxKL.0000223777/top10all10; some strict state values differ. D64 and full state/block/attention/S1 qualification remain incomplete. Native P128/D64 now executes all65 whole-target steps from own state, all native greedy IDs equal the initial observed original sequence;1case/804of807pass,exit1, with TV failuresD11/D29 and KLD29. Trace65 M1 full-head calls,48RawGate/3072PackedDecode,zeroBF16/CPU/scalarPacked. Original trace replays directly prove all65 actual token prefixes and3position axes match in each of3 repeats; original itself fails frozen distribution triggers (maxTV.135296/maxKL.0868866/top10min9). Native-to-these195 comparisons retain8triggers; no threshold or failed fixture was changed. Strict P128 state/full attention/block/S1 and all S2-S6 remain incomplete. Actual original layer3 now has48 captured P128/D1 tensors and exact active FP8 continuity. Native same-input post-RoPE Q/K/V writer/core1case37assertions passes with byte-exact active writes/untouched capacity and fixed attention band. XPU interleaved-head stride support added; three existing focused cache/attention regressions2275assertions pass. Native QKV/norm/RoPE/complete mixer and all earlier state/D64 failures remain open. Actual model-owned layer3 full-attention P128/D1 now executes on captured input-norm with own native cache:652of657assertions pass,exit1. QKV and gate exact; first differences in fused QK/RoPE (mostly rotated dimensions),122 K byte differences persist and fixed core bands fail2088/5values. Mixer output within unchanged band does not waive these failures. Original normalized FP16 Q/K and actual FP16 cos/sin captured separately (54 tensors). Independent half replay and native RopeFromCache on identical operands are bit-exact at P128/D1. Explicit fused FP16 primitive meets frozen band; focused v4 test37/38 assertions passes, exit1, retaining2 generated half-coefficient differences (down from9). New primitive is not yet selected in actual model; earlier mixer failures remain open. Bounded RoPE cache v7 now matches all original half coefficients at positions0-128 after explicit F32 round-to-nearest division. Auto and scalar primitive cases each38/38pass; two default SG16/cached-RoPE regressions115pass. Actual model wiring remains next. Scoped model FP16 RoPE selected consistently for XPU EXL3 cache and attention consumers. Real model-owned P128/D1 mixer now655/657 assertions passes: all frozen numerical bands pass, K-byte differences122->1 persist intoD1, V/inactive exact. Primitive38/38 still passes. Unfused absolute-position lookup fixed and also655/657 passes. Original same-input RMS rsqrt probe is exact, but native SG16 mean/rsqrt boundary remains distinct; no mixer/S1 pass claimed. Source-matched fused D256 mean now exact across all3612 P128/D1 heads; actual variance also exact. Inverse-root differences remain (P128 Q891/K171,D1 Q10/K1). Final v13 build passes, mixer655/657 assertions fails unchanged K-byte checks; standalone helper success does not waive actual failures.",
     "remaining": [
       "Complete native target/MTP loader mapping and GPU upload, real FP16 model/state/attention boundary qualification",
       "Qualify immutable-map validation/reuse without per-call readback; graph/multi-queue lifetime and performance remain later gates.",
       "Qualify remaining real SmallM families, independent nonlinear stages and one complete real block",
       "Eager complete target parity at P128 D1/D64, then remaining S2-S6 including W8A8, FP8, MTP, graphs and prefix/state lifecycle"
     ],
-    "next_step": "Resolve the two remaining generated FP16 RoPE coefficient differences, then select the qualified rounding only in the native EXL3 model path and rerun the unchanged model-owned mixer/cache gate. Preserve GDN-state/D64 failures and finish remaining S1 and S2-S6."
+    "next_step": "Isolate the actual fused inverse-root difference on identical variance inputs and resolve the unchanged K-byte gate; qualify fused/scalar/unfused execution. Then rerun real target/state/D64 and finish S1 and S2-S6."
   }
 }
