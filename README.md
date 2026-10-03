@@ -37,6 +37,9 @@
 
 ## News
 
+- **2026-09** **Vulkan gains TQ1_0 ternary kernels.** Matrix multiplication and fused MoE
+  kernels operate on compressed weights. TQ1_0 and TQ2_0 GGUF loading remain unsupported.
+  See [kernel coverage and limits](docs/FEATURES.md#ternary-kernels).
 - **2026-09** **Tev1 serves typed decisions and chat from one engine.**
   The decision route returns probabilities for each question. See the
   [Tev1 recipe](docs/models/tev1.md) for activation, CPU comparisons, and remaining validation gaps.
