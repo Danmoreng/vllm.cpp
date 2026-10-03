@@ -6152,7 +6152,8 @@ DBuf FullAttnBlock(Dev d, const FullAttnLayerWeights& w, const HfConfig& cfg,
     vt::AttnGateSplit(d.q, qf.t(), gatef.t(), qgate);
     Tensor dqw = ResidentWeightF32(d, w.q_norm, {Dh});
     Tensor dqn2d = Reshape(dq3.t(), {T * Hq, Dh});
-    vt::RmsNorm(d.q, dqn2d, Reshape(qf.t(), {T * Hq, Dh}), dqw, vt::RmsNormArgs{eps, true});
+    const vt::RmsNormArgs qk_norm{eps, true, rope.fp16_intermediates && Dh == 256};
+    vt::RmsNorm(d.q, dqn2d, Reshape(qf.t(), {T * Hq, Dh}), dqw, qk_norm);
     // `RmsNorm` NO LONGER requires `w.dtype == x.dtype`; #2477/#2493 gave the CUDA
     // kernel its own `Tw`, and #2492 did the same for the ROCm and fp8 twins. This
     // selection is therefore a WORK-AROUND FOR A CONSTRAINT THAT NO LONGER EXISTS,
@@ -6166,7 +6167,7 @@ DBuf FullAttnBlock(Dev d, const FullAttnLayerWeights& w, const HfConfig& cfg,
                                            : ResidentWeightF32(d, w.k_norm, {Dh});
     Tensor dkn2d = Reshape(dk3.t(), {T * Hkv, Dh});
     vt::RmsNorm(d.q, dkn2d, Reshape(kf, {T * Hkv, Dh}), dkw,
-                vt::RmsNormArgs{eps, true});
+                qk_norm);
     DBuf dpos(d, DType::kI32, {T}, positions.data());
     // A resolved zero rotary width preserves the normalized query/key bytes.
     if (rot != 0) {
@@ -6354,7 +6355,8 @@ DBuf FullAttnBlockPaged(Dev d, const FullAttnLayerWeights& w, const HfConfig& cf
     vt::AttnGateSplit(d.q, qf.t(), gatef.t(), qgate);
     Tensor dqw = ResidentWeightF32(d, w.q_norm, {Dh});
     Tensor dqn2d = Reshape(dq3.t(), {T * Hq, Dh});
-    vt::RmsNorm(d.q, dqn2d, Reshape(qf.t(), {T * Hq, Dh}), dqw, vt::RmsNormArgs{eps, true});
+    const vt::RmsNormArgs qk_norm{eps, true, rope.fp16_intermediates && Dh == 256};
+    vt::RmsNorm(d.q, dqn2d, Reshape(qf.t(), {T * Hq, Dh}), dqw, qk_norm);
     // k-norm weight dtype must equal kf's (RmsNorm requires w.dtype == x.dtype). When
     // kf is bf16 (VT_BF16_GEMM_OUT on the fp4 path) use the raw bf16 on-disk k_norm;
     // otherwise (fp8/35B or toggle off) keep the f32 upcast. bf16 kf · bf16 dkw -> f32.
@@ -6362,7 +6364,7 @@ DBuf FullAttnBlockPaged(Dev d, const FullAttnLayerWeights& w, const HfConfig& cf
                                            : ResidentWeightF32(d, w.k_norm, {Dh});
     Tensor dkn2d = Reshape(dk3.t(), {T * Hkv, Dh});
     vt::RmsNorm(d.q, dkn2d, Reshape(kf, {T * Hkv, Dh}), dkw,
-                vt::RmsNormArgs{eps, true});
+                qk_norm);
     // Keep negative-width validation in the shared primitive. Only zero is no work.
     if (rot != 0) {
       if (rope.fp16_intermediates) {

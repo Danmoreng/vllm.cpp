@@ -1372,3 +1372,129 @@ Production is inactive and no native/oracle job remains running. **Next:** isola
 the actual-kernel inverse-root difference on identical variance inputs, resolve
 the remaining K byte, qualify fused/scalar/unfused paths, then rerun the real
 target/state/D64 gates. S1 and all S2-S6 remain incomplete.
+
+
+## 36. Qualified fused and scalar Q/K, RoPE and model-owned KV bytes
+
+Changing native rsqrt to regular SYCL rsqrt alone (v14b) still passes655/657,
+exit1, with the same actual inverse differences. The first v14 invocation
+ended before norm observation because its dump directory had not been created;
+that failed receipt is retained separately. LLVM text emission is unavailable
+in this installed Intel compiler; saved device bitcode translated to SPIR-V
+text is retained instead. Failed diagnostic invocations are also retained.
+
+Separate compile-time producer/legacy kernel instantiations (v15) resolve the
+actual inverse difference. The observed3612 means, variances and inverses all
+match the same-input bounded Torch replay exactly. The old frozen48-tensor
+model-owned mixer test passes **657/657 assertions,exit0**. P128/D1 Q/K become
+bit-exact, both active K/V caches and inactive capacity exact; all unchanged
+numerical core/gated/mixer bands pass. This shows the effective repair, not a
+proof of a particular backend optimization or compiler defect.
+
+The v15b default run without VT_XPU_ATTN_NORM_PROBE passes695/695,exit0.
+Scalar initially fails5/695: only rotated Q/K differ, with121 K bytes retained
+into D1. Its actual means/variances/inverses are also exact. Saved scalar
+SPIR-V lowers rotation products to Half FMul, unlike the passing SG16 F32
+products. Explicit F32 round-to-nearest multiplication before each scalar F16
+product narrowing restores the original boundary (v16).
+
+Final focused v16 build exits0. Default and scalar runs each pass
+**2cases/695assertions,exit0**, with the norm observer unset. The separate
+54-tensor primitive fixture and old48-tensor mixer fixture remain unchanged;
+all P128/D1 Q/K half values and bounded positions0-128 coefficients are exact
+in each test's own reference. Active K/V writes and poisoned unused capacity
+are exact at both phases. All16 native model stage dumps are byte-identical
+between default and scalar. Two existing SG16/cached-RoPE cases pass
+**115/115 assertions,exit0** in both default and scalar selections against the
+rebuilt current library.
+
+Source/build identities, successful bounded runs and all failed attempts are
+recorded in `reference_B.S1_attention3_fused_scalar_exact_QK_and_KV`.
+**Next:** use the qualified reduction/root boundaries for scoped unfused Q/K
+RMS and rerun its unchanged model-owned mixer/cache gate. The temporary
+unfused selected-row allocation still needs later graph/lifetime work. Whole
+native target/state/D64 have not been rerun since the RoPE wiring; their prior
+failures remain open. S1 and S2-S6 are incomplete. Production remains stopped;
+all jobs from this step are terminal.
+
+
+## 37. Qualified scoped unfused Q/K normalization
+
+RmsNormArgs has an explicit default-false qk_fp16 selection. The standalone
+VT wrapper accepts it only on XPU at D256, with F16/F32 inputs, F16 output,
+F32 Gemma weights and no residual. Model paged/unpaged Q/K calls select it
+only when the existing EXL3/XPU/F16 boundary is active and Dh is256. Other
+head widths retain their existing norm selection; unsupported explicit requests
+are rejected instead of silently using another precision/backend contract.
+
+The qualified D256 mean and explicit F32 multiply helpers now live in one
+private XPU header shared by fused attention and standalone RMS. The new
+standalone producer kernel has its own rsqrt body, separate from legacy1/sqrt,
+and narrows normalized outputs into F16. B70 uses its SG16 implementation;
+its no-SG16 scalar fallback has not been exercised on this card. Generic
+residual/other-width RMS arithmetic is unchanged.
+
+Focused v1 and final v2 builds exit0. Final own-cache P128/D1 unfused mixer
+passes **1case/657assertions,exit0** on the unchanged48-tensor fixture. Every
+Q/K half, active K/V byte and inactive-capacity byte is exact; numerical
+core/gated/mixer bands pass. The trace witnesses4 standalone RMS selections,
+2 cached rotations and zero fused preamble selections, BF16 tensor arguments
+or CPU-reference selections. All16 v1 unfused/fused native model stage dumps
+are bit-identical. The final v2 width eligibility restricts the new selection
+to the qualified geometry; internal standalone means/inverses are not separately
+instrumented by this gate.
+
+After sharing the helper, v1 fused auto and scalar each pass2cases/695assertions,
+exit0, and final v2 fused auto repeats695/695,exit0. The existing generic RMS
+case (weights/Gemma, residuals and aliases) passes **63928/63928 assertions,
+exit0**. No frozen tolerance/fixture or earlier failed receipt was changed.
+This qualifies bounded attention paths, not the complete target or S1.
+
+Source/build identities and focused results are retained in
+`reference_B.S1_attention3_unfused_QK_FP16_qualified`. **Next:** rerun the
+complete native64-layer target P128/D1 and D64 gates after these attention
+changes, then resolve the remaining full block/state requirements. The unfused
+selected-row scratch/upload still needs later graph/lifetime/performance
+qualification. S1 and S2-S6 remain incomplete; production remains stopped.
+
+
+## 38. Whole-target rerun after Q/K/RoPE qualification
+
+The current final v2 binary executes the complete64-layer target with F16
+activations, FP32 GDN state, FP8 KV and the full6-bpw248320 head. It keeps its
+own native continuation/cache; original state is never restored. The norm
+observer and stage dumps are unset, and MTP/graphs are disabled by this eager
+functional seam. New output prefixes preserve all earlier logits/failed tests.
+
+P128/D1 against the unchanged3 original repeats now passes
+**1case/197assertions,exit0**. Greedy IDs13/198 match all repeats; top10 overlap
+is10 in all6 comparisons. MaxTV0.00370011 and maxKL0.0000469401 remain inside
+TV0.02/KL0.002. Trace witnesses514 grouped linears,48 raw-gate prefill calls,
+48 packed decodes,32 FP8 writers and2 full-head M1 calls. BF16 arguments,
+CPU-reference and old scalar-packed selections are zero.
+
+P128/D64 completes all65 steps but fails its unchanged distribution gate:
+**1case/801of807assertions,exit1**. All65 native greedy IDs equal the original
+observed sequence, and top10 overlap is at least9. Both TV and KL fail at
+D24 (0.0315285/0.00285727), D27 (0.0343527/0.0025539) and D29
+(0.223781/0.169353). The earlier D11 failure is absent in this run; the larger
+D29 failure is retained, not replaced or attributed to variability as a pass.
+Trace witnesses65 full-head M1 calls,48 raw-gate prefill and3072 packed decode
+calls, with zero BF16/CPU-reference/old scalar-packed selections.
+
+The existing comparator also checks all65 current rows against the3 earlier
+original repeats with directly observed input prefixes and all3 position axes.
+It revalidates those witnesses and immutable capture hashes. Report generation
+exits0, but **10of195 comparisons retain investigation triggers**: D11/repeat1,
+D14/repeat2, D24/repeats0/1, D27/all3 and D29/all3. MaxTV0.2057348624 and
+maxKL0.1627901091 remain failing. This additional comparison does not replace
+or waive the exit1 native test. Previously measured original-original variance
+and strict state failures remain separate evidence, not qualification.
+
+Results, all65 new bounded logit rows, traces and source/build identities are
+recorded in `reference_B.S1_target_after_QK_RoPE_qualification`.
+**Next:** replay full-width Gemma normalization and BA/state boundaries on
+identical frozen operands, identify the first remaining mean/root/block
+arithmetic difference, then rerun the unchanged block/state/D64 gates after a
+source-backed repair. Complete S1 and then S2-S6; none is marked complete here.
+Production remains stopped and all jobs from this step are terminal.

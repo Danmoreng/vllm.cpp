@@ -974,6 +974,9 @@ struct DropinProbeArgs {
 struct RmsNormArgs {
   float eps = 1e-6f;
   bool gemma = false;  // weight applied as (1 + w), GemmaRMSNorm style
+  // Producer Q/K boundary: XPU D256, F16 output, F32 weight, no residual.
+  // F16/F32 input is normalized by the pinned F32 mean/rsqrt order.
+  bool qk_fp16 = false;
 };
 
 struct ResidualRmsNormArgs {

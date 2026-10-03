@@ -11628,10 +11628,11 @@
       "status": "verified_real_capture_and_scoped_normalization_gate",
       "scope": "Pinned real layer0 P128/D1 normalization on identical captured inputs plus narrow/wide FP32-sum rounding witness and aliases. Complete mixer/block/state numerical replay remains unqualified.",
       "kernel_source": {
-        "status": "verified",
+        "status": "historical_observation",
         "path": "/home/sebastian/LocalLLM/vllm.cpp/src/vt/xpu/xpu_norm.cpp",
         "bytes": 4515,
-        "sha256": "242d6508130ec564921a963fa7aaf76d0c398a27a65d5b5410a86aef548b1919"
+        "sha256": "242d6508130ec564921a963fa7aaf76d0c398a27a65d5b5410a86aef548b1919",
+        "current_identity_status": "Changed by scoped standalone Q/K norm/shared helper wiring; historical identity retained. Preserved snapshots and reference receipts remain unchanged."
       },
       "test_source": {
         "status": "historical_observation",
@@ -11821,10 +11822,11 @@
           "sha256": "49ed3e7618022459c61895dd23ee778c08f1a21277952e34cff9bcbfae66c6b8"
         },
         "binary": {
-          "status": "verified",
+          "status": "historical_observation",
           "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/engine-build/tests/test_xpu_ops",
           "bytes": 31477464,
-          "sha256": "a3c8c23b59416d6e9ab1021febe5fe84e9616ab51887cdad761d9c60e489d51b"
+          "sha256": "a3c8c23b59416d6e9ab1021febe5fe84e9616ab51887cdad761d9c60e489d51b",
+          "current_identity_status": "Changed by scoped standalone Q/K norm/shared helper wiring; historical identity retained. Preserved snapshots and reference receipts remain unchanged."
         },
         "scope": "Existing CPU-agreement weight/1+weight, residual rounding and alias contract; no whole CPU/XPU suite."
       },
@@ -17142,10 +17144,11 @@
           "current_identity_status": "changed during model-owned attention mixer step; original hash retained"
         },
         {
-          "status": "verified",
+          "status": "historical_observation",
           "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/engine-build/tests/test_xpu_attention",
           "bytes": 32136888,
-          "sha256": "be9db4942e9fba2c11082524c828a5ea778bc06b191fb837757dce230e64761b"
+          "sha256": "be9db4942e9fba2c11082524c828a5ea778bc06b191fb837757dce230e64761b",
+          "current_identity_status": "Changed by qualified fused/scalar root and rotation boundaries; historical identity retained. Preserved snapshots/receipts are unchanged."
         }
       ],
       "preserved_receipts": [
@@ -17637,16 +17640,18 @@
           "sha256": "dc75f2c1fe373ed76e4adcd57695ba3cdc8acaaa53f3b245e2fbdeae69a17baa"
         },
         {
-          "status": "verified",
+          "status": "historical_observation",
           "path": "/home/sebastian/LocalLLM/vllm.cpp/include/vt/ops.h",
           "bytes": 403359,
-          "sha256": "18cec075867671e6c508666b88813bdaa50ed7eb6db9cce974fb2bdae72fadfb"
+          "sha256": "18cec075867671e6c508666b88813bdaa50ed7eb6db9cce974fb2bdae72fadfb",
+          "current_identity_status": "Changed by scoped standalone Q/K norm/shared helper wiring; historical identity retained. Preserved snapshots and reference receipts remain unchanged."
         },
         {
-          "status": "verified",
+          "status": "historical_observation",
           "path": "/home/sebastian/LocalLLM/vllm.cpp/src/vt/ops.cpp",
           "bytes": 388463,
-          "sha256": "2edcae8d20a51bd5f62f3fb0c1eab4db5a17d08fc5a7e563392fc3e240f3a6ee"
+          "sha256": "2edcae8d20a51bd5f62f3fb0c1eab4db5a17d08fc5a7e563392fc3e240f3a6ee",
+          "current_identity_status": "Changed by scoped standalone Q/K norm/shared helper wiring; historical identity retained. Preserved snapshots and reference receipts remain unchanged."
         },
         {
           "status": "historical_observation",
@@ -18163,10 +18168,11 @@
       "scope": "Actual model-owned layer3 P128/D1 from unchanged 48-tensor original input-norm and own persistent poisoned native cache. Numerical bands pass; exact K-byte gate still fails.",
       "current_source_and_build_artifacts": [
         {
-          "status": "verified",
+          "status": "historical_observation",
           "path": "/home/sebastian/LocalLLM/vllm.cpp/src/vllm/model_executor/models/qwen3_5.cpp",
           "bytes": 732571,
-          "sha256": "5babc24e9bcdb3d72eead6cd88e85ec3268622383f28da8c9ce0ea9374276b0a"
+          "sha256": "5babc24e9bcdb3d72eead6cd88e85ec3268622383f28da8c9ce0ea9374276b0a",
+          "current_identity_status": "Changed by scoped standalone Q/K norm/shared helper wiring; historical identity retained. Preserved snapshots and reference receipts remain unchanged."
         },
         {
           "status": "historical_observation",
@@ -19043,16 +19049,18 @@
       "scope": "Scoped fused XPU FP16 Q/K mean and actual kernel observer. Unchanged model-owned P128/D1 mixer gate still fails; no whole-model parity claim.",
       "current_source_and_build_artifacts": [
         {
-          "status": "verified",
+          "status": "historical_observation",
           "path": "/home/sebastian/LocalLLM/vllm.cpp/src/vt/xpu/xpu_attention.cpp",
           "bytes": 33825,
-          "sha256": "0244c1ef7da2120e98216e7172d2a6b740712415f6e11e49376164194b5ada60"
+          "sha256": "0244c1ef7da2120e98216e7172d2a6b740712415f6e11e49376164194b5ada60",
+          "current_identity_status": "Changed by qualified fused/scalar root and rotation boundaries; historical identity retained. Preserved snapshots/receipts are unchanged."
         },
         {
-          "status": "verified",
+          "status": "historical_observation",
           "path": "/home/sebastian/LocalLLM/vllm.cpp/src/vllm/model_executor/models/qwen3_5.cpp",
           "bytes": 732571,
-          "sha256": "5babc24e9bcdb3d72eead6cd88e85ec3268622383f28da8c9ce0ea9374276b0a"
+          "sha256": "5babc24e9bcdb3d72eead6cd88e85ec3268622383f28da8c9ce0ea9374276b0a",
+          "current_identity_status": "Changed by scoped standalone Q/K norm/shared helper wiring; historical identity retained. Preserved snapshots and reference receipts remain unchanged."
         },
         {
           "status": "verified",
@@ -19061,10 +19069,11 @@
           "sha256": "14c957a702f9b23ac2b8fb7d5a27638668e10cffe5d20fb5ebd892338363c6bc"
         },
         {
-          "status": "verified",
+          "status": "historical_observation",
           "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/engine-build/tests/test_xpu_qwen_exl3_fp16",
           "bytes": 32424440,
-          "sha256": "078cf3f4a776438446c8c68fcc623f2e604483fcf4ee05bd1ef42ce51651bd1f"
+          "sha256": "078cf3f4a776438446c8c68fcc623f2e604483fcf4ee05bd1ef42ce51651bd1f",
+          "current_identity_status": "Changed by qualified fused/scalar root and rotation boundaries; historical identity retained. Preserved snapshots/receipts are unchanged."
         }
       ],
       "preserved_source_snapshots": [
@@ -20015,6 +20024,3538 @@
         "No S1 completion or S2-S6 qualification."
       ],
       "next_step": "Isolate actual-kernel inverse-root differences on identical variances; resolve frozen K-byte gate and qualify fused/scalar/unfused, then real target/state/D64."
+    },
+    "S1_attention3_fused_scalar_exact_QK_and_KV": {
+      "observed_date": "2026-10-03",
+      "status": "verified_bounded_fused_and_scalar_mixer",
+      "scope": "Native actual model-owned P128/D1 attention from the unchanged original input-norm fixture and own poisoned persistent cache. Separate primitive uses its unchanged 54-tensor fixture. This does not qualify unfused RMS or whole-target/state/D64.",
+      "parent_commit": "c21c6654d12ee7cc7fb135b752c874425ee52621",
+      "current_source_and_build_artifacts": [
+        {
+          "status": "historical_observation",
+          "path": "/home/sebastian/LocalLLM/vllm.cpp/src/vt/xpu/xpu_attention.cpp",
+          "bytes": 34697,
+          "sha256": "816f312cbb37bfa849edf68c49ffbd93fc5b30f817829ca0f88b05600fb56029",
+          "current_identity_status": "Changed by scoped standalone Q/K norm/shared helper wiring; historical identity retained. Preserved snapshots and reference receipts remain unchanged."
+        },
+        {
+          "status": "historical_observation",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/engine-build/tests/test_xpu_qwen_exl3_fp16",
+          "bytes": 32469576,
+          "sha256": "5f92a459006ce034df2982198f0e59340075357ea133c282bf7a494b39e6d5ae",
+          "current_identity_status": "Changed by scoped standalone Q/K norm/shared helper wiring; historical identity retained. Preserved snapshots and reference receipts remain unchanged."
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/engine-build/tests/test_xpu_attention",
+          "bytes": 32272072,
+          "sha256": "7f017981649309358aa37d476fd00c3a088802a00a5b23adb0751dbc94da2356"
+        }
+      ],
+      "preserved_source_snapshots": [
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-v16-source-xpu_attention.cpp",
+          "bytes": 34697,
+          "sha256": "816f312cbb37bfa849edf68c49ffbd93fc5b30f817829ca0f88b05600fb56029"
+        }
+      ],
+      "unchanged_fixtures": [
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/real_attention3_oracle.safetensors",
+          "bytes": 22460520,
+          "sha256": "05ffbe48817830a0175cedbf4f86fb81369b2288b3fce3adcfe6bdc280d8f5c3"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/real_attention3_rope_oracle.safetensors",
+          "bytes": 24326888,
+          "sha256": "36852e1f13d014943f70eb84ee06478b4aa87fbcd1fae394da592dff1d1f59c2"
+        }
+      ],
+      "preserved_receipts": [
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-actual-norm-compare.py",
+          "bytes": 1586,
+          "sha256": "3921755536acf1e7c360ed47a1b3b8bdf9c02a6b4c1d3b9643f7c461f5821062"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-actual-norm-v14b/mean_var_inv.0.t128.f32",
+          "bytes": 43008,
+          "sha256": "99a6eecdf627714dd3bafb2a26ed4be19ae1df4c77b8aea389f63301e3c9ca39"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-actual-norm-v14b/mean_var_inv.1.t1.f32",
+          "bytes": 336,
+          "sha256": "b96840419245d8e038f85c584169827e96bbe76559b309a4f1db605b15fe8dbf"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-actual-norm-v14b-compare.json",
+          "bytes": 2760,
+          "sha256": "7feea58533ded88c0de3dc7dd0d59835d25bdd4ad1e3a60e4ee8901bdde8a446"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-actual-norm-v15/mean_var_inv.0.t128.f32",
+          "bytes": 43008,
+          "sha256": "0d81d915fe00023bbb1acc06436c29d965ea4d33b024c4460bdc295d8ea7173d"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-actual-norm-v15/mean_var_inv.1.t1.f32",
+          "bytes": 336,
+          "sha256": "0450886587264b85d767de8e1d54df6b32efe965eca33194aa45e1c9649fd233"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-actual-norm-v15-compare.json",
+          "bytes": 1243,
+          "sha256": "ad8f2ece8459cd46924cc0334cd4c6525e580fdae1494ddcbb1cab219ef6acb2"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-actual-norm-v15b-scalar-probe/mean_var_inv.0.t128.f32",
+          "bytes": 43008,
+          "sha256": "0d81d915fe00023bbb1acc06436c29d965ea4d33b024c4460bdc295d8ea7173d"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-actual-norm-v15b-scalar-probe/mean_var_inv.1.t1.f32",
+          "bytes": 336,
+          "sha256": "0450886587264b85d767de8e1d54df6b32efe965eca33194aa45e1c9649fd233"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-actual-norm-v15b-scalar-probe-compare.json",
+          "bytes": 1243,
+          "sha256": "ad8f2ece8459cd46924cc0334cd4c6525e580fdae1494ddcbb1cab219ef6acb2"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v14b/manifest.tsv",
+          "bytes": 884,
+          "sha256": "860432d776df3071079b1900a84d70d3674d4194127ceb255c2547fe2a3b543f"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v14b/s0_l3_attn_core.bin",
+          "bytes": 1572864,
+          "sha256": "9a48fe55a178028fd433be62a5c40327293c917ab08bc26f156d36854d94862b"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v14b/s0_l3_attn_gate.bin",
+          "bytes": 3145728,
+          "sha256": "4d219bd6a2cbd48bc95ae94d374a1a86f2814623a8da0a7e927961bad528d036"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v14b/s0_l3_attn_gated.bin",
+          "bytes": 1572864,
+          "sha256": "e6797b51e93608441481327ea3b2a94c23a8b5e73ffff41b5b9e0fcd7e4485cd"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v14b/s0_l3_attn_k_rope.bin",
+          "bytes": 262144,
+          "sha256": "cf46352abf1f205200e2fef7ab1409fd26bc7f48d09a55d63e6e092f4679ef95"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v14b/s0_l3_attn_key_raw.bin",
+          "bytes": 262144,
+          "sha256": "40f4af973117b82fbd8caea1cc18b9eca682dd4b4811eb8eeca8539bbb9889a8"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v14b/s0_l3_attn_q_rope.bin",
+          "bytes": 1572864,
+          "sha256": "880c8af31efddd55b9eff570220ec36bbd7cc56b00781bc0160b2ef48cdcb260"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v14b/s0_l3_attn_qgate.bin",
+          "bytes": 3145728,
+          "sha256": "5b6abd040d6cd3b5cd34b64319c22de968701eda45418a49d63119979c5fdef3"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v14b/s0_l3_attn_value.bin",
+          "bytes": 262144,
+          "sha256": "af7c36101b4702d5dd855f0b6172d62f2ece5473d0562619784a1386835ce167"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v14b/s1_l3_attn_core.bin",
+          "bytes": 12288,
+          "sha256": "0cfbb93baa3730ebe26787320a571d671f5eb684884e399602a210a71eb1483f"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v14b/s1_l3_attn_gate.bin",
+          "bytes": 24576,
+          "sha256": "1ed1b529d2823431c1ecdd3ec441e589f5bbc4fbaa684d368c014bc01b8408cd"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v14b/s1_l3_attn_gated.bin",
+          "bytes": 12288,
+          "sha256": "ace150d35eac24020d73aa30b131054885f30e6016c1388e6e71f8d73fe1c12a"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v14b/s1_l3_attn_k_rope.bin",
+          "bytes": 2048,
+          "sha256": "24aa601ee695eca6ef821883f37596a1bfcac4d534d3d487a2b68671606adb92"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v14b/s1_l3_attn_key_raw.bin",
+          "bytes": 2048,
+          "sha256": "d86f738dbb4f54b7753b74c6cef2c661edf98208c61d4dac15705c4e7ba16cc9"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v14b/s1_l3_attn_q_rope.bin",
+          "bytes": 12288,
+          "sha256": "58ec51d328fde26d9ffb67706e8a02bb711c6b46caa87edf272cf6082230251f"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v14b/s1_l3_attn_qgate.bin",
+          "bytes": 24576,
+          "sha256": "4379c25d2e78654042d12364add75885f7c46513217d9b8ff18f5c8a633034a7"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v14b/s1_l3_attn_value.bin",
+          "bytes": 2048,
+          "sha256": "3650686e31e4eaf4b55c3f83999acfc287ac5c4dde019be3ef160d75ea6ef149"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v15/manifest.tsv",
+          "bytes": 884,
+          "sha256": "860432d776df3071079b1900a84d70d3674d4194127ceb255c2547fe2a3b543f"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v15/s0_l3_attn_core.bin",
+          "bytes": 1572864,
+          "sha256": "f730ade4e2172d7e3356807a478625f28c61411ed6b00ed1de6c7475d9576266"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v15/s0_l3_attn_gate.bin",
+          "bytes": 3145728,
+          "sha256": "4d219bd6a2cbd48bc95ae94d374a1a86f2814623a8da0a7e927961bad528d036"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v15/s0_l3_attn_gated.bin",
+          "bytes": 1572864,
+          "sha256": "e7a1008d90d60522154bc8ac75b1612bd1039d7ad4c339a746b74fee478fb42f"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v15/s0_l3_attn_k_rope.bin",
+          "bytes": 262144,
+          "sha256": "e69e5997fcbac3ce8864d07f1d5f1c83cbdb9c9f4a27f6634367acd959d40bd5"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v15/s0_l3_attn_key_raw.bin",
+          "bytes": 262144,
+          "sha256": "40f4af973117b82fbd8caea1cc18b9eca682dd4b4811eb8eeca8539bbb9889a8"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v15/s0_l3_attn_q_rope.bin",
+          "bytes": 1572864,
+          "sha256": "06ae903d4c592d5133f9b5b381e0dc7e0b909229327e06f2dbad3780f0993494"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v15/s0_l3_attn_qgate.bin",
+          "bytes": 3145728,
+          "sha256": "5b6abd040d6cd3b5cd34b64319c22de968701eda45418a49d63119979c5fdef3"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v15/s0_l3_attn_value.bin",
+          "bytes": 262144,
+          "sha256": "af7c36101b4702d5dd855f0b6172d62f2ece5473d0562619784a1386835ce167"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v15/s1_l3_attn_core.bin",
+          "bytes": 12288,
+          "sha256": "974936a943360d32ad5fda13486b6be3b03b2682c9cbfac74a6f57bcd943aef0"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v15/s1_l3_attn_gate.bin",
+          "bytes": 24576,
+          "sha256": "1ed1b529d2823431c1ecdd3ec441e589f5bbc4fbaa684d368c014bc01b8408cd"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v15/s1_l3_attn_gated.bin",
+          "bytes": 12288,
+          "sha256": "ac975553eb12cc0462189dd079d262ed4c60915d37643cf01d7f01fca963d5d8"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v15/s1_l3_attn_k_rope.bin",
+          "bytes": 2048,
+          "sha256": "24aa601ee695eca6ef821883f37596a1bfcac4d534d3d487a2b68671606adb92"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v15/s1_l3_attn_key_raw.bin",
+          "bytes": 2048,
+          "sha256": "d86f738dbb4f54b7753b74c6cef2c661edf98208c61d4dac15705c4e7ba16cc9"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v15/s1_l3_attn_q_rope.bin",
+          "bytes": 12288,
+          "sha256": "58ec51d328fde26d9ffb67706e8a02bb711c6b46caa87edf272cf6082230251f"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v15/s1_l3_attn_qgate.bin",
+          "bytes": 24576,
+          "sha256": "4379c25d2e78654042d12364add75885f7c46513217d9b8ff18f5c8a633034a7"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v15/s1_l3_attn_value.bin",
+          "bytes": 2048,
+          "sha256": "3650686e31e4eaf4b55c3f83999acfc287ac5c4dde019be3ef160d75ea6ef149"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v15b-auto/manifest.tsv",
+          "bytes": 884,
+          "sha256": "860432d776df3071079b1900a84d70d3674d4194127ceb255c2547fe2a3b543f"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v15b-auto/s0_l3_attn_core.bin",
+          "bytes": 1572864,
+          "sha256": "f730ade4e2172d7e3356807a478625f28c61411ed6b00ed1de6c7475d9576266"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v15b-auto/s0_l3_attn_gate.bin",
+          "bytes": 3145728,
+          "sha256": "4d219bd6a2cbd48bc95ae94d374a1a86f2814623a8da0a7e927961bad528d036"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v15b-auto/s0_l3_attn_gated.bin",
+          "bytes": 1572864,
+          "sha256": "e7a1008d90d60522154bc8ac75b1612bd1039d7ad4c339a746b74fee478fb42f"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v15b-auto/s0_l3_attn_k_rope.bin",
+          "bytes": 262144,
+          "sha256": "e69e5997fcbac3ce8864d07f1d5f1c83cbdb9c9f4a27f6634367acd959d40bd5"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v15b-auto/s0_l3_attn_key_raw.bin",
+          "bytes": 262144,
+          "sha256": "40f4af973117b82fbd8caea1cc18b9eca682dd4b4811eb8eeca8539bbb9889a8"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v15b-auto/s0_l3_attn_q_rope.bin",
+          "bytes": 1572864,
+          "sha256": "06ae903d4c592d5133f9b5b381e0dc7e0b909229327e06f2dbad3780f0993494"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v15b-auto/s0_l3_attn_qgate.bin",
+          "bytes": 3145728,
+          "sha256": "5b6abd040d6cd3b5cd34b64319c22de968701eda45418a49d63119979c5fdef3"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v15b-auto/s0_l3_attn_value.bin",
+          "bytes": 262144,
+          "sha256": "af7c36101b4702d5dd855f0b6172d62f2ece5473d0562619784a1386835ce167"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v15b-auto/s1_l3_attn_core.bin",
+          "bytes": 12288,
+          "sha256": "974936a943360d32ad5fda13486b6be3b03b2682c9cbfac74a6f57bcd943aef0"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v15b-auto/s1_l3_attn_gate.bin",
+          "bytes": 24576,
+          "sha256": "1ed1b529d2823431c1ecdd3ec441e589f5bbc4fbaa684d368c014bc01b8408cd"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v15b-auto/s1_l3_attn_gated.bin",
+          "bytes": 12288,
+          "sha256": "ac975553eb12cc0462189dd079d262ed4c60915d37643cf01d7f01fca963d5d8"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v15b-auto/s1_l3_attn_k_rope.bin",
+          "bytes": 2048,
+          "sha256": "24aa601ee695eca6ef821883f37596a1bfcac4d534d3d487a2b68671606adb92"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v15b-auto/s1_l3_attn_key_raw.bin",
+          "bytes": 2048,
+          "sha256": "d86f738dbb4f54b7753b74c6cef2c661edf98208c61d4dac15705c4e7ba16cc9"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v15b-auto/s1_l3_attn_q_rope.bin",
+          "bytes": 12288,
+          "sha256": "58ec51d328fde26d9ffb67706e8a02bb711c6b46caa87edf272cf6082230251f"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v15b-auto/s1_l3_attn_qgate.bin",
+          "bytes": 24576,
+          "sha256": "4379c25d2e78654042d12364add75885f7c46513217d9b8ff18f5c8a633034a7"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v15b-auto/s1_l3_attn_value.bin",
+          "bytes": 2048,
+          "sha256": "3650686e31e4eaf4b55c3f83999acfc287ac5c4dde019be3ef160d75ea6ef149"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v15b-scalar/manifest.tsv",
+          "bytes": 884,
+          "sha256": "860432d776df3071079b1900a84d70d3674d4194127ceb255c2547fe2a3b543f"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v15b-scalar/s0_l3_attn_core.bin",
+          "bytes": 1572864,
+          "sha256": "ccd9308048e40266cb38574072dc945dd689c1e2b43a1e44535d3d67662ad13e"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v15b-scalar/s0_l3_attn_gate.bin",
+          "bytes": 3145728,
+          "sha256": "4d219bd6a2cbd48bc95ae94d374a1a86f2814623a8da0a7e927961bad528d036"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v15b-scalar/s0_l3_attn_gated.bin",
+          "bytes": 1572864,
+          "sha256": "53dc4b672cac1863f993f6fd9baa9c643af39b74b095c30b745bfd3bf51b9af7"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v15b-scalar/s0_l3_attn_k_rope.bin",
+          "bytes": 262144,
+          "sha256": "05a4179f3e53823ff643f47e76a9503428047eab2e74bc2ef25ccd443c20e06b"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v15b-scalar/s0_l3_attn_key_raw.bin",
+          "bytes": 262144,
+          "sha256": "40f4af973117b82fbd8caea1cc18b9eca682dd4b4811eb8eeca8539bbb9889a8"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v15b-scalar/s0_l3_attn_q_rope.bin",
+          "bytes": 1572864,
+          "sha256": "8f337145e61459f4ba26dc9548d4441746a907d30f475cadf9f865882f3c5eec"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v15b-scalar/s0_l3_attn_qgate.bin",
+          "bytes": 3145728,
+          "sha256": "5b6abd040d6cd3b5cd34b64319c22de968701eda45418a49d63119979c5fdef3"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v15b-scalar/s0_l3_attn_value.bin",
+          "bytes": 262144,
+          "sha256": "af7c36101b4702d5dd855f0b6172d62f2ece5473d0562619784a1386835ce167"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v15b-scalar/s1_l3_attn_core.bin",
+          "bytes": 12288,
+          "sha256": "167764e26733b7352486fbab72189507aaf33795613595a641f0f902a2e01075"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v15b-scalar/s1_l3_attn_gate.bin",
+          "bytes": 24576,
+          "sha256": "1ed1b529d2823431c1ecdd3ec441e589f5bbc4fbaa684d368c014bc01b8408cd"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v15b-scalar/s1_l3_attn_gated.bin",
+          "bytes": 12288,
+          "sha256": "0ceb9d2ecd2d53c3aeffd8d7c9087eab496b3c7b0f4a7aa759ac3e6921447780"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v15b-scalar/s1_l3_attn_k_rope.bin",
+          "bytes": 2048,
+          "sha256": "eea873e4216530c16b84bbcc29b5254a952989628bd54f1135a3c9f58c53bd72"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v15b-scalar/s1_l3_attn_key_raw.bin",
+          "bytes": 2048,
+          "sha256": "d86f738dbb4f54b7753b74c6cef2c661edf98208c61d4dac15705c4e7ba16cc9"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v15b-scalar/s1_l3_attn_q_rope.bin",
+          "bytes": 12288,
+          "sha256": "3d7381bfc6342a1a104ebc65e2c8c06156596da010ca5f8797dda16fd1973adc"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v15b-scalar/s1_l3_attn_qgate.bin",
+          "bytes": 24576,
+          "sha256": "4379c25d2e78654042d12364add75885f7c46513217d9b8ff18f5c8a633034a7"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v15b-scalar/s1_l3_attn_value.bin",
+          "bytes": 2048,
+          "sha256": "3650686e31e4eaf4b55c3f83999acfc287ac5c4dde019be3ef160d75ea6ef149"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v15b-scalar-probe/manifest.tsv",
+          "bytes": 884,
+          "sha256": "860432d776df3071079b1900a84d70d3674d4194127ceb255c2547fe2a3b543f"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v15b-scalar-probe/s0_l3_attn_core.bin",
+          "bytes": 1572864,
+          "sha256": "ccd9308048e40266cb38574072dc945dd689c1e2b43a1e44535d3d67662ad13e"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v15b-scalar-probe/s0_l3_attn_gate.bin",
+          "bytes": 3145728,
+          "sha256": "4d219bd6a2cbd48bc95ae94d374a1a86f2814623a8da0a7e927961bad528d036"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v15b-scalar-probe/s0_l3_attn_gated.bin",
+          "bytes": 1572864,
+          "sha256": "53dc4b672cac1863f993f6fd9baa9c643af39b74b095c30b745bfd3bf51b9af7"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v15b-scalar-probe/s0_l3_attn_k_rope.bin",
+          "bytes": 262144,
+          "sha256": "05a4179f3e53823ff643f47e76a9503428047eab2e74bc2ef25ccd443c20e06b"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v15b-scalar-probe/s0_l3_attn_key_raw.bin",
+          "bytes": 262144,
+          "sha256": "40f4af973117b82fbd8caea1cc18b9eca682dd4b4811eb8eeca8539bbb9889a8"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v15b-scalar-probe/s0_l3_attn_q_rope.bin",
+          "bytes": 1572864,
+          "sha256": "8f337145e61459f4ba26dc9548d4441746a907d30f475cadf9f865882f3c5eec"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v15b-scalar-probe/s0_l3_attn_qgate.bin",
+          "bytes": 3145728,
+          "sha256": "5b6abd040d6cd3b5cd34b64319c22de968701eda45418a49d63119979c5fdef3"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v15b-scalar-probe/s0_l3_attn_value.bin",
+          "bytes": 262144,
+          "sha256": "af7c36101b4702d5dd855f0b6172d62f2ece5473d0562619784a1386835ce167"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v15b-scalar-probe/s1_l3_attn_core.bin",
+          "bytes": 12288,
+          "sha256": "167764e26733b7352486fbab72189507aaf33795613595a641f0f902a2e01075"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v15b-scalar-probe/s1_l3_attn_gate.bin",
+          "bytes": 24576,
+          "sha256": "1ed1b529d2823431c1ecdd3ec441e589f5bbc4fbaa684d368c014bc01b8408cd"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v15b-scalar-probe/s1_l3_attn_gated.bin",
+          "bytes": 12288,
+          "sha256": "0ceb9d2ecd2d53c3aeffd8d7c9087eab496b3c7b0f4a7aa759ac3e6921447780"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v15b-scalar-probe/s1_l3_attn_k_rope.bin",
+          "bytes": 2048,
+          "sha256": "eea873e4216530c16b84bbcc29b5254a952989628bd54f1135a3c9f58c53bd72"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v15b-scalar-probe/s1_l3_attn_key_raw.bin",
+          "bytes": 2048,
+          "sha256": "d86f738dbb4f54b7753b74c6cef2c661edf98208c61d4dac15705c4e7ba16cc9"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v15b-scalar-probe/s1_l3_attn_q_rope.bin",
+          "bytes": 12288,
+          "sha256": "3d7381bfc6342a1a104ebc65e2c8c06156596da010ca5f8797dda16fd1973adc"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v15b-scalar-probe/s1_l3_attn_qgate.bin",
+          "bytes": 24576,
+          "sha256": "4379c25d2e78654042d12364add75885f7c46513217d9b8ff18f5c8a633034a7"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v15b-scalar-probe/s1_l3_attn_value.bin",
+          "bytes": 2048,
+          "sha256": "3650686e31e4eaf4b55c3f83999acfc287ac5c4dde019be3ef160d75ea6ef149"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v16-auto/manifest.tsv",
+          "bytes": 884,
+          "sha256": "860432d776df3071079b1900a84d70d3674d4194127ceb255c2547fe2a3b543f"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v16-auto/s0_l3_attn_core.bin",
+          "bytes": 1572864,
+          "sha256": "f730ade4e2172d7e3356807a478625f28c61411ed6b00ed1de6c7475d9576266"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v16-auto/s0_l3_attn_gate.bin",
+          "bytes": 3145728,
+          "sha256": "4d219bd6a2cbd48bc95ae94d374a1a86f2814623a8da0a7e927961bad528d036"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v16-auto/s0_l3_attn_gated.bin",
+          "bytes": 1572864,
+          "sha256": "e7a1008d90d60522154bc8ac75b1612bd1039d7ad4c339a746b74fee478fb42f"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v16-auto/s0_l3_attn_k_rope.bin",
+          "bytes": 262144,
+          "sha256": "e69e5997fcbac3ce8864d07f1d5f1c83cbdb9c9f4a27f6634367acd959d40bd5"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v16-auto/s0_l3_attn_key_raw.bin",
+          "bytes": 262144,
+          "sha256": "40f4af973117b82fbd8caea1cc18b9eca682dd4b4811eb8eeca8539bbb9889a8"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v16-auto/s0_l3_attn_q_rope.bin",
+          "bytes": 1572864,
+          "sha256": "06ae903d4c592d5133f9b5b381e0dc7e0b909229327e06f2dbad3780f0993494"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v16-auto/s0_l3_attn_qgate.bin",
+          "bytes": 3145728,
+          "sha256": "5b6abd040d6cd3b5cd34b64319c22de968701eda45418a49d63119979c5fdef3"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v16-auto/s0_l3_attn_value.bin",
+          "bytes": 262144,
+          "sha256": "af7c36101b4702d5dd855f0b6172d62f2ece5473d0562619784a1386835ce167"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v16-auto/s1_l3_attn_core.bin",
+          "bytes": 12288,
+          "sha256": "974936a943360d32ad5fda13486b6be3b03b2682c9cbfac74a6f57bcd943aef0"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v16-auto/s1_l3_attn_gate.bin",
+          "bytes": 24576,
+          "sha256": "1ed1b529d2823431c1ecdd3ec441e589f5bbc4fbaa684d368c014bc01b8408cd"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v16-auto/s1_l3_attn_gated.bin",
+          "bytes": 12288,
+          "sha256": "ac975553eb12cc0462189dd079d262ed4c60915d37643cf01d7f01fca963d5d8"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v16-auto/s1_l3_attn_k_rope.bin",
+          "bytes": 2048,
+          "sha256": "24aa601ee695eca6ef821883f37596a1bfcac4d534d3d487a2b68671606adb92"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v16-auto/s1_l3_attn_key_raw.bin",
+          "bytes": 2048,
+          "sha256": "d86f738dbb4f54b7753b74c6cef2c661edf98208c61d4dac15705c4e7ba16cc9"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v16-auto/s1_l3_attn_q_rope.bin",
+          "bytes": 12288,
+          "sha256": "58ec51d328fde26d9ffb67706e8a02bb711c6b46caa87edf272cf6082230251f"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v16-auto/s1_l3_attn_qgate.bin",
+          "bytes": 24576,
+          "sha256": "4379c25d2e78654042d12364add75885f7c46513217d9b8ff18f5c8a633034a7"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v16-auto/s1_l3_attn_value.bin",
+          "bytes": 2048,
+          "sha256": "3650686e31e4eaf4b55c3f83999acfc287ac5c4dde019be3ef160d75ea6ef149"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v16-scalar/manifest.tsv",
+          "bytes": 884,
+          "sha256": "860432d776df3071079b1900a84d70d3674d4194127ceb255c2547fe2a3b543f"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v16-scalar/s0_l3_attn_core.bin",
+          "bytes": 1572864,
+          "sha256": "f730ade4e2172d7e3356807a478625f28c61411ed6b00ed1de6c7475d9576266"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v16-scalar/s0_l3_attn_gate.bin",
+          "bytes": 3145728,
+          "sha256": "4d219bd6a2cbd48bc95ae94d374a1a86f2814623a8da0a7e927961bad528d036"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v16-scalar/s0_l3_attn_gated.bin",
+          "bytes": 1572864,
+          "sha256": "e7a1008d90d60522154bc8ac75b1612bd1039d7ad4c339a746b74fee478fb42f"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v16-scalar/s0_l3_attn_k_rope.bin",
+          "bytes": 262144,
+          "sha256": "e69e5997fcbac3ce8864d07f1d5f1c83cbdb9c9f4a27f6634367acd959d40bd5"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v16-scalar/s0_l3_attn_key_raw.bin",
+          "bytes": 262144,
+          "sha256": "40f4af973117b82fbd8caea1cc18b9eca682dd4b4811eb8eeca8539bbb9889a8"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v16-scalar/s0_l3_attn_q_rope.bin",
+          "bytes": 1572864,
+          "sha256": "06ae903d4c592d5133f9b5b381e0dc7e0b909229327e06f2dbad3780f0993494"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v16-scalar/s0_l3_attn_qgate.bin",
+          "bytes": 3145728,
+          "sha256": "5b6abd040d6cd3b5cd34b64319c22de968701eda45418a49d63119979c5fdef3"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v16-scalar/s0_l3_attn_value.bin",
+          "bytes": 262144,
+          "sha256": "af7c36101b4702d5dd855f0b6172d62f2ece5473d0562619784a1386835ce167"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v16-scalar/s1_l3_attn_core.bin",
+          "bytes": 12288,
+          "sha256": "974936a943360d32ad5fda13486b6be3b03b2682c9cbfac74a6f57bcd943aef0"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v16-scalar/s1_l3_attn_gate.bin",
+          "bytes": 24576,
+          "sha256": "1ed1b529d2823431c1ecdd3ec441e589f5bbc4fbaa684d368c014bc01b8408cd"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v16-scalar/s1_l3_attn_gated.bin",
+          "bytes": 12288,
+          "sha256": "ac975553eb12cc0462189dd079d262ed4c60915d37643cf01d7f01fca963d5d8"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v16-scalar/s1_l3_attn_k_rope.bin",
+          "bytes": 2048,
+          "sha256": "24aa601ee695eca6ef821883f37596a1bfcac4d534d3d487a2b68671606adb92"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v16-scalar/s1_l3_attn_key_raw.bin",
+          "bytes": 2048,
+          "sha256": "d86f738dbb4f54b7753b74c6cef2c661edf98208c61d4dac15705c4e7ba16cc9"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v16-scalar/s1_l3_attn_q_rope.bin",
+          "bytes": 12288,
+          "sha256": "58ec51d328fde26d9ffb67706e8a02bb711c6b46caa87edf272cf6082230251f"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v16-scalar/s1_l3_attn_qgate.bin",
+          "bytes": 24576,
+          "sha256": "4379c25d2e78654042d12364add75885f7c46513217d9b8ff18f5c8a633034a7"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-native-v16-scalar/s1_l3_attn_value.bin",
+          "bytes": 2048,
+          "sha256": "3650686e31e4eaf4b55c3f83999acfc287ac5c4dde019be3ef160d75ea6ef149"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-test-v14.log",
+          "bytes": 926,
+          "sha256": "210ec532e15e2da14f6c22240d4b96095fa1172ec24e861866211071031505cc"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-test-v14b.log",
+          "bytes": 2165,
+          "sha256": "089645d1997e9679a1539ace225bcfb360a3b775440099c6133497521a8b8cd2"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-test-v15.log",
+          "bytes": 1647,
+          "sha256": "2a9f597f69f0e707f51aec5bfdf7266efdc21afce3ae4df131daf9fdfaad06e4"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-test-v15b-auto.log",
+          "bytes": 2017,
+          "sha256": "b30f66f4debb37755067c291a1c45c3b92b3a2d95a63cf02878c8e519471f224"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-test-v15b-scalar-probe.log",
+          "bytes": 2616,
+          "sha256": "2e8321a6243d82322f8b0848ddc2ac06da33381f1f2451b43054a0ef2cd5ce18"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-test-v15b-scalar.log",
+          "bytes": 3071,
+          "sha256": "86a6931a4862892a11cfbab1372e6abaaab203e6cb14b859995dbc74f7c8b6be"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-test-v16-auto.log",
+          "bytes": 2017,
+          "sha256": "b30f66f4debb37755067c291a1c45c3b92b3a2d95a63cf02878c8e519471f224"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-test-v16-scalar.log",
+          "bytes": 2017,
+          "sha256": "b30f66f4debb37755067c291a1c45c3b92b3a2d95a63cf02878c8e519471f224"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-trace-v14.jsonl",
+          "bytes": 1524,
+          "sha256": "cc1761d98d3c7c7924d36e75f32b41d8d5c86746aa64529e7bf47e33aaaa1a8e"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-trace-v14b.jsonl",
+          "bytes": 15630,
+          "sha256": "5fd4fd01073cf781337e66fa49fe3f900a43019d398b46ac8d4c2e9c17fa66aa"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-trace-v15.jsonl",
+          "bytes": 15630,
+          "sha256": "5fd4fd01073cf781337e66fa49fe3f900a43019d398b46ac8d4c2e9c17fa66aa"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-trace-v15b-auto.jsonl",
+          "bytes": 18471,
+          "sha256": "9c717e209b341edbdfcb476536eaa8d313ebf649fe99005bc629d810d0c91b68"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-trace-v15b-scalar-probe.jsonl",
+          "bytes": 15630,
+          "sha256": "5fd4fd01073cf781337e66fa49fe3f900a43019d398b46ac8d4c2e9c17fa66aa"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-trace-v15b-scalar.jsonl",
+          "bytes": 18471,
+          "sha256": "9c717e209b341edbdfcb476536eaa8d313ebf649fe99005bc629d810d0c91b68"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-trace-v16-auto.jsonl",
+          "bytes": 18471,
+          "sha256": "9c717e209b341edbdfcb476536eaa8d313ebf649fe99005bc629d810d0c91b68"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-trace-v16-scalar.jsonl",
+          "bytes": 18471,
+          "sha256": "9c717e209b341edbdfcb476536eaa8d313ebf649fe99005bc629d810d0c91b68"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-fp16-v16-auto-scalar-dumps.json",
+          "bytes": 4582,
+          "sha256": "9c1bf9f6e02fabe52fe1b443cc61de3e32fd5a7f5efe94fe1fc2ccca00d824d0"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-root-installed-source.txt",
+          "bytes": 1587,
+          "sha256": "03b2525f52552863a82900ff99a0c551ba45389c8aa70d79156136ab8ba358ac"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-root-torch-installed-source.txt",
+          "bytes": 2059,
+          "sha256": "64bbedbd96d85910632605961daff8606aea89729118f8976f2f69a7078dba76"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-scalar-half-installed-source.txt",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-scalar-v15b-rounding-variants.json",
+          "bytes": 392,
+          "sha256": "1235d01018bd2b0226af844c98dba928bdf269e0b8bb093347a8d395c81f9b45"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-v13-device-ir-build-v2.log",
+          "bytes": 52,
+          "sha256": "ab2d8e0e0495877133c694174950cfaf8da8fb02e215d80fb4108c4215a674ae"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-v13-device-ir-build.log",
+          "bytes": 54,
+          "sha256": "22eeb789de9d45f873336e3dcf97648a7534ad6c21f8a13fa735f8f762baafdc"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-v13-device-ir-command.log",
+          "bytes": 3836,
+          "sha256": "266221cdefa64577fc7720bd34ed02c0fd5b0e61b487003966b3e65202bc0870"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-v13-device-v2.spvtxt",
+          "bytes": 185502,
+          "sha256": "a1ce9c07e2c503a8287ed65dd9d4927122487eff6627a3144ab38b1e348d6a94"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-v13-device.spvtxt",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-v13-postlink-v2.log",
+          "bytes": 73,
+          "sha256": "1986368cfa7fab39247eaf0b1323a1ae34759c1e8b9a4c8cdd13924a01899da5"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-v13-postlink-v3.log",
+          "bytes": 48,
+          "sha256": "1953315f18fa825b72346c860b72456e1e5fdea13cc6526d527edd593a8c0a0b"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-v13-postlink-v4.log",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-v13-postlink-v4.table",
+          "bytes": 199,
+          "sha256": "724891e301465695601d8ba04a199b6331faeedaff1c777d74eb73e8dbe3c579"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-v13-postlink-v4_0.ll",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-v13-postlink-v4_1.ll",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-v13-postlink-v4_2.ll",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-v13-postlink-v4_3.ll",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-v13-postlink.log",
+          "bytes": 73,
+          "sha256": "1986368cfa7fab39247eaf0b1323a1ae34759c1e8b9a4c8cdd13924a01899da5"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-v13-save-temps-build.log",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-v13-save-temps.o",
+          "bytes": 326232,
+          "sha256": "3c7248b83d274bc9f1887a9ef684b7b1903765ce73e6c96c96c0320c0a0fba33"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-v13-spirv-build-v2.log",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-v13-spirv-build.log",
+          "bytes": 89,
+          "sha256": "293be1e74c682cf197b333401498e8805d725b137a8d9b85cb719be2bcd5c8e9"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-v15-ir/attention.o",
+          "bytes": 362832,
+          "sha256": "7926bb8a37770c1d9a6ed8da7761242695fbd5c4fc1b45606d7c61e65332b82f"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-v15-ir/build.log",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-v15-ir/device.spvtxt",
+          "bytes": 227073,
+          "sha256": "2038be8860d8566d19d263ed854cf41b9574c3bccef08e285907bfb63c09a168"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-v15-ir/spirv.log",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-v15-ir/xpu_attention-footer-d245f8.h",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-v15-ir/xpu_attention-header-d29368.h",
+          "bytes": 72575,
+          "sha256": "5938633b58a999231a328551eaea95b6efc8bd54308eec1217c22b49c5f39da9"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-v15-ir/xpu_attention-host-x86_64-unknown-linux-gnu.ii",
+          "bytes": 6100101,
+          "sha256": "ff6b04c33ae93d1a9afde927cb1f27798c988d18e39322f0487f26e9df825ec2"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-v15-ir/xpu_attention-host-x86_64-unknown-linux-gnu.o",
+          "bytes": 299040,
+          "sha256": "c86410daba23d0139f226a630d4f575896aadbe315f73d5ef6f495b16bab4ed5"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-v15-ir/xpu_attention-host-x86_64-unknown-linux-gnu.s",
+          "bytes": 1291632,
+          "sha256": "1650582366b92072a58c83f2ca5a5a4b98467805629651fb753ab5d003d4c169"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-v15-ir/xpu_attention-sycl-spir64-unknown-unknown.bc",
+          "bytes": 58476,
+          "sha256": "8becab7966f4a96c11754dcbc191fe2a610926a9d1f47813e1cc2edc7b3d86ff"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-mixer-v15-ir/xpu_attention-sycl-spir64-unknown-unknown.ii",
+          "bytes": 6446177,
+          "sha256": "0c487f519d674faad6ab7521bc33d8d2f1cc2ea8e2333995e4c08d6e5b9da15d"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-rope-legacy-regressions-v16.log",
+          "bytes": 298,
+          "sha256": "de2eb14aecea1e619652b9af5433468e606ad49ec781ecf7042e40f1344eba09"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-rope-native-build-v14.log",
+          "bytes": 183,
+          "sha256": "17a64654c7de7ec6b37cb32659fd4862374894830fa0f82744bc04ab47072504"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-rope-native-build-v15.log",
+          "bytes": 183,
+          "sha256": "17a64654c7de7ec6b37cb32659fd4862374894830fa0f82744bc04ab47072504"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-rope-native-build-v15b.log",
+          "bytes": 237,
+          "sha256": "8e2de44ab1bc73b179442ad5449646767539f1e6a6db88f22343c50a5437b5ed"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-rope-native-build-v16.log",
+          "bytes": 237,
+          "sha256": "8e2de44ab1bc73b179442ad5449646767539f1e6a6db88f22343c50a5437b5ed"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/xpu_attention-footer-a1947c.h",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/xpu_attention-header-f31a04.h",
+          "bytes": 62220,
+          "sha256": "c31040cc91a0caafc1beaac2cde82a56f685407734f84cda5f24121fcf014fdb"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/xpu_attention-host-x86_64-unknown-linux-gnu.ii",
+          "bytes": 6090335,
+          "sha256": "f2baf2ff9e51a597d7270b9a093e84b53899c0e4837f7028ad767da71022b895"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/xpu_attention-host-x86_64-unknown-linux-gnu.o",
+          "bytes": 272248,
+          "sha256": "54a8a9c381f61baf15e02b1aee08562a33373d5569ac4cab38e9a3f7317d6b75"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/xpu_attention-host-x86_64-unknown-linux-gnu.s",
+          "bytes": 1173201,
+          "sha256": "315a29f45ff5d650b4835d242492330612eaa0bcaa2b00208bf9320ce73d9b3e"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/xpu_attention-sycl-spir64-unknown-unknown.bc",
+          "bytes": 49404,
+          "sha256": "a01ddfe6e118890cd264840b106f66c82976d71cdf115940bfcfcb675668707f"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/xpu_attention-sycl-spir64-unknown-unknown.ii",
+          "bytes": 6445858,
+          "sha256": "93a9e6c348f94ad807cec7bd458a29a4fe83a8cdcd1038adc02cf7d7c5664412"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-rope-legacy-scalar-regressions-v16.log",
+          "bytes": 298,
+          "sha256": "de2eb14aecea1e619652b9af5433468e606ad49ec781ecf7042e40f1344eba09"
+        }
+      ],
+      "repair": "Producer and legacy arithmetic use separate compile-time kernel instantiations. Producer uses SYCL rsqrt with the qualified D256 mean. Scalar RoPE multiplies F32 explicitly before F16 narrowing, avoiding observed Half FMul lowering.",
+      "actual_kernel_probe": {
+        "scope": "Actual fused kernel observer against bounded same-input pinned Torch replay; not live original-worker internal instrumentation.",
+        "stages": {
+          "p128_q": {
+            "mean_differences": 0,
+            "first_mean": [],
+            "variance_differences": 0,
+            "first_variance": [],
+            "inverse_differences": 0,
+            "first_inverse": []
+          },
+          "p128_k": {
+            "mean_differences": 0,
+            "first_mean": [],
+            "variance_differences": 0,
+            "first_variance": [],
+            "inverse_differences": 0,
+            "first_inverse": []
+          },
+          "d1_q": {
+            "mean_differences": 0,
+            "first_mean": [],
+            "variance_differences": 0,
+            "first_variance": [],
+            "inverse_differences": 0,
+            "first_inverse": []
+          },
+          "d1_k": {
+            "mean_differences": 0,
+            "first_mean": [],
+            "variance_differences": 0,
+            "first_variance": [],
+            "inverse_differences": 0,
+            "first_inverse": []
+          }
+        },
+        "point": {
+          "mean": {
+            "actual": 2.6682865619659424,
+            "expected": 2.6682865619659424
+          },
+          "variance": {
+            "actual": 2.668287515640259,
+            "expected": 2.668287515640259
+          },
+          "inverse": {
+            "actual": 0.6121863722801208,
+            "expected": 0.6121863722801208
+          }
+        }
+      },
+      "scalar_kernel_probe_before_product_fix": {
+        "scope": "Actual fused kernel observer against bounded same-input pinned Torch replay; not live original-worker internal instrumentation.",
+        "stages": {
+          "p128_q": {
+            "mean_differences": 0,
+            "first_mean": [],
+            "variance_differences": 0,
+            "first_variance": [],
+            "inverse_differences": 0,
+            "first_inverse": []
+          },
+          "p128_k": {
+            "mean_differences": 0,
+            "first_mean": [],
+            "variance_differences": 0,
+            "first_variance": [],
+            "inverse_differences": 0,
+            "first_inverse": []
+          },
+          "d1_q": {
+            "mean_differences": 0,
+            "first_mean": [],
+            "variance_differences": 0,
+            "first_variance": [],
+            "inverse_differences": 0,
+            "first_inverse": []
+          },
+          "d1_k": {
+            "mean_differences": 0,
+            "first_mean": [],
+            "variance_differences": 0,
+            "first_variance": [],
+            "inverse_differences": 0,
+            "first_inverse": []
+          }
+        },
+        "point": {
+          "mean": {
+            "actual": 2.6682865619659424,
+            "expected": 2.6682865619659424
+          },
+          "variance": {
+            "actual": 2.668287515640259,
+            "expected": 2.668287515640259
+          },
+          "inverse": {
+            "actual": 0.6121863722801208,
+            "expected": 0.6121863722801208
+          }
+        }
+      },
+      "failed_attempts": {
+        "direct_LLVM_text": "Installed compiler does not support this emission; saved bitcode and translated SPIR-V text used instead. Empty text outputs and failed invocations retained.",
+        "v14_first_test": "Missing dump directory; test threw before norm observation, exit1.",
+        "v14b": {
+          "passed_assertions": 655,
+          "assertions": 657,
+          "exit": 1,
+          "key_byte_differences_p128": 1,
+          "key_byte_differences_d1": 1
+        },
+        "v15b_scalar": {
+          "passed_assertions": 690,
+          "assertions": 695,
+          "exit": 1,
+          "key_byte_differences_p128": 121,
+          "key_byte_differences_d1": 121,
+          "mean_variance_inverse_differences": 0,
+          "unrotated_QK_half_differences": 0
+        }
+      },
+      "checks": {
+        "final_v16_build_exit": 0,
+        "auto_norm_observer_unset": {
+          "cases": 2,
+          "assertions": 695,
+          "passed_assertions": 695,
+          "exit": 0
+        },
+        "scalar_norm_observer_unset": {
+          "cases": 2,
+          "assertions": 695,
+          "passed_assertions": 695,
+          "exit": 0
+        },
+        "default_legacy_regressions": {
+          "cases": 2,
+          "assertions": 115,
+          "passed_assertions": 115,
+          "exit": 0
+        },
+        "actual_model_QK_half_differences": {
+          "p128_q": 0,
+          "p128_k": 0,
+          "d1_q": 0,
+          "d1_k": 0
+        },
+        "active_KV_and_inactive_cache_byte_differences": 0,
+        "coefficient_half_differences_positions_0_128": 0,
+        "numerical_band_failures": 0,
+        "native_auto_scalar_identical_stage_files": 16,
+        "reference_tier_hits": 0,
+        "scalar_legacy_regressions": {
+          "cases": 2,
+          "assertions": 115,
+          "passed_assertions": 115,
+          "exit": 0
+        }
+      },
+      "limitations": [
+        "Bounded P128/D1/positions0-128 only. Core/gated/mixer agree within unchanged bands; their original half values are not all exact.",
+        "No proof of a specific backend/compiler optimization causing prior root differences.",
+        "Generic unfused Q/K RMS remains to be integrated and qualified.",
+        "Whole-target/state/D64 have not been rerun after model RoPE wiring; prior failures remain open.",
+        "Graph/lifetime/performance of unfused selected-row allocation pending.",
+        "S1 and S2-S6 incomplete."
+      ],
+      "next_step": "Wire and qualify scoped unfused Q/K RMS with the same reduction/root/half boundaries; then rerun real target/state/D64."
+    },
+    "S1_attention3_unfused_QK_FP16_qualified": {
+      "observed_date": "2026-10-03",
+      "status": "verified_bounded_unfused_mixer",
+      "scope": "Standalone Q/K norm in actual model-owned P128/D1 attention on unchanged48-tensor input fixture and own native poisoned persistent cache; not whole-target/state qualification.",
+      "current_source_and_build_artifacts": [
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/vllm.cpp/include/vt/ops.h",
+          "bytes": 403527,
+          "sha256": "b002daa763dcec97f9c2eaae828f49e344ec1e8bdd678ec8a5fb8bbabeb0eb01"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/vllm.cpp/src/vt/ops.cpp",
+          "bytes": 388878,
+          "sha256": "4e66eac24be03c91bf7ae5f84184bb215a3bd1001d1ebf8a63a417011da0c63e"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/vllm.cpp/src/vt/xpu/xpu_qk_norm.h",
+          "bytes": 2599,
+          "sha256": "da17bac91f88ae02695d839640e01d705beb24ba38fd13c796f0412d77bd3fa9"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/vllm.cpp/src/vt/xpu/xpu_norm.cpp",
+          "bytes": 6373,
+          "sha256": "a101c3deb7a5d31171bab60c957f89172122b99755b8fed3b180aed490e4ecc1"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/vllm.cpp/src/vt/xpu/xpu_attention.cpp",
+          "bytes": 32269,
+          "sha256": "f884ba3a42cc21230d4da6148f88051e59f4c3b4f0757ac6f15ac421dd1c7045"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/vllm.cpp/src/vllm/model_executor/models/qwen3_5.cpp",
+          "bytes": 732663,
+          "sha256": "e8d9a6e6ec91a03caf3ef590f55d924e6c00d0bfae33aa5cbd54e8341c93857d"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/engine-build/tests/test_xpu_qwen_exl3_fp16",
+          "bytes": 32551440,
+          "sha256": "efd6928c2f43383032ac9c2a03f725c755321abc0f4b76fe690545a6938b36b8"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/engine-build/tests/test_xpu_ops",
+          "bytes": 32326000,
+          "sha256": "a7374ef53659b0e9caa3b8908c228133910cff3e6f86b74dc13939dca591b81d"
+        }
+      ],
+      "preserved_source_snapshots": [
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-unfused-qk-v2-source-ops.h",
+          "bytes": 403527,
+          "sha256": "b002daa763dcec97f9c2eaae828f49e344ec1e8bdd678ec8a5fb8bbabeb0eb01"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-unfused-qk-v2-source-ops.cpp",
+          "bytes": 388878,
+          "sha256": "4e66eac24be03c91bf7ae5f84184bb215a3bd1001d1ebf8a63a417011da0c63e"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-unfused-qk-v2-source-xpu_qk_norm.h",
+          "bytes": 2599,
+          "sha256": "da17bac91f88ae02695d839640e01d705beb24ba38fd13c796f0412d77bd3fa9"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-unfused-qk-v2-source-xpu_norm.cpp",
+          "bytes": 6373,
+          "sha256": "a101c3deb7a5d31171bab60c957f89172122b99755b8fed3b180aed490e4ecc1"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-unfused-qk-v2-source-xpu_attention.cpp",
+          "bytes": 32269,
+          "sha256": "f884ba3a42cc21230d4da6148f88051e59f4c3b4f0757ac6f15ac421dd1c7045"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-unfused-qk-v2-source-qwen3_5.cpp",
+          "bytes": 732663,
+          "sha256": "e8d9a6e6ec91a03caf3ef590f55d924e6c00d0bfae33aa5cbd54e8341c93857d"
+        }
+      ],
+      "unchanged_fixtures": [
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/real_attention3_oracle.safetensors",
+          "bytes": 22460520,
+          "sha256": "05ffbe48817830a0175cedbf4f86fb81369b2288b3fce3adcfe6bdc280d8f5c3"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/real_attention3_rope_oracle.safetensors",
+          "bytes": 24326888,
+          "sha256": "36852e1f13d014943f70eb84ee06478b4aa87fbcd1fae394da592dff1d1f59c2"
+        }
+      ],
+      "preserved_receipts": [
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-unfused-qk-build-v1.log",
+          "bytes": 27208,
+          "sha256": "f2388196d4d6b92775854983d33c9e7e870e0700e1b979f27fe55505e226f402"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-unfused-qk-build-v2.log",
+          "bytes": 398,
+          "sha256": "12d5dae05ec46b1a8fcac6cac85192a3f66d315381b465eb0614dab815ab0660"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-unfused-qk-default-rms-regression-v1.log",
+          "bytes": 306,
+          "sha256": "49ed3e7618022459c61895dd23ee778c08f1a21277952e34cff9bcbfae66c6b8"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-unfused-qk-final-fused-auto-test-v2.log",
+          "bytes": 2017,
+          "sha256": "b30f66f4debb37755067c291a1c45c3b92b3a2d95a63cf02878c8e519471f224"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-unfused-qk-final-fused-auto-trace-v2.jsonl",
+          "bytes": 18471,
+          "sha256": "9c717e209b341edbdfcb476536eaa8d313ebf649fe99005bc629d810d0c91b68"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-unfused-qk-final-fused-auto-v2/manifest.tsv",
+          "bytes": 884,
+          "sha256": "860432d776df3071079b1900a84d70d3674d4194127ceb255c2547fe2a3b543f"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-unfused-qk-final-fused-auto-v2/s0_l3_attn_core.bin",
+          "bytes": 1572864,
+          "sha256": "f730ade4e2172d7e3356807a478625f28c61411ed6b00ed1de6c7475d9576266"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-unfused-qk-final-fused-auto-v2/s0_l3_attn_gate.bin",
+          "bytes": 3145728,
+          "sha256": "4d219bd6a2cbd48bc95ae94d374a1a86f2814623a8da0a7e927961bad528d036"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-unfused-qk-final-fused-auto-v2/s0_l3_attn_gated.bin",
+          "bytes": 1572864,
+          "sha256": "e7a1008d90d60522154bc8ac75b1612bd1039d7ad4c339a746b74fee478fb42f"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-unfused-qk-final-fused-auto-v2/s0_l3_attn_k_rope.bin",
+          "bytes": 262144,
+          "sha256": "e69e5997fcbac3ce8864d07f1d5f1c83cbdb9c9f4a27f6634367acd959d40bd5"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-unfused-qk-final-fused-auto-v2/s0_l3_attn_key_raw.bin",
+          "bytes": 262144,
+          "sha256": "40f4af973117b82fbd8caea1cc18b9eca682dd4b4811eb8eeca8539bbb9889a8"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-unfused-qk-final-fused-auto-v2/s0_l3_attn_q_rope.bin",
+          "bytes": 1572864,
+          "sha256": "06ae903d4c592d5133f9b5b381e0dc7e0b909229327e06f2dbad3780f0993494"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-unfused-qk-final-fused-auto-v2/s0_l3_attn_qgate.bin",
+          "bytes": 3145728,
+          "sha256": "5b6abd040d6cd3b5cd34b64319c22de968701eda45418a49d63119979c5fdef3"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-unfused-qk-final-fused-auto-v2/s0_l3_attn_value.bin",
+          "bytes": 262144,
+          "sha256": "af7c36101b4702d5dd855f0b6172d62f2ece5473d0562619784a1386835ce167"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-unfused-qk-final-fused-auto-v2/s1_l3_attn_core.bin",
+          "bytes": 12288,
+          "sha256": "974936a943360d32ad5fda13486b6be3b03b2682c9cbfac74a6f57bcd943aef0"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-unfused-qk-final-fused-auto-v2/s1_l3_attn_gate.bin",
+          "bytes": 24576,
+          "sha256": "1ed1b529d2823431c1ecdd3ec441e589f5bbc4fbaa684d368c014bc01b8408cd"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-unfused-qk-final-fused-auto-v2/s1_l3_attn_gated.bin",
+          "bytes": 12288,
+          "sha256": "ac975553eb12cc0462189dd079d262ed4c60915d37643cf01d7f01fca963d5d8"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-unfused-qk-final-fused-auto-v2/s1_l3_attn_k_rope.bin",
+          "bytes": 2048,
+          "sha256": "24aa601ee695eca6ef821883f37596a1bfcac4d534d3d487a2b68671606adb92"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-unfused-qk-final-fused-auto-v2/s1_l3_attn_key_raw.bin",
+          "bytes": 2048,
+          "sha256": "d86f738dbb4f54b7753b74c6cef2c661edf98208c61d4dac15705c4e7ba16cc9"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-unfused-qk-final-fused-auto-v2/s1_l3_attn_q_rope.bin",
+          "bytes": 12288,
+          "sha256": "58ec51d328fde26d9ffb67706e8a02bb711c6b46caa87edf272cf6082230251f"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-unfused-qk-final-fused-auto-v2/s1_l3_attn_qgate.bin",
+          "bytes": 24576,
+          "sha256": "4379c25d2e78654042d12364add75885f7c46513217d9b8ff18f5c8a633034a7"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-unfused-qk-final-fused-auto-v2/s1_l3_attn_value.bin",
+          "bytes": 2048,
+          "sha256": "3650686e31e4eaf4b55c3f83999acfc287ac5c4dde019be3ef160d75ea6ef149"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-unfused-qk-fused-auto-test-v1.log",
+          "bytes": 2017,
+          "sha256": "b30f66f4debb37755067c291a1c45c3b92b3a2d95a63cf02878c8e519471f224"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-unfused-qk-fused-auto-trace-v1.jsonl",
+          "bytes": 18471,
+          "sha256": "9c717e209b341edbdfcb476536eaa8d313ebf649fe99005bc629d810d0c91b68"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-unfused-qk-fused-auto-v1/manifest.tsv",
+          "bytes": 884,
+          "sha256": "860432d776df3071079b1900a84d70d3674d4194127ceb255c2547fe2a3b543f"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-unfused-qk-fused-auto-v1/s0_l3_attn_core.bin",
+          "bytes": 1572864,
+          "sha256": "f730ade4e2172d7e3356807a478625f28c61411ed6b00ed1de6c7475d9576266"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-unfused-qk-fused-auto-v1/s0_l3_attn_gate.bin",
+          "bytes": 3145728,
+          "sha256": "4d219bd6a2cbd48bc95ae94d374a1a86f2814623a8da0a7e927961bad528d036"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-unfused-qk-fused-auto-v1/s0_l3_attn_gated.bin",
+          "bytes": 1572864,
+          "sha256": "e7a1008d90d60522154bc8ac75b1612bd1039d7ad4c339a746b74fee478fb42f"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-unfused-qk-fused-auto-v1/s0_l3_attn_k_rope.bin",
+          "bytes": 262144,
+          "sha256": "e69e5997fcbac3ce8864d07f1d5f1c83cbdb9c9f4a27f6634367acd959d40bd5"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-unfused-qk-fused-auto-v1/s0_l3_attn_key_raw.bin",
+          "bytes": 262144,
+          "sha256": "40f4af973117b82fbd8caea1cc18b9eca682dd4b4811eb8eeca8539bbb9889a8"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-unfused-qk-fused-auto-v1/s0_l3_attn_q_rope.bin",
+          "bytes": 1572864,
+          "sha256": "06ae903d4c592d5133f9b5b381e0dc7e0b909229327e06f2dbad3780f0993494"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-unfused-qk-fused-auto-v1/s0_l3_attn_qgate.bin",
+          "bytes": 3145728,
+          "sha256": "5b6abd040d6cd3b5cd34b64319c22de968701eda45418a49d63119979c5fdef3"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-unfused-qk-fused-auto-v1/s0_l3_attn_value.bin",
+          "bytes": 262144,
+          "sha256": "af7c36101b4702d5dd855f0b6172d62f2ece5473d0562619784a1386835ce167"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-unfused-qk-fused-auto-v1/s1_l3_attn_core.bin",
+          "bytes": 12288,
+          "sha256": "974936a943360d32ad5fda13486b6be3b03b2682c9cbfac74a6f57bcd943aef0"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-unfused-qk-fused-auto-v1/s1_l3_attn_gate.bin",
+          "bytes": 24576,
+          "sha256": "1ed1b529d2823431c1ecdd3ec441e589f5bbc4fbaa684d368c014bc01b8408cd"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-unfused-qk-fused-auto-v1/s1_l3_attn_gated.bin",
+          "bytes": 12288,
+          "sha256": "ac975553eb12cc0462189dd079d262ed4c60915d37643cf01d7f01fca963d5d8"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-unfused-qk-fused-auto-v1/s1_l3_attn_k_rope.bin",
+          "bytes": 2048,
+          "sha256": "24aa601ee695eca6ef821883f37596a1bfcac4d534d3d487a2b68671606adb92"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-unfused-qk-fused-auto-v1/s1_l3_attn_key_raw.bin",
+          "bytes": 2048,
+          "sha256": "d86f738dbb4f54b7753b74c6cef2c661edf98208c61d4dac15705c4e7ba16cc9"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-unfused-qk-fused-auto-v1/s1_l3_attn_q_rope.bin",
+          "bytes": 12288,
+          "sha256": "58ec51d328fde26d9ffb67706e8a02bb711c6b46caa87edf272cf6082230251f"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-unfused-qk-fused-auto-v1/s1_l3_attn_qgate.bin",
+          "bytes": 24576,
+          "sha256": "4379c25d2e78654042d12364add75885f7c46513217d9b8ff18f5c8a633034a7"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-unfused-qk-fused-auto-v1/s1_l3_attn_value.bin",
+          "bytes": 2048,
+          "sha256": "3650686e31e4eaf4b55c3f83999acfc287ac5c4dde019be3ef160d75ea6ef149"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-unfused-qk-fused-dump-compare-v1.json",
+          "bytes": 4618,
+          "sha256": "ff9e6787ef04a4da98bda6a8a21e0edcc09d78362ac0d2b7458b3c47627963db"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-unfused-qk-fused-scalar-test-v1.log",
+          "bytes": 2017,
+          "sha256": "b30f66f4debb37755067c291a1c45c3b92b3a2d95a63cf02878c8e519471f224"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-unfused-qk-fused-scalar-trace-v1.jsonl",
+          "bytes": 18471,
+          "sha256": "9c717e209b341edbdfcb476536eaa8d313ebf649fe99005bc629d810d0c91b68"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-unfused-qk-fused-scalar-v1/manifest.tsv",
+          "bytes": 884,
+          "sha256": "860432d776df3071079b1900a84d70d3674d4194127ceb255c2547fe2a3b543f"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-unfused-qk-fused-scalar-v1/s0_l3_attn_core.bin",
+          "bytes": 1572864,
+          "sha256": "f730ade4e2172d7e3356807a478625f28c61411ed6b00ed1de6c7475d9576266"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-unfused-qk-fused-scalar-v1/s0_l3_attn_gate.bin",
+          "bytes": 3145728,
+          "sha256": "4d219bd6a2cbd48bc95ae94d374a1a86f2814623a8da0a7e927961bad528d036"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-unfused-qk-fused-scalar-v1/s0_l3_attn_gated.bin",
+          "bytes": 1572864,
+          "sha256": "e7a1008d90d60522154bc8ac75b1612bd1039d7ad4c339a746b74fee478fb42f"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-unfused-qk-fused-scalar-v1/s0_l3_attn_k_rope.bin",
+          "bytes": 262144,
+          "sha256": "e69e5997fcbac3ce8864d07f1d5f1c83cbdb9c9f4a27f6634367acd959d40bd5"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-unfused-qk-fused-scalar-v1/s0_l3_attn_key_raw.bin",
+          "bytes": 262144,
+          "sha256": "40f4af973117b82fbd8caea1cc18b9eca682dd4b4811eb8eeca8539bbb9889a8"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-unfused-qk-fused-scalar-v1/s0_l3_attn_q_rope.bin",
+          "bytes": 1572864,
+          "sha256": "06ae903d4c592d5133f9b5b381e0dc7e0b909229327e06f2dbad3780f0993494"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-unfused-qk-fused-scalar-v1/s0_l3_attn_qgate.bin",
+          "bytes": 3145728,
+          "sha256": "5b6abd040d6cd3b5cd34b64319c22de968701eda45418a49d63119979c5fdef3"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-unfused-qk-fused-scalar-v1/s0_l3_attn_value.bin",
+          "bytes": 262144,
+          "sha256": "af7c36101b4702d5dd855f0b6172d62f2ece5473d0562619784a1386835ce167"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-unfused-qk-fused-scalar-v1/s1_l3_attn_core.bin",
+          "bytes": 12288,
+          "sha256": "974936a943360d32ad5fda13486b6be3b03b2682c9cbfac74a6f57bcd943aef0"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-unfused-qk-fused-scalar-v1/s1_l3_attn_gate.bin",
+          "bytes": 24576,
+          "sha256": "1ed1b529d2823431c1ecdd3ec441e589f5bbc4fbaa684d368c014bc01b8408cd"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-unfused-qk-fused-scalar-v1/s1_l3_attn_gated.bin",
+          "bytes": 12288,
+          "sha256": "ac975553eb12cc0462189dd079d262ed4c60915d37643cf01d7f01fca963d5d8"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-unfused-qk-fused-scalar-v1/s1_l3_attn_k_rope.bin",
+          "bytes": 2048,
+          "sha256": "24aa601ee695eca6ef821883f37596a1bfcac4d534d3d487a2b68671606adb92"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-unfused-qk-fused-scalar-v1/s1_l3_attn_key_raw.bin",
+          "bytes": 2048,
+          "sha256": "d86f738dbb4f54b7753b74c6cef2c661edf98208c61d4dac15705c4e7ba16cc9"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-unfused-qk-fused-scalar-v1/s1_l3_attn_q_rope.bin",
+          "bytes": 12288,
+          "sha256": "58ec51d328fde26d9ffb67706e8a02bb711c6b46caa87edf272cf6082230251f"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-unfused-qk-fused-scalar-v1/s1_l3_attn_qgate.bin",
+          "bytes": 24576,
+          "sha256": "4379c25d2e78654042d12364add75885f7c46513217d9b8ff18f5c8a633034a7"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-unfused-qk-fused-scalar-v1/s1_l3_attn_value.bin",
+          "bytes": 2048,
+          "sha256": "3650686e31e4eaf4b55c3f83999acfc287ac5c4dde019be3ef160d75ea6ef149"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-unfused-qk-native-v1/manifest.tsv",
+          "bytes": 884,
+          "sha256": "860432d776df3071079b1900a84d70d3674d4194127ceb255c2547fe2a3b543f"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-unfused-qk-native-v1/s0_l3_attn_core.bin",
+          "bytes": 1572864,
+          "sha256": "f730ade4e2172d7e3356807a478625f28c61411ed6b00ed1de6c7475d9576266"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-unfused-qk-native-v1/s0_l3_attn_gate.bin",
+          "bytes": 3145728,
+          "sha256": "4d219bd6a2cbd48bc95ae94d374a1a86f2814623a8da0a7e927961bad528d036"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-unfused-qk-native-v1/s0_l3_attn_gated.bin",
+          "bytes": 1572864,
+          "sha256": "e7a1008d90d60522154bc8ac75b1612bd1039d7ad4c339a746b74fee478fb42f"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-unfused-qk-native-v1/s0_l3_attn_k_rope.bin",
+          "bytes": 262144,
+          "sha256": "e69e5997fcbac3ce8864d07f1d5f1c83cbdb9c9f4a27f6634367acd959d40bd5"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-unfused-qk-native-v1/s0_l3_attn_key_raw.bin",
+          "bytes": 262144,
+          "sha256": "40f4af973117b82fbd8caea1cc18b9eca682dd4b4811eb8eeca8539bbb9889a8"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-unfused-qk-native-v1/s0_l3_attn_q_rope.bin",
+          "bytes": 1572864,
+          "sha256": "06ae903d4c592d5133f9b5b381e0dc7e0b909229327e06f2dbad3780f0993494"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-unfused-qk-native-v1/s0_l3_attn_qgate.bin",
+          "bytes": 3145728,
+          "sha256": "5b6abd040d6cd3b5cd34b64319c22de968701eda45418a49d63119979c5fdef3"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-unfused-qk-native-v1/s0_l3_attn_value.bin",
+          "bytes": 262144,
+          "sha256": "af7c36101b4702d5dd855f0b6172d62f2ece5473d0562619784a1386835ce167"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-unfused-qk-native-v1/s1_l3_attn_core.bin",
+          "bytes": 12288,
+          "sha256": "974936a943360d32ad5fda13486b6be3b03b2682c9cbfac74a6f57bcd943aef0"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-unfused-qk-native-v1/s1_l3_attn_gate.bin",
+          "bytes": 24576,
+          "sha256": "1ed1b529d2823431c1ecdd3ec441e589f5bbc4fbaa684d368c014bc01b8408cd"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-unfused-qk-native-v1/s1_l3_attn_gated.bin",
+          "bytes": 12288,
+          "sha256": "ac975553eb12cc0462189dd079d262ed4c60915d37643cf01d7f01fca963d5d8"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-unfused-qk-native-v1/s1_l3_attn_k_rope.bin",
+          "bytes": 2048,
+          "sha256": "24aa601ee695eca6ef821883f37596a1bfcac4d534d3d487a2b68671606adb92"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-unfused-qk-native-v1/s1_l3_attn_key_raw.bin",
+          "bytes": 2048,
+          "sha256": "d86f738dbb4f54b7753b74c6cef2c661edf98208c61d4dac15705c4e7ba16cc9"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-unfused-qk-native-v1/s1_l3_attn_q_rope.bin",
+          "bytes": 12288,
+          "sha256": "58ec51d328fde26d9ffb67706e8a02bb711c6b46caa87edf272cf6082230251f"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-unfused-qk-native-v1/s1_l3_attn_qgate.bin",
+          "bytes": 24576,
+          "sha256": "4379c25d2e78654042d12364add75885f7c46513217d9b8ff18f5c8a633034a7"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-unfused-qk-native-v1/s1_l3_attn_value.bin",
+          "bytes": 2048,
+          "sha256": "3650686e31e4eaf4b55c3f83999acfc287ac5c4dde019be3ef160d75ea6ef149"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-unfused-qk-native-v2/manifest.tsv",
+          "bytes": 884,
+          "sha256": "860432d776df3071079b1900a84d70d3674d4194127ceb255c2547fe2a3b543f"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-unfused-qk-native-v2/s0_l3_attn_core.bin",
+          "bytes": 1572864,
+          "sha256": "f730ade4e2172d7e3356807a478625f28c61411ed6b00ed1de6c7475d9576266"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-unfused-qk-native-v2/s0_l3_attn_gate.bin",
+          "bytes": 3145728,
+          "sha256": "4d219bd6a2cbd48bc95ae94d374a1a86f2814623a8da0a7e927961bad528d036"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-unfused-qk-native-v2/s0_l3_attn_gated.bin",
+          "bytes": 1572864,
+          "sha256": "e7a1008d90d60522154bc8ac75b1612bd1039d7ad4c339a746b74fee478fb42f"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-unfused-qk-native-v2/s0_l3_attn_k_rope.bin",
+          "bytes": 262144,
+          "sha256": "e69e5997fcbac3ce8864d07f1d5f1c83cbdb9c9f4a27f6634367acd959d40bd5"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-unfused-qk-native-v2/s0_l3_attn_key_raw.bin",
+          "bytes": 262144,
+          "sha256": "40f4af973117b82fbd8caea1cc18b9eca682dd4b4811eb8eeca8539bbb9889a8"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-unfused-qk-native-v2/s0_l3_attn_q_rope.bin",
+          "bytes": 1572864,
+          "sha256": "06ae903d4c592d5133f9b5b381e0dc7e0b909229327e06f2dbad3780f0993494"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-unfused-qk-native-v2/s0_l3_attn_qgate.bin",
+          "bytes": 3145728,
+          "sha256": "5b6abd040d6cd3b5cd34b64319c22de968701eda45418a49d63119979c5fdef3"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-unfused-qk-native-v2/s0_l3_attn_value.bin",
+          "bytes": 262144,
+          "sha256": "af7c36101b4702d5dd855f0b6172d62f2ece5473d0562619784a1386835ce167"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-unfused-qk-native-v2/s1_l3_attn_core.bin",
+          "bytes": 12288,
+          "sha256": "974936a943360d32ad5fda13486b6be3b03b2682c9cbfac74a6f57bcd943aef0"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-unfused-qk-native-v2/s1_l3_attn_gate.bin",
+          "bytes": 24576,
+          "sha256": "1ed1b529d2823431c1ecdd3ec441e589f5bbc4fbaa684d368c014bc01b8408cd"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-unfused-qk-native-v2/s1_l3_attn_gated.bin",
+          "bytes": 12288,
+          "sha256": "ac975553eb12cc0462189dd079d262ed4c60915d37643cf01d7f01fca963d5d8"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-unfused-qk-native-v2/s1_l3_attn_k_rope.bin",
+          "bytes": 2048,
+          "sha256": "24aa601ee695eca6ef821883f37596a1bfcac4d534d3d487a2b68671606adb92"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-unfused-qk-native-v2/s1_l3_attn_key_raw.bin",
+          "bytes": 2048,
+          "sha256": "d86f738dbb4f54b7753b74c6cef2c661edf98208c61d4dac15705c4e7ba16cc9"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-unfused-qk-native-v2/s1_l3_attn_q_rope.bin",
+          "bytes": 12288,
+          "sha256": "58ec51d328fde26d9ffb67706e8a02bb711c6b46caa87edf272cf6082230251f"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-unfused-qk-native-v2/s1_l3_attn_qgate.bin",
+          "bytes": 24576,
+          "sha256": "4379c25d2e78654042d12364add75885f7c46513217d9b8ff18f5c8a633034a7"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-unfused-qk-native-v2/s1_l3_attn_value.bin",
+          "bytes": 2048,
+          "sha256": "3650686e31e4eaf4b55c3f83999acfc287ac5c4dde019be3ef160d75ea6ef149"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-unfused-qk-test-v1.log",
+          "bytes": 1647,
+          "sha256": "2a9f597f69f0e707f51aec5bfdf7266efdc21afce3ae4df131daf9fdfaad06e4"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-unfused-qk-test-v2.log",
+          "bytes": 1647,
+          "sha256": "2a9f597f69f0e707f51aec5bfdf7266efdc21afce3ae4df131daf9fdfaad06e4"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-unfused-qk-trace-summary-v1.json",
+          "bytes": 362,
+          "sha256": "3e0d00fc71a492f6c81d4233bd015c5d4a575c9071979887abe532c3d9e1c691"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-unfused-qk-trace-v1.jsonl",
+          "bytes": 20172,
+          "sha256": "c0b9d22b4165eac9e4e1ba990bbfd2c1d0868334f4ddfc336bf6cbe6808608c6"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-unfused-qk-trace-v2.jsonl",
+          "bytes": 20172,
+          "sha256": "c0b9d22b4165eac9e4e1ba990bbfd2c1d0868334f4ddfc336bf6cbe6808608c6"
+        }
+      ],
+      "selection": "RmsNormArgs.qk_fp16 defaults false. Model paged/unpaged calls select only XPU+EXL3+F16+D256. VT wrapper rejects unsupported explicit selections (non-XPU, other width, non-F16/F32 input, non-F16 output, non-F32/non-Gemma weight or residual).",
+      "arithmetic": "Private shared D256 mean/F32 multiply helpers; dedicated producer rsqrt kernel separate from legacy1/sqrt; normalized F16 stores. Other-width/residual norm arithmetic unchanged.",
+      "checks": {
+        "v1_build_exit": 0,
+        "v2_build_exit": 0,
+        "unfused_v1_v2": {
+          "cases": 1,
+          "assertions": 657,
+          "passed": 657,
+          "exit": 0
+        },
+        "fused_auto_v1_v2": {
+          "cases": 2,
+          "assertions": 695,
+          "passed": 695,
+          "exit": 0
+        },
+        "fused_scalar_v1": {
+          "cases": 2,
+          "assertions": 695,
+          "passed": 695,
+          "exit": 0
+        },
+        "generic_RMS_v1": {
+          "cases": 1,
+          "assertions": 63928,
+          "passed": 63928,
+          "exit": 0
+        },
+        "actual_QK_half_differences_p128_d1": 0,
+        "active_KV_and_inactive_cache_byte_differences": 0,
+        "numerical_band_failures": 0,
+        "identical_native_unfused_fused_stage_dumps_v1": 16
+      },
+      "trace": {
+        "scope": "Actual unfused P128/D1 native mixer operator trace",
+        "selections": {
+          "RopeCosSinCache": 2,
+          "Exl3GroupedLinear": 4,
+          "Copy": 24,
+          "AttnGateSplit": 2,
+          "RmsNorm": 4,
+          "RopeFromCache": 2,
+          "ReshapeAndCacheFp8": 2,
+          "PagedAttention": 2,
+          "SigmoidGateBf16": 2
+        },
+        "cpu_reference_selections": 0,
+        "bf16_arguments": 0
+      },
+      "limitations": [
+        "Standalone internal means/inverses not separately instrumented by this mixer gate.",
+        "No-SG16 RMS scalar fallback not exercised on B70.",
+        "Unfused selected-row scratch/upload graph/lifetime/performance pending.",
+        "Whole-target/state/D64 remain separate gates; S1/S2-S6 incomplete."
+      ],
+      "next_step": "Rerun complete target gates, then investigate remaining full-width norm/BA/state differences without weakening frozen gates."
+    },
+    "S1_target_after_QK_RoPE_qualification": {
+      "observed_date": "2026-10-03",
+      "status": "in_progress_D64_distribution_gate_failing",
+      "scope": "Current complete64-layer native eager target after Q/K/RoPE repairs; full6bpw248320 head, own persistent state/cache, MTP/graphs disabled. P128/D1 passes; D64 still fails.",
+      "current_source_and_build_artifacts": [
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/vllm.cpp/include/vt/ops.h",
+          "bytes": 403527,
+          "sha256": "b002daa763dcec97f9c2eaae828f49e344ec1e8bdd678ec8a5fb8bbabeb0eb01"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/vllm.cpp/src/vt/ops.cpp",
+          "bytes": 388878,
+          "sha256": "4e66eac24be03c91bf7ae5f84184bb215a3bd1001d1ebf8a63a417011da0c63e"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/vllm.cpp/src/vt/xpu/xpu_qk_norm.h",
+          "bytes": 2599,
+          "sha256": "da17bac91f88ae02695d839640e01d705beb24ba38fd13c796f0412d77bd3fa9"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/vllm.cpp/src/vt/xpu/xpu_norm.cpp",
+          "bytes": 6373,
+          "sha256": "a101c3deb7a5d31171bab60c957f89172122b99755b8fed3b180aed490e4ecc1"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/vllm.cpp/src/vt/xpu/xpu_attention.cpp",
+          "bytes": 32269,
+          "sha256": "f884ba3a42cc21230d4da6148f88051e59f4c3b4f0757ac6f15ac421dd1c7045"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/vllm.cpp/src/vllm/model_executor/models/qwen3_5.cpp",
+          "bytes": 732663,
+          "sha256": "e8d9a6e6ec91a03caf3ef590f55d924e6c00d0bfae33aa5cbd54e8341c93857d"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/engine-build/tests/test_xpu_qwen_exl3_fp16",
+          "bytes": 32551440,
+          "sha256": "efd6928c2f43383032ac9c2a03f725c755321abc0f4b76fe690545a6938b36b8"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/engine-build/tests/test_xpu_ops",
+          "bytes": 32326000,
+          "sha256": "a7374ef53659b0e9caa3b8908c228133910cff3e6f86b74dc13939dca591b81d"
+        }
+      ],
+      "preserved_source_snapshots": [
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-unfused-qk-v2-source-ops.h",
+          "bytes": 403527,
+          "sha256": "b002daa763dcec97f9c2eaae828f49e344ec1e8bdd678ec8a5fb8bbabeb0eb01"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-unfused-qk-v2-source-ops.cpp",
+          "bytes": 388878,
+          "sha256": "4e66eac24be03c91bf7ae5f84184bb215a3bd1001d1ebf8a63a417011da0c63e"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-unfused-qk-v2-source-xpu_qk_norm.h",
+          "bytes": 2599,
+          "sha256": "da17bac91f88ae02695d839640e01d705beb24ba38fd13c796f0412d77bd3fa9"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-unfused-qk-v2-source-xpu_norm.cpp",
+          "bytes": 6373,
+          "sha256": "a101c3deb7a5d31171bab60c957f89172122b99755b8fed3b180aed490e4ecc1"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-unfused-qk-v2-source-xpu_attention.cpp",
+          "bytes": 32269,
+          "sha256": "f884ba3a42cc21230d4da6148f88051e59f4c3b4f0757ac6f15ac421dd1c7045"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/attention3-unfused-qk-v2-source-qwen3_5.cpp",
+          "bytes": 732663,
+          "sha256": "e8d9a6e6ec91a03caf3ef590f55d924e6c00d0bfae33aa5cbd54e8341c93857d"
+        }
+      ],
+      "preserved_receipts": [
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-QK-qualified-summary-v1.json",
+          "bytes": 12871,
+          "sha256": "5c44dee7ea0798467f7aa3957daeef74308196a87acaa324a17697691a7ef3e9"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-QK-qualified-test-v1.log",
+          "bytes": 10175,
+          "sha256": "2d78b29d313064a789ce6b9aecbcc936606de3816a09c00c6264af43382b01cb"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-QK-qualified-trace-v1.jsonl",
+          "bytes": 27038118,
+          "sha256": "5b53da3a3628822445f483696608a31ba48321c01cec248d4d5384904d5f9242"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-QK-qualified-v1-d1-logits.f32",
+          "bytes": 993280,
+          "sha256": "c37cfe9994a41e4a2d91a97c29082b2a30ead8d086b8d91549d6b8bc331fca99"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-QK-qualified-v1-d10-logits.f32",
+          "bytes": 993280,
+          "sha256": "43198575c59db1d5f3abbfe655f09400673ce7d46381fca253b1fe1bce36c8b0"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-QK-qualified-v1-d11-logits.f32",
+          "bytes": 993280,
+          "sha256": "4f871415d769a1c9b190173ec04bae783588fac3299584c9b37523ee8046b7f3"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-QK-qualified-v1-d12-logits.f32",
+          "bytes": 993280,
+          "sha256": "1b92e957a9de1d3d925db6910bb96d7ef37e81fd9f990190e5ad0b5f3eee4884"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-QK-qualified-v1-d13-logits.f32",
+          "bytes": 993280,
+          "sha256": "6759c02ae4a3cbf04d868b07ab15b75c40bbd80b80871462870088ea347b61af"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-QK-qualified-v1-d14-logits.f32",
+          "bytes": 993280,
+          "sha256": "d142d61c22841471b776c18b45791a497cbd9ae6a6d5ec04149404fd1e230077"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-QK-qualified-v1-d15-logits.f32",
+          "bytes": 993280,
+          "sha256": "e95f7778984625eda349d6fa0f89a208d44f5d6d4b3e332e9d3c4c5e909fdd72"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-QK-qualified-v1-d16-logits.f32",
+          "bytes": 993280,
+          "sha256": "d2c6d6e948df1d533c24b4251eb2b0fae79cf20607411951755c008707ea3f4e"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-QK-qualified-v1-d17-logits.f32",
+          "bytes": 993280,
+          "sha256": "7bf4e5ca6dac5a7e6c8b78ef1874a40f55d0e3b6fdb9939857737f92699b78ab"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-QK-qualified-v1-d18-logits.f32",
+          "bytes": 993280,
+          "sha256": "e9babf9f730b2d20ff0b2204b0107d8f5097ac5e06a567a1f880bd47790f35f3"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-QK-qualified-v1-d19-logits.f32",
+          "bytes": 993280,
+          "sha256": "a439bcc2be4f66c131fd42db76b3e41fb522945b86fbbcb84d03da2657686461"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-QK-qualified-v1-d2-logits.f32",
+          "bytes": 993280,
+          "sha256": "bb52a7dd2882475343ea652dc0c97d8e8cddf423c0308d6426a91ba94ebaa30b"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-QK-qualified-v1-d20-logits.f32",
+          "bytes": 993280,
+          "sha256": "9d4ba133550835d23ffd9a0e1d07ad4dd9e905938974a56744b2f354f23ec386"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-QK-qualified-v1-d21-logits.f32",
+          "bytes": 993280,
+          "sha256": "09fb35affed81a6aab93e263f3faf523562f0f9c7176efa07981c7ca5e86218a"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-QK-qualified-v1-d22-logits.f32",
+          "bytes": 993280,
+          "sha256": "5d6ed73c21b1c9d68a059fede1991d110ba4ea108a2bbafc3c2f7cfeafab696c"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-QK-qualified-v1-d23-logits.f32",
+          "bytes": 993280,
+          "sha256": "7a50dd81082185001e0e8e8eaa81a1a8b05ee23cc9f3a5e08a1d9aa1de105de0"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-QK-qualified-v1-d24-logits.f32",
+          "bytes": 993280,
+          "sha256": "0b37481f48380be4194a54e9ce2d7738addaa2469dc4965697859e4225639000"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-QK-qualified-v1-d25-logits.f32",
+          "bytes": 993280,
+          "sha256": "ad8b1629d404353c25af52b3674ebdd15f51a505932eb7ec1f772d90c88c1197"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-QK-qualified-v1-d26-logits.f32",
+          "bytes": 993280,
+          "sha256": "c16221d6d4a0fcf91918b67b93213d226428af6c55089fdde8225616fd3bd83c"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-QK-qualified-v1-d27-logits.f32",
+          "bytes": 993280,
+          "sha256": "3866364898ac0e91adf735db20485c64f83cccaa081af4ce573a970770592646"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-QK-qualified-v1-d28-logits.f32",
+          "bytes": 993280,
+          "sha256": "14fda9811d8152826e6116e6f5e1d2d894bd9e81426e32afbb2d1a2a7b0ac75b"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-QK-qualified-v1-d29-logits.f32",
+          "bytes": 993280,
+          "sha256": "3ea037ddc22464918e4ef2a8ba5412fc8d601ab265d7d25164c1a8b037f06b29"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-QK-qualified-v1-d3-logits.f32",
+          "bytes": 993280,
+          "sha256": "3aa50d8eb8a38666e5975bbdb4f6154a7119f0e6bf57b8d6f90c87bc29232460"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-QK-qualified-v1-d30-logits.f32",
+          "bytes": 993280,
+          "sha256": "e6f7adaabaa14901df27c0cd0ef86ad331667d128685fc7487f77601d995ded8"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-QK-qualified-v1-d31-logits.f32",
+          "bytes": 993280,
+          "sha256": "d6992b68d58ddd9c856fd308bdcc3271eab8c2f4c082208a86338b6863d60396"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-QK-qualified-v1-d32-logits.f32",
+          "bytes": 993280,
+          "sha256": "b38b9a3f98646b3a0125a137510ee7ed817912c5a20a170a284d86f7f5064a53"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-QK-qualified-v1-d33-logits.f32",
+          "bytes": 993280,
+          "sha256": "38e5600e626005d6e4b9eed6cce5dd73fb05eb5848474d89ce77948aab86e7b7"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-QK-qualified-v1-d34-logits.f32",
+          "bytes": 993280,
+          "sha256": "02aa005b0fe97667bf1e0422650b35dcf72ffe178d563bc16fd70146e0553c1c"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-QK-qualified-v1-d35-logits.f32",
+          "bytes": 993280,
+          "sha256": "d15c116ee9d73ab276093f87053c28064f05b373b2ddb05676a3d47313cde5ca"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-QK-qualified-v1-d36-logits.f32",
+          "bytes": 993280,
+          "sha256": "7cc84903dd4c7e3d4a4b713adfec920a9a433791581759e29271f842cb82c5f8"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-QK-qualified-v1-d37-logits.f32",
+          "bytes": 993280,
+          "sha256": "4e32a90df36fb05eaa9bae7392a24f2a5e1ba24ff93afd3cc9f086c50f2ae90c"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-QK-qualified-v1-d38-logits.f32",
+          "bytes": 993280,
+          "sha256": "77324da1f6a9c65ed7939d94bc4857c574730ede409637ed82e38ca416913070"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-QK-qualified-v1-d39-logits.f32",
+          "bytes": 993280,
+          "sha256": "bce9f2be12069c9d0f6c6f6444a7f30fd8d08bb7b4053d1c1b369112b516c4f3"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-QK-qualified-v1-d4-logits.f32",
+          "bytes": 993280,
+          "sha256": "7330042147bdeba1f85fcbc005557bf3fc55c03b00a9164b9c97577d400e9241"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-QK-qualified-v1-d40-logits.f32",
+          "bytes": 993280,
+          "sha256": "bb21d196374ef8841c2d2945a2265b706e53257b0b5103593ff96e03825362a9"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-QK-qualified-v1-d41-logits.f32",
+          "bytes": 993280,
+          "sha256": "1954aae80a1a240ac920d52e12d010dd0a2ff6f0a016e6bb06888808cc782daf"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-QK-qualified-v1-d42-logits.f32",
+          "bytes": 993280,
+          "sha256": "afee43709552b2a44f28aa9eb5c652ffe2ebe230b2ae6c860cd8fe8527ec1c19"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-QK-qualified-v1-d43-logits.f32",
+          "bytes": 993280,
+          "sha256": "9ad6a1c67c4708cc55d669b4e98b86cbd22f8fdc95cb252b704b1196ea1c72fe"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-QK-qualified-v1-d44-logits.f32",
+          "bytes": 993280,
+          "sha256": "23ebcaf75080a9fd58947e10746575f0389ae01cca61b3653afd17e536fdff99"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-QK-qualified-v1-d45-logits.f32",
+          "bytes": 993280,
+          "sha256": "3e5bf2ae0119bcb558d4387446602e22a668810609f0c30b056a3aaa8c1cbef3"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-QK-qualified-v1-d46-logits.f32",
+          "bytes": 993280,
+          "sha256": "1284dc8ff4019819d3326a928499cb0d5334232845cb78198847bc49124ce8e7"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-QK-qualified-v1-d47-logits.f32",
+          "bytes": 993280,
+          "sha256": "fc702523466a3858bdd9f751a4b9fa5753d7dc6168c43161fc3ce0fe4d008daa"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-QK-qualified-v1-d48-logits.f32",
+          "bytes": 993280,
+          "sha256": "0d8e014cf2b1836d27147db734ce14cb42c291d448acc2fc1f787d4ae75e7cc7"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-QK-qualified-v1-d49-logits.f32",
+          "bytes": 993280,
+          "sha256": "fb4932334f2db1b35a885b0fc05088731560c0f1a795f73da481f5379ed32d54"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-QK-qualified-v1-d5-logits.f32",
+          "bytes": 993280,
+          "sha256": "66814d42f55cd29d5569cf672afaddbddaf3ae9c0bc2a341060496eacbd5a3d6"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-QK-qualified-v1-d50-logits.f32",
+          "bytes": 993280,
+          "sha256": "7f2776fe49f2e795d08629889d1ad5528b2dcb863ec8f4437ff477b0702cf59a"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-QK-qualified-v1-d51-logits.f32",
+          "bytes": 993280,
+          "sha256": "8136bedd9e494cd2f7b5e47d3eec3cfddce0ffba5f88c18b27ce4fc1c11caf65"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-QK-qualified-v1-d52-logits.f32",
+          "bytes": 993280,
+          "sha256": "a5820db94d9b51c3f49f88e06f37905340f86de8fe406cb5ee3286042aef39bc"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-QK-qualified-v1-d53-logits.f32",
+          "bytes": 993280,
+          "sha256": "e924176085533bd5911c850018bb53971308b8f603048cf6aa6779825185aadc"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-QK-qualified-v1-d54-logits.f32",
+          "bytes": 993280,
+          "sha256": "cf43944922701c0c8be44b14e6087dae30b00a1ba248d326e5f29bf3b42f04ba"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-QK-qualified-v1-d55-logits.f32",
+          "bytes": 993280,
+          "sha256": "c1f43ce68230c97837952dcd16b9d6b10e974775f2cae4399b6a1c2553ab2602"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-QK-qualified-v1-d56-logits.f32",
+          "bytes": 993280,
+          "sha256": "7ab3aef9a05582e6f65d124e2856c7a99904d292388c3a46cd1a6bb594dddd07"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-QK-qualified-v1-d57-logits.f32",
+          "bytes": 993280,
+          "sha256": "e7a3f5d6a9169fff85154e8f8a7b96e550683c6cac7e4dd3907d98c78ed3e3cd"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-QK-qualified-v1-d58-logits.f32",
+          "bytes": 993280,
+          "sha256": "f0bf6f6f5c5080ed7db27911647e37a86129f84a16a58d1cc9e64d7b4b010dec"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-QK-qualified-v1-d59-logits.f32",
+          "bytes": 993280,
+          "sha256": "52218bcbef96983e77626ff6ca24d554b3f15a1895773546dfff06d480d662ee"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-QK-qualified-v1-d6-logits.f32",
+          "bytes": 993280,
+          "sha256": "7a7bd0303f60ff35e08cf621c2d23d9e752dd8b4afd29302d849bf1bbe625153"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-QK-qualified-v1-d60-logits.f32",
+          "bytes": 993280,
+          "sha256": "40f044557a957f3f4ec2971df5363768ce8dccd53ed60cb8732e976268c3cdff"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-QK-qualified-v1-d61-logits.f32",
+          "bytes": 993280,
+          "sha256": "740118fac86bdae4dfbeee38f8da85b23e64f610ff74f8eaf7e3dcbc47c3ba66"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-QK-qualified-v1-d62-logits.f32",
+          "bytes": 993280,
+          "sha256": "4d9f58eac151cbf415653ccf6ec970efaa0c14ffded0ea551de8e4ba99209b55"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-QK-qualified-v1-d63-logits.f32",
+          "bytes": 993280,
+          "sha256": "bec9f03ab041e9a42093585b476c3b8367ba4b9d925eedf103c012d99d9edb8e"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-QK-qualified-v1-d64-logits.f32",
+          "bytes": 993280,
+          "sha256": "473a168e707414712c6918cf08ae15cc4a1a33803619c7e93e93fdc1577f2aaf"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-QK-qualified-v1-d7-logits.f32",
+          "bytes": 993280,
+          "sha256": "5e66cfb67359d6ee7d981fe5ac7c0f666be98a428018bec300e5005ed9306b69"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-QK-qualified-v1-d8-logits.f32",
+          "bytes": 993280,
+          "sha256": "41e6c6ad3f1717d3216afff68f56d7c232d0d576484afda56a004f2d53bc6b67"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-QK-qualified-v1-d9-logits.f32",
+          "bytes": 993280,
+          "sha256": "a4f2158a9bf2be56fb72fae13d5d2485ea06a062c716821c7ebc7e6f9c45fe97"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-QK-qualified-v1-p128-logits.f32",
+          "bytes": 993280,
+          "sha256": "52b52de624185cfc7c2e48a7729dbc41bc228ddd0823eccf8f96c4dc380a63ce"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-QK-qualified-witness-compare-v1.log",
+          "bytes": 49,
+          "sha256": "90451dc1f9d054cf97d52366f3d9a4ef3e1081dfa86f2f0e28cca924e25e1b1c"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-QK-qualified-witness-comparison-v1.json",
+          "bytes": 58616,
+          "sha256": "6151aeadeae41f98dc4b65b3ba822fd1783a73648bf9cf0e130c78bf8aaeea1f"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-QK-qualified-summary-v1.json",
+          "bytes": 1943,
+          "sha256": "242627b0520a0c5f0a8dddbc184d2fce9415e240d6f851273d28ca16a334b1df"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-QK-qualified-test-v1.log",
+          "bytes": 1018,
+          "sha256": "f5acc557b1934395922070333731bab96c73cd2f6f8f8b57438b5d66d61688f4"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-QK-qualified-trace-v1.jsonl",
+          "bytes": 967760,
+          "sha256": "ea8d2c49d5ad18cfbf61a61285445bde7e9088d35602bf47177cd44de6c366da"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-QK-qualified-v1-d1-logits.f32",
+          "bytes": 993280,
+          "sha256": "889893f5f8ff48d4ac949ca44432f32775ca9eae96f164d1169d3bc3a3ebf473"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-QK-qualified-v1-p128-logits.f32",
+          "bytes": 993280,
+          "sha256": "29f7fbfef3713f984ed1ddd067bff87eda69a1a0b97c4319c7e65be8fc9f4299"
+        }
+      ],
+      "P128_D1": {
+        "cases": 1,
+        "assertions": 197,
+        "passed": 197,
+        "test_exit": 0,
+        "scope": "Current complete native64-layer eager P128/D1, full6bpw248320 head against three unchanged original repeats; not D64/state qualification.",
+        "comparisons": [
+          {
+            "phase": "p128",
+            "repeat": 0,
+            "TV": 0.002072,
+            "KL": 1.42139e-05,
+            "top10": 10,
+            "greedy": 13,
+            "reference_greedy": 13
+          },
+          {
+            "phase": "p128",
+            "repeat": 1,
+            "TV": 0.0024333,
+            "KL": 1.90345e-05,
+            "top10": 10,
+            "greedy": 13,
+            "reference_greedy": 13
+          },
+          {
+            "phase": "p128",
+            "repeat": 2,
+            "TV": 0.00229301,
+            "KL": 1.75972e-05,
+            "top10": 10,
+            "greedy": 13,
+            "reference_greedy": 13
+          },
+          {
+            "phase": "d1",
+            "repeat": 0,
+            "TV": 0.00355169,
+            "KL": 4.21623e-05,
+            "top10": 10,
+            "greedy": 198,
+            "reference_greedy": 198
+          },
+          {
+            "phase": "d1",
+            "repeat": 1,
+            "TV": 0.00367591,
+            "KL": 4.69401e-05,
+            "top10": 10,
+            "greedy": 198,
+            "reference_greedy": 198
+          },
+          {
+            "phase": "d1",
+            "repeat": 2,
+            "TV": 0.00370011,
+            "KL": 4.495e-05,
+            "top10": 10,
+            "greedy": 198,
+            "reference_greedy": 198
+          }
+        ],
+        "max_TV": 0.00370011,
+        "max_KL": 4.69401e-05,
+        "min_top10": 10,
+        "greedy_matches_captured": true,
+        "selections": {
+          "Embedding": 2,
+          "RopeCosSinCache": 2,
+          "RmsNorm": 258,
+          "Exl3GroupedLinear": 514,
+          "MatmulDenseF16": 96,
+          "GdnStateGather": 96,
+          "CausalConv1dFwd": 48,
+          "GdnStateScatter": 96,
+          "GdnPostConv": 48,
+          "GdnPrefillRawGate": 48,
+          "RmsNormGated": 96,
+          "SiluAndMul": 128,
+          "AttnQkNormRopeGate": 32,
+          "ReshapeAndCacheFp8": 32,
+          "PagedAttention": 32,
+          "SigmoidGateBf16": 32,
+          "CastF32": 2,
+          "CausalConv1dUpdate": 48,
+          "GdnPackedDecode": 48
+        },
+        "bf16_arguments": 0,
+        "cpu_reference_selections": 0,
+        "old_scalar_packed_selections": 0,
+        "full_head_tensor_calls": 2
+      },
+      "P128_D64": {
+        "cases": 1,
+        "assertions": 807,
+        "passed": 801,
+        "failed": 6,
+        "test_exit": 1,
+        "scope": "Current complete native64-layer P128/D64 from own state/cache, unchanged initial observed prefix/reference; distribution gate still fails.",
+        "comparisons": [
+          {
+            "phase": "p128",
+            "repeat": 0,
+            "TV": 0.00212254,
+            "KL": 1.47061e-05,
+            "top10": 10,
+            "greedy": 13,
+            "reference_greedy": 13
+          },
+          {
+            "phase": "d1",
+            "repeat": 0,
+            "TV": 0.00291283,
+            "KL": 3.22546e-05,
+            "top10": 10,
+            "greedy": 198,
+            "reference_greedy": 198
+          },
+          {
+            "phase": "d2",
+            "repeat": 0,
+            "TV": 0.00327224,
+            "KL": 3.81894e-05,
+            "top10": 10,
+            "greedy": 248044,
+            "reference_greedy": 248044
+          },
+          {
+            "phase": "d3",
+            "repeat": 0,
+            "TV": 0.00388553,
+            "KL": 5.22772e-05,
+            "top10": 10,
+            "greedy": 248044,
+            "reference_greedy": 248044
+          },
+          {
+            "phase": "d4",
+            "repeat": 0,
+            "TV": 0.00418662,
+            "KL": 5.30478e-05,
+            "top10": 10,
+            "greedy": 248044,
+            "reference_greedy": 248044
+          },
+          {
+            "phase": "d5",
+            "repeat": 0,
+            "TV": 0.00593517,
+            "KL": 0.000112142,
+            "top10": 10,
+            "greedy": 248044,
+            "reference_greedy": 248044
+          },
+          {
+            "phase": "d6",
+            "repeat": 0,
+            "TV": 0.00677349,
+            "KL": 0.000147291,
+            "top10": 9,
+            "greedy": 248044,
+            "reference_greedy": 248044
+          },
+          {
+            "phase": "d7",
+            "repeat": 0,
+            "TV": 0.0107657,
+            "KL": 0.00034064,
+            "top10": 10,
+            "greedy": 248044,
+            "reference_greedy": 248044
+          },
+          {
+            "phase": "d8",
+            "repeat": 0,
+            "TV": 0.00870607,
+            "KL": 0.000259683,
+            "top10": 10,
+            "greedy": 248046,
+            "reference_greedy": 248046
+          },
+          {
+            "phase": "d9",
+            "repeat": 0,
+            "TV": 6.07974e-07,
+            "KL": 2.64581e-08,
+            "top10": 10,
+            "greedy": 198,
+            "reference_greedy": 198
+          },
+          {
+            "phase": "d10",
+            "repeat": 0,
+            "TV": 0.00692127,
+            "KL": 0.000108339,
+            "top10": 10,
+            "greedy": 248045,
+            "reference_greedy": 248045
+          },
+          {
+            "phase": "d11",
+            "repeat": 0,
+            "TV": 0.0148552,
+            "KL": 0.000527412,
+            "top10": 10,
+            "greedy": 248046,
+            "reference_greedy": 248046
+          },
+          {
+            "phase": "d12",
+            "repeat": 0,
+            "TV": 1.84292e-07,
+            "KL": 1.09253e-08,
+            "top10": 9,
+            "greedy": 198,
+            "reference_greedy": 198
+          },
+          {
+            "phase": "d13",
+            "repeat": 0,
+            "TV": 0.000150239,
+            "KL": 2.36053e-06,
+            "top10": 10,
+            "greedy": 248045,
+            "reference_greedy": 248045
+          },
+          {
+            "phase": "d14",
+            "repeat": 0,
+            "TV": 0.00373299,
+            "KL": 0.000276522,
+            "top10": 10,
+            "greedy": 846,
+            "reference_greedy": 846
+          },
+          {
+            "phase": "d15",
+            "repeat": 0,
+            "TV": 8.09984e-07,
+            "KL": 5.68686e-08,
+            "top10": 10,
+            "greedy": 198,
+            "reference_greedy": 198
+          },
+          {
+            "phase": "d16",
+            "repeat": 0,
+            "TV": 0.00689486,
+            "KL": 0.000145029,
+            "top10": 10,
+            "greedy": 2523,
+            "reference_greedy": 2523
+          },
+          {
+            "phase": "d17",
+            "repeat": 0,
+            "TV": 0.00296057,
+            "KL": 4.2128e-05,
+            "top10": 10,
+            "greedy": 513,
+            "reference_greedy": 513
+          },
+          {
+            "phase": "d18",
+            "repeat": 0,
+            "TV": 0.00257936,
+            "KL": 2.64887e-05,
+            "top10": 10,
+            "greedy": 264,
+            "reference_greedy": 264
+          },
+          {
+            "phase": "d19",
+            "repeat": 0,
+            "TV": 0.0121376,
+            "KL": 0.000583332,
+            "top10": 10,
+            "greedy": 47739,
+            "reference_greedy": 47739
+          },
+          {
+            "phase": "d20",
+            "repeat": 0,
+            "TV": 0.00366521,
+            "KL": 5.81873e-05,
+            "top10": 10,
+            "greedy": 248046,
+            "reference_greedy": 248046
+          },
+          {
+            "phase": "d21",
+            "repeat": 0,
+            "TV": 3.24073e-09,
+            "KL": 9.77842e-11,
+            "top10": 10,
+            "greedy": 198,
+            "reference_greedy": 198
+          },
+          {
+            "phase": "d22",
+            "repeat": 0,
+            "TV": 1.60106e-07,
+            "KL": 4.95128e-09,
+            "top10": 10,
+            "greedy": 248045,
+            "reference_greedy": 248045
+          },
+          {
+            "phase": "d23",
+            "repeat": 0,
+            "TV": 0.00386151,
+            "KL": 7.76121e-05,
+            "top10": 10,
+            "greedy": 248045,
+            "reference_greedy": 248045
+          },
+          {
+            "phase": "d24",
+            "repeat": 0,
+            "TV": 0.0315285,
+            "KL": 0.00285727,
+            "top10": 10,
+            "greedy": 248046,
+            "reference_greedy": 248046
+          },
+          {
+            "phase": "d25",
+            "repeat": 0,
+            "TV": 1.25541e-10,
+            "KL": 3.48132e-12,
+            "top10": 10,
+            "greedy": 198,
+            "reference_greedy": 198
+          },
+          {
+            "phase": "d26",
+            "repeat": 0,
+            "TV": 4.61948e-07,
+            "KL": 5.26252e-09,
+            "top10": 10,
+            "greedy": 248045,
+            "reference_greedy": 248045
+          },
+          {
+            "phase": "d27",
+            "repeat": 0,
+            "TV": 0.0343527,
+            "KL": 0.0025539,
+            "top10": 10,
+            "greedy": 248045,
+            "reference_greedy": 248045
+          },
+          {
+            "phase": "d28",
+            "repeat": 0,
+            "TV": 0.0103579,
+            "KL": 0.000537541,
+            "top10": 10,
+            "greedy": 198,
+            "reference_greedy": 198
+          },
+          {
+            "phase": "d29",
+            "repeat": 0,
+            "TV": 0.223781,
+            "KL": 0.169353,
+            "top10": 9,
+            "greedy": 248068,
+            "reference_greedy": 248068
+          },
+          {
+            "phase": "d30",
+            "repeat": 0,
+            "TV": 0.0001204,
+            "KL": 9.51072e-07,
+            "top10": 10,
+            "greedy": 198,
+            "reference_greedy": 198
+          },
+          {
+            "phase": "d31",
+            "repeat": 0,
+            "TV": 4.05494e-06,
+            "KL": 1.66198e-07,
+            "top10": 10,
+            "greedy": 760,
+            "reference_greedy": 760
+          },
+          {
+            "phase": "d32",
+            "repeat": 0,
+            "TV": 4.44622e-07,
+            "KL": 5.29376e-09,
+            "top10": 10,
+            "greedy": 1156,
+            "reference_greedy": 1156
+          },
+          {
+            "phase": "d33",
+            "repeat": 0,
+            "TV": 0.000973787,
+            "KL": 1.77881e-05,
+            "top10": 10,
+            "greedy": 579,
+            "reference_greedy": 579
+          },
+          {
+            "phase": "d34",
+            "repeat": 0,
+            "TV": 9.16545e-05,
+            "KL": 1.51535e-06,
+            "top10": 10,
+            "greedy": 1876,
+            "reference_greedy": 1876
+          },
+          {
+            "phase": "d35",
+            "repeat": 0,
+            "TV": 0.00145504,
+            "KL": 1.34694e-05,
+            "top10": 10,
+            "greedy": 7701,
+            "reference_greedy": 7701
+          },
+          {
+            "phase": "d36",
+            "repeat": 0,
+            "TV": 1.09704e-05,
+            "KL": 1.69445e-07,
+            "top10": 10,
+            "greedy": 310,
+            "reference_greedy": 310
+          },
+          {
+            "phase": "d37",
+            "repeat": 0,
+            "TV": 3.34031e-05,
+            "KL": 6.15537e-07,
+            "top10": 10,
+            "greedy": 381,
+            "reference_greedy": 381
+          },
+          {
+            "phase": "d38",
+            "repeat": 0,
+            "TV": 0.00273027,
+            "KL": 2.66296e-05,
+            "top10": 10,
+            "greedy": 3799,
+            "reference_greedy": 3799
+          },
+          {
+            "phase": "d39",
+            "repeat": 0,
+            "TV": 6.4286e-09,
+            "KL": 8.76715e-11,
+            "top10": 10,
+            "greedy": 974,
+            "reference_greedy": 974
+          },
+          {
+            "phase": "d40",
+            "repeat": 0,
+            "TV": 0.00187147,
+            "KL": 2.95399e-05,
+            "top10": 10,
+            "greedy": 466,
+            "reference_greedy": 466
+          },
+          {
+            "phase": "d41",
+            "repeat": 0,
+            "TV": 0.00419402,
+            "KL": 6.77742e-05,
+            "top10": 10,
+            "greedy": 47739,
+            "reference_greedy": 47739
+          },
+          {
+            "phase": "d42",
+            "repeat": 0,
+            "TV": 0.00435621,
+            "KL": 9.89771e-05,
+            "top10": 10,
+            "greedy": 13,
+            "reference_greedy": 13
+          },
+          {
+            "phase": "d43",
+            "repeat": 0,
+            "TV": 0.00294759,
+            "KL": 2.31983e-05,
+            "top10": 10,
+            "greedy": 2302,
+            "reference_greedy": 2302
+          },
+          {
+            "phase": "d44",
+            "repeat": 0,
+            "TV": 0.00731945,
+            "KL": 0.000167225,
+            "top10": 10,
+            "greedy": 5947,
+            "reference_greedy": 5947
+          },
+          {
+            "phase": "d45",
+            "repeat": 0,
+            "TV": 1.0498e-06,
+            "KL": 4.03251e-08,
+            "top10": 10,
+            "greedy": 328,
+            "reference_greedy": 328
+          },
+          {
+            "phase": "d46",
+            "repeat": 0,
+            "TV": 7.90243e-06,
+            "KL": 4.80968e-07,
+            "top10": 10,
+            "greedy": 2523,
+            "reference_greedy": 2523
+          },
+          {
+            "phase": "d47",
+            "repeat": 0,
+            "TV": 1.94295e-07,
+            "KL": 4.17153e-09,
+            "top10": 10,
+            "greedy": 513,
+            "reference_greedy": 513
+          },
+          {
+            "phase": "d48",
+            "repeat": 0,
+            "TV": 7.90909e-07,
+            "KL": 1.58715e-08,
+            "top10": 10,
+            "greedy": 264,
+            "reference_greedy": 264
+          },
+          {
+            "phase": "d49",
+            "repeat": 0,
+            "TV": 4.43636e-06,
+            "KL": 7.08082e-08,
+            "top10": 10,
+            "greedy": 47739,
+            "reference_greedy": 47739
+          },
+          {
+            "phase": "d50",
+            "repeat": 0,
+            "TV": 0.00035082,
+            "KL": 5.45551e-06,
+            "top10": 10,
+            "greedy": 1,
+            "reference_greedy": 1
+          },
+          {
+            "phase": "d51",
+            "repeat": 0,
+            "TV": 0.00371906,
+            "KL": 4.08572e-05,
+            "top10": 10,
+            "greedy": 864,
+            "reference_greedy": 864
+          },
+          {
+            "phase": "d52",
+            "repeat": 0,
+            "TV": 0.00586963,
+            "KL": 0.000117209,
+            "top10": 10,
+            "greedy": 4816,
+            "reference_greedy": 4816
+          },
+          {
+            "phase": "d53",
+            "repeat": 0,
+            "TV": 9.37479e-07,
+            "KL": 1.67292e-08,
+            "top10": 10,
+            "greedy": 31084,
+            "reference_greedy": 31084
+          },
+          {
+            "phase": "d54",
+            "repeat": 0,
+            "TV": 0.00076349,
+            "KL": 2.33066e-05,
+            "top10": 10,
+            "greedy": 13,
+            "reference_greedy": 13
+          },
+          {
+            "phase": "d55",
+            "repeat": 0,
+            "TV": 0.00218973,
+            "KL": 6.94687e-05,
+            "top10": 10,
+            "greedy": 6558,
+            "reference_greedy": 6558
+          },
+          {
+            "phase": "d56",
+            "repeat": 0,
+            "TV": 4.29189e-09,
+            "KL": 1.45076e-10,
+            "top10": 10,
+            "greedy": 728,
+            "reference_greedy": 728
+          },
+          {
+            "phase": "d57",
+            "repeat": 0,
+            "TV": 0.00957163,
+            "KL": 0.00025683,
+            "top10": 10,
+            "greedy": 2814,
+            "reference_greedy": 2814
+          },
+          {
+            "phase": "d58",
+            "repeat": 0,
+            "TV": 5.11173e-06,
+            "KL": 7.01641e-08,
+            "top10": 10,
+            "greedy": 1092,
+            "reference_greedy": 1092
+          },
+          {
+            "phase": "d59",
+            "repeat": 0,
+            "TV": 4.91536e-05,
+            "KL": 1.66383e-06,
+            "top10": 10,
+            "greedy": 781,
+            "reference_greedy": 781
+          },
+          {
+            "phase": "d60",
+            "repeat": 0,
+            "TV": 5.46148e-08,
+            "KL": 2.27596e-09,
+            "top10": 10,
+            "greedy": 2493,
+            "reference_greedy": 2493
+          },
+          {
+            "phase": "d61",
+            "repeat": 0,
+            "TV": 0.000774175,
+            "KL": 1.8686e-05,
+            "top10": 10,
+            "greedy": 381,
+            "reference_greedy": 381
+          },
+          {
+            "phase": "d62",
+            "repeat": 0,
+            "TV": 0.00267259,
+            "KL": 6.8086e-05,
+            "top10": 10,
+            "greedy": 4313,
+            "reference_greedy": 4313
+          },
+          {
+            "phase": "d63",
+            "repeat": 0,
+            "TV": 4.867e-10,
+            "KL": 5.69854e-12,
+            "top10": 10,
+            "greedy": 310,
+            "reference_greedy": 310
+          },
+          {
+            "phase": "d64",
+            "repeat": 0,
+            "TV": 4.92929e-05,
+            "KL": 7.74274e-07,
+            "top10": 10,
+            "greedy": 1910,
+            "reference_greedy": 1910
+          }
+        ],
+        "investigation_triggers": [
+          {
+            "phase": "d24",
+            "repeat": 0,
+            "TV": 0.0315285,
+            "KL": 0.00285727,
+            "top10": 10,
+            "greedy": 248046,
+            "reference_greedy": 248046
+          },
+          {
+            "phase": "d27",
+            "repeat": 0,
+            "TV": 0.0343527,
+            "KL": 0.0025539,
+            "top10": 10,
+            "greedy": 248045,
+            "reference_greedy": 248045
+          },
+          {
+            "phase": "d29",
+            "repeat": 0,
+            "TV": 0.223781,
+            "KL": 0.169353,
+            "top10": 9,
+            "greedy": 248068,
+            "reference_greedy": 248068
+          }
+        ],
+        "max_TV": 0.223781,
+        "max_KL": 0.169353,
+        "min_top10": 9,
+        "greedy_matches_captured": true,
+        "selections": {
+          "Embedding": 65,
+          "RopeCosSinCache": 65,
+          "RmsNorm": 8385,
+          "Exl3GroupedLinear": 16705,
+          "MatmulDenseF16": 3120,
+          "GdnStateGather": 96,
+          "CausalConv1dFwd": 48,
+          "GdnStateScatter": 96,
+          "GdnPostConv": 48,
+          "GdnPrefillRawGate": 48,
+          "RmsNormGated": 3120,
+          "SiluAndMul": 4160,
+          "AttnQkNormRopeGate": 1040,
+          "ReshapeAndCacheFp8": 1040,
+          "PagedAttention": 1040,
+          "SigmoidGateBf16": 1040,
+          "CastF32": 65,
+          "CausalConv1dUpdate": 3072,
+          "GdnPackedDecode": 3072
+        },
+        "bf16_arguments": 0,
+        "cpu_reference_selections": 0,
+        "old_scalar_packed_selections": 0,
+        "full_head_tensor_calls": 65
+      },
+      "direct_prefix_witness_comparison": {
+        "host_report_exit": 0,
+        "comparisons": 195,
+        "investigation_trigger_count": 10,
+        "investigation_triggers": [
+          {
+            "phase": "d11",
+            "reference_repeat": 1,
+            "TV": 0.020325679237848577,
+            "KL_reference_to_actual": 0.0012639305168541226,
+            "top10_overlap": 10,
+            "investigation_trigger": true
+          },
+          {
+            "phase": "d14",
+            "reference_repeat": 2,
+            "TV": 0.016057672937570565,
+            "KL_reference_to_actual": 0.0035483922299854465,
+            "top10_overlap": 10,
+            "investigation_trigger": true
+          },
+          {
+            "phase": "d24",
+            "reference_repeat": 0,
+            "TV": 0.03156691036735425,
+            "KL_reference_to_actual": 0.0027320029646939804,
+            "top10_overlap": 10,
+            "investigation_trigger": true
+          },
+          {
+            "phase": "d24",
+            "reference_repeat": 1,
+            "TV": 0.044186124898638476,
+            "KL_reference_to_actual": 0.005671406525169221,
+            "top10_overlap": 9,
+            "investigation_trigger": true
+          },
+          {
+            "phase": "d27",
+            "reference_repeat": 0,
+            "TV": 0.020427072924482242,
+            "KL_reference_to_actual": 0.0010283201493005106,
+            "top10_overlap": 10,
+            "investigation_trigger": true
+          },
+          {
+            "phase": "d27",
+            "reference_repeat": 1,
+            "TV": 0.0343616812251459,
+            "KL_reference_to_actual": 0.0028574283950806726,
+            "top10_overlap": 10,
+            "investigation_trigger": true
+          },
+          {
+            "phase": "d27",
+            "reference_repeat": 2,
+            "TV": 0.020154783217672122,
+            "KL_reference_to_actual": 0.0011659189625672073,
+            "top10_overlap": 10,
+            "investigation_trigger": true
+          },
+          {
+            "phase": "d29",
+            "reference_repeat": 0,
+            "TV": 0.07213940674423257,
+            "KL_reference_to_actual": 0.011877627229734579,
+            "top10_overlap": 10,
+            "investigation_trigger": true
+          },
+          {
+            "phase": "d29",
+            "reference_repeat": 1,
+            "TV": 0.09520920686520934,
+            "KL_reference_to_actual": 0.02067131339253519,
+            "top10_overlap": 10,
+            "investigation_trigger": true
+          },
+          {
+            "phase": "d29",
+            "reference_repeat": 2,
+            "TV": 0.20573486240574398,
+            "KL_reference_to_actual": 0.16279010912314326,
+            "top10_overlap": 9,
+            "investigation_trigger": true
+          }
+        ],
+        "max_TV": 0.20573486240574398,
+        "max_KL": 0.16279010912314326,
+        "scope": "All65 current rows versus3 earlier original repeats with revalidated actual input-prefix/3position-axis witnesses and capture hashes. Does not waive failed native test."
+      },
+      "frozen_thresholds": {
+        "TV_max": 0.02,
+        "KL_max": 0.002,
+        "top10_min": 9
+      },
+      "limitations": [
+        "Strict P128 block/state failures not rerun or waived by target success.",
+        "D64 currently fails6 assertions; no parity claim despite all65 greedy IDs matching.",
+        "Original-original variance remains separate failing evidence.",
+        "S1/S2-S6 remain incomplete."
+      ],
+      "next_step": "Replay full-width Gemma norm and BA/state boundaries on identical frozen operands; localize remaining mean/root/block differences and repair source-backed arithmetic, then rerun unchanged block/state/D64 gates."
     }
   },
   "native_build_environment": {
@@ -20744,13 +24285,13 @@
   "S1_result": {
     "status": "in_progress",
     "complete": false,
-    "completed_scope": "Current native shared reader accepts all409 pinned EXL3 modules including8MTP with verbatim mapped packed/scaling bytes; exact mul1 marker validation added and host-tested. FP16 shared reader/merged BA and explicit EXL3 parameter storage policy host-tested; all64 real native target layer loads verify FP16 norms/Conv/BA. Regular XPU/oneDNN engine library and selected targets build; explicit EXL3 gate/up policy passes M1/M4 B70 checks, and config-declared EXL3 cache planning uses F16 Conv/F32 recurrence with focused spec tests. DenseDev and shared EXL3 output/BA/head boundaries wired; synthetic two-layer B70 paged P4/D1 in merged/split BA subcases passes1066 assertions with60 traced F16 Packed EXL3 calls, no BF16 args or CPU-reference selections. Four alternate dense/pooling entries now resolve scoped F16; pooling gather owner fixed and native unpaged Attention registered. Extended synthetic B70 model check passes3891 assertions (2cases), CPU-agreement unpaged Attention case206, legacy CPU regression242, all exit0. Trace witnesses128 F16 Packed calls and zero BF16/CPU-reference arguments. Typed grouped VT SmallM4/6 port now passes222 assertions: three real M1/M4 fixtures are bit-exact through input Hadamard, split Partials and output; synthetic separate-source groups at M1/4/12/16/128 pass. Scoped native model single projections use producer SmallM; synthetic hybrid/model check passes4287 assertions with129 SmallM calls, no Packed operator selections, BF16 or CPU fallback. Linear-method8/1565 regression passes. Actual model-owned gate/up packed grouping now passes9/1717 focused assertions and2/4287 synthetic model assertions. Trace shows111 native SmallM calls including18 two-source gate/up groups (M4=14,M1=4), down from129 separate calls, with zero BF16/CPU-reference/old Packed selections. Merged host staging is released after first upload and resident packed/map handles are reused. Real layer0 full Gate/Up S2/K5120/N34816 at M1/4/12/16/128 now passes1case/112assertions against the unchanged pinned producer: merged packed operands, active source Hadamards, F32 parts and F16 output are bit-exact (relative/max0), including actual model-resident wrapper reuse. Producer splits are4/3/3/3/1; all10 replay calls native, zero BF16/CPU/Packed. Model-owned grouped QKVZ S2 and QKV S3 are now wired into actual paged/unpaged model calls, with owned packed outputs and native copies where consumers require contiguous Q/K/V. Synthetic test3/4357 passes; direct M1/M4 group/copy checks match each source exactly. Actual model trace84 SmallM calls including9 QKV S3,9 QKVZ S2 and18 Gate/Up S2, zero BF16/CPU/Packed; source resident absence asserted. Real full layer0 QKVZ and layer3 QKV now pass1case/248assertions at M1/4/12/16/128 against unchanged producer, with exact packed merge/active Hadamards/F32 parts/F16 output and actual lazy model seam; relative/max0. Trace20 native calls (10S2/10S3), zero BF16/CPU/Packed. Source mapping survives file destruction; cache reused without source GPU duplicates. Complete6bpw target head K5120/N248320 at M1/4/12/16/128 now passes1case/125assertions against the pinned producer. Exact953548800 packed GPU bytes checked in64MiB chunks, active Hadamards/F32 parts/F16 outputs bit-exact; relative/max0. Actual model linear reuses one packed resident and leaves dense head empty. Trace10 native calls,2 GEMV/8 DPAS,P1all,zero BF16/CPU/Packed. Real layer0 SwiGLU eager gate now passes1case/105assertions at M1/4/12/16/128, bit-exact actual model GateUp and direct SiLU output against resolved pinned forward_native/custom_ops none. FP16 SiLU intermediate confirmed; unrounded diagnostic differs. Trace5 SmallM plus10 SiLU native calls,zero BF16/CPU/Packed. No activation arithmetic change needed. Actual layer0 eager P128/D1 capture now contains44 verified tensors with active Conv/FP32 state continuity exact between P128 after and D1 before; observer greedy IDs13/198 match ordinary. Native FP16 Gemma residual norm fixed to normalize unrounded FP32 sum while storing FP16 residual separately. Regression witness failed8assertions before and now2cases/89pass; actual P128/D1 norm stages meet unchanged producer IR tolerance with exact residuals. P128 post differing halves drop186652 to44; D1 post2368 to0. Synthetic paged model1/1602 and legacy norm1/63928 pass. Traces zero BF16/CPU/Packed; full real block/state still pending. Real layer0 full MLP SwiGLU/down now passes bit-exact at captured P128/D1. Original fused/split GDN replay matches all8 full-worker endpoints exactly; 28 intermediate tensors independently captured and verified. Actual native GDN P128 state remains failing, and explicit prep prototype now passes6154 exact assertions for Q/K/V/Beta after uniform scalar root/order correction; original Torch-free FP16 recurrence and raw gate prefix body replay is bit-exact at P128, but neither is wired/qualified as actual model execution; these are not S1/block/model passes. Native P128 raw-gate operator now qualifies on identical original inputs (1case/11assertions, exact core/state), with genuinely pinned SYCL-TLA and scoped producer math. Actual paged EXL3 path uses qualified FP32 Conv/prep/recurrence; dense BA first differs (genericA20/B21, native oneDNNA3/B3), strict state still fails and D1 is not reached. Default paged regression1case/1602passes. Actual live-worker BA operands/layout/selection still require observation; S1 and all S2-S6 remain incomplete. Actual worker BA input is exact input-norm output, weight bytes exact checkpoint F16 B/A, but identical live operand P128 replays differ5halves; original-original state fails122 values in the unchanged strict band. Native FP16 packed D1 original body integrated: own-state P128->D1 chain1case/19passes with zero output/state/inactive differences; actual paged D1 block from matched original states1case/26passes with exact mixer/Conv/SSM values; default paged regression1case/1602passes. These do not qualify full native P128 block or the eager target. Complete native eager P128/D1 target runs all64 layers/full6bpw248320 head:1case/195assertions pass fixed TV.02/KL.002/top10>=9 triggers against3 original repeats. Native greedy13/198, maxTV.00398878/maxKL.0000512979/top10all10. Trace514 grouped linears,48RawGate/48PackedDecode,32FP8writers,2headM1 calls; zero BF16 args/CPU-reference/old scalar Exl3Gemm. Original repeat maxTV.00265848/maxKL.0000223777/top10all10; some strict state values differ. D64 and full state/block/attention/S1 qualification remain incomplete. Native P128/D64 now executes all65 whole-target steps from own state, all native greedy IDs equal the initial observed original sequence;1case/804of807pass,exit1, with TV failuresD11/D29 and KLD29. Trace65 M1 full-head calls,48RawGate/3072PackedDecode,zeroBF16/CPU/scalarPacked. Original trace replays directly prove all65 actual token prefixes and3position axes match in each of3 repeats; original itself fails frozen distribution triggers (maxTV.135296/maxKL.0868866/top10min9). Native-to-these195 comparisons retain8triggers; no threshold or failed fixture was changed. Strict P128 state/full attention/block/S1 and all S2-S6 remain incomplete. Actual original layer3 now has48 captured P128/D1 tensors and exact active FP8 continuity. Native same-input post-RoPE Q/K/V writer/core1case37assertions passes with byte-exact active writes/untouched capacity and fixed attention band. XPU interleaved-head stride support added; three existing focused cache/attention regressions2275assertions pass. Native QKV/norm/RoPE/complete mixer and all earlier state/D64 failures remain open. Actual model-owned layer3 full-attention P128/D1 now executes on captured input-norm with own native cache:652of657assertions pass,exit1. QKV and gate exact; first differences in fused QK/RoPE (mostly rotated dimensions),122 K byte differences persist and fixed core bands fail2088/5values. Mixer output within unchanged band does not waive these failures. Original normalized FP16 Q/K and actual FP16 cos/sin captured separately (54 tensors). Independent half replay and native RopeFromCache on identical operands are bit-exact at P128/D1. Explicit fused FP16 primitive meets frozen band; focused v4 test37/38 assertions passes, exit1, retaining2 generated half-coefficient differences (down from9). New primitive is not yet selected in actual model; earlier mixer failures remain open. Bounded RoPE cache v7 now matches all original half coefficients at positions0-128 after explicit F32 round-to-nearest division. Auto and scalar primitive cases each38/38pass; two default SG16/cached-RoPE regressions115pass. Actual model wiring remains next. Scoped model FP16 RoPE selected consistently for XPU EXL3 cache and attention consumers. Real model-owned P128/D1 mixer now655/657 assertions passes: all frozen numerical bands pass, K-byte differences122->1 persist intoD1, V/inactive exact. Primitive38/38 still passes. Unfused absolute-position lookup fixed and also655/657 passes. Original same-input RMS rsqrt probe is exact, but native SG16 mean/rsqrt boundary remains distinct; no mixer/S1 pass claimed. Source-matched fused D256 mean now exact across all3612 P128/D1 heads; actual variance also exact. Inverse-root differences remain (P128 Q891/K171,D1 Q10/K1). Final v13 build passes, mixer655/657 assertions fails unchanged K-byte checks; standalone helper success does not waive actual failures.",
+    "completed_scope": "Native mapped loader checks cover all409 pinned EXL3 modules including8MTP, verbatim packed/scaling bytes and ownership. Explicit FP16 parameter/activation/Conv/BA/head policy and FP32 recurrent state are wired into the native model. Producer grouped SmallM4/6 and actual resident QKVZ/QKV, GateUp and full6bpw head are qualified on real M1/4/12/16/128 inputs with exact active Hadamards/F32 parts/F16 outputs. Real same-input SwiGLU/MLP and selected original-input GDN prep/raw-prefill/P128-to-D1 state-chain gates pass; these do not qualify the complete native P128 block/state. Current bounded layer3 attention qualifies fused SG16, scalar and scoped standalone RMS/RoPE paths: Q/K and active FP8 K/V bytes/inactive capacity exact at P128/D1; fixed core/gated/mixer bands pass. Final unfused657/657 and fused auto695/695 pass; shared-helper scalar695/695 and generic RMS63928/63928 pass. Bounded coefficients at positions0-128 exact; native fused/unfused stage dumps match. Current complete64-layer eager target with full6bpw248320 head passes P128/D1 against3 unchanged original repeats (197/197, maxTV0.00370011/maxKL0.0000469401/top10all10/greedy13,198). D64 executes all65 own-state/cache steps with matching greedy IDs but fails6of807 assertions atD24/D27/D29 (maxTV0.223781/maxKL0.169353). Comparison to3 directly witnessed same-prefix original repeats retains10of195 investigation triggers. No BF16/CPU-reference/old scalar-packed production selections appear in current native target traces. Whole P128 block/state, D64, remaining S1 and S2-S6 are not qualified.",
     "remaining": [
       "Complete native target/MTP loader mapping and GPU upload, real FP16 model/state/attention boundary qualification",
       "Qualify immutable-map validation/reuse without per-call readback; graph/multi-queue lifetime and performance remain later gates.",
       "Qualify remaining real SmallM families, independent nonlinear stages and one complete real block",
       "Eager complete target parity at P128 D1/D64, then remaining S2-S6 including W8A8, FP8, MTP, graphs and prefix/state lifecycle"
     ],
-    "next_step": "Isolate the actual fused inverse-root difference on identical variance inputs and resolve the unchanged K-byte gate; qualify fused/scalar/unfused execution. Then rerun real target/state/D64 and finish S1 and S2-S6."
+    "next_step": "Replay full-width Gemma norm and BA/state boundaries on identical frozen operands; localize remaining mean/root/block differences and repair source-backed arithmetic, then rerun unchanged block/state/D64 gates. Finish remaining S1, then S2-S6."
   }
 }

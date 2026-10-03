@@ -1,6 +1,7 @@
 #include "xpu_common.h"
 #include "xpu_kernels.h"
 #include "xpu_fp8.h"
+#include "xpu_qk_norm.h"
 #include <sycl/ext/intel/math.hpp>
 #include <algorithm>
 #include <atomic>
@@ -49,61 +50,7 @@ void CopyElement(View dst, int64_t to, View src, int64_t from) {
     static_cast<uint16_t*>(dst.data)[to] = static_cast<const uint16_t*>(src.data)[from];
 }
 
-// Pinned Torch XPU mean for contiguous F32 squares at D256: four adjacent
-// registers per virtual lane, then its ascending-offset subgroup tree.
-// At >=32 outputs the reduction has 32 lanes and two vectors per lane;
-// smaller output counts have >=64 lanes and combine vectors after summing
-// their registers. All wider geometries have the same active 64 vectors.
-float ProducerQkPartial256(View src, int64_t base, int lane, bool paired_vectors) {
-  float sums[4];
-  for (int j = 0; j < 4; ++j) {
-    const float first = Load(src, base + 4 * lane + j);
-    sums[j] = first * first;
-    if (paired_vectors) {
-      const float second = Load(src, base + 128 + 4 * lane + j);
-      sums[j] += second * second;
-    }
-  }
-  return ((sums[0] + sums[1]) + sums[2]) + sums[3];
-}
 
-float ProducerQkMean256(View src, int64_t base, sycl::sub_group group,
-                       int lane, int64_t outputs) {
-  const bool paired = outputs >= 32;
-  float first = ProducerQkPartial256(src, base, lane, paired);
-  float second = ProducerQkPartial256(src, base, lane + 16, paired);
-  if (!paired) {
-    first += ProducerQkPartial256(src, base, lane + 32, false);
-    second += ProducerQkPartial256(src, base, lane + 48, false);
-  }
-  for (int offset = 1; offset < 16; offset *= 2) {
-    first += sycl::shift_group_left(group, first, offset);
-    second += sycl::shift_group_left(group, second, offset);
-  }
-  return sycl::group_broadcast(group, first + second, 0) / 256.0f;
-}
-
-float ProducerQkMean256Scalar(View src, int64_t base, int64_t outputs) {
-  const bool paired = outputs >= 32;
-  float partials[32];
-  for (int lane = 0; lane < 32; ++lane) {
-    partials[lane] = ProducerQkPartial256(src, base, lane, paired);
-    if (!paired) partials[lane] += ProducerQkPartial256(src, base, lane + 32, false);
-  }
-  for (int offset = 1; offset < 32; offset *= 2)
-    for (int lane = 0; lane + offset < 32; ++lane)
-      partials[lane] += partials[lane + offset];
-  return partials[0] / 256.0f;
-}
-
-float ProducerQkNormValue(float value, float inverse, float weight, bool gemma) {
-  // Original eager IR materializes each F32 multiply before narrowing to
-  // F16. Request both boundaries explicitly in this fused kernel.
-  const float effective_weight = gemma
-      ? sycl::ext::intel::math::fadd_rn(1.0f, weight) : weight;
-  const float normalized = sycl::ext::intel::math::fmul_rn(value, inverse);
-  return sycl::ext::intel::math::fmul_rn(normalized, effective_weight);
-}
 }
 void AttnGateSplitKernel(Queue& q, Tensor& queries, Tensor& gates, const Tensor& packed) {
   TraceXpuOp(OpId::kAttnGateSplit, q, {&queries, &gates, &packed});
@@ -184,9 +131,14 @@ void AttnQkNormRopeGateKernel(Queue& q, Tensor& q_out, Tensor& k_out,
     constexpr int lanes = 16, tile = 16, workgroup = 128;
     const auto heads = tokens * (hq + hk);
     const auto global = ((heads * lanes + workgroup - 1) / workgroup) * workgroup;
-    const auto event = NativeQueue(q).parallel_for(
+    // Separate kernel instantiations preserve the producer root boundary:
+    // runtime selection of rsqrt versus legacy 1/sqrt changed observed F32
+    // inverses on the pinned B70 toolchain, despite identical variances.
+    const auto launch = [&]<bool Producer>() {
+      return NativeQueue(q).parallel_for(
         sycl::nd_range<1>(sycl::range<1>(global), sycl::range<1>(workgroup)),
         [=](sycl::nd_item<1> item) [[sycl::reqd_sub_group_size(16)]] {
+      constexpr bool fp16 = Producer;
       const int64_t index = item.get_global_linear_id() / lanes;
       if (index >= heads) return;
       const int lane = item.get_local_linear_id() % lanes;
@@ -206,8 +158,8 @@ void AttnQkNormRopeGateKernel(Queue& q, Tensor& q_out, Tensor& k_out,
                                                  lane, tokens * (query ? hq : hk))
                               : sum / static_cast<float>(dim);
       const float variance = mean + eps;
-      // Reproduce the observed pinned Torch XPU inverse-root boundary.
-      const float inv = fp16 ? sycl::native::rsqrt(variance) : 1.0f / sycl::sqrt(variance);
+      // Keep the producer rsqrt operation distinct from the legacy 1/sqrt.
+      const float inv = fp16 ? sycl::rsqrt(variance) : 1.0f / sycl::sqrt(variance);
       if (probe && lane == 0) {
         probe[3 * index] = mean; probe[3 * index + 1] = variance; probe[3 * index + 2] = inv;
       }
@@ -238,13 +190,17 @@ void AttnQkNormRopeGateKernel(Queue& q, Tensor& q_out, Tensor& k_out,
         Store(dst, out_base + col, value);
         if (query) Store(go, out_base + col, Load(qs, src_base + dim + col));
       }
-    });
+      });
+    };
+    const auto event = fp16 ? launch.operator()<true>() : launch.operator()<false>();
     RecordProfileEvent(q, "attn_qk_norm_rope_gate_subgroup", event);
     finish_probe(event);
     return;
   }
-  const auto event = NativeQueue(q).parallel_for(
+  const auto launch = [&]<bool Producer>() {
+    return NativeQueue(q).parallel_for(
       sycl::range<1>(tokens * (hq + hk)), [=](sycl::id<1> item) {
+    constexpr bool fp16 = Producer;
     const int64_t token = item[0] / (hq + hk), head = item[0] % (hq + hk);
     const bool query = head < hq;
     const int64_t local_head = query ? head : head - hq;
@@ -262,7 +218,7 @@ void AttnQkNormRopeGateKernel(Queue& q, Tensor& q_out, Tensor& k_out,
         ? ProducerQkMean256Scalar(src, src_base, tokens * (query ? hq : hk))
         : sum / static_cast<float>(dim);
     const float variance = mean + eps;
-    const float inv = fp16 ? sycl::native::rsqrt(variance) : 1.0f / sycl::sqrt(variance);
+    const float inv = fp16 ? sycl::rsqrt(variance) : 1.0f / sycl::sqrt(variance);
     if (probe) {
       probe[3 * item[0]] = mean; probe[3 * item[0] + 1] = variance; probe[3 * item[0] + 2] = inv;
     }
@@ -281,14 +237,22 @@ void AttnQkNormRopeGateKernel(Queue& q, Tensor& q_out, Tensor& k_out,
         const float s = Load(cs, token * rot + half + pair);
         if (fp16) {
           const float hc = Round(DType::kF16, c), hs = Round(DType::kF16, s);
-          value = i < half ? Round(DType::kF16, first * hc) - Round(DType::kF16, second * hs)
-                           : Round(DType::kF16, first * hs) + Round(DType::kF16, second * hc);
+          // Torch's half pointwise multiply uses F32 opmath before the F16
+          // store. Without an explicit F32 operation this scalar kernel
+          // lowered these products to half FMul and lost the observed boundary.
+          const auto product = [](float a, float b) {
+            return Round(DType::kF16, sycl::ext::intel::math::fmul_rn(a, b));
+          };
+          value = i < half ? product(first, hc) - product(second, hs)
+                           : product(first, hs) + product(second, hc);
         } else value = i < half ? first * c - second * s : first * s + second * c;
       }
       Store(dst, out_base + i, value);
       if (query) Store(go, out_base + i, Load(qs, src_base + dim + i));
     }
-  });
+    });
+  };
+  const auto event = fp16 ? launch.operator()<true>() : launch.operator()<false>();
   RecordProfileEvent(q, "attn_qk_norm_rope_gate", event);
   finish_probe(event);
 }

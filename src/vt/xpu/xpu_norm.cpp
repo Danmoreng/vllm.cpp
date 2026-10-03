@@ -1,5 +1,6 @@
 #include "xpu_common.h"
 #include "xpu_kernels.h"
+#include "xpu_qk_norm.h"
 namespace vt::xpu {
 void RmsNormKernel(Queue& q, Tensor& out, const Tensor& x, const Tensor& weight,
                    const RmsNormArgs& args, Tensor* residual) {
@@ -15,6 +16,39 @@ void RmsNormKernel(Queue& q, Tensor& out, const Tensor& x, const Tensor& weight,
     const View dst(target), src(x), w(weight), res(residual ? *residual : x);
     const auto width = x.shape[1]; const bool has_res = residual != nullptr;
     const auto eps = args.eps; const bool gemma = args.gemma;
+    if (args.qk_fp16) {
+      const int64_t rows = x.shape[0];
+      const auto sizes = NativeQueue(q).get_device().get_info<sycl::info::device::sub_group_sizes>();
+      if (std::find(sizes.begin(), sizes.end(), 16) != sizes.end()) {
+        constexpr int lanes = 16, workgroup = 128;
+        const auto global = ((rows * lanes + workgroup - 1) / workgroup) * workgroup;
+        const auto event = NativeQueue(q).parallel_for(
+            sycl::nd_range<1>(sycl::range<1>(global), sycl::range<1>(workgroup)),
+            [=](sycl::nd_item<1> item) [[sycl::reqd_sub_group_size(16)]] {
+          const int64_t row = item.get_global_linear_id() / lanes;
+          if (row >= rows) return;
+          const int lane = item.get_local_linear_id() % lanes;
+          const int64_t base = row * src.stride[0];
+          const float mean = ProducerQkMean256(src, base, item.get_sub_group(), lane, rows);
+          const float inverse = sycl::rsqrt(mean + eps);
+          for (int col = lane; col < 256; col += lanes)
+            Store(dst, row * dst.stride[0] + col,
+                  ProducerQkNormValue(Load(src, base + col), inverse, Load(w, col), true));
+        });
+        RecordProfileEvent(q, "rms_norm_qk_fp16_subgroup", event);
+      } else {
+        const auto event = NativeQueue(q).parallel_for(sycl::range<1>(rows), [=](sycl::id<1> item) {
+          const int64_t row = item[0], base = row * src.stride[0];
+          const float mean = ProducerQkMean256Scalar(src, base, rows);
+          const float inverse = sycl::rsqrt(mean + eps);
+          for (int col = 0; col < 256; ++col)
+            Store(dst, row * dst.stride[0] + col,
+                  ProducerQkNormValue(Load(src, base + col), inverse, Load(w, col), true));
+        });
+        RecordProfileEvent(q, "rms_norm_qk_fp16_scalar", event);
+      }
+      return;
+    }
     // Pinned EXL3 FP16 GemmaRMSNorm uses the native producer IR:
     // normalize x.float()+res.float(), but return that sum narrowed as res.
     // Do not normalize a reread of the FP16 store. Other dtype/weight modes

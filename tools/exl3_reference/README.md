@@ -257,10 +257,17 @@ add/subtract on those captured operands; its focused host check is
 these operands, the explicit fused primitive and generated coefficients.
 The qualified bounded primitive passes38/38 assertions: captured-coefficient
 rotation and all generated half coefficients at positions0-128 are exact.
-The mode is now selected in scoped XPU FP16 EXL3 model execution. The actual
-model-owned mixer passes655/657 assertions: numerical bands pass, but one
-K-byte difference from normalization persists through P128/D1. The complete
-mixer gate remains open; see the execution map for retained failed attempts.
+The mode is now selected in scoped XPU FP16 EXL3 model execution. Separate
+producer/legacy kernel specializations preserve the qualified root boundary;
+scalar rotation also materializes F32 products before their F16 narrowing.
+Default and scalar primitive/mixer runs each pass695/695 assertions: bounded
+Q/K and active FP8 K/V bytes match the original exactly, with numerical mixer
+bands passing. Scoped standalone XPU D256 Q/K RMS now shares those boundaries;
+with `VT_FUSE_ATTN_PREAMBLE=0` the own-cache mixer also passes657/657 assertions
+with exact Q/K and cache bytes. The current full64-layer P128/D1 target passes
+197/197 assertions against3 original repeats. D64 still fails6of807 assertions
+at D24/D27/D29; state/block and S1 remain open. See the execution map for
+retained failures and qualification limits.
 
 
 For the focused fused-preamble diagnostic, set `VT_XPU_ATTN_NORM_PROBE` to a
@@ -268,5 +275,6 @@ new writable file prefix. The observer waits for that kernel and writes
 `PREFIX.SEQUENCE.tTOKENS.f32` without overwriting files. Current output is
 little-endian F32 `[T,Hq+Hkv,3]`: Q heads then K heads, with mean, mean plus
 epsilon, and inverse root. Unset the variable for ordinary execution. The
-current actual-kernel means and variances match the bounded Torch replay;
-inverse-root differences and the exact mixer K-byte failure remain open.
+qualified specialized actual-kernel means, variances and inverse roots match
+the bounded Torch replay at P128/D1. This observer does not establish live
+original-worker internals, whole-model parity, graph behavior or performance.
