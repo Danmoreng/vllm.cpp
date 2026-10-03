@@ -1070,7 +1070,7 @@ jobs:
         with:
           fetch-depth: 0
       # `scripts/check-windows-portability.py` skips its PowerShell AST stage
-      # when `pwsh` is absent (scripts/check-windows-portability.py:2029), so a
+      # when `pwsh` is absent (scripts/check-windows-portability.py:2028), so a
       # lane without pwsh cannot see the defects that stage catches. The
       # semantic-evidence gate re-runs the changed checker test at HEAD and at
       # the merge base; when the changed test is red only through the ps1
@@ -1085,9 +1085,10 @@ jobs:
           curl -sSfL \
             https://github.com/PowerShell/PowerShell/releases/download/v7.5.2/powershell-7.5.2-linux-x64.tar.gz \
             -o /tmp/pwsh.tar.gz
+          echo "8fa9584f6f95d29ca1466c4397ac39c371373d6581c12dfae9ebd53c06d77664  /tmp/pwsh.tar.gz" | sha256sum -c -
           sudo mkdir -p /opt/pwsh
           sudo tar -xzf /tmp/pwsh.tar.gz -C /opt/pwsh
-          sudo ln -s /opt/pwsh/pwsh /usr/local/bin/pwsh
+          sudo ln -sf /opt/pwsh/pwsh /usr/local/bin/pwsh
           pwsh -NoProfile -Command '$PSVersionTable.PSVersion.ToString()'
       - name: PR path classification and checker evidence
         run: |
