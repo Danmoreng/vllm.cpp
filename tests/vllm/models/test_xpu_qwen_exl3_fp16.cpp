@@ -352,8 +352,17 @@ TEST_CASE("XPU EXL3 attention RoPE: actual FP16 operands and coefficients") {
   vt::RopeCosSinCache(gpu.q, generated.tensor, positions.tensor, args);
   auto values = generated.floats();
   size_t different = 0;
-  for (size_t i = 0; i < values.size(); ++i)
-    different += vt::F16ToF32(vt::F32ToF16(values[i])) != coefficients[i];
+  for (size_t i = 0; i < values.size(); ++i) {
+    const auto half = vt::F32ToF16(values[i]);
+    if (vt::F16ToF32(half) == coefficients[i]) continue;
+    if (different < 16)
+      std::cout << "REAL_ROPE_COEFFICIENT_DIFFERENCE position=" << i / 64
+                << " column=" << i % 64 << " generated=" << std::hexfloat << values[i]
+                << " captured_half=" << coefficients[i] << std::defaultfloat
+                << " generated_half_bits=" << half
+                << " captured_half_bits=" << vt::F32ToF16(coefficients[i]) << '\n';
+    ++different;
+  }
   std::cout << "REAL_ROPE_COEFFICIENTS half_differences=" << different << '\n';
   CHECK(different == 0);
   CHECK(vt::GetReferenceTierHits() == 0);

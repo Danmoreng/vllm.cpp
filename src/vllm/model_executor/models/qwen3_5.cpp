@@ -20,6 +20,7 @@
 #include "vllm/model_executor/models/decode_graph_sizes.h"
 #include "vllm/model_executor/models/kv_cache_route.h"  // KV-FP8 W3 store/read route
 #include "vllm/model_executor/models/dense_exl3_linear.h"  // MODEL-QWEN35-EXL3 (#2495): the EXL3 linear seam
+#include "vllm/model_executor/layers/quantization/exl3_checkpoint.h"
 #include "vllm/model_executor/models/dense_gptq4_linear.h"
 #ifdef VLLM_CPP_XPU
 #include "vt/xpu.h"
@@ -5130,22 +5131,30 @@ StepDevInputs BuildStepDevInputs(Dev d, const std::vector<int32_t>& positions,
   return s;
 }
 
+vt::RopeArgs FullAttnRopeArgs(Dev d, const HfConfig& cfg) {
+  vt::RopeArgs args{static_cast<float>(cfg.rope_theta), static_cast<int>(cfg.rotary_dim)};
+  args.fp16_intermediates = d.q.device.type == vt::DeviceType::kXPU &&
+      ActDType(d) == DType::kF16 && IsExl3Checkpoint(cfg);
+  // The pinned unscaled cache still has F32 power/reciprocal/angle boundaries.
+  if (args.fp16_intermediates) args.linear_scaling_factor = 1.0f;
+  return args;
+}
+
 // Build the per-step fused-preamble cos|sin cache into `sdi` (once per step,
-// reused by every full-attn layer's fused preamble) when VT_FUSE_ATTN_PREAMBLE is
-// on. No-op otherwise, so the default forward path is byte-identical. Uses the
+// reused by every full-attn layer) when VT_FUSE_ATTN_PREAMBLE is on or the
+// EXL3 FP16 path needs its rounded coefficients. Uses the
 // PERSISTENT sdi.positions device buffer (same source the RopeNeox path reads) so
 // the fill is a single device kernel — eager and graph-replay identical.
 void MaybeBuildAttnCosSin(Dev d, StepDevInputs& sdi, const HfConfig& cfg, int64_t T,
                           bool fp4_attn = false) {
-  if (!FuseAttnPreambleOn(fp4_attn)) return;
-  // A cache is useful here only when the backend can consume the fused
-  // preamble. Otherwise preserve the unfused Q/K norm + RoPE text path.
+  const auto rope = FullAttnRopeArgs(d, cfg);
+  if (!FuseAttnPreambleOn(fp4_attn) && !rope.fp16_intermediates) return;
+  // Native EXL3 XPU also consumes this cache in the unfused RoPE path.
   if (!vt::OpRegistered(vt::OpId::kAttnQkNormRopeGate, d.q.device.type)) return;
   const int rot = static_cast<int>(cfg.rotary_dim);
   if (rot <= 0) return;
   sdi.attn_cos_sin = DBuf(d, DType::kF32, {T, rot});
-  vt::RopeCosSinCache(d.q, sdi.attn_cos_sin.t(), sdi.positions.t(),
-                      vt::RopeArgs{static_cast<float>(cfg.rope_theta), rot});
+  vt::RopeCosSinCache(d.q, sdi.attn_cos_sin.t(), sdi.positions.t(), rope);
   sdi.has_attn_cos_sin = true;
 }
 
@@ -5158,7 +5167,7 @@ void FillAttnCosSin(Dev d, StepDevInputs& sdi, const HfConfig& cfg) {
   const int rot = static_cast<int>(cfg.rotary_dim);
   if (rot <= 0) return;
   vt::RopeCosSinCache(d.q, sdi.attn_cos_sin.t(), sdi.positions.t(),
-                      vt::RopeArgs{static_cast<float>(cfg.rope_theta), rot});
+                      FullAttnRopeArgs(d, cfg));
 }
 
 // --- Batched PAGED GDN block (M1.8 Task 3). Same conv1d + l2norm + q/k/v/g/beta
@@ -6097,7 +6106,7 @@ DBuf FullAttnBlock(Dev d, const FullAttnLayerWeights& w, const HfConfig& cfg,
   const int64_t Hkv = cfg.num_key_value_heads;
   const int64_t Dh = cfg.head_dim;
   const int rot = static_cast<int>(cfg.rotary_dim);
-  const float base = static_cast<float>(cfg.rope_theta);
+  const auto rope = FullAttnRopeArgs(d, cfg);
   const float eps = static_cast<float>(cfg.rms_norm_eps);
 
   const bool fp4_attn = !w.q_proj_fp4.Empty();
@@ -6124,7 +6133,7 @@ DBuf FullAttnBlock(Dev d, const FullAttnLayerWeights& w, const HfConfig& cfg,
   if (FuseAttnPreambleOn(fp4) && rot > 0 && vt::OpRegistered(vt::OpId::kAttnQkNormRopeGate, d.q.device.type)) {
     DBuf dpos(d, DType::kI32, {T}, positions.data());
     DBuf cos_sin(d, DType::kF32, {T, rot});
-    vt::RopeCosSinCache(d.q, cos_sin.t(), dpos.t(), vt::RopeArgs{base, rot});
+    vt::RopeCosSinCache(d.q, cos_sin.t(), dpos.t(), rope);
     Tensor dqw = ResidentWeightF32(d, w.q_norm, {Dh});
     Tensor dkw = ResidentWeightF32(d, w.k_norm, {Dh});
     // KERNEL-FUSION-FRAMEWORK W2 — route the fused attn preamble through
@@ -6133,10 +6142,10 @@ DBuf FullAttnBlock(Dev d, const FullAttnLayerWeights& w, const HfConfig& cfg,
     // perf-neutral + byte-identical. VT_FUSED_CHAIN_ADOPT=0 restores the hand-call.
     if (FusedChainAdoptEnabled()) {
       vt::FusedChain(d.q, vt::kAttnQkNormRopeGate, dq3.t(), dk3.t(), gatef.t(), qgate, kf, dqw,
-                     dkw, cos_sin.t(), eps, vt::RopeArgs{base, rot});
+                     dkw, cos_sin.t(), eps, rope);
     } else {
       vt::AttnQkNormRopeGate(d.q, dq3.t(), dk3.t(), gatef.t(), qgate, kf, dqw, dkw, cos_sin.t(),
-                             vt::RmsNormArgs{eps, true}, vt::RopeArgs{base, rot});
+                             vt::RmsNormArgs{eps, true}, rope);
     }
   } else {
     DBuf qf(d, DType::kF32, {T, Hq, Dh});
@@ -6160,7 +6169,17 @@ DBuf FullAttnBlock(Dev d, const FullAttnLayerWeights& w, const HfConfig& cfg,
                 vt::RmsNormArgs{eps, true});
     DBuf dpos(d, DType::kI32, {T}, positions.data());
     // A resolved zero rotary width preserves the normalized query/key bytes.
-    if (rot != 0) vt::RopeNeox(d.q, dq3.t(), dk3.t(), dpos.t(), vt::RopeArgs{base, rot});
+    if (rot != 0) {
+      if (rope.fp16_intermediates) {
+        DBuf cos_sin(d, DType::kF32, {T, rot});
+        vt::RopeCosSinCache(d.q, cos_sin.t(), dpos.t(), rope);
+        std::vector<int32_t> rows(T); std::iota(rows.begin(), rows.end(), 0);
+        DBuf cache_rows(d, DType::kI32, {T}, rows.data());
+        vt::RopeFromCache(d.q, dq3.t(), &dk3.t(), cache_rows.t(), cos_sin.t(), rope);
+      } else {
+        vt::RopeNeox(d.q, dq3.t(), dk3.t(), dpos.t(), rope);
+      }
+    }
   }
   Tensor qn3 = dq3.t();
   Tensor kn3 = dk3.t();
@@ -6230,7 +6249,7 @@ DBuf FullAttnBlockPaged(Dev d, const FullAttnLayerWeights& w, const HfConfig& cf
   const int64_t Hkv = cfg.num_key_value_heads;
   const int64_t Dh = cfg.head_dim;
   const int rot = static_cast<int>(cfg.rotary_dim);
-  const float base = static_cast<float>(cfg.rope_theta);
+  const auto rope = FullAttnRopeArgs(d, cfg);
   const float eps = static_cast<float>(cfg.rms_norm_eps);
   // KV-FP8 W3: a third storage dtype joins the two float ones — 1-byte fp8
   // (`vt::DType::kI8`), which `dense_attn::IsFp8KvCache` admits only together
@@ -6324,11 +6343,11 @@ DBuf FullAttnBlockPaged(Dev d, const FullAttnLayerWeights& w, const HfConfig& cf
     // vt::AttnQkNormRopeGate launch (perf-neutral + byte-identical). ADOPT=0 rolls back.
     if (FusedChainAdoptEnabled()) {
       vt::FusedChain(d.q, vt::kAttnQkNormRopeGate, dq3.t(), dk3.t(), gatef.t(), qgate, kf, dqw,
-                     dkw, sdi.attn_cos_sin.t(), eps, vt::RopeArgs{base, rot});
+                     dkw, sdi.attn_cos_sin.t(), eps, rope);
     } else {
       vt::AttnQkNormRopeGate(d.q, dq3.t(), dk3.t(), gatef.t(), qgate, kf, dqw, dkw,
                              sdi.attn_cos_sin.t(), vt::RmsNormArgs{eps, true},
-                             vt::RopeArgs{base, rot});
+                             rope);
     }
   } else {
     DBuf qf(d, DType::kF32, {T, Hq, Dh});
@@ -6345,7 +6364,18 @@ DBuf FullAttnBlockPaged(Dev d, const FullAttnLayerWeights& w, const HfConfig& cf
     vt::RmsNorm(d.q, dkn2d, Reshape(kf, {T * Hkv, Dh}), dkw,
                 vt::RmsNormArgs{eps, true});
     // Keep negative-width validation in the shared primitive. Only zero is no work.
-    if (rot != 0) vt::RopeNeox(d.q, dq3.t(), dk3.t(), sdi.positions.t(), vt::RopeArgs{base, rot});
+    if (rot != 0) {
+      if (rope.fp16_intermediates) {
+        VT_CHECK(sdi.has_attn_cos_sin, "EXL3 FP16 attention requires its per-step RoPE cache");
+        // The cache contains selected rows for this step, not positions0..P.
+        std::vector<int32_t> rows(T); std::iota(rows.begin(), rows.end(), 0);
+        DBuf cache_rows(d, DType::kI32, {T}, rows.data());
+        vt::RopeFromCache(d.q, dq3.t(), &dk3.t(), cache_rows.t(),
+                          sdi.attn_cos_sin.t(), rope);
+      } else {
+        vt::RopeNeox(d.q, dq3.t(), dk3.t(), sdi.positions.t(), rope);
+      }
+    }
   }
   Tensor qn3 = dq3.t();
   Tensor kn3 = dk3.t();
