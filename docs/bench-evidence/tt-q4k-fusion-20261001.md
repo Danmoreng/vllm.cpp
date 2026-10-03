@@ -1,19 +1,19 @@
 # the wave-3 Q4_K arm: the INT8DOT=0 27B legs serve, the fit wall is gone (2026-10-02)
 
 Wave-3 money legs for the Q4_K arm of the fused whole-decode dispatch
-(commit `640709002`, the fused kernel with the scale-index repair —
+(commit `17a42d831`, the fused kernel with the scale-index repair —
 `scales[g+8]`/`scales[g+4]` for the `is >= 4` super-block groups — plus
 its golden pin). Branch `row/tt-q4k-fusion`, worktree
-`/tmp/vllm-region-capture-spec`, build `build2/build2-rescue2`, device
+`<worktree>`, build `build2/build2-rescue2`, device
 `thor:gpu0`-class Blackhole under `flock $HOME/gpu.lock`, own device
 reset + 15 s before each leg, pin-first env
-(`TT_METAL_HOME=/home/lu_zero/Sources/tt/tt-metal-pin`,
+(`TT_METAL_HOME=<tt-metal-checkout>`,
 `TT_METAL_RUNTIME_ROOT` the same,
 `build_release_script/lib64` + `libexec/tt-metalium`), no other
 `TT_METAL*`. One device job at a time.
 
 Workload: Qwen3.8-27B Q4_K_M
-(`/mnt/models/unsloth-qwen3.8-27B-gguf/Qwen3.8-27B-Q4_K_M.gguf`),
+(`<models-dir>/unsloth-qwen3.8-27B-gguf/Qwen3.8-27B-Q4_K_M.gguf`),
 `--num-prompts 2 --input-len 128 --output-len 32 --num-blocks 64
 --max-num-batched-tokens 64 --seed 0`, greedy, `VT_TT_KEEPQUANT_INT8DOT`
 selects the arm, `timeout -k 10 5400` per leg.
@@ -32,8 +32,8 @@ Leg-4 detail (c2 INT8DOT=1): TPOT mean/median 25,434.18 ms (P99
 38,032.32), TTFT mean 1,215,318.10 ms — −1.0% vs wave 2, the same
 two-streams-on-one-replay-queue shape, no regression.
 
-Logs `/tmp/leg-c1-i0.log`, `/tmp/leg-c2-i0.log`, `/tmp/leg-c1-i1.log`,
-`/tmp/leg-c2-i1.log` (each ends with its own `BENCH_EXIT=` line, read
+Logs `<logs-dir>/leg-c1-i0.log`, `<logs-dir>/leg-c2-i0.log`, `<logs-dir>/leg-c1-i1.log`,
+`<logs-dir>/leg-c2-i1.log` (each ends with its own `BENCH_EXIT=` line, read
 from that log).
 
 ## 2. Verdict

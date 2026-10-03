@@ -309,7 +309,7 @@ policy).
 
 ## Now
 
-2026-10-02 (row/tt-q4k-fusion, commit 640709002): WAVE 3 LANDED — the
+2026-10-02 (row/tt-q4k-fusion, commit 17a42d831): WAVE 3 LANDED — the
 Q4_K arm of the fused whole-decode dispatch, with the scale-index
 repair (the `is >= 4` super-block groups read `scales[g+8]` and
 `scales[g+4]`), is golden-pinned bit-exact to the chain. MONEY LEGS RAN:
