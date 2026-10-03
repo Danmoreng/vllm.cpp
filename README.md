@@ -37,6 +37,9 @@
 
 ## News
 
+- **2026-09** **Qwen3.8 gains an endpoint measurement tool.** The TensorFold comparison remains
+  blocked by missing artifacts, with no speed result. See the
+  [measurement instructions and limits](docs/benchmarks/qwen38-tensorfold-gap.md#measurement-tools).
 - **2026-09** **Vulkan gains TQ1_0 ternary kernels.** Matrix multiplication and fused MoE
   kernels operate on compressed weights. TQ1_0 and TQ2_0 GGUF loading remain unsupported.
   See [kernel coverage and limits](docs/FEATURES.md#ternary-kernels).
