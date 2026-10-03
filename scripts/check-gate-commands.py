@@ -588,6 +588,11 @@ RUNNABLE_BASELINE = frozenset({
     # suite, CPU gate, and agent-preflight.sh; the row's own sweep/e2e gates
     # are owed (spec-first).
     "BACKEND-TENSTORRENT-QWEN35",
+    # 2026-10-03: +MODEL-MM-nano-nemotron-vl-nemotron-h-nano-vl-v2. GROWTH,
+    # re-pinned in the change that exposed it. The row became runnable at
+    # ae07db609, when its gate gained a command that can genuinely fail:
+    # scripts/mm/nano_nemotron_vl_ref.py.
+    "MODEL-MM-nano-nemotron-vl-nemotron-h-nano-vl-v2",
 })
 
 
