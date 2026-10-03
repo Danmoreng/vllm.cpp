@@ -97,14 +97,14 @@ struct DenseMlpWeights {
   mutable std::shared_ptr<void> d_gate_up_alpha;
 
   // QUANT-EXL3 (#2181) / MODEL-QWEN35-EXL3 (#2495 item 3): the exllamav3
-  // trellis arm of the dense SwiGLU MLP. gate and up stay SEPARATE for the
-  // same reason the attention shards do -- a trellis merge on the output dim
-  // interleaves per input tile -- and `layers::Exl3MlpGateUpMethod` is the
-  // shared seam that consumes the pair, so the model never learns which scheme
-  // it bound. Exactly one representation is populated per layer.
+  // trellis arm of the dense SwiGLU MLP. The checkpoint shards remain available
+  // for diagnostics; the scoped XPU FP16 path lazily builds one packed resident
+  // with independent gate/up input transforms. Exactly one representation is
+  // populated per layer.
   Exl3Weight gate_proj_exl3;  // [K=H, N=I]
   Exl3Weight up_proj_exl3;    // [K=H, N=I]
   Exl3Weight down_proj_exl3;  // [K=I, N=H]
+  mutable Exl3GroupedWeight gate_up_exl3;
 
   // `down_proj_exl3`, mirroring `Qwen3DenseMlpWeights::IsExl3` in `qwen3.h`:
   // down is the projection that has no merged twin in any arm, so it is the one
@@ -164,7 +164,8 @@ struct DenseExecutionPrecision {
 };
 
 DenseExecutionPrecision ResolveQwen3_5DensePrecision(const HfConfig& config,
-                                                     bool gptq4_checkpoint);
+                                                     bool gptq4_checkpoint,
+                                                     bool exl3_checkpoint = false);
 
 DenseGateUpGlobals MergeDenseGateUpGlobals(const Nvfp4Weight& gate,
                                            const Nvfp4Weight& up);
@@ -172,8 +173,8 @@ DenseGateUpGlobals MergeDenseGateUpGlobals(const Nvfp4Weight& gate,
 // One dense decoder layer: input/post norms + one attention variant + dense MLP.
 struct Qwen3_5DenseLayerWeights {
   bool is_linear_attention = false;
-  OwnedTensor input_layernorm;           // bf16 [H]
-  OwnedTensor post_attention_layernorm;  // bf16 [H]
+  OwnedTensor input_layernorm;           // model dtype [H]
+  OwnedTensor post_attention_layernorm;  // model dtype [H]
   GdnLayerWeights gdn;                    // valid iff is_linear_attention
   FullAttnLayerWeights attn;             // valid iff !is_linear_attention
   DenseMlpWeights mlp;                   // every layer has a dense MLP
@@ -206,8 +207,11 @@ struct Qwen3_5DenseWeights {
   // GPTQ owners use FP16 for the unquantized remainder. Execution is enabled
   // by the scoped FP16 work in GPTQ-03; this flag prevents BF16 fallthrough.
   bool gptq4_checkpoint = false;
-  OwnedTensor embed_tokens;  // BF16 normally, GPTQ F16 [vocab,H]
-  OwnedTensor final_norm;    // BF16 normally, GPTQ F16 [H]
+  // EXL3 storage follows the pinned FP16 text recipe independently of the
+  // export config's BF16 dtype declaration. Recurrent state remains FP32.
+  bool exl3_checkpoint = false;
+  OwnedTensor embed_tokens;  // BF16 normally, GPTQ/EXL3 F16 [vocab,H]
+  OwnedTensor final_norm;    // BF16 normally, GPTQ/EXL3 F16 [H]
   OwnedTensor lm_head;       // BF16 [H,vocab] normally; GPTQ F16 raw [vocab,H]
   // NVFP4-resident output head [N=vocab, K=H], kept in the on-disk orientation the
   // fp4 GEMMs read. Mirrors Qwen3_5MoeWeights::lm_head_fp4 and vLLM's own decision

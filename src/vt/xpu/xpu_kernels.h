@@ -1,5 +1,6 @@
 #pragma once
 #include "vt/ops.h"
+#include "vt/exl3_grouped.h"
 namespace vt::xpu {
 void CopyKernel(Queue&, Tensor&, const Tensor&);
 void AddKernel(Queue&, Tensor&, const Tensor&, const Tensor&);
@@ -28,11 +29,23 @@ void ApplyAllowedTokenIdsKernel(Queue&, Tensor&, const Tensor&);
 void Exl3HadR128Kernel(Queue&, Tensor&, const Tensor&, const Exl3HadArgs&);
 void Exl3GemmKernel(Queue&, Tensor&, const Tensor&, const Tensor&, const Tensor&,
                     const Tensor&, Tensor&, const Exl3GemmArgs&);
+void Exl3GroupedLinearKernel(Queue&, Tensor&, const Tensor&, const Tensor&, const Tensor&,
+    const Tensor&, const Tensor&, Tensor&, Tensor&, const Exl3GroupedLinearArgs&);
+// Eager diagnostic only: capture the selected packed/reference leaf's F32
+// intermediate in caller-owned storage. Refuses fused/prefill routes instead
+// of changing dispatch. The normal registered operator never uses this hook.
+void Exl3GemmReplayKernel(Queue&, Tensor&, const Tensor&, const Tensor&, const Tensor&,
+                          const Tensor&, Tensor&, const Exl3GemmArgs&, Tensor& raw);
 bool Exl3PrefillKernel(Queue&, Tensor&, const Tensor&, const Tensor&, const Tensor&, int,
                        bool matrix = true, bool all_rows = false);
 bool GdnChunkedPrefillKernel(Queue&, Tensor&, const Tensor&, const Tensor&, const Tensor&, const Tensor&,
                              const Tensor&, Tensor&, const Tensor&, const GdnArgs&);
 #ifdef VLLM_CPP_XPU_XE2_GDN
+void GdnPackedDecodeKernel(Queue&, Tensor&, const Tensor&, const Tensor&,
+    const Tensor&, const Tensor&, const Tensor&, Tensor&, const Tensor&, const GdnArgs&);
+void GdnPrefillRawGateKernel(Queue&, Tensor&, const Tensor&, const Tensor&,
+    const Tensor&, const Tensor&, const Tensor&, const Tensor&, const Tensor&,
+    Tensor&, const Tensor&, const GdnArgs&);
 bool GdnNativePrefillKernel(Queue&, Tensor&, const Tensor&, const Tensor&, const Tensor&,
                             const Tensor&, const Tensor&, Tensor&, const Tensor&, const GdnArgs&);
 #endif
@@ -45,7 +58,7 @@ void CausalConv1dSpecUpdateKernel(Queue&, Tensor&, const Tensor&, const Tensor&,
                                   Tensor&, const Tensor&, const Tensor&, const Tensor&,
                                   const CausalConv1dArgs&);
 void GdnPostConvKernel(Queue&, Tensor&, Tensor&, Tensor&, Tensor&, Tensor&, const Tensor&,
-                        const Tensor&, const Tensor&, const Tensor&, const Tensor&, const L2NormArgs&);
+                        const Tensor&, const Tensor&, const Tensor&, const Tensor&, const GdnPostConvArgs&);
 void GdnPrefillKernel(Queue&, Tensor&, const Tensor&, const Tensor&, const Tensor&, const Tensor&,
                        const Tensor&, Tensor&, const Tensor&, const GdnArgs&);
 void GdnDecodeKernel(Queue&, Tensor&, const Tensor&, const Tensor&, const Tensor&, const Tensor&,
@@ -66,6 +79,8 @@ void RopeFromCacheKernel(Queue&, Tensor&, Tensor*, const Tensor&, const Tensor&,
 void ReshapeAndCacheKernel(Queue&, const Tensor&, const Tensor&, Tensor&, Tensor&, const Tensor&);
 void ReshapeAndCacheFp8Kernel(Queue&, const Tensor&, const Tensor&, Tensor&, Tensor&, const Tensor&,
                               Fp8KVCacheDataType, float, float);
+void AttentionKernel(Queue&, Tensor&, const Tensor&, const Tensor&, const Tensor&,
+                     const AttentionArgs&);
 void PagedAttentionKernel(Queue&, Tensor&, const Tensor&, const Tensor&, const Tensor&,
                             const Tensor&, const Tensor&, const Tensor&, const PagedAttentionArgs&);
 bool PagedAttentionSplitKernel(Queue&, Tensor&, const Tensor&, const Tensor&, const Tensor&,

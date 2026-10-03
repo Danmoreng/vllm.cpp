@@ -32,7 +32,8 @@ void CpuCopy(Queue&, Tensor& out, const Tensor& in) {
 }
 struct Registrar {
   Registrar() { RegisterOp(OpId::kCopy, DeviceType::kCPU, reinterpret_cast<void*>(static_cast<CopyFn>(&CpuCopy))); }
-} registrar;
+};
+[[maybe_unused]] Registrar registrar;
 }
 void Copy(Queue& q, Tensor& out, const Tensor& in) {
   VT_CHECK(out.device == q.device && in.device == q.device, "copy: device mismatch");

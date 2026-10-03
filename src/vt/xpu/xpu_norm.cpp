@@ -15,6 +15,12 @@ void RmsNormKernel(Queue& q, Tensor& out, const Tensor& x, const Tensor& weight,
     const View dst(target), src(x), w(weight), res(residual ? *residual : x);
     const auto width = x.shape[1]; const bool has_res = residual != nullptr;
     const auto eps = args.eps; const bool gemma = args.gemma;
+    // Pinned EXL3 FP16 GemmaRMSNorm uses the native producer IR:
+    // normalize x.float()+res.float(), but return that sum narrowed as res.
+    // Do not normalize a reread of the FP16 store. Other dtype/weight modes
+    // retain their existing residual-rounding contract.
+    const bool fp32_sum = has_res && gemma && src.dtype == DType::kF16 &&
+                          dst.dtype == DType::kF16 && res.dtype == DType::kF16;
     // Wide decode rows must distribute the reduction over a work-group. A
     // single work-item reading 5120 elements twice dominates B70 token time.
     if (width >= 256) {
@@ -30,8 +36,11 @@ void RmsNormKernel(Queue& q, Tensor& out, const Tensor& x, const Tensor& weight,
           float value = Load(src, row * src.stride[0] + col);
           if (has_res) {
             const auto off = row * res.stride[0] + col;
-            value = Round(res.dtype, value + Load(res, off));
-            Store(res, off, value);
+            value += Load(res, off);
+            if (!fp32_sum) {
+              value = Round(res.dtype, value);
+              Store(res, off, value);
+            }
           }
           partial += value * value;
         }
@@ -40,8 +49,12 @@ void RmsNormKernel(Queue& q, Tensor& out, const Tensor& x, const Tensor& weight,
         const float scale = 1.0f / sycl::sqrt(sum / static_cast<float>(width) + eps);
         sycl::group_barrier(item.get_group());
         for (int64_t col = lane; col < width; col += kWorkGroup) {
-          const float value = has_res ? Load(res, row * res.stride[0] + col)
-                                      : Load(src, row * src.stride[0] + col);
+          float value = has_res ? Load(res, row * res.stride[0] + col)
+                               : Load(src, row * src.stride[0] + col);
+          if (fp32_sum) {
+            value += Load(src, row * src.stride[0] + col);
+            Store(res, row * res.stride[0] + col, value);
+          }
           const float weight_value = gemma ? 1.0f + Load(w, col) : Load(w, col);
           Store(dst, row * dst.stride[0] + col, value * scale * weight_value);
         }
@@ -57,15 +70,22 @@ void RmsNormKernel(Queue& q, Tensor& out, const Tensor& x, const Tensor& weight,
         float value = Load(src, row * src.stride[0] + col);
         if (has_res) {
           const auto off = row * res.stride[0] + col;
-          value = Round(res.dtype, value + Load(res, off));
-          Store(res, off, value);
+          value += Load(res, off);
+          if (!fp32_sum) {
+            value = Round(res.dtype, value);
+            Store(res, off, value);
+          }
         }
         sum += value * value;
       }
       const float scale = 1.0f / sycl::sqrt(sum / static_cast<float>(width) + eps);
       for (int64_t col = 0; col < width; ++col) {
-        const float value = has_res ? Load(res, row * res.stride[0] + col)
-                                    : Load(src, row * src.stride[0] + col);
+        float value = has_res ? Load(res, row * res.stride[0] + col)
+                             : Load(src, row * src.stride[0] + col);
+        if (fp32_sum) {
+          value += Load(src, row * src.stride[0] + col);
+          Store(res, row * res.stride[0] + col, value);
+        }
         const float weight_value = gemma ? 1.0f + Load(w, col) : Load(w, col);
         Store(dst, row * dst.stride[0] + col, value * scale * weight_value);
       }

@@ -1941,9 +1941,12 @@ void RopeFromCache(Queue& q, Tensor& q_states, Tensor* k_states,
   VT_CHECK(cos_sin_cache.rank == 2 && cos_sin_cache.shape[0] > 0 &&
                cos_sin_cache.shape[1] == args.rotary_dim,
            "rope_from_cache: cache must be [P,rotary_dim]");
-  VT_CHECK(IsOutFloat(q_states.dtype) &&
-               cos_sin_cache.dtype == q_states.dtype,
-           "rope_from_cache: q/k/cache must share f32 or bf16 dtype");
+  const bool xpu_fp16 = args.fp16_intermediates && q.device.type == DeviceType::kXPU &&
+      q_states.dtype == DType::kF16 && cos_sin_cache.dtype == DType::kF32;
+  VT_CHECK(!args.fp16_intermediates || xpu_fp16,
+           "rope_from_cache: FP16 intermediates require XPU FP16 Q/K and F32 cache");
+  VT_CHECK(xpu_fp16 || (IsOutFloat(q_states.dtype) && cos_sin_cache.dtype == q_states.dtype),
+           "rope_from_cache: shared f32/bf16 dtype, or explicit XPU FP16 intermediates");
   VT_CHECK(args.rotary_dim > 0 && args.rotary_dim % 2 == 0 &&
                args.rotary_dim <= head_dim,
            "rope_from_cache: rotary_dim must be even and <= head_dim");
@@ -2031,6 +2034,10 @@ void AttnQkNormRopeGate(Queue& q, Tensor& q_out, Tensor& k_out, Tensor& gate_out
                         const Tensor& qgate, const Tensor& kf, const Tensor& q_norm,
                         const Tensor& k_norm, const Tensor& cos_sin,
                         const RmsNormArgs& norm_args, const RopeArgs& rope_args) {
+  VT_CHECK(!rope_args.fp16_intermediates ||
+               (q.device.type == DeviceType::kXPU && q_out.dtype == DType::kF16 &&
+                k_out.dtype == DType::kF16 && qgate.dtype == DType::kF16 && kf.dtype == DType::kF16),
+           "attn_qk_norm_rope_gate: FP16 intermediates require native XPU FP16 operands");
   VT_CHECK(q_out.rank == 3 && k_out.rank == 3 && gate_out.rank == 3,
            "attn_qk_norm_rope_gate: q_out/k_out/gate_out rank-3 [T,H,Dh]");
   const int64_t t = q_out.shape[0], hq = q_out.shape[1], dh = q_out.shape[2];
@@ -2587,6 +2594,49 @@ void GdnPrefill(Queue& q, Tensor& out, const Tensor& q_in, const Tensor& k, cons
   CheckI32Meta(q, query_start_loc, state.shape[0] + 1, "gdn_prefill", "query_start_loc");
   reinterpret_cast<GdnPrefillFn>(GetOp(OpId::kGdnPrefill, q.device.type))(
       q, out, q_in, k, v, g, beta, state, query_start_loc, args);
+}
+
+void GdnPrefillRawGate(Queue& q, Tensor& out, const Tensor& qi, const Tensor& k,
+    const Tensor& v, const Tensor& raw_a, const Tensor& beta, const Tensor& a_log,
+    const Tensor& dt_bias, Tensor& state, const Tensor& qsl, const GdnArgs& args) {
+  VT_CHECK(q.device.type == DeviceType::kXPU,
+           "gdn_prefill_raw_gate: pinned FP16 producer requires XPU");
+  VT_CHECK(qi.rank == 3 && k.rank == 3 && v.rank == 3 && out.rank == 3 &&
+               raw_a.rank == 2 && beta.rank == 2 && state.rank == 4 &&
+               a_log.rank == 1 && dt_bias.rank == 1,
+           "gdn_prefill_raw_gate: invalid tensor ranks");
+  const int64_t t = qi.shape[0], hk = qi.shape[1], d = qi.shape[2], hv = v.shape[1];
+  VT_CHECK(t == 128 && hk == 16 && hv == 48 && d == 128 &&
+               k.shape[0] == t && k.shape[1] == hk && k.shape[2] == d &&
+               v.shape[0] == t && v.shape[2] == d &&
+               out.shape[0] == t && out.shape[1] == hv && out.shape[2] == d &&
+               raw_a.shape[0] == t && raw_a.shape[1] == hv &&
+               beta.shape[0] == t && beta.shape[1] == hv &&
+               a_log.shape[0] == hv && dt_bias.shape[0] == hv &&
+               state.shape[0] == 1 && state.shape[1] == hv &&
+               state.shape[2] == d && state.shape[3] == d,
+           "gdn_prefill_raw_gate: qualified geometry is P128/Hk16/Hv48/D128, one sequence");
+  VT_CHECK(args.scale == 1.0f,
+           "gdn_prefill_raw_gate: q must already include the normalization scale");
+  for (const Tensor* tensor : std::initializer_list<const Tensor*>{&qi, &k, &v, &out, &raw_a}) {
+    VT_CHECK(tensor->dtype == DType::kF16,
+             "gdn_prefill_raw_gate: q/k/v/out/raw_a must be FP16");
+  }
+  for (const Tensor* tensor : std::initializer_list<const Tensor*>{&beta, &a_log, &dt_bias, &state}) {
+    VT_CHECK(tensor->dtype == DType::kF32,
+             "gdn_prefill_raw_gate: beta/a_log/dt_bias/state must be FP32");
+  }
+  for (const Tensor* tensor : std::initializer_list<const Tensor*>{&qi, &k, &v, &out, &beta, &a_log, &dt_bias, &state}) {
+    VT_CHECK(tensor->IsContiguous(), "gdn_prefill_raw_gate: contiguous storage required");
+  }
+  VT_CHECK(raw_a.stride[1] == 1 && raw_a.stride[0] >= hv,
+           "gdn_prefill_raw_gate: raw_a requires inner-contiguous, nonoverlapping rows");
+  for (const Tensor* tensor : std::initializer_list<const Tensor*>{&qi, &k, &v, &out, &raw_a, &beta, &a_log, &dt_bias, &state}) {
+    VT_CHECK(tensor->device == q.device, "gdn_prefill_raw_gate: device mismatch");
+  }
+  CheckI32Meta(q, qsl, 2, "gdn_prefill_raw_gate", "query_start_loc");
+  reinterpret_cast<GdnPrefillRawGateFn>(GetOp(OpId::kGdnPrefillRawGate, q.device.type))(
+      q, out, qi, k, v, raw_a, beta, a_log, dt_bias, state, qsl, args);
 }
 
 void KdaGatedDeltaRule(Queue& q, Tensor& out, const Tensor& q_in, const Tensor& k,
@@ -3612,7 +3662,7 @@ void Attention(Queue& q, Tensor& out, const Tensor& query, const Tensor& key,
   VT_CHECK(args.scale > 0.0f, "attention: scale must be set (> 0), e.g. head_dim^-0.5");
   VT_CHECK(IsFloat(query.dtype) && key.dtype == query.dtype && value.dtype == query.dtype,
            "attention: query/key/value must share one float dtype");
-  VT_CHECK(IsOutFloat(out.dtype), "attention: out must be f32 or bf16");
+  VT_CHECK(IsXpuF16Out(q, out.dtype), "attention: out must be f32 or bf16 (f16 on XPU)");
   VT_CHECK(query.IsContiguous() && key.IsContiguous() && value.IsContiguous() &&
                out.IsContiguous(),
            "attention: contiguous tensors required");
@@ -4462,7 +4512,18 @@ void ReshapeAndCacheFp8(Queue& q, const Tensor& k, const Tensor& v, Tensor& k_ca
            "slot_mapping contiguous");
   VT_CHECK(k_cache.stride[3] == 1 && v_cache.stride[3] == 1,
            "reshape_and_cache_fp8: k_cache/v_cache innermost (head_size) stride must be 1");
-  VT_CHECK(k_cache.stride[2] == head_size_k && v_cache.stride[2] == head_size_v,
+  // The pinned EXL3 XPU producer stores K/V together within each head.
+  // Its [B,P,H,D] views have head stride 2*D; other providers retain
+  // their existing head-contiguous contract.
+  const bool xpu_interleaved = q.device.type == DeviceType::kXPU &&
+      head_size_k == head_size_v &&
+      k_cache.stride[2] == 2 * head_size_k && v_cache.stride[2] == 2 * head_size_v &&
+      k_cache.stride[1] >= num_kv_heads * k_cache.stride[2] &&
+      v_cache.stride[1] >= num_kv_heads * v_cache.stride[2] &&
+      k_cache.stride[0] >= k_cache.shape[1] * k_cache.stride[1] &&
+      v_cache.stride[0] >= v_cache.shape[1] * v_cache.stride[1];
+  VT_CHECK(xpu_interleaved ||
+               (k_cache.stride[2] == head_size_k && v_cache.stride[2] == head_size_v),
            "reshape_and_cache_fp8: k_cache/v_cache page must be head-contiguous "
            "(stride[2] == head_size) — the NHD unbind-slice layout");
   // NO device-class guard. W1 hard-refused every non-CPU queue here, which is
@@ -5332,7 +5393,15 @@ void PagedAttention(Queue& q, Tensor& out, const Tensor& query, const Tensor& k_
            "paged_attention: query/out/seq_lens/query_start_loc must be contiguous");
   VT_CHECK(k_cache.stride[3] == 1 && v_cache.stride[3] == 1,
            "paged_attention: k_cache/v_cache innermost (head_size) stride must be 1");
-  VT_CHECK(k_cache.stride[2] == head_size_k && v_cache.stride[2] == head_size_v,
+  const bool xpu_interleaved = q.device.type == DeviceType::kXPU &&
+      head_size_k == head_size_v &&
+      k_cache.stride[2] == 2 * head_size_k && v_cache.stride[2] == 2 * head_size_v &&
+      k_cache.stride[1] >= num_kv_heads * k_cache.stride[2] &&
+      v_cache.stride[1] >= num_kv_heads * v_cache.stride[2] &&
+      k_cache.stride[0] >= k_cache.shape[1] * k_cache.stride[1] &&
+      v_cache.stride[0] >= v_cache.shape[1] * v_cache.stride[1];
+  VT_CHECK(xpu_interleaved ||
+               (k_cache.stride[2] == head_size_k && v_cache.stride[2] == head_size_v),
            "paged_attention: k_cache/v_cache page must be head-contiguous "
            "(stride[2] == head_size) — the NHD unbind-slice layout");
   VT_CHECK(query.device == q.device && out.device == q.device && k_cache.device == q.device &&
@@ -5789,7 +5858,13 @@ void QkvSplit(Queue& q, Tensor& q_out, Tensor& k_out, Tensor& v_out, const Tenso
 
 void GdnPostConv(Queue& q, Tensor& q_out, Tensor& k_out, Tensor& v_out, Tensor& g_out,
                  Tensor& beta_out, const Tensor& conv, const Tensor& araw, const Tensor& braw,
-                 const Tensor& a_log, const Tensor& dt_bias, const L2NormArgs& args) {
+                 const Tensor& a_log, const Tensor& dt_bias, const GdnPostConvArgs& args) {
+  if (args.xpu_fp16_prefill) {
+    VT_CHECK(q.device.type == DeviceType::kXPU && conv.dtype == DType::kF32 &&
+                 q_out.dtype == DType::kF16 && q_out.shape[1] == 16 && q_out.shape[2] == 128 &&
+                 v_out.shape[1] == 48 && v_out.shape[2] == 128,
+             "gdn_post_conv: producer FP16 prefill requires XPU/F32 Conv/Hk16/Hv48/D128");
+  }
   // Fusion of GdnConvSplit + L2Norm(q) + L2Norm(k) + GdnGBeta; validation is the
   // union of those four ops (same shape/dtype/device/contiguity contracts).
   VT_CHECK(conv.rank == 2, "gdn_post_conv: conv rank-2 [T, conv_dim]");

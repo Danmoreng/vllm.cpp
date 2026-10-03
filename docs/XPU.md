@@ -1,12 +1,17 @@
 # Native XPU development
 
-The optional SYCL/Level Zero backend provides the resource and core-operator
-foundation, EXL3, Conv/GDN, attention and the text engine path from PR00–PR06 of the
-[B70 implementation plan](B70-SYCL-Qwen38-EXL3-Implementation-Plan.md).
-It supports the dense `Qwen3_5ForConditionalGeneration` text path with EXL3,
-BF16 residual/KV storage and F32 recurrent state. Use device `auto` with
-`language_model_only` enabled and speculation disabled. Kernels still prioritize
-correctness; fast decode, XMX prefill and production serving parity are later steps.
+The optional SYCL/Level Zero backend includes EXL3, Conv/GDN, attention,
+GPTQ and text-engine development. The active local work is the
+[B70 EXL3 migration and parity plan](B70-EXL3-Migration-and-Parity-Plan.md),
+starting with S0a on the merged branch.
+
+The setup and inventory examples below describe the earlier Mia-AiLab
+3.5-bpw EXL3/BF16 path. They are historical build/operator references, not a
+validated recipe for the current turboderp 4-bpw/6-bpw-head FP16 checkpoint.
+In particular, `tools/b70_inventory.py` still contains the old model pins.
+The [original PR00–PR14 plan](archive/b70/B70-SYCL-Qwen38-EXL3-Implementation-Plan.md)
+is archived. Select only the focused check needed for the active plan step;
+do not run all commands below as an onboarding gate.
 
 ## Build and focused checks
 

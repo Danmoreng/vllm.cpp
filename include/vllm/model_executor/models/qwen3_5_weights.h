@@ -670,6 +670,25 @@ struct Exl3Weight {
   }
 };
 
+// Packed output-axis merge. Each source retains its own input transform;
+// source_map selects that transform for every complete 128-column block.
+// Owned by the model, rather than by a temporary per-forward method.
+struct Exl3GroupedWeight {
+  std::string name;
+  OwnedTensor trellis;     // I8 [K/16, N/16, 32*bits]
+  OwnedTensor suh;         // F16 [S, K]
+  OwnedTensor svh;         // F16 [N]
+  OwnedTensor source_map;  // I32 [N/128]
+  std::vector<int64_t> output_offsets;  // S+1 column boundaries
+  int codebook = -1;
+  bool Empty() const { return trellis.Empty(); }
+};
+
+// Exact byte rearrangement only; no decode or arithmetic. Sources must have
+// available host bytes, common K/bits/mul1, and N divisible by 128.
+Exl3GroupedWeight MergeExl3Weights(const std::vector<const Exl3Weight*>& sources,
+                                  std::string name);
+
 struct Nvfp4Weight {
   OwnedTensor packed;   // i8 [N, K/2]   two 4-bit E2M1 codes per byte
   OwnedTensor scale;    // i8 [N, K/16]  one fp8-e4m3 scale per 16-elem group
@@ -935,30 +954,13 @@ struct GdnLayerWeights {
   mutable std::shared_ptr<void> d_qkvz_fp8_packed;
   mutable std::shared_ptr<void> d_qkvz_fp8_alpha;
 
-  // MODEL-QWEN35-GDN-EXL3 (#2495 item 4) — the EXL3 (exllamav3 trellis) arm of
-  // this tower, and it is THREE projections rather than the merged qkvz owner
-  // above.
-  //
-  // `Mia-AiLab/Qwen3.8-27B-EXL3-3.5bpw` ships `in_proj_qkv` and `in_proj_z` as
-  // two INDEPENDENTLY quantized trellises: `in_proj_qkv.svh [10240]` and
-  // `in_proj_z.svh [6144]`, each fitted at quantization time against its own
-  // projection. The bf16 loader N-concatenates the two `.weight` shards because
-  // concatenating bf16 rows is a byte copy. A trellis is a 16x16-tiled
-  // bitstream whose two Hadamard sign vectors are per projection, so the same
-  // concatenation is defined only when both shards share `suh` bit-for-bit, and
-  // nothing in the calibration gives a reason to expect that. There is no
-  // merged-trellis operand in this tree either (`quant-exl3-shared.md` records
-  // "no merged EXL3 QKV or gate_up" as owed).
-  //
-  // So the arm MIRRORS THE ARTIFACT and issues two in-projection GEMMs. That is
-  // the shape `ProjectGdnQkvz` already has a precedent for: the split native-FP8
-  // arm the 35B runs takes exactly this path when the merged owner is empty.
-  //
-  // Exactly one representation is ever populated. When these are filled, the
-  // bf16 `in_proj_qkvz`/`out_proj` and every FP8 and NVFP4 field above are empty.
+  // Independent checkpoint QKV/Z transforms are retained in the model-owned
+  // lazy packed group for scoped XPU FP16 SmallM. Legacy execution can still
+  // use the source shards. Exactly one representation is populated per layer.
   Exl3Weight in_proj_qkv_exl3;  // [K=H,         N=conv_dim]
   Exl3Weight in_proj_z_exl3;    // [K=H,         N=value_dim]
   Exl3Weight out_proj_exl3;     // [K=value_dim, N=H]
+  mutable Exl3GroupedWeight in_proj_qkvz_exl3;
 
   // ONE truth for the arm, keyed on the first projection alone, exactly as
   // `FullAttnLayerWeights::IsExl3` keys on `q_proj_exl3`. A predicate that
@@ -1042,17 +1044,14 @@ struct FullAttnLayerWeights {
   // trade off. Empty on every non-block owner.
   Fp8BlockMergedResident qkv_fp8_block_merged;
 
-  // QUANT-EXL3 (#2181) / MODEL-QWEN35-EXL3 (#2495 item 3): the exllamav3
-  // trellis arm of this tower. Q/K/V stay SEPARATE where the bf16, NVFP4 and
-  // block-FP8 arms above hold (or build) one merged owner: a trellis is
-  // `[k/16, n/16, 32*bits]`, so joining on the output dim interleaves per input
-  // tile rather than row-stacking, which is a real transform and owed its own
-  // gate (`## Owed` in `specs/quant-exl3-shared.md`). Exactly one of {bf16,
-  // fp4, per-tensor fp8, block fp8, exl3} is populated per layer.
+  // EXL3 checkpoint shards and model-owned lazy QKV packed group. Each shard
+  // keeps its input transform; the group concatenates output tiles per K tile.
+  // Exactly one of {bf16, fp4, per-tensor fp8, block fp8, exl3} is populated.
   Exl3Weight q_proj_exl3;  // [K=H,       N=2*Hq*Dh]
   Exl3Weight k_proj_exl3;  // [K=H,       N=Hkv*Dh]
   Exl3Weight v_proj_exl3;  // [K=H,       N=Hkv*Dh]
   Exl3Weight o_proj_exl3;  // [K=Hq*Dh,   N=H]
+  mutable Exl3GroupedWeight qkv_proj_exl3;
 
   // `q_proj_exl3` and not "any of the four": the loader fills all four together
   // or none, and asking about the FIRST one keeps this predicate the same

@@ -113,7 +113,7 @@ bool PagedAttentionPrefillImpl(Queue& q, Tensor& out, const Tensor& query, const
           float value = 0;
           if (base + key < end) {
             const int64_t index = base + key, block = table[request * bt.stride[0] + (index / page) * bt.stride[1]];
-            value = LoadKV(kc, block * kc.stride[0] + (index % page) * kc.stride[1] + (head / ratio) * D + d, kscale);
+            value = LoadKV(kc, block * kc.stride[0] + (index % page) * kc.stride[1] + (head / ratio) * kc.stride[2] + d, kscale);
           }
           kv[i] = narrow(value); // transposed K: [D,K]
         }
@@ -172,7 +172,7 @@ bool PagedAttentionPrefillImpl(Queue& q, Tensor& out, const Tensor& query, const
           float value = 0;
           if (base + key < end) {
             const int64_t index = base + key, block = table[request * bt.stride[0] + (index / page) * bt.stride[1]];
-            value = LoadKV(vc, block * vc.stride[0] + (index % page) * vc.stride[1] + (head / ratio) * D + d, vscale);
+            value = LoadKV(vc, block * vc.stride[0] + (index % page) * vc.stride[1] + (head / ratio) * vc.stride[2] + d, vscale);
           }
           kv[i] = narrow(value); // shared stage now holds V: [K,D]
         }

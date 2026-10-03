@@ -1176,3 +1176,54 @@ TEST_CASE("Qwen3.5 KV-cache spec: num_spec widens the conv row and adds state bl
   // part by conv_dim * sizeof(bf16) and leaves the ssm part alone.
   CHECK(k1->page_size_bytes() - base_mamba->page_size_bytes() == conv_dim * 2);
 }
+
+TEST_CASE("Qwen3.5 KV-cache spec: EXL3 uses FP16 Conv and FP32 recurrence despite BF16 export") {
+  HfConfig cfg = Config({"Qwen3_5ForConditionalGeneration"});
+  cfg.torch_dtype = "bfloat16";
+  cfg.mamba_ssm_dtype = "float32";
+  cfg.raw["quantization_config"] = {{"quant_method", "exl3"}, {"codebook", "mul1"}};
+  cfg.num_key_value_heads = 4;
+  cfg.head_dim = 256;
+  cfg.linear_num_key_heads = 16;
+  cfg.linear_num_value_heads = 48;
+  cfg.linear_key_head_dim = 128;
+  cfg.linear_value_head_dim = 128;
+  cfg.linear_conv_kernel_dim = 4;
+  for (int num_spec : {0, 3}) {
+    CAPTURE(num_spec);
+    const auto kv = vllm::MakeQwen3_5KVCacheSpec(cfg, 1600, 8, num_spec);
+    const auto* mamba = dynamic_cast<const vllm::v1::MambaSpec*>(
+        kv.kv_cache_groups[1].kv_cache_spec.get());
+    const auto* attention = dynamic_cast<const vllm::v1::FullAttentionSpec*>(
+        kv.kv_cache_groups[0].kv_cache_spec.get());
+    REQUIRE(mamba != nullptr);
+    REQUIRE(attention != nullptr);
+    CHECK(mamba->dtypes == std::vector<vt::DType>{vt::DType::kF16, vt::DType::kF32});
+    CHECK(mamba->shapes[0] == std::vector<int64_t>{10240, 3 + num_spec});
+    CHECK(mamba->shapes[1] == std::vector<int64_t>{48, 128, 128});
+    CHECK(mamba->page_size_bytes() == 10240 * (3 + num_spec) * 2 + 48 * 128 * 128 * 4);
+    CHECK(attention->dtype == vt::DType::kF16);
+    if (num_spec > 0) {
+      const auto* draft = dynamic_cast<const vllm::v1::FullAttentionSpec*>(
+          kv.kv_cache_groups[2].kv_cache_spec.get());
+      REQUIRE(draft != nullptr);
+      CHECK(draft->dtype == vt::DType::kF16);
+    }
+  }
+  cfg.mamba_ssm_dtype = "bfloat16";
+  CHECK_THROWS_AS(vllm::MakeQwen3_5KVCache(cfg, 1600, 8), std::runtime_error);
+  cfg.mamba_ssm_dtype = "float32";
+  cfg.raw.erase("quantization_config");
+  const auto ordinary = vllm::MakeQwen3_5KVCache(cfg, 1600, 8);
+  const auto* mamba = dynamic_cast<const vllm::v1::MambaSpec*>(
+      ordinary.kv_cache_groups[1].kv_cache_spec.get());
+  REQUIRE(mamba != nullptr);
+  CHECK(mamba->dtypes == std::vector<vt::DType>{vt::DType::kBF16, vt::DType::kF32});
+  cfg.torch_dtype = "float16";
+  cfg.raw["quantization_config"] = {{"quant_method", "gptq"}};
+  const auto gptq = vllm::MakeQwen3_5KVCache(cfg, 1600, 8);
+  const auto* gptq_mamba = dynamic_cast<const vllm::v1::MambaSpec*>(
+      gptq.kv_cache_groups[1].kv_cache_spec.get());
+  REQUIRE(gptq_mamba != nullptr);
+  CHECK(gptq_mamba->dtypes == std::vector<vt::DType>{vt::DType::kF16, vt::DType::kF32});
+}

@@ -25,6 +25,59 @@ vt::Tensor CacheView(const vt::Tensor& storage, int side, int64_t blocks, int64_
 }
 }
 
+TEST_CASE("XPU unpaged attention: CPU agreement, model dtypes, causal GQA and aliases") {
+  Queue cpu(vt::DeviceType::kCPU), gpu(vt::DeviceType::kXPU);
+  for (int dim : {7, 256}) for (bool causal : {false, true})
+    for (auto input : {DType::kF32, DType::kBF16, DType::kF16}) {
+      CAPTURE(dim);
+      CAPTURE(causal);
+      CAPTURE(input);
+      constexpr int tokens = 5, hq = 6, hk = 2;
+      std::vector<float> expected;
+      for (auto* q : {&cpu.q, &gpu.q}) {
+        Buffer query(*q, input, {tokens, hq, dim});
+        Buffer key(*q, input, {tokens, hk, dim}), value(*q, input, {tokens, hk, dim});
+        query.put(Values(tokens * hq * dim, 1, 0.1f));
+        key.put(Values(tokens * hk * dim, 3, 0.1f));
+        value.put(Values(tokens * hk * dim, 7, 0.1f));
+        const vt::AttentionArgs args{1.0f / std::sqrt(float(dim)), causal};
+        if (q == &cpu.q) {
+          Buffer out(*q, DType::kF32, {tokens, hq, dim});
+          vt::Attention(*q, out.tensor, query.tensor, key.tensor, value.tensor, args);
+          expected = out.floats();
+        } else {
+          for (auto output : {DType::kF32, DType::kBF16, DType::kF16}) {
+            CAPTURE(output);
+            Buffer out(*q, output, {tokens, hq, dim});
+            vt::Attention(*q, out.tensor, query.tensor, key.tensor, value.tensor, args);
+            // The independent CPU reference accumulates in F32. Device
+            // reductions need not be bit-identical, including at a half tie.
+            const float tolerance = output == DType::kF32 ? 2e-5f :
+                                    output == DType::kF16 ? 0.001f : 0.008f;
+            Close(out.floats(), expected, tolerance, tolerance);
+            const auto result = out.floats();
+            CHECK(std::all_of(result.begin(), result.end(),
+                              [](float v) { return std::isfinite(v); }));
+          }
+          // Same input/output storage must preserve the query until all rows
+          // have consumed it. Exercise the existing native alias snapshot.
+          vt::Attention(*q, query.tensor, query.tensor, key.tensor, value.tensor, args);
+          const float tolerance = input == DType::kF32 ? 2e-5f :
+                                  input == DType::kF16 ? 0.001f : 0.008f;
+          Close(query.floats(), expected, tolerance, tolerance);
+        }
+      }
+    }
+  // CPU keeps its existing F32/BF16 output contract. The F16 extension is
+  // scoped to XPU, independently of the shared floating input support.
+  Buffer half(cpu.q, DType::kF16, {1, 1, 7});
+  CHECK_THROWS_WITH_AS(vt::Attention(cpu.q, half.tensor, half.tensor,
+                                    half.tensor, half.tensor, {1.0f, true}),
+                       doctest::Contains("out must be f32 or bf16"),
+                       std::runtime_error);
+  CHECK(vt::GetReferenceTierHits() == 0);
+}
+
 TEST_CASE("XPU attention preamble: Q/gate split, Q/K RMSNorm, partial RoPE at real geometry") {
   Queue cpu(vt::DeviceType::kCPU), gpu(vt::DeviceType::kXPU);
   constexpr int hq = 24, hk = 4, dim = 256, rot = 64;

@@ -25,11 +25,18 @@ double Frequency(int64_t pair, const RopeArgs& args) {
   const double smooth = low == high ? 0.0 : (original / wavelength - low) / (high - low);
   return (1.0 - smooth) * freq / factor + smooth * freq;
 }
-void Rotate(View dst, int64_t token, int64_t head, int64_t first, int64_t second, float c, float s) {
+void Rotate(View dst, int64_t token, int64_t head, int64_t first, int64_t second, float c, float s,
+            bool fp16 = false) {
   const auto base = token * dst.stride[0] + head * dst.stride[1];
   const float x = Load(dst, base + first), y = Load(dst, base + second);
-  Store(dst, base + first, x * c - y * s);
-  Store(dst, base + second, x * s + y * c);
+  if (fp16) {
+    c = Round(DType::kF16, c); s = Round(DType::kF16, s);
+    Store(dst, base + first, Round(DType::kF16, x * c) - Round(DType::kF16, y * s));
+    Store(dst, base + second, Round(DType::kF16, x * s) + Round(DType::kF16, y * c));
+  } else {
+    Store(dst, base + first, x * c - y * s);
+    Store(dst, base + second, x * s + y * c);
+  }
 }
 void CopyElement(View dst, int64_t to, View src, int64_t from) {
   if (src.dtype == DType::kF32)
@@ -71,6 +78,7 @@ void AttnQkNormRopeGateKernel(Queue& q, Tensor& q_out, Tensor& k_out,
   const int64_t half = rope_args.rotary_dim / 2, rot = rope_args.rotary_dim;
   const float eps = norm_args.eps;
   const bool gemma = norm_args.gemma;
+  const bool fp16 = rope_args.fp16_intermediates;
   enum class PreambleMode { kAuto, kReference, kSubgroup };
   static const PreambleMode mode = [] {
     const char* value = std::getenv("VT_XPU_ATTN_PREAMBLE");
@@ -117,6 +125,7 @@ void AttnQkNormRopeGateKernel(Queue& q, Tensor& q_out, Tensor& k_out,
         const int col = lane + lanes * j;
         const float w = Load(weight, col);
         norm[j] = values[j] * inv * (gemma ? 1.0f + w : w);
+        if (fp16) norm[j] = Round(DType::kF16, norm[j]);
       }
       for (int j = 0; j < tile; ++j) {
         const int col = lane + lanes * j;
@@ -126,8 +135,14 @@ void AttnQkNormRopeGateKernel(Queue& q, Tensor& q_out, Tensor& k_out,
           const int first = pair / lanes, second = (pair + half) / lanes;
           const float c = Load(cs, token * rot + pair);
           const float s = Load(cs, token * rot + half + pair);
-          value = col < half ? norm[first] * c - norm[second] * s
-                             : norm[first] * s + norm[second] * c;
+          if (fp16) {
+            const float hc = Round(DType::kF16, c), hs = Round(DType::kF16, s);
+            value = col < half ? Round(DType::kF16, norm[first] * hc) - Round(DType::kF16, norm[second] * hs)
+                               : Round(DType::kF16, norm[first] * hs) + Round(DType::kF16, norm[second] * hc);
+          } else {
+            value = col < half ? norm[first] * c - norm[second] * s
+                               : norm[first] * s + norm[second] * c;
+          }
         }
         Store(dst, out_base + col, value);
         if (query) Store(go, out_base + col, Load(qs, src_base + dim + col));
@@ -155,7 +170,8 @@ void AttnQkNormRopeGateKernel(Queue& q, Tensor& q_out, Tensor& k_out,
     for (int64_t i = 0; i < dim; ++i) {
       const auto norm = [&](int64_t col) {
         const float w = Load(weight, col);
-        return Load(src, src_base + col) * inv * (gemma ? 1.0f + w : w);
+        const float value = Load(src, src_base + col) * inv * (gemma ? 1.0f + w : w);
+        return fp16 ? Round(DType::kF16, value) : value;
       };
       float value = norm(i);
       if (i < rot) {
@@ -163,7 +179,11 @@ void AttnQkNormRopeGateKernel(Queue& q, Tensor& q_out, Tensor& k_out,
         const float first = norm(pair), second = norm(pair + half);
         const float c = Load(cs, token * rot + pair);
         const float s = Load(cs, token * rot + half + pair);
-        value = i < half ? first * c - second * s : first * s + second * c;
+        if (fp16) {
+          const float hc = Round(DType::kF16, c), hs = Round(DType::kF16, s);
+          value = i < half ? Round(DType::kF16, first * hc) - Round(DType::kF16, second * hs)
+                           : Round(DType::kF16, first * hs) + Round(DType::kF16, second * hc);
+        } else value = i < half ? first * c - second * s : first * s + second * c;
       }
       Store(dst, out_base + i, value);
       if (query) Store(go, out_base + i, Load(qs, src_base + dim + i));
@@ -198,8 +218,13 @@ void RopeCosSinCacheKernel(Queue& q, Tensor& cache, const Tensor& positions, con
       // Round both pow and its reciprocal to F32 before the F32 angle.
       // B70 FP64 avoids the larger device float-pow approximation.
       const float exponent = float(2 * pair) / float(rot);
-      const float power = float(sycl::pow(double(args.base), double(exponent)));
-      const float inv = float(1.0 / double(power));
+      // Original EXL3 cache construction executes pow/reciprocal on FP32
+      // XPU tensors. Its half-coefficient boundary can distinguish that from
+      // the legacy high-precision cache producer.
+      const float power = args.fp16_intermediates
+          ? sycl::pow(args.base, exponent)
+          : float(sycl::pow(double(args.base), double(exponent)));
+      const float inv = args.fp16_intermediates ? 1.0f / power : float(1.0 / double(power));
       const float angle = (float(p) / args.linear_scaling_factor) * inv;
       c = sycl::cos(angle); s = sycl::sin(angle);
     } else {
@@ -224,12 +249,15 @@ void RopeFromCacheKernel(Queue& q, Tensor& queries, Tensor* keys, const Tensor& 
     return true;
   }, "XPU RoPE position outside cache", {&positions});
   const bool neox = args.is_neox_style;
+  const bool fp16 = args.fp16_intermediates;
+  VT_CHECK(!fp16 || (queries.dtype == DType::kF16 && (!keys || keys->dtype == DType::kF16)),
+           "XPU FP16 RoPE intermediates require FP16 Q/K");
   const auto event = NativeQueue(q).parallel_for(sycl::range<1>(tokens * (hq + hk) * half), [=](sycl::id<1> item) {
     const int64_t pair = item[0] % half, head = (item[0] / half) % (hq + hk), token = item[0] / (half * (hq + hk));
     const auto base = Position(pos, token) * rot;
     Rotate(head < hq ? qs : ks, token, head < hq ? head : head - hq,
            neox ? pair : 2 * pair, neox ? pair + half : 2 * pair + 1,
-           Load(cs, base + pair), Load(cs, base + half + pair));
+           Load(cs, base + pair), Load(cs, base + half + pair), fp16);
   });
   RecordProfileEvent(q, "rope_cache_consume", event);
 }
@@ -239,6 +267,7 @@ void CacheWrite(Queue& q, const Tensor& keys, const Tensor& values, Tensor& key_
                 Tensor& value_cache, const Tensor& slots, float k_scale, float v_scale) {
   const int64_t count = slots.Numel(), page = key_cache.shape[1], blocks = key_cache.shape[0];
   const auto elements = keys.shape[1] * keys.shape[2];
+  const auto head_dim = keys.shape[2];
   const auto* ids = static_cast<const int64_t*>(slots.data);
   CheckDeviceMetadata(q, [=] {
     for (int64_t t = 0; t < count; ++t) if (ids[t] >= blocks * page) return false;
@@ -261,8 +290,9 @@ void CacheWrite(Queue& q, const Tensor& keys, const Tensor& values, Tensor& key_
       if (!keep[0]) return;
       const auto block = slot / page, offset = slot % page;
       for (int64_t col = item.get_local_id(0); col < elements; col += 128) {
-        const auto kd = block * kc.stride[0] + offset * kc.stride[1] + col;
-        const auto vd = block * vc.stride[0] + offset * vc.stride[1] + col;
+        const auto head = col / head_dim, channel = col % head_dim;
+        const auto kd = block * kc.stride[0] + offset * kc.stride[1] + head * kc.stride[2] + channel;
+        const auto vd = block * vc.stride[0] + offset * vc.stride[1] + head * vc.stride[2] + channel;
         if constexpr (Fp8) {
           static_cast<uint8_t*>(kc.data)[kd] = EncodeE4M3(Load(ks, token * ks.stride[0] + col) / k_scale);
           static_cast<uint8_t*>(vc.data)[vd] = EncodeE4M3(Load(vs, token * vs.stride[0] + col) / v_scale);
@@ -288,6 +318,36 @@ void ReshapeAndCacheFp8Kernel(Queue& q, const Tensor& keys, const Tensor& values
   VT_CHECK(kind == Fp8KVCacheDataType::kFp8E4M3 && std::isfinite(k_scale) && std::isfinite(v_scale),
            "XPU FP8 KV requires E4M3 and finite positive scales");
   CacheWrite<true>(q, keys, values, key_cache, value_cache, slots, k_scale, v_scale);
+}
+
+void AttentionKernel(Queue& q, Tensor& out, const Tensor& query, const Tensor& key,
+                     const Tensor& value, const AttentionArgs& args) {
+  TraceXpuOp(OpId::kAttention, q, {&out, &query, &key, &value});
+  const int64_t tokens = query.shape[0];
+  if (!tokens) return;
+  VT_CHECK(tokens <= std::numeric_limits<int32_t>::max(),
+           "XPU attention token count exceeds I32 metadata");
+  // A contiguous sequence is one page. Borrow Q/K/V directly and reuse the
+  // native paged implementation, including its output-alias handling. No KV
+  // copy or quadratic score allocation is needed for this unpaged entry.
+  auto keys = Tensor::Contiguous(key.data, key.dtype, key.device,
+                                {1, tokens, key.shape[1], key.shape[2]});
+  auto values = Tensor::Contiguous(value.data, value.dtype, value.device,
+                                  {1, tokens, value.shape[1], value.shape[2]});
+  Scratch metadata(q.device, 4 * sizeof(int32_t));
+  auto* data = static_cast<int32_t*>(metadata.data);
+  const int32_t length = static_cast<int32_t>(tokens);
+  NativeQueue(q).single_task([=] {
+    data[0] = 0; data[1] = length; data[2] = 0; data[3] = length;
+  });
+  auto table = Tensor::Contiguous(data, DType::kI32, q.device, {1, 1});
+  auto lengths = Tensor::Contiguous(data + 1, DType::kI32, q.device, {1});
+  auto offsets = Tensor::Contiguous(data + 2, DType::kI32, q.device, {2});
+  PagedAttentionArgs paged;
+  paged.scale = args.scale;
+  paged.causal = args.causal;
+  vt::PagedAttention(q, out, query, keys, values, table, lengths, offsets, paged);
+  // Scratch release drains its last use, including any selected fast kernel.
 }
 
 void PagedAttentionKernel(Queue& q, Tensor& out, const Tensor& query, const Tensor& key_cache,
