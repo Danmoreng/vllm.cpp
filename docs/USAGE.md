@@ -243,6 +243,12 @@ a silent fallback cannot post a plausible number:
   [ENVIRONMENT.md](ENVIRONMENT.md) for what each knob does and what it measured.
 
 ### Quantized checkpoints: which weight forms load
+
+**TQ1_0 and TQ2_0 GGUF files cannot load yet.** The
+[GGUF reader](../src/vllm/model_executor/model_loader/gguf_reader.cpp) rejects their
+tensor types as unknown, including in Vulkan builds. The
+[ternary kernels](FEATURES.md#ternary-kernels) do not remove this loader limitation.
+
 ### How long a load takes, and how to see where it goes
 
 `VT_LOAD_STATS=1` prints one line per load phase with its wall time, plus the

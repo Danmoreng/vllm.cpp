@@ -133,6 +133,17 @@ by #2794 (goldens predate the pin) and #2817 (the advance).
 | Safetensors direct load, no conversion | ✅ at ANY tensor byte offset: the format aligns nothing, so no loader forms a typed pointer into the mapping. Last three fixed by #772; a checker is still owed on #627 | ✅ | ✅ | ☐ |
 | Weights uploaded straight from the file mapping (no host copy first) | ◐ verbatim tensors only (37.8% of 27B BF16); arbitrary-offset reads are defined, including Laguna graph staging. Merged/transposed and merged FP4 weights still copy | ✅ | ✅ | ✅ mmap |
 
+### Ternary kernels
+
+Vulkan includes TQ1_0 and TQ2_0 kernels for matrix multiplication, grouped expert
+matrix multiplication, and fused MoE gate/up/SwiGLU. These kernels compute directly
+on compressed weight blocks. CPU decoders and dot-product implementations also exist.
+TQ1_0 tests check shader metadata and CPU decoding, not GPU numerical correctness.
+
+The GGUF reader still rejects TQ1_0 and TQ2_0 tensors, so these kernels do not
+establish model support. See [loading limits](USAGE.md#quantized-checkpoints-which-weight-forms-load)
+and the [kernel implementation](../src/vt/vulkan/vulkan_ops.cpp).
+
 ## Model coverage
 
 The supported set is exactly what the C++ registry registers: every
