@@ -492,8 +492,15 @@ void PagedAttentionKernel(Queue& q, Tensor& out, const Tensor& query, const Tens
     bool verify = false;
 #ifdef VLLM_CPP_XPU_XE2_VERIFY
     const char* verify_setting = std::getenv("VT_XPU_XE2_VERIFY");
-    if (mode == "verify" || (automatic && verify_setting &&
-                              std::string_view(verify_setting) == "1"))
+    // Original short C1 decode uses FP16 probabilities and XMX P*V, with
+    // one split below16 KV tiles. The same native donor is already used for
+    // optional packed verification; its own admission guards both routes.
+    if ((mode == "verify" || automatic) && tokens == 1)
+      verify = PagedAttentionXe2DecodeKernel(
+          q, target, query, key_cache, value_cache,
+          block_table, seq_lens, query_start_loc, args);
+    if (!verify && (mode == "verify" || (automatic && verify_setting &&
+                              std::string_view(verify_setting) == "1")))
       verify = PagedAttentionXe2VerifyKernel(
           q, target, query, key_cache, value_cache,
           block_table, seq_lens, query_start_loc, args);

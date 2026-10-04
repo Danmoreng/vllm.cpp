@@ -2,19 +2,10 @@
 // Narrow Torch-free derivative of vllm-xpu-kernels 6d92b1bfbf32767ecda8e819613eb151e70030ad.
 #pragma once
 
-#include "cutlass/epilogue/collective/default_epilogue.hpp"
-#include "cutlass/gemm/device/gemm_universal_adapter.h"
 #include "flash_attention_v2/collective/fmha_fusion.hpp"
 #include "cutlass/util/packed_stride.hpp"
-#include "cutlass/util/GPU_Clock.hpp"
 #include <cute/tensor.hpp>
-#include <random>
 #include <stdexcept>
-
-#include "cutlass/util/command_line.h"
-#include "cutlass/util/device_memory.h"
-#include "cutlass/util/reference/device/gemm_complex.h"
-#include "cutlass/util/reference/device/tensor_compare.h"
 
 #include <sycl/ext/intel/experimental/grf_size_properties.hpp>
 

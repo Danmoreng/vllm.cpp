@@ -262,7 +262,93 @@ TEST_CASE("XPU EXL3 real attention gate: identical P128 D1 D29 operands") {
   CHECK(vt::GetReferenceTierHits() == 0);
 }
 
-TEST_CASE("XPU EXL3 real attention: identical original operands FP8 bytes P128 D1") {
+TEST_CASE("XPU EXL3 real attention core: identical D29 operands and FP8 state") {
+  const char* captures = std::getenv("VT_B70_EXL3_S1_FIXTURES");
+  if (!captures) std::exit(77);
+  const auto oracle = vllm::SafetensorsFile::Open(
+      (std::filesystem::path(captures) / "repeat-0-attention3.safetensors").string());
+  const auto& query = oracle.Get("d29_q_rope");
+  const auto& expected = oracle.Get("d29_attention_output");
+  const auto& key = oracle.Get("d29_key_bytes_after");
+  const auto& value = oracle.Get("d29_value_bytes_after");
+  REQUIRE(query.dtype == "F16");
+  REQUIRE(expected.dtype == "F16");
+  REQUIRE(key.dtype == "U8");
+  REQUIRE(value.dtype == "U8");
+  REQUIRE(query.nbytes == 6144 * 2);
+  REQUIRE(expected.nbytes == query.nbytes);
+  REQUIRE(key.shape == std::vector<int64_t>{157, 4, 256});
+  REQUIRE(value.shape == key.shape);
+  const auto& block = oracle.Get("d29_block_table");
+  REQUIRE(block.dtype == "I32");
+  REQUIRE(block.nbytes == sizeof(int32_t));
+  int32_t physical_block;
+  std::memcpy(&physical_block, block.data, sizeof(physical_block));
+  REQUIRE(physical_block == 1);
+  xpu_test::Queue gpu(vt::DeviceType::kXPU);
+  // Same initialized logical state in the original interleaved and native
+  // planar layouts. Padding remains poisoned; neither inference nor cache
+  // construction is replaced by this isolated consumer regression.
+  for (int64_t page : {1600, 1664}) {
+  const int64_t block_bytes = page * 4 * 512;
+  for (uint8_t padding : {uint8_t{0x7f}, uint8_t{0}})
+  for (bool alias : {false, true})
+  for (bool interleaved : {false, true}) {
+    CAPTURE(page);
+    CAPTURE(alias);
+    CAPTURE(int(padding));
+    CAPTURE(interleaved);
+    xpu_test::Buffer storage(gpu.q, DType::kI8, {2, page, 4, 512});
+    std::vector<uint8_t> state(2 * block_bytes, padding);
+    auto kc = storage.tensor;
+    kc.shape[3] = 256;
+    if (!interleaved) { kc.stride[1] = 4 * 256; kc.stride[2] = 256; }
+    auto vc = kc;
+    vc.data = static_cast<uint8_t*>(vc.data) + (interleaved ? 256 : page * 4 * 256);
+    for (int64_t p = 0; p < 157; ++p) for (int64_t h = 0; h < 4; ++h) {
+      const auto logical = (p * 4 + h) * 256;
+      const auto at = physical_block * block_bytes + p * kc.stride[1] + h * kc.stride[2];
+      std::memcpy(state.data() + at, key.data + logical, 256);
+      std::memcpy(state.data() + at + (interleaved ? 256 : page * 4 * 256),
+                  value.data + logical, 256);
+    }
+    storage.upload(state.data());
+    xpu_test::Buffer q(gpu.q, DType::kF16, {1, 24, 256});
+    xpu_test::Buffer out(gpu.q, DType::kF16, {1, 24, 256});
+    xpu_test::Buffer table(gpu.q, DType::kI32, {1, 1});
+    xpu_test::Buffer lengths(gpu.q, DType::kI32, {1});
+    xpu_test::Buffer offsets(gpu.q, DType::kI32, {2});
+    q.upload(query.data); table.upload(block.data);
+    lengths.upload(oracle.Get("d29_seq_lens").data);
+    offsets.upload(oracle.Get("d29_query_start_loc").data);
+    vt::PagedAttentionArgs args;
+    args.scale = 1.0f / 16.0f; args.causal = true; args.max_seq_len = 157;
+    args.kv_cache_dtype = vt::Fp8KVCacheDataType::kFp8E4M3;
+    args.k_scale = 1.0f; args.v_scale = 1.0f;
+    const int32_t host_offsets[] = {0, 1}; args.query_start_loc_host = host_offsets;
+    vt::PagedAttention(gpu.q, alias ? q.tensor : out.tensor, q.tensor, kc, vc, table.tensor,
+                        lengths.tensor, offsets.tensor, args);
+    const auto actual = alias ? q.download() : out.download();
+    size_t mismatches = 0, nonfinite = 0;
+    for (size_t i = 0; i < actual.size(); i += 2) {
+      mismatches += std::memcmp(actual.data() + i, expected.data + i, 2) != 0;
+      uint16_t bits;
+      std::memcpy(&bits, actual.data() + i, sizeof(bits));
+      nonfinite += !std::isfinite(vt::F16ToF32(bits));
+    }
+    std::cout << "ATTENTION_CORE_D29 page=" << page << " alias=" << alias
+              << " interleaved=" << interleaved
+              << " padding=" << int(padding) << " half_differences=" << mismatches
+              << " nonfinite=" << nonfinite << '\n';
+    CHECK(storage.download() == state);
+    CHECK(nonfinite == 0);
+    CHECK(mismatches == 0);
+  }
+  }
+  CHECK(vt::GetReferenceTierHits() == 0);
+}
+
+static void RunRealAttentionCore(bool strict_halves) {
   const char* captures = std::getenv("VT_B70_EXL3_S1_FIXTURES");
   if (!captures) { std::cerr << "Set VT_B70_EXL3_S1_FIXTURES.\n"; std::exit(77); }
   const auto dir = std::filesystem::path(captures);
@@ -358,8 +444,28 @@ TEST_CASE("XPU EXL3 real attention: identical original operands FP8 bytes P128 D
     std::cout << "REAL_ATTN_CORE phase=" << phase << " max_error=" << maximum
               << " band_failures=" << band_failures << '\n';
     CHECK(finite_failures == 0); CHECK(band_failures == 0);
+    if (strict_halves) {
+      const auto actual = output.download();
+      const auto& expected = get("attention_output");
+      REQUIRE(expected.dtype == "F16");
+      REQUIRE(actual.size() == expected.nbytes);
+      size_t mismatches = 0;
+      for (size_t i = 0; i < actual.size(); i += 2)
+        mismatches += std::memcmp(actual.data() + i, expected.data + i, 2) != 0;
+      std::cout << "ATTENTION_CORE_STRICT phase=" << phase
+                << " half_differences=" << mismatches << '\n';
+      CHECK(mismatches == 0);
+    }
   }
   CHECK(vt::GetReferenceTierHits() == 0);
+}
+
+TEST_CASE("XPU EXL3 real attention: identical original operands FP8 bytes P128 D1") {
+  RunRealAttentionCore(false);
+}
+
+TEST_CASE("XPU EXL3 real attention core: strict P128 D1 original endpoints") {
+  RunRealAttentionCore(true);
 }
 
 TEST_CASE("XPU EXL3 attention RoPE: actual FP16 operands and coefficients") {
