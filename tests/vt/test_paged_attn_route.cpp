@@ -72,3 +72,15 @@ TEST_CASE("route: without the spec admission the shipped predicate holds verbati
   CHECK_FALSE(PagedAttnIsPrefill(4, 4, /*spec_as_decode=*/false));
   CHECK_FALSE(PagedAttnIsPrefill(1, 1, /*spec_as_decode=*/false));
 }
+
+TEST_CASE("route: XPU packed verification graph bound is stable and overflow safe") {
+  CHECK(vt::PagedAttnXpuPackedVerifyBound(4096, 1600) == 4800);
+  CHECK(vt::PagedAttnXpuPackedVerifyBound(4800, 1600) == 4800);
+  CHECK(vt::PagedAttnXpuPackedVerifyBound(4801, 1600) == 6400);
+  CHECK(vt::PagedAttnXpuPackedVerifyBound(4096, 1664) == 4992);
+  CHECK(vt::PagedAttnXpuPackedVerifyBound(262144, 1600) == 262400);
+  CHECK(vt::PagedAttnXpuPackedVerifyBound(0, 1600) == 0);
+  CHECK(vt::PagedAttnXpuPackedVerifyBound(4, 0) == 4);
+  CHECK(vt::PagedAttnXpuPackedVerifyBound(INT32_MAX, 1600) == INT32_MAX);
+  CHECK(vt::PagedAttnXpuPackedVerifyBound(4, INT64_MAX) == 4);
+}

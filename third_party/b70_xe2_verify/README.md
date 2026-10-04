@@ -37,7 +37,10 @@ padding, aliases and strided output copies match the executed original. Missing
 or ragged host offsets retain the generic route; the speculative classification
 hint alone does not admit a packed batch. Raw C4/C1 graphs qualify shared scratch,
 fresh metadata, request permutation/input mutation and retirement across queues.
-Model graph policy and emitted-cycle qualification remain pending. These are isolated operator
+The dense model graph policy now tracks route settings, every KV binding/layout
+and partition/page boundaries. Requested C4 verification uses a page-end grid
+bound, without raising request/context limits. Actual model-owner retirement
+and emitted-cycle qualification remain pending. These are isolated operator
 proofs; automatic verification stays off by default.
 
 `src/vt/xpu/xpu_attention_decode_xe2.cpp` uses a separate short C1 policy:

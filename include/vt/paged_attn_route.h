@@ -21,6 +21,7 @@
 #define VLLM_CPP_INCLUDE_VT_PAGED_ATTN_ROUTE_H_
 
 #include <cstdint>
+#include <limits>
 
 namespace vt {
 
@@ -39,6 +40,16 @@ inline bool PagedAttnXpuLongSplitBound(int64_t max_seq_len) {
 }
 inline int64_t PagedAttnXpuActivePages(int64_t max_seq_len, int64_t page) {
   return max_seq_len > 0 && page > 0 ? 1 + (max_seq_len - 1) / page : 0;
+}
+
+// Packed C4 metadata validation bakes this upper bound into a graph. Keep it
+// stable within a page; the model retires the graph at active-page boundaries.
+// This sizes the kernel, not the request/context limit or allocated cache.
+inline int32_t PagedAttnXpuPackedVerifyBound(int32_t max_seq_len, int64_t page) {
+  if (max_seq_len <= 0 || page <= 0) return max_seq_len;
+  const int64_t pages = 1 + (int64_t(max_seq_len) - 1) / page;
+  if (page > std::numeric_limits<int32_t>::max() / pages) return max_seq_len;
+  return static_cast<int32_t>(pages * page);
 }
 
 // The shape-consistency guard for a CLASSIFIED uniform speculative batch:

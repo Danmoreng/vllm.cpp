@@ -3,6 +3,7 @@
 #include "vt/fp8_kv.h"
 #include "vllm/model_executor/model_loader/safetensors_reader.h"
 #include "vt/unaligned.h"
+#include "vt/paged_attn_route.h"
 #include <filesystem>
 #include <array>
 #include <memory>
@@ -1413,6 +1414,25 @@ TEST_CASE("XPU FP8 attention P1: C4 uniform metadata proof and ragged generic re
   xpu_test::SameBytes(f.cache.download(), cache_before); xpu_test::SameBytes(f.query.download(), query_before);
   xpu_test::SameBytes(table.download(), table_before); xpu_test::SameBytes(f.lens.download(), lens_before);
   xpu_test::SameBytes(f.offsets.download(), std::vector<unsigned char>(reinterpret_cast<const unsigned char*>(uniform), reinterpret_cast<const unsigned char*>(uniform + 5)));
+  // A generic C4 graph has no packed-layout proof or exact verifier bound.
+  // Increasing fresh device lengths with unchanged32-part arithmetic must
+  // preserve the existing generic replay, even when the host has uniform Q4.
+  const int32_t short_lens[] = {1600, 1600, 1599, 1598};
+  f.lens.upload(short_lens); f.args.max_seq_len = 1600; run("split");
+  struct GenericGraph {
+    vt::Backend& b; void* handle = nullptr;
+    ~GenericGraph() { if (handle) { try { b.DestroyGraph(handle); } catch (...) {} } }
+  } graph{backend};
+  backend.BeginCapture(gpu.q);
+  vt::PagedAttention(gpu.q, f.out.tensor, f.query.tensor, f.kc, f.vc,
+                     table.tensor, f.lens.tensor, f.offsets.tensor, f.args);
+  graph.handle = backend.EndCaptureGraph(gpu.q);
+  f.lens.upload(lens); f.args.max_seq_len = 1601; run("split");
+  const auto fresh_generic = f.out.download();
+  backend.ReplayGraph(gpu.q, graph.handle);
+  xpu_test::SameBytes(f.out.download(), fresh_generic);
+  backend.DestroyGraph(graph.handle); graph.handle = nullptr;
+  CHECK(vt::xpu::GetMemoryInfo().graph_device_bytes == 0);
   CHECK(vt::GetReferenceTierHits() == 0);
 }
 
@@ -1703,7 +1723,7 @@ TEST_CASE("XPU FP8 attention P1: C4 and C1 graphs share scratch with fresh reque
   key.stride[0] = 1600 * 2048; key.stride[1] = 2048; key.stride[2] = 512;
   auto value = key; value.data = static_cast<unsigned char*>(key.data) + 256;
   vt::PagedAttentionArgs args4;
-  args4.scale = 0.0625f; args4.max_seq_len = 4801; args4.kv_cache_dtype = vt::Fp8KVCacheDataType::kFp8E4M3;
+  args4.scale = 0.0625f; args4.max_seq_len = vt::PagedAttnXpuPackedVerifyBound(4801, 1600); args4.kv_cache_dtype = vt::Fp8KVCacheDataType::kFp8E4M3;
   args4.query_start_loc_host = logical4;
   auto args1 = args4; args1.query_start_loc_host = logical1;
   const auto run = [&](vt::Queue& q, int slot, vt::Tensor& dest) {
@@ -1783,7 +1803,7 @@ TEST_CASE("XPU FP8 attention P1: C4 and C1 graphs share scratch with fresh reque
   const int32_t ragged_claim[] = {0, 3, 8, 12, 16}; offsets4.upload(ragged_claim);
   CHECK_THROWS_AS(backend.ReplayGraph(first.q, graphs.handles[0]), std::runtime_error);
   xpu_test::SameBytes(out4.download(), last4); offsets4.upload(logical4);
-  auto bad_lens = active_lens; bad_lens[3] = 4802; lens4.upload(bad_lens.data());
+  auto bad_lens = active_lens; bad_lens[3] = args4.max_seq_len + 1; lens4.upload(bad_lens.data());
   CHECK_THROWS_AS(backend.ReplayGraph(first.q, graphs.handles[0]), std::runtime_error);
   xpu_test::SameBytes(out4.download(), last4); lens4.upload(active_lens.data());
   auto bad_table = active_table; bad_table[2 * 164] = -1; table4.upload(bad_table.data());

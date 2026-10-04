@@ -438,9 +438,14 @@ void PagedAttentionKernel(Queue& q, Tensor& out, const Tensor& query, const Tens
   const auto* lengths = static_cast<const int32_t*>(seq_lens.data);
   const auto* offsets = static_cast<const int32_t*>(query_start_loc.data);
   const auto* table = static_cast<const int32_t*>(block_table.data);
+  const char* setting = std::getenv("VT_XPU_ATTENTION");
+  const std::string_view mode = setting ? setting : "auto";
   int64_t packed_verify_rows = 0;
 #ifdef VLLM_CPP_XPU_XE2_VERIFY
-  if (requests > 1)
+  const char* verify_setting = std::getenv("VT_XPU_XE2_VERIFY");
+  const bool packed_requested = mode == "verify" ||
+      (mode == "auto" && verify_setting && std::string_view(verify_setting) == "1");
+  if (requests > 1 && packed_requested)
     packed_verify_rows = PagedAttentionXe2VerifyQueryLength(
         tokens, requests, args.query_start_loc_host);
 #endif
@@ -478,8 +483,6 @@ void PagedAttentionKernel(Queue& q, Tensor& out, const Tensor& query, const Tens
   const int64_t left = args.window_size ? args.window_size->left : -1;
   const int64_t right = args.window_size ? args.window_size->right : -1;
   WithOutput(q, out, {&query, &key_cache, &value_cache, &block_table, &seq_lens, &query_start_loc}, [&](Tensor& target) {
-    const char* setting = std::getenv("VT_XPU_ATTENTION");
-    const std::string_view mode = setting ? setting : "auto";
     VT_CHECK(mode == "auto" || mode == "reference" || mode == "split" ||
                  mode == "prefill" || mode == "verify" || mode == "exl3_onednn", "Invalid VT_XPU_ATTENTION");
     const auto device = NativeQueue(q).get_device();
@@ -504,7 +507,6 @@ void PagedAttentionKernel(Queue& q, Tensor& out, const Tensor& query, const Tens
 #endif
     bool verify = false;
 #ifdef VLLM_CPP_XPU_XE2_VERIFY
-    const char* verify_setting = std::getenv("VT_XPU_XE2_VERIFY");
     // Original short C1 decode uses FP16 probabilities and XMX P*V, with
     // one split below16 KV tiles. The same native donor is already used for
     // optional packed verification; its own admission guards both routes.
