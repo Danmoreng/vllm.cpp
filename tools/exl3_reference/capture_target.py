@@ -50,10 +50,10 @@ def target_phases(decode_steps):
 
 
 def selected_detail_kind(block_step, detail_layer):
-    headers.require(type(detail_layer) is int and detail_layer in (-1, 1, 3) and
+    headers.require(type(detail_layer) is int and detail_layer in (-1, 1, 3, 21) and
                     (detail_layer == -1 or block_step == 29),
-                    "detailed observation supports D29 GDN1 or attention3 only")
-    return {-1: "none", 1: "gdn", 3: "attention"}[detail_layer]
+                    "detailed observation supports D29 GDN1/GDN21 or attention3 only")
+    return {-1: "none", 1: "gdn", 3: "attention", 21: "gdn"}[detail_layer]
 
 
 def selected_block_layers(modules, first_layer):
@@ -198,17 +198,17 @@ class TargetCapture(BlockCapture):
             self._selected_attention_capture = observer
         if detail_kind == "gdn":
             from vllm.forward_context import get_forward_context
-            block = modules[installed["layer"].rsplit(".", 1)[0] + ".1"]
-            headers.require(block.layer_type == "linear_attention", "layer1 must be GDN")
+            block = modules[installed["layer"].rsplit(".", 1)[0] + f".{detail_layer}"]
+            headers.require(block.layer_type == "linear_attention", "selected layer must be GDN")
             mixer = block.linear_attn
             def save_detail(label, value):
-                key = "d29_l1_detail_" + label
+                key = f"d29_l{detail_layer}_detail_" + label
                 headers.require(key not in self._block_tensors and value.numel() <= 1_000_000,
-                                "duplicate or unbounded D29 layer1 detail")
+                                "duplicate or unbounded D29 selected GDN detail")
                 host = value.detach().cpu().contiguous()
                 dtype = {torch.float16: "F16", torch.float32: "F32"}.get(host.dtype)
                 headers.require(dtype is not None and torch.isfinite(host).all().item(),
-                                "invalid D29 layer1 detail")
+                                "invalid D29 selected GDN detail")
                 self._block_tensors[key] = (dtype, list(host.shape), host.numpy().tobytes())
             def mixer_before(module, args, kwargs):
                 if len(self._target_phases) != block_step:
@@ -220,7 +220,7 @@ class TargetCapture(BlockCapture):
                 slot = int(indices.detach().cpu().item())
                 headers.require(0 <= slot < mixer.kv_cache[0].shape[0] and
                                 self._selected_detail_record is None, "invalid or repeated active D29 slot")
-                self._selected_detail_record = {"layer": 1, "step": 29, "slot": slot,
+                self._selected_detail_record = {"layer": detail_layer, "step": 29, "slot": slot,
                     "metadata": active_metadata(meta),
                     "conv_layout": tensor_layout(mixer.kv_cache[0]),
                     "ssm_layout": tensor_layout(mixer.kv_cache[1])}
@@ -437,7 +437,7 @@ if __name__ == "__main__":
     parser.add_argument("--image-identity", required=True)
     parser.add_argument("--decode-steps", type=int, choices=(1, 29, 64), default=1)
     parser.add_argument("--block-step", type=int, choices=(-1, 29), default=-1)
-    parser.add_argument("--detail-layer", type=int, choices=(-1, 1, 3), default=-1)
+    parser.add_argument("--detail-layer", type=int, choices=(-1, 1, 3, 21), default=-1)
     parser.add_argument("--deterministic-ba", action="store_true",
                         help="separate diagnostic policy: original BA matmul deterministic; frozen gates unchanged")
     parser.add_argument("--repeats", type=int, choices=(1, 2, 3), default=3)
