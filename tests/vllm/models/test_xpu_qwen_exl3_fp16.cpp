@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <chrono>
 #include <cstring>
 #include <cstdlib>
 #include <filesystem>
@@ -25,6 +26,9 @@
 #include "vllm/v1/attention/backends/gdn_attn.h"
 #include "vt/exl3_fixture.h"
 #include "vt/xpu_test_helpers.h"
+#include "vllm/tokenizer/tokenizer.h"
+#include "support/exl3_autonomous.h"
+#include "vt/xpu.h"
 
 namespace {
 using vt::DType;
@@ -188,6 +192,33 @@ struct RealLayer0 {
     REQUIRE(config.hidden_size == 5120);
   }
 };
+
+void ExportGdnState(const std::string& phase, const xpu_test::Buffer& conv,
+                    const xpu_test::Buffer& ssm) {
+  const char* directory = std::getenv("VT_B70_EXL3_STATE_OUTPUT");
+  if (!directory) return;
+  const std::filesystem::path path(directory);
+  std::filesystem::create_directories(path);
+  nlohmann::json layout;
+  for (const auto& entry : {std::make_pair("conv", &conv), std::make_pair("ssm", &ssm)}) {
+    const auto& tensor = entry.second->tensor;
+    const auto bytes = entry.second->download();
+    const auto file = path / (phase + "-" + entry.first + ".bin");
+    REQUIRE(!std::filesystem::exists(file));
+    std::ofstream output(file, std::ios::binary);
+    output.write(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+    output.close(); REQUIRE(output.good());
+    layout[entry.first] = {{"dtype", vt::Name(tensor.dtype)},
+                          {"shape", std::vector<int64_t>(tensor.shape, tensor.shape + tensor.rank)},
+                          {"stride", std::vector<int64_t>(tensor.stride, tensor.stride + tensor.rank)},
+                          {"bytes", bytes.size()}, {"file", file.filename().string()}};
+  }
+  layout["active_slot"] = 4;
+  const auto metadata = path / (phase + "-layout.json");
+  REQUIRE(!std::filesystem::exists(metadata));
+  std::ofstream report(metadata); report << layout.dump(2) << '\n';
+  report.close(); REQUIRE(report.good());
+}
 }  // namespace
 
 TEST_CASE("XPU EXL3 real attention: identical original operands FP8 bytes P128 D1") {
@@ -671,6 +702,7 @@ TEST_CASE("XPU EXL3 real block GDN: captured P128 and D1 mixer/state continuatio
   std::fill(conv_seed.begin()+active*channels*history, conv_seed.end(), -2.0f);
   std::fill(ssm_seed.begin()+active*heads*dim*dim, ssm_seed.end(), 7.0f);
   conv.put(conv_seed); ssm.put(ssm_seed);
+  ExportGdnState("p128-initial", conv, ssm);
   vllm::GdnStateCache state; state.conv_state = conv.tensor; state.ssm_state = ssm.tensor;
   for (bool prefill : {true, false}) {
     CAPTURE(prefill);
@@ -713,6 +745,9 @@ TEST_CASE("XPU EXL3 real block GDN: captured P128 and D1 mixer/state continuatio
     REQUIRE(out.tensor.dtype == DType::kF16);
     xpu_test::Buffer copy(gpu.q, DType::kF16, {rows, 5120});
     vt::Copy(gpu.q, copy.tensor, out.tensor);
+    // Export actual final physical states before a frozen comparison can abort
+    // this case. The independent matched-state D1 case is collected separately.
+    ExportGdnState(phase + "-final", conv, ssm);
     CapturedClose(phase+".mixer", copy.floats(), real.oracle->Get(phase+"_mixer_output"), 0.01f, 0.003f);
     const auto cv = conv.floats(), ss = ssm.floats();
     CHECK(std::equal(cv.begin(), cv.begin()+active*channels*history, conv_seed.begin()));
@@ -748,6 +783,7 @@ TEST_CASE("XPU EXL3 real block GDN: D1 from matched original Conv and SSM state"
   xpu_test::Buffer conv(gpu.q, DType::kF16, {slots, channels, history});
   xpu_test::Buffer ssm(gpu.q, DType::kF32, {slots, heads, dim, dim});
   conv.put(conv_seed); ssm.put(ssm_seed);
+  ExportGdnState("matched-d1-initial", conv, ssm);
   vllm::GdnStateCache state; state.conv_state = conv.tensor; state.ssm_state = ssm.tensor;
   vllm::dense_attn::DBuf input(d, DType::kF16, {1, 5120},
                               real.oracle->Get("d1_input_norm_output").data);
@@ -768,6 +804,7 @@ TEST_CASE("XPU EXL3 real block GDN: D1 from matched original Conv and SSM state"
   REQUIRE(out.tensor.dtype == DType::kF16);
   xpu_test::Buffer copy(gpu.q, DType::kF16, {1, 5120});
   vt::Copy(gpu.q, copy.tensor, out.tensor);
+  ExportGdnState("matched-d1-final", conv, ssm);
   CapturedClose("matched_d1.mixer", copy.floats(), real.oracle->Get("d1_mixer_output"), 0.01f, 0.003f);
   const auto cv = conv.floats(), ss = ssm.floats();
   CHECK(std::equal(cv.begin(), cv.begin() + active * channels * history, conv_seed.begin()));
@@ -778,6 +815,63 @@ TEST_CASE("XPU EXL3 real block GDN: D1 from matched original Conv and SSM state"
   CHECK(active_conv == CapturedFloats(real.oracle->Get("d1_conv_state_after")));
   const std::vector<float> active_ssm(ss.begin() + active * heads * dim * dim, ss.end());
   CapturedClose("matched_d1.ssm", active_ssm, real.oracle->Get("d1_ssm_state_after"), 1e-4f, 1e-5f);
+  CHECK(vt::GetReferenceTierHits() == 0);
+}
+
+TEST_CASE("XPU EXL3 real BA: actual VT identical operands three repeats P128 D1") {
+  RealLayer0 real;
+  const char* directory = std::getenv("VT_B70_EXL3_STATE_OUTPUT");
+  if (!directory) std::exit(77);
+  const std::filesystem::path path(directory);
+  std::filesystem::create_directories(path);
+  xpu_test::Queue gpu(vt::DeviceType::kXPU);
+  vllm::dense_attn::Dev d{vt::GetBackend(gpu.q.device.type), gpu.q, DType::kF16};
+  const auto& owner = real.layer.gdn.in_proj_ba;
+  REQUIRE(owner.nk); REQUIRE(owner.dtype == DType::kF16);
+  REQUIRE(owner.shape[0] == 96); REQUIRE(owner.shape[1] == 5120);
+  const auto weight = vllm::dense_attn::ResidentWeight(d, owner);
+  vt::xpu::DrainProfileEvents();
+  nlohmann::json result = {{"purpose", "Actual production VT MatmulDenseF16 fixed-input repeatability gate; not oracle parity/performance"},
+                           {"activation_dtype", "f16"}, {"weight_shape", {96, 5120}},
+                           {"weight_strides", {5120, 1}}, {"phases", nlohmann::json::object()}};
+  for (const auto& phase : {std::string("p128"), std::string("d1")}) {
+    const int rows = phase == "p128" ? 128 : 1;
+    const auto& hidden = real.oracle->Get(phase + "_input_norm_output");
+    REQUIRE(hidden.dtype == "F16"); REQUIRE(hidden.shape == std::vector<int64_t>{rows, 5120});
+    vllm::dense_attn::DBuf input(d, DType::kF16, {rows, 5120}, hidden.data);
+    xpu_test::Buffer output(gpu.q, DType::kF16, {rows, 96});
+    std::vector<std::vector<uint16_t>> repeats;
+    for (int repeat = 0; repeat < 3; ++repeat) {
+      vt::MatmulDenseF16(gpu.q, output.tensor, input.t(), weight);
+      const auto bytes = output.download();
+      std::vector<uint16_t> bits(bytes.size() / 2);
+      std::memcpy(bits.data(), bytes.data(), bytes.size()); repeats.push_back(bits);
+      const auto file = path / (phase + "-vt-ba-repeat" + std::to_string(repeat) + ".f16");
+      REQUIRE(!std::filesystem::exists(file));
+      std::ofstream raw(file, std::ios::binary);
+      raw.write(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+      raw.close(); REQUIRE(raw.good());
+      REQUIRE(std::all_of(bits.begin(), bits.end(), [](uint16_t v) { return std::isfinite(vt::F16ToF32(v)); }));
+    }
+    auto& summary = result["phases"][phase];
+    summary["shape"] = {rows, 96}; summary["pair_half_differences"] = nlohmann::json::array();
+    for (int first = 0; first < 3; ++first) for (int second = first + 1; second < 3; ++second) {
+      const auto different = std::inner_product(repeats[first].begin(), repeats[first].end(),
+          repeats[second].begin(), size_t{0}, std::plus<size_t>(),
+          [](uint16_t a, uint16_t b) { return size_t(a != b); });
+      summary["pair_half_differences"].push_back({{"first", first}, {"second", second}, {"different", different}});
+      std::cout << "ACTUAL_VT_BA phase=" << phase << " first=" << first << " second=" << second
+                << " half_differences=" << different << '\n';
+      CHECK(different == 0);
+    }
+  }
+  result["selected_implementations"] = nlohmann::json::array();
+  for (const auto& event : vt::xpu::DrainProfileEvents())
+    if (event.stage == "onednn_dense_f16_stream")
+      result["selected_implementations"].push_back(event.matrix);
+  const auto file = path / "actual-vt-ba-repeats.json";
+  REQUIRE(!std::filesystem::exists(file));
+  std::ofstream report(file); report << result.dump(2) << '\n'; report.close(); REQUIRE(report.good());
   CHECK(vt::GetReferenceTierHits() == 0);
 }
 
@@ -907,6 +1001,115 @@ TEST_CASE("XPU EXL3 real block Gemma: captured P128 and D1 normalization stages"
       REQUIRE(expected_res.shape == input.shape);
       xpu_test::SameBytes(res.download(), std::vector<unsigned char>(expected_res.data, expected_res.data + expected_res.nbytes));
     }
+    // The producer F16 Gemma path must preserve the same captured boundary
+    // when WithOutput stages an output that aliases either read operand.
+    const std::vector<unsigned char> expected_bytes(expected.data, expected.data + expected.nbytes);
+    xpu_test::SameBytes(bytes, expected_bytes);
+    for (int alias : {1, 2}) {
+      if (alias == 2 && !post) continue;
+      CAPTURE(alias);
+      x.upload(input.data);
+      if (post) res.upload(oracle.Get(phase + "_post_norm_residual_input").data);
+      auto& target = alias == 1 ? x : res;
+      vt::RmsNorm(gpu.q, target.tensor, x.tensor, w,
+                  vt::RmsNormArgs{static_cast<float>(config.rms_norm_eps), true},
+                  post ? &res.tensor : nullptr);
+      xpu_test::SameBytes(target.download(), expected_bytes);
+      if (post && alias == 1) {
+        const auto& expected_res = oracle.Get(phase + "_post_norm_residual_output");
+        xpu_test::SameBytes(res.download(), std::vector<unsigned char>(
+            expected_res.data, expected_res.data + expected_res.nbytes));
+      }
+    }
+  }
+  CHECK(vt::GetReferenceTierHits() == 0);
+}
+
+TEST_CASE("XPU EXL3 Gemma5120: real short rows aliases strides and poisoned padding") {
+  const char* path = std::getenv("VT_B70_EXL3_GEMMA_ROWS_FIXTURE");
+  if (!path) std::exit(77);
+  const std::filesystem::path fixture(path);
+  auto metadata = fixture; metadata.replace_extension(".json");
+  std::ifstream record(metadata);
+  const auto cases = nlohmann::json::parse(record).at("cases");
+  const auto oracle = vllm::SafetensorsFile::Open(fixture.string());
+  xpu_test::Queue gpu(vt::DeviceType::kXPU);
+  for (const auto& entry : cases) {
+    const auto label = entry.at("label").get<std::string>();
+    CAPTURE(label);
+    const int rows = entry.at("physical_rows"), active = entry.at("logical_rows");
+    const bool residual = entry.at("residual");
+    REQUIRE(active > 0); REQUIRE(active <= rows);
+    const auto& input = oracle.Get(label + "_input");
+    const auto& expected = oracle.Get(label + "_output");
+    REQUIRE(input.dtype == "F16"); REQUIRE(expected.dtype == "F16");
+    REQUIRE(input.shape == std::vector<int64_t>{rows, 5120});
+    xpu_test::Buffer weight(gpu.q, DType::kF16, {5120});
+    weight.upload(oracle.Get(label + "_weight").data);
+    for (bool strided : {false, true}) for (int alias : {0, 1, 2}) {
+      if (alias == 2 && !residual) continue;
+      CAPTURE(strided);
+      CAPTURE(alias);
+      const int leading = 5120 + (strided ? 16 : 0), border = strided ? 1 : 0, offset = strided ? 8 : 0;
+      xpu_test::Buffer xb(gpu.q, DType::kF16, {rows + 2 * border, leading});
+      xpu_test::Buffer rb(gpu.q, DType::kF16, {rows + 2 * border, leading});
+      xpu_test::Buffer ob(gpu.q, DType::kF16, {rows + 2 * border, leading});
+      std::vector<uint16_t> poison((rows + 2 * border) * leading, 0x7e00);
+      const auto upload = [&](xpu_test::Buffer& owner, const vllm::StTensor& value) {
+        auto data = poison;
+        for (int row = 0; row < active; ++row)
+          std::memcpy(data.data() + (row + border) * leading + offset,
+                      value.data + row * 5120 * 2, 5120 * 2);
+        // Inactive physical rows stay poisoned. They must not affect a logical
+        // row, even when physical M changes the producer reduction geometry.
+        owner.upload(data.data());
+      };
+      upload(xb, input); ob.upload(poison.data()); rb.upload(poison.data());
+      if (residual) upload(rb, oracle.Get(label + "_residual"));
+      auto x = xb.tensor.Slice(0, border, border + rows).Slice(1, offset, offset + 5120);
+      auto res = rb.tensor.Slice(0, border, border + rows).Slice(1, offset, offset + 5120);
+      auto out = alias == 1 ? x : alias == 2 ? res :
+          ob.tensor.Slice(0, border, border + rows).Slice(1, offset, offset + 5120);
+      if (strided) {
+        // The public VT RMSNorm contract requires contiguous rows. Keep this
+        // unsupported layout explicit and prove refusal precedes any write.
+        const auto before_x = xb.download(), before_res = rb.download(), before_out = ob.download();
+        CHECK_THROWS_WITH_AS(vt::RmsNorm(gpu.q, out, x, weight.tensor,
+            vt::RmsNormArgs{1e-6f, true}, residual ? &res : nullptr),
+            doctest::Contains("rmsnorm: contiguous required"), std::runtime_error);
+        xpu_test::SameBytes(xb.download(), before_x);
+        xpu_test::SameBytes(rb.download(), before_res);
+        xpu_test::SameBytes(ob.download(), before_out);
+        continue;
+      }
+      vt::RmsNorm(gpu.q, out, x, weight.tensor, vt::RmsNormArgs{1e-6f, true}, residual ? &res : nullptr);
+      const auto logical = [&](const xpu_test::Buffer& owner) {
+        const auto storage = owner.download();
+        std::vector<unsigned char> data(active * 5120 * 2);
+        for (int row = 0; row < active; ++row)
+          std::memcpy(data.data() + row * 5120 * 2,
+                      storage.data() + ((row + border) * leading + offset) * 2, 5120 * 2);
+        return data;
+      };
+      const auto want = [&](const vllm::StTensor& value) {
+        return std::vector<unsigned char>(value.data, value.data + active * 5120 * 2);
+      };
+      xpu_test::SameBytes(logical(alias == 1 ? xb : alias == 2 ? rb : ob), want(expected));
+      if (residual) xpu_test::SameBytes(logical(rb), want(oracle.Get(
+          label + (alias == 2 ? "_output" : "_stored_residual"))));
+      if (alias != 1) xpu_test::SameBytes(logical(xb), want(input));
+      for (const auto* owner : {&xb, &rb, &ob}) {
+        const auto storage = owner->download();
+        bool guards_unchanged = true;
+        for (int row = 0; row < rows + 2 * border; ++row) for (int col = 0; col < leading; ++col) {
+          if (row >= border && row < border + rows && col >= offset && col < offset + 5120) continue;
+          uint16_t bits; std::memcpy(&bits, storage.data() + (row * leading + col) * 2, 2);
+          guards_unchanged &= bits == 0x7e00;
+        }
+        CHECK(guards_unchanged);
+      }
+    }
+    std::cout << "GEMMA_SHORT_ROWS " << label << " PASS\n";
   }
   CHECK(vt::GetReferenceTierHits() == 0);
 }
@@ -1062,6 +1265,157 @@ TEST_CASE("XPU EXL3 real target: eager P128 D64 full vocabulary continuation") {
   RunRealEagerTarget(64);
 }
 
+TEST_CASE("XPU EXL3 autonomous target: real prompt native feedback cold reset") {
+  const char* model = std::getenv("VT_B70_EXL3_MODEL");
+  const char* input = std::getenv("VT_B70_EXL3_SMOKE_PROMPT");
+  const char* output = std::getenv("VT_B70_EXL3_SMOKE_OUTPUT");
+  if (!model || !input || !output) std::exit(77);
+  const std::filesystem::path model_dir(model), output_dir(output);
+  REQUIRE(!std::filesystem::exists(output_dir));
+  std::ifstream prompt_file(input);
+  const auto prompt_record = nlohmann::json::parse(prompt_file);
+  const auto prompt = prompt_record.at("prompt_token_ids").get<std::vector<int32_t>>();
+  const int limit = prompt_record.at("output_limit").get<int>();
+  // R05: one real eager prefill, without hidden-state padding or rechunking.
+  REQUIRE(!prompt.empty()); REQUIRE(prompt.size() <= 4096);
+  REQUIRE((limit == 16 || limit == 64 || limit == 256));
+  const auto tokenizer = vllm::tok::Tokenizer::FromHfJson((model_dir / "tokenizer.json").string());
+  REQUIRE(tokenizer.Encode(prompt_record.at("rendered_prompt").get<std::string>()) == prompt);
+  const auto config = vllm::LoadHfConfig((model_dir / "config.json").string());
+  REQUIRE(config.num_hidden_layers == 64); REQUIRE(config.vocab_size == 248320);
+  REQUIRE(!config.generation_config_eos_ids.empty());
+  std::vector<vllm::SafetensorsFile> shards;
+  for (const char* name : {"model-00001-of-00002.safetensors", "model-00002-of-00002.safetensors"})
+    shards.push_back(vllm::SafetensorsFile::Open((model_dir / name).string()));
+  xpu_test::Queue gpu(vt::DeviceType::kXPU);
+  const auto weights = vllm::LoadQwen3_5Dense(shards, config, &gpu.q);
+  REQUIRE(weights.exl3_checkpoint); REQUIRE(weights.precision.activation == DType::kF16);
+  REQUIRE(weights.lm_head.Empty()); REQUIRE(weights.lm_head_exl3.Bits() == 6);
+  REQUIRE(weights.lm_head_exl3.OutFeatures() == config.vocab_size);
+  constexpr int page = 1600;  // Actual physical FP8 page contract, not a context cap.
+  const int budget = static_cast<int>(prompt.size()) + limit - 1;
+  const int blocks = (budget + page - 1) / page;
+  std::vector<std::unique_ptr<xpu_test::Buffer>> conv_owners, ssm_owners, kv_owners;
+  std::vector<vllm::GdnStateCache> states;
+  std::vector<vllm::PagedKvCache> caches;
+  for (const auto& layer : weights.layers) {
+    if (layer.is_linear_attention) {
+      auto conv = std::make_unique<xpu_test::Buffer>(gpu.q, DType::kF16,
+          std::initializer_list<int64_t>{1, 10240, 3});
+      auto ssm = std::make_unique<xpu_test::Buffer>(gpu.q, DType::kF32,
+          std::initializer_list<int64_t>{1, 48, 128, 128});
+      vllm::GdnStateCache state; state.conv_state = conv->tensor; state.ssm_state = ssm->tensor;
+      states.push_back(state); conv_owners.push_back(std::move(conv)); ssm_owners.push_back(std::move(ssm));
+    } else {
+      auto kv = std::make_unique<xpu_test::Buffer>(gpu.q, DType::kI8,
+          std::initializer_list<int64_t>{2LL * blocks * page * 4 * 256});
+      vllm::PagedKvCache cache;
+      cache.data = kv->tensor.data; cache.dtype = DType::kI8;
+      cache.num_blocks = blocks; cache.block_size = page; cache.num_kv_heads = 4; cache.head_size = 256;
+      cache.fp8_kind = vt::Fp8KVCacheDataType::kFp8E4M3;
+      caches.push_back(cache); kv_owners.push_back(std::move(kv));
+    }
+  }
+  REQUIRE(states.size() == 48); REQUIRE(caches.size() == 16);
+  REQUIRE(std::filesystem::create_directory(output_dir));
+  auto& backend = vt::GetBackend(gpu.q.device.type);
+  nlohmann::json runs = nlohmann::json::array();
+  const auto dump_layer0 = [&](const std::string& phase) {
+    // Selected exports only; no full-model activation/state download campaign.
+    for (const auto& entry : {std::make_tuple("conv.f16", states[0].conv_state.data, size_t(10240 * 3 * 2)),
+                              std::make_tuple("ssm.f32", states[0].ssm_state.data, size_t(48 * 128 * 128 * 4))}) {
+      std::vector<uint8_t> bytes(std::get<2>(entry));
+      backend.Copy(gpu.q, bytes.data(), std::get<1>(entry), bytes.size());
+      backend.Synchronize(gpu.q);
+      std::ofstream file(output_dir / (phase + "-layer0-" + std::get<0>(entry)), std::ios::binary);
+      file.write(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+      file.close(); REQUIRE(file.good());
+    }
+  };
+  for (int request = 0; request < 2; ++request) {
+    nlohmann::json witnesses = nlohmann::json::array();
+    double prefill_seconds = 0, decode_seconds = 0;
+    int decode_calls = 0;
+    const auto generated = exl3_test::RunAutonomousC1(prompt, limit, config.generation_config_eos_ids,
+        static_cast<int>(config.vocab_size), [&] {
+          for (auto& conv : conv_owners) conv->put(std::vector<float>(10240 * 3, 0));
+          for (auto& ssm : ssm_owners) ssm->put(std::vector<float>(48 * 128 * 128, 0));
+          const std::vector<uint8_t> poison(2LL * blocks * page * 4 * 256, 0x7f);
+          for (auto& kv : kv_owners) kv->upload(poison.data());
+          backend.Synchronize(gpu.q);
+          dump_layer0("request" + std::to_string(request) + "-initial");
+        }, [&](const auto& ids, const auto& positions, bool prefill) {
+          const int rows = static_cast<int>(ids.size());
+          const int length = positions.back() + 1;
+          vllm::v1::CommonAttentionMetadata am;
+          am.num_reqs = 1; am.num_actual_tokens = rows;
+          am.query_start_loc = am.query_start_loc_cpu = {0, rows};
+          am.seq_lens = am.seq_lens_cpu = {length}; am.max_query_len = rows; am.max_seq_len = length;
+          am.block_table_num_cols = blocks; am.block_table_tensor.resize(blocks);
+          std::iota(am.block_table_tensor.begin(), am.block_table_tensor.end(), 0);
+          am.slot_mapping.assign(positions.begin(), positions.end()); am.causal = true;
+          vllm::v1::GDNAttentionMetadata gm;
+          gm.num_actual_tokens = rows;
+          gm.non_spec_state_indices_tensor = std::vector<int32_t>{0};
+          gm.non_spec_query_start_loc = std::vector<int32_t>{0, rows};
+          if (prefill) {
+            gm.num_prefills = 1; gm.num_prefill_tokens = rows;
+            gm.has_initial_state = std::vector<uint8_t>{0};
+            gm.prefill_query_start_loc = std::vector<int32_t>{0, rows};
+            gm.prefill_state_indices = std::vector<int32_t>{0};
+            gm.prefill_has_initial_state = std::vector<uint8_t>{0};
+            const auto chunks = vllm::v1::ComputeCausalConv1dMetadata(*gm.non_spec_query_start_loc);
+            gm.batch_ptr = chunks.batch_ptr; gm.token_chunk_offset_ptr = chunks.token_chunk_offset_ptr;
+          } else { gm.num_decodes = gm.num_decode_tokens = 1; }
+          const auto start = std::chrono::steady_clock::now();
+          const auto out = vllm::Qwen3_5DenseModel::ForwardDeviceTap(
+              ids, positions, am, gm, caches, states, weights, config, gpu.q, nullptr, {rows - 1});
+          REQUIRE(out.rows == 1); REQUIRE(out.device_tensor.dtype == DType::kF32);
+          std::vector<float> logits(config.vocab_size);
+          backend.Copy(gpu.q, logits.data(), out.device_tensor.data, logits.size() * sizeof(float));
+          backend.Synchronize(gpu.q);
+          const auto chosen = exl3_test::GreedyToken(logits);
+          const double seconds = std::chrono::duration<double>(
+              std::chrono::steady_clock::now() - start).count();
+          if (prefill) prefill_seconds += seconds;
+          else { decode_seconds += seconds; ++decode_calls; }
+          witnesses.push_back({{"input_ids", ids}, {"positions", positions},
+                               {"prefill", prefill}, {"selected_global_id", chosen},
+                               {"model_and_selection_seconds", seconds}});
+          std::cout << "AUTONOMOUS_TARGET request=" << request << " emitted=" << witnesses.size()
+                    << " selected_global_id=" << chosen << " seconds=" << seconds
+                    << '\n' << std::flush;
+          if (prefill) dump_layer0("request" + std::to_string(request) + "-prefill");
+          return chosen;
+        });
+    dump_layer0("request" + std::to_string(request) + "-final");
+    REQUIRE(!generated.output_ids.empty());
+    CHECK(generated.output_ids.size() <= static_cast<size_t>(limit));
+    runs.push_back({{"output_ids", generated.output_ids}, {"output_text", tokenizer.Decode(generated.output_ids)},
+                    {"stop_reason", generated.stop_reason}, {"forward_calls", generated.forward_calls},
+                    {"input_witnesses", witnesses}, {"prefill_seconds", prefill_seconds},
+                    {"prefill_tokens_per_second", prompt.size() / prefill_seconds},
+                    {"decode_forward_calls", decode_calls}, {"decode_seconds", decode_seconds},
+                    {"decode_tokens_per_second", decode_calls ? decode_calls / decode_seconds : 0.0}});
+  }
+  const bool repeat_equal = runs[0]["output_ids"] == runs[1]["output_ids"];
+  const bool native_only = vt::GetReferenceTierHits() == 0;
+  CHECK(repeat_equal); CHECK(native_only);
+  const nlohmann::json result = {
+      {"schema", 1}, {"task", "R05"}, {"prompt", prompt_record}, {"runs", runs},
+      {"timing_scope", "eager model forward plus full-row download and greedy selection; excludes reset, state exports and witness logging; request0 includes lazy weight uploads/compilation"},
+      {"kv_page_size", page}, {"kv_blocks_per_layer", blocks}, {"token_budget", budget},
+      {"sampling", "native_cpp_greedy_full_vocabulary"}, {"mtp", false}, {"graphs", false},
+      {"prefix_reuse", false}, {"executed", true}, {"operator_pass", nullptr},
+      {"target_parity_pass", false}, {"autonomous_smoke_pass", repeat_equal && native_only},
+      {"serving_qualified", false}, {"blocking_issue_ids", {"S1_D64", "S1_strict_state"}},
+      {"qualification", "functional development smoke; frozen numerical failures remain open"},
+      {"state_exports", {{"layer", 0}, {"slot", 0}, {"conv_shape", {1, 10240, 3}},
+                         {"ssm_shape", {1, 48, 128, 128}}, {"initial_state", "zero"}}}};
+  std::ofstream report(output_dir / "result.json"); report << result.dump(2) << '\n';
+  report.close(); REQUIRE(report.good());
+}
+
 TEST_CASE("XPU dense EXL3 FP16: QKVZ/QKV groups preserve independent source projections") {
   xpu_test::Queue gpu(vt::DeviceType::kXPU);
   const auto c = Config();
@@ -1076,7 +1430,7 @@ TEST_CASE("XPU dense EXL3 FP16: QKVZ/QKV groups preserve independent source proj
         : std::vector<const vllm::Exl3Weight*>{&g.in_proj_qkv_exl3, &g.in_proj_z_exl3};
     auto& cache = qkv ? a.qkv_proj_exl3 : g.in_proj_qkvz_exl3;
     const void* resident = nullptr;
-    for (int64_t m : {1, 4}) {
+    for (int64_t m : {1, 4, 129}) {
       CAPTURE(m);
       const auto values = xpu_test::Values(m * 128, 13, 0.007f);
       std::vector<uint16_t> input_bits(values.size());

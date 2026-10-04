@@ -53,6 +53,7 @@
 #include "vt/sample_common.h"
 #ifdef VLLM_CPP_XPU
 #include "vt/xpu_sampling.h"
+#include "vt/xpu_profile_span.h"
 #endif
 #ifdef VLLM_CPP_CUDA
 #include "vt/cuda/combine_tokens.h"  // W3 device combine/scatter (removes the sync)
@@ -759,7 +760,9 @@ void GPUModelRunner::initialize_kv_cache(const KVCacheConfig& kv_cache_config) {
   const int64_t base_slots = max_num_reqs_ > 0 ? max_num_reqs_ : num_blocks_;
   prefix_snapshot_base_ = base_slots * spec_cols;
   recurrent_prefix_snapshots_ = kv_cache_config.recurrent_prefix_snapshots;
-  VT_CHECK(!recurrent_prefix_snapshots_ || !spec_on(), "recurrent prefix snapshots require non-speculative execution");
+  VT_CHECK(!recurrent_prefix_snapshots_ || !spec_on() ||
+               (draft_model_ && spec_config_->method == "mtp"),
+           "recurrent prefix speculation requires a native MTP draft model");
   gdn_state_slots_ = prefix_snapshot_base_ + (recurrent_prefix_snapshots_ ? recurrent_prefix_snapshots_->capacity() : 0);
   gdn_slot_of_req_.clear();
   gdn_free_slots_.clear();
@@ -1287,7 +1290,10 @@ void GPUModelRunner::initialize_kv_cache(const KVCacheConfig& kv_cache_config) {
           GroupLayerMask(kv_cache_config
                              .kv_cache_groups[static_cast<size_t>(
                                  full_attn_group_id_)],
-                         num_layers);
+                         num_layers + (kv_cache_config.mtp_draft_shares_target_pages ? 1 : 0));
+      // A shared MTP group also names the separately allocated draft layer at
+      // num_hidden_layers. Exclude it from the target's membership mask.
+      if (attn_layer_mask.has_value()) attn_layer_mask->resize(num_layers);
       // A recurrent group that names its layers next to an attention group that
       // does not leaves the non-recurrent layers unclassifiable. Fall back
       // wholesale rather than guess.
@@ -1848,8 +1854,9 @@ void GPUModelRunner::initialize_kv_cache(const KVCacheConfig& kv_cache_config) {
     multi_kv_index_.group_block_table_cols = &group_block_table_cols_;
   }
 
-  // SPEC-MTP I5d: allocate the MTP draft's own paged KV layer (the `fa_draft`
-  // group). It is sized exactly like a target full-attn layer and the propose
+  // Allocate the MTP draft's own paged KV storage. EXL3 registers that layer
+  // in the target group; other checkpoints publish the `fa_draft` group.
+  // It is sized exactly like a target full-attn layer and the propose
   // forward reuses the target's block table / slot mapping over it
   // (speculator.py:222-234). Allocated ONLY when speculation is on and the ctor
   // did not already supply a draft KV (tests may). num_spec==0 has no fa_draft
@@ -1876,6 +1883,11 @@ void GPUModelRunner::initialize_kv_cache(const KVCacheConfig& kv_cache_config) {
   // than a guarantee.
   if (!multi_cache_topology && spec_on() && draft_attn_kv_.empty() &&
       full_attn_group_id_ >= 0 && fa_page_bytes > 0) {
+    bool allocate_draft = kv_cache_config.mtp_draft_shares_target_pages;
+    if (allocate_draft) {
+      VT_CHECK(spec_config_->method == "mtp",
+               "shared target/draft pages require native MTP");
+    }
     for (int g = 0;
          g < static_cast<int>(kv_cache_config.kv_cache_groups.size()); ++g) {
       if (g == full_attn_group_id_) continue;
@@ -1883,6 +1895,10 @@ void GPUModelRunner::initialize_kv_cache(const KVCacheConfig& kv_cache_config) {
       if (group.kv_cache_spec->kind() != KVCacheSpecKind::kFullAttention) {
         continue;  // the GDN group and any non-attn group are not the draft.
       }
+      allocate_draft = true;
+      break;
+    }
+    if (allocate_draft) {
       draft_attn_buf_.push_back(std::make_unique<CacheBuffer>(
           dev, queue_,
           static_cast<size_t>(num_blocks_) * static_cast<size_t>(fa_page_bytes),
@@ -1906,7 +1922,6 @@ void GPUModelRunner::initialize_kv_cache(const KVCacheConfig& kv_cache_config) {
       // sides index one shared block table.
       dkv.page_size_bytes = fa_page_bytes;
       draft_attn_kv_.push_back(dkv);
-      break;  // exactly one fa_draft group at k=1.
     }
   }
 
@@ -2090,6 +2105,18 @@ void GPUModelRunner::remap_gdn_state_slots(
       base = gdn_free_slots_.back();
       gdn_free_slots_.pop_back();
       gdn_slot_of_req_.emplace(rid, base);
+      // A new owner must never inherit the previous request's recurrent state.
+      // One-token prompts are classified as decode and bypass the prefill
+      // has_initial_state reset. Clear every published state and speculative
+      // slot on admission; a pinned prefix is restored below, after the reset.
+      for (const auto& layer : gdn_state_) {
+        for (const auto& state : layer.states) {
+          const size_t row_bytes = size_t(state.stride[0]) * vt::SizeOf(state.dtype);
+          vt::GetBackend(queue_.device).Memset(
+              queue_, static_cast<char*>(state.data) + size_t(base) * row_bytes,
+              0, size_t(spec_cols) * row_bytes);
+        }
+      }
     }
     if (recurrent_prefix_snapshots_) {
       if (auto snapshot = recurrent_prefix_snapshots_->Pinned(rid)) {
@@ -3329,8 +3356,16 @@ std::optional<ModelRunnerOutput> GPUModelRunner::execute_model(
     ConnectorLoadExternalKv();
   }
 
+#ifdef VLLM_CPP_XPU
+  auto target_profile = vt::xpu::BeginProfileSpan(queue_);
+#endif
   ForwardLogits logits = ModelRegistry::Forward(*model_, forward_input);
-  publish_recurrent_prefixes(step);
+#ifdef VLLM_CPP_XPU
+  vt::xpu::EndProfileSpan(queue_, "runner_target_forward", std::move(target_profile));
+#endif
+  // MTP publication waits for its shifted draft KV writes as well as target
+  // state. The versioned next-token hash pairs both with this exact prefix.
+  if (!spec_on()) publish_recurrent_prefixes(step);
 
   // KV-EXTERNAL-CACHE (LMCache): after the forward has written this step's KV,
   // STORE every newly-complete prompt block to the external cache (the worker
@@ -3347,6 +3382,8 @@ std::optional<ModelRunnerOutput> GPUModelRunner::execute_model(
   exec_state_.step = std::move(step);
   exec_state_.attn_meta = std::move(attn_meta);
   exec_state_.gdn_meta = std::move(gdn_meta);
+  exec_state_.scheduled_spec_decode_tokens =
+      scheduler_output.scheduled_spec_decode_tokens;
   exec_state_.req_ids.reserve(static_cast<size_t>(num_reqs));
   for (int i = 0; i < num_reqs; ++i) {
     exec_state_.req_ids.push_back(*input_batch_.req_ids[static_cast<size_t>(i)]);
@@ -3441,14 +3478,11 @@ vt::Tensor GPUModelRunner::assemble_sample_logits(
   // Apply the structured-output grammar bitmask (utils.py apply_grammar_bitmask)
   // to the gathered [num_logits, vocab] logits BEFORE sampling, when a structured
   // request is scheduled this step (gpu_model_runner.py:4462-4466). The grammar
-  // bitmask over the EXPANDED spec rows (a bitmask row per draft position) is
-  // DEFERRED with SPEC-MTP (spec §Protocol-compliance "Grammar bitmask under
-  // spec decode: OUT of scope"), so the spec-token map stays empty (per-req
-  // offset 0) — correct while num_draft_tokens == 0, which is the only state
-  // the runner can reach today.
+  // bitmask includes every draft position and the bonus row. Retain the step's
+  // spec counts so mixed batches map compact grammar rows onto expanded logits.
   if (grammar_output.has_value()) {
-    apply_grammar_bitmask(*grammar_output, exec_state_.req_ids, {}, queue_,
-                          logits);
+    apply_grammar_bitmask(*grammar_output, exec_state_.req_ids,
+                         exec_state_.scheduled_spec_decode_tokens, queue_, logits);
   }
   return logits;
 }
@@ -3634,17 +3668,37 @@ ModelRunnerOutput GPUModelRunner::sample_tokens_with_rejection(
   // pre-split behaviour.
   RejectionSamplerOutput rs;
   const SamplingMetadata sm = input_batch_.make_sampling_metadata();
+  // Verification samples the target's processed distribution, including when
+  // all requests are greedy. Keep the original forward logits intact, and
+  // retain the filtered device rows through either verification download path.
+  struct FilteredGreedyLogits {
+    vt::Queue& q;
+    std::unique_ptr<DeviceScratch> storage;
+    ~FilteredGreedyLogits() {
+      if (storage) vt::GetBackend(q.device.type).Synchronize(q);
+    }
+  } filtered_greedy{queue_, nullptr};
+  vt::Tensor greedy_logits = logits;
+  if (sm.all_greedy && (sm.allowed_token_ids_mask.has_value() ||
+                       !sm.logit_bias.empty() || !sm.min_tokens.empty() ||
+                       !sm.no_penalties || !sm.bad_words_token_ids.empty() ||
+                       !sm.logits_processors.empty())) {
+    filtered_greedy.storage = std::make_unique<DeviceScratch>(
+        logits.device, queue_, logits.data, vt::DType::kF32,
+        std::initializer_list<int64_t>{logits.shape[0], logits.shape[1]});
+    greedy_logits = filtered_greedy.storage->tensor();
+    apply_speculative_logits_processors(queue_, greedy_logits, sm,
+                                         step.cu_num_logits, draft_sampled);
+  }
   if (!sm.all_greedy) {
 #ifdef VLLM_CPP_XPU
     VT_CHECK(logits.device.type == vt::DeviceType::kXPU &&
                  sm.temperature.has_value() &&
                  sm.temperature->size() == static_cast<size_t>(num_reqs),
              "sampled speculative decoding requires XPU logits and per-request temperatures");
-    VT_CHECK(sm.no_penalties && sm.bad_words_token_ids.empty() &&
-                 sm.logits_processors.empty() &&
-                 !sm.max_num_logprobs.has_value() &&
+    VT_CHECK(!sm.max_num_logprobs.has_value() &&
                  (!sm.logprob_token_ids.has_value() || sm.logprob_token_ids->empty()),
-             "sampled speculative decoding does not yet support penalties, bad words, custom processors or logprobs");
+             "sampled speculative decoding does not yet support logprobs");
     const int64_t rows = logits.shape[0], vocab = logits.shape[1];
     vt::Backend& backend = vt::GetBackend(logits.device.type);
     // Keep every queued input/output alive through the single download drain.
@@ -3668,8 +3722,8 @@ ModelRunnerOutput GPUModelRunner::sample_tokens_with_rejection(
     vt::Tensor processed = scratch.alloc(vt::DType::kF32, {rows, vocab});
     vt::Tensor probs = scratch.alloc(vt::DType::kF32, {rows, vocab});
     backend.Copy(queue_, processed.data, logits.data, size_t(rows * vocab) * sizeof(float));
-    apply_speculative_logit_filters(queue_, processed, sm,
-                                    step.cu_num_logits);
+    apply_speculative_logits_processors(queue_, processed, sm,
+                                         step.cu_num_logits, draft_sampled);
 
     std::vector<float> temperatures(static_cast<size_t>(rows));
     std::vector<int32_t> ks, proposals(static_cast<size_t>(rows));
@@ -3755,7 +3809,7 @@ ModelRunnerOutput GPUModelRunner::sample_tokens_with_rejection(
     VT_CHECK(false, "sampled speculative decoding needs the native XPU verifier");
 #endif
   } else if (download == VerifyDownload::kMainQueueDrain) {
-    rs = rejection_sampler.forward(queue_, logits, draft_sampled, step.cu_num_logits,
+    rs = rejection_sampler.forward(queue_, greedy_logits, draft_sampled, step.cu_num_logits,
                                    chunked_prefilling);
   } else {
     // The COPY-QUEUE route. `verify` issues the walk on the MAIN queue and
@@ -3788,7 +3842,7 @@ ModelRunnerOutput GPUModelRunner::sample_tokens_with_rejection(
     // a later wave can move past the propose. The drain is REMOVABLE from here;
     // it is not removed here, and no overlap is claimed on this head.
     RejectionSamplerDeviceOutput dev_out =
-        rejection_sampler.verify(queue_, logits, draft_sampled, step.cu_num_logits);
+        rejection_sampler.verify(queue_, greedy_logits, draft_sampled, step.cu_num_logits);
     const int64_t rows = dev_out.num_reqs();
     const int64_t width = dev_out.width();
     std::vector<int32_t> host_sampled(static_cast<size_t>(rows * width));
@@ -4557,6 +4611,10 @@ void GPUModelRunner::propose_drafts(const std::vector<int32_t>& num_sampled_in,
   VT_CHECK(!draft_attn_kv_.empty() && draft_attn_kv_[0].block_size > 0,
            "propose_drafts: the draft KV group has no block geometry");
 
+  exec_state_.spec_hidden.WaitReady(queue_);
+#ifdef VLLM_CPP_XPU
+  auto draft_profile = vt::xpu::BeginProfileSpan(queue_);
+#endif
   const MtpDraftProposal proposal = MtpProposeDrafts(
       *draft_model_, exec_state_.attn_meta, draft_attn_kv_[0],
       exec_state_.spec_hidden.tensor, exec_state_.step.input_token_ids,
@@ -4565,10 +4623,16 @@ void GPUModelRunner::propose_drafts(const std::vector<int32_t>& num_sampled_in,
       /*max_num_reqs=*/num_reqs, /*num_speculative_tokens=*/k,
       /*max_model_len=*/input_batch_.max_model_len,
       /*block_size=*/static_cast<int>(draft_attn_kv_[0].block_size), queue_);
+#ifdef VLLM_CPP_XPU
+  vt::xpu::EndProfileSpan(queue_, "runner_mtp_draft", std::move(draft_profile));
+#endif
   const std::vector<int32_t>& drafts = proposal.draft_tokens;
   VT_CHECK(drafts.size() ==
                static_cast<size_t>(num_reqs) * static_cast<size_t>(k),
            "propose_drafts: the MTP propose must return k drafts per request");
+  // Only prompt boundaries are published. The copy's completion wait also
+  // completes draft work; later verification mutates private running slots.
+  publish_recurrent_prefixes(exec_state_.step);
   // SPEC-MTP-K-GT-1 (#81): the WORK witness, recorded here because this is the
   // only place that knows both the configured k and the forwards the propose
   // actually ran. The check above is a SHAPE check and cannot stand in for it:

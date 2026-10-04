@@ -10,6 +10,9 @@
 #include "vllm/model_executor/models/qwen3_5_internal.h"
 #include "vllm/model_executor/models/qwen3_5_common.h"
 #include "vllm/v1/kv_cache_interface.h"
+#include "vllm/v1/kv_cache_dtype.h"
+#include "vllm/v1/core/kv_cache_manager.h"
+#include "vllm/v1/request.h"
 
 #include <doctest/doctest.h>
 
@@ -38,6 +41,22 @@ HfConfig Config(std::vector<std::string> architectures) {
   HfConfig config;
   config.architectures = std::move(architectures);
   return config;
+}
+
+HfConfig EXL3QwenKVConfig() {
+  HfConfig cfg = Config({"Qwen3_5ForConditionalGeneration"});
+  cfg.raw["quantization_config"] = {{"quant_method", "exl3"}};
+  cfg.num_hidden_layers = 64;
+  cfg.layer_types.assign(64, "linear_attention");
+  for (int l = 3; l < 64; l += 4) cfg.layer_types[l] = "full_attention";
+  cfg.num_key_value_heads = 4;
+  cfg.head_dim = 256;
+  cfg.linear_num_key_heads = 16;
+  cfg.linear_num_value_heads = 48;
+  cfg.linear_key_head_dim = cfg.linear_value_head_dim = 128;
+  cfg.linear_conv_kernel_dim = 4;
+  cfg.mamba_ssm_dtype = "float32";
+  return cfg;
 }
 
 }  // namespace
@@ -1177,6 +1196,81 @@ TEST_CASE("Qwen3.5 KV-cache spec: num_spec widens the conv row and adds state bl
   CHECK(k1->page_size_bytes() - base_mamba->page_size_bytes() == conv_dim * 2);
 }
 
+TEST_CASE("Qwen3.5 KV-cache spec: EXL3 MTP shares page identity and counts separate storage") {
+  const HfConfig cfg = EXL3QwenKVConfig();
+  for (int depth : {0, 3}) {
+    CAPTURE(depth);
+    auto kv = vllm::MakeQwen3_5KVCacheSpec(cfg, 1600, 180, depth, /*share_mtp_pages=*/true);
+    vllm::v1::ResolveKVCacheGroupLayerNames(kv, cfg.num_hidden_layers, cfg.layer_types);
+    vllm::v1::ApplyCacheDType(kv, vllm::v1::ParseCacheDType("fp8", vt::DType::kF16), 1.0F, 1.0F);
+    REQUIRE(kv.kv_cache_groups.size() == 2);
+    CHECK(kv.kv_cache_groups[0].layer_names.size() == (depth > 0 ? 17 : 16));
+    CHECK(kv.kv_cache_groups[1].layer_names.size() == 48);
+    CHECK(vllm::v1::KVBytesPerBlock(kv) == (depth > 0 ? 17 : 16) * 3276800LL);
+    const auto names = kv.kv_cache_groups[0].layer_names;
+    vllm::v1::ResolveKVCacheGroupLayerNames(kv, cfg.num_hidden_layers, cfg.layer_types);
+    CHECK(kv.kv_cache_groups[0].layer_names == names);
+    if (depth > 0) CHECK(names.back() == "model.layers.64.self_attn.attn");
+  }
+}
+
+TEST_CASE("Qwen3.5 KV-cache spec: EXL3 MTP maximum-context admission and recurrent retirement") {
+  constexpr int context = 262144, block_size = 1600, pool_blocks = 170;
+  const HfConfig cfg = EXL3QwenKVConfig();
+  auto kv = vllm::MakeQwen3_5KVCacheSpec(cfg, block_size, pool_blocks, 3, true);
+  vllm::v1::ResolveKVCacheGroupLayerNames(kv, cfg.num_hidden_layers, cfg.layer_types);
+  vllm::v1::ApplyCacheDType(kv, vllm::v1::ParseCacheDType("fp8", vt::DType::kF16), 1.0F, 1.0F);
+  const auto* mamba = dynamic_cast<const vllm::v1::MambaSpec*>(kv.kv_cache_groups[1].kv_cache_spec.get());
+  REQUIRE(mamba != nullptr);
+  CHECK(mamba->mamba_cache_mode == "align");
+  CHECK(vllm::v1::max_blocks_per_request(*mamba, context, block_size) == 5);
+  CHECK(mamba->max_num_blocks_per_req(context) == 167);  // null-padded logical row
+  const int64_t bytes_per_block = vllm::v1::KVBytesPerBlock(kv);
+  CHECK(bytes_per_block == 17 * 3276800LL);
+  CHECK(vllm::v1::max_memory_usage_bytes_from_groups(kv, context, block_size) ==
+        169 * bytes_per_block);  // 164 FA + five live recurrent identities
+  CHECK_NOTHROW(vllm::v1::check_enough_kv_cache_memory(kv, pool_blocks * bytes_per_block, context, block_size));
+  auto too_small = kv;
+  too_small.num_blocks = pool_blocks - 1;
+  CHECK_THROWS(vllm::v1::check_enough_kv_cache_memory(too_small, (pool_blocks - 1) * bytes_per_block, context, block_size));
+  vllm::v1::KVCacheManager manager(kv, context, block_size, block_size, block_size,
+                                  /*enable_caching=*/false, /*use_eagle=*/false, /*log_stats=*/false);
+  vllm::SamplingParams sampling;
+  sampling.max_tokens = 1024;
+  vllm::v1::Request req("long", std::vector<int32_t>(261120, 42), sampling, 0.0);
+  const auto allocate = [&](const vllm::v1::Request& r, int count) {
+    return manager.allocate_slots(r, count, 0, std::nullopt, 3, 0, false, 0,
+                                  // Scheduler reserves the full prompt only
+                                  // when admitting a waiting/preempted owner.
+                                  /*full_sequence_must_fit=*/r.num_computed_tokens == 0);
+  };
+  int max_live_recurrent = 0;
+  for (int position = 0; position < context; ) {
+    CAPTURE(position);
+    const int count = std::min(block_size, context - position);
+    req.num_computed_tokens = position;
+    REQUIRE(allocate(req, count).has_value());
+    const auto blocks = manager.get_blocks(req.request_id).blocks;
+    REQUIRE(blocks.size() == 2);
+    CHECK(blocks[0].size() == size_t((std::min(context, position + count + 3) + block_size - 1) / block_size));
+    int live_recurrent = 0;
+    for (const auto* block : blocks[1]) {
+      if (!block->is_null) { ++live_recurrent; CHECK(block->ref_cnt == 1); }
+    }
+    max_live_recurrent = std::max(max_live_recurrent, live_recurrent);
+    CHECK(live_recurrent <= 5);
+    position += count;
+  }
+  CHECK(max_live_recurrent == 5);
+  vllm::v1::Request second("second", std::vector<int32_t>(261120, 43), sampling, 0.0);
+  CHECK_FALSE(allocate(second, block_size).has_value());
+  manager.free(req);
+  CHECK(manager.block_pool.get_num_free_blocks() == pool_blocks - 1);
+  CHECK(allocate(second, block_size).has_value());
+  manager.free(second);
+  CHECK(manager.block_pool.get_num_free_blocks() == pool_blocks - 1);
+}
+
 TEST_CASE("Qwen3.5 KV-cache spec: EXL3 uses FP16 Conv and FP32 recurrence despite BF16 export") {
   HfConfig cfg = Config({"Qwen3_5ForConditionalGeneration"});
   cfg.torch_dtype = "bfloat16";
@@ -1203,6 +1297,8 @@ TEST_CASE("Qwen3.5 KV-cache spec: EXL3 uses FP16 Conv and FP32 recurrence despit
     CHECK(mamba->shapes[1] == std::vector<int64_t>{48, 128, 128});
     CHECK(mamba->page_size_bytes() == 10240 * (3 + num_spec) * 2 + 48 * 128 * 128 * 4);
     CHECK(attention->dtype == vt::DType::kF16);
+    CHECK(kv.kv_cache_groups.size() == (num_spec > 0 ? 3 : 2));
+    CHECK_FALSE(kv.mtp_draft_shares_target_pages);
     if (num_spec > 0) {
       const auto* draft = dynamic_cast<const vllm::v1::FullAttentionSpec*>(
           kv.kv_cache_groups[2].kv_cache_spec.get());

@@ -49,6 +49,15 @@ void apply_speculative_logit_filters(
     vt::Queue& q, vt::Tensor& logits, const SamplingMetadata& metadata,
     const std::vector<int32_t>& cu_num_logits);
 
+// Full target processor order for verification. Row depth d sees the committed
+// output history followed by exactly d provisional drafts; the anchor at each
+// request's first row is already in the committed history and is not appended.
+// EOS masking uses accepted output positions, rather than an optimistic length.
+void apply_speculative_logits_processors(
+    vt::Queue& q, vt::Tensor& logits, const SamplingMetadata& metadata,
+    const std::vector<int32_t>& cu_num_logits,
+    const std::vector<int32_t>& draft_input_ids);
+
 // MinPLogitsProcessor.apply. Per row: mask tokens whose softmax probability is
 // below min_p[i] * max_prob to -inf. Rows with min_p[i] == 0 are unaffected.
 void apply_min_p(vt::Queue& q, vt::Tensor& logits, const std::vector<float>& min_p);

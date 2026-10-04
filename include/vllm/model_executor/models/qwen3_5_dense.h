@@ -651,12 +651,14 @@ class Qwen3_5DenseDecodeGraph {
   Qwen3_5DenseDecodeGraph(const Qwen3_5DenseDecodeGraph&) = delete;
   Qwen3_5DenseDecodeGraph& operator=(const Qwen3_5DenseDecodeGraph&) = delete;
 
-  // One PURE-DECODE step. Returns the [B, vocab] f32 logits as a DEVICE-resident
-  // ForwardLogits (the captured graph's output stays on device — a view over the
-  // slot's persistent logits buffer; the eager fallback owns a pool block), fed
-  // straight to the sampler with NO full-logits D2H. Bit-identical to
-  // Qwen3_5DenseModel::Forward for the same inputs/caches. The caller must only
-  // route pure-decode batches here (all query_len==1, no prefill).
+  // One supported uniform decode/verification step, without prefill. Logits
+  // remain device-resident for the sampler. With hidden_out, the normalized
+  // hidden tap and logits share an owning lease and one-shot producer event;
+  // retaining either output prevents reuse of both destinations. A consumer
+  // on another queue must WaitReady and retain its carrier until its queued
+  // reads finish. The graph may retire while those output owners remain live.
+  // Without hidden_out, captured logits and aux taps are slot-local views
+  // valid until that slot is reused; the eager fallback owns its output.
   ForwardLogits Step(const std::vector<int32_t>& token_ids,
                      const std::vector<int32_t>& positions,
                      const v1::CommonAttentionMetadata& attn_meta,
@@ -669,7 +671,10 @@ class Qwen3_5DenseDecodeGraph {
                      // valid until this slot's next replay, the same contract the
                      // returned logits already carry. Null keeps the pure-decode
                      // behavior byte-identical.
-                     Qwen3_5AuxTaps* aux_out = nullptr);
+                     Qwen3_5AuxTaps* aux_out = nullptr,
+                     // MTP normalized [T,H] output with paired ownership above;
+                     // mutually exclusive with aux_out.
+                     Qwen3_5MTPHiddenStates* hidden_out = nullptr);
 
   // Diagnostics (A/B + tests): is a graph currently captured, and how many
   // replays have run since the last (re)capture.

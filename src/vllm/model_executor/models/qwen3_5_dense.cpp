@@ -201,24 +201,6 @@ ForwardLogits ForwardQwen3_5Dense(LoadedModel& model,
   const detail::DeviceTokenIdsScope device_ids_scope(
       input.device_token_ids, static_cast<int64_t>(input.token_ids.size()));
 
-  // SPEC-MTP I5d-pre hidden-state tap. When the spec verify forward requests the
-  // drafter's [T,H] post-final-norm hidden (I5d), route to the EXISTING
-  // ForwardDeviceTap: byte-identical logits to ForwardDevice, plus the hidden
-  // moved into *input.hidden_tap. Null (every spec-off run) falls through to the
-  // unchanged path below, so the forward is byte-identical when spec is off.
-  if (input.hidden_tap != nullptr) {
-    if (weights.gptq4_checkpoint && Gptq4RouteTraceEnabled())
-      std::fprintf(stderr,
-                   "{\"event\":\"gptq4_route\",\"selected\":\"eager\","
-                   "\"reason\":\"hidden_tap\",\"tokens\":%zu,"
-                   "\"requests\":%d}\n",
-                   input.token_ids.size(), input.num_reqs);
-    return Qwen3_5DenseModel::ForwardDeviceTap(
-        input.token_ids, input.positions, input.attn_meta, input.gdn_meta,
-        input.attn_kv, input.gdn_state, weights, input.config, input.queue,
-        input.hidden_tap, input.logits_indices);
-  }
-
   // SPEC-DFLASH D1 (DF-AUX-TAPS): non-null routes to ForwardDeviceMultiTap
   // (byte-identical logits + the [T,H×taps] aux capture); null is byte-identical to
   // the path below. Mutually exclusive with hidden_tap.
@@ -323,7 +305,22 @@ ForwardLogits ForwardQwen3_5Dense(LoadedModel& model,
     }
     return qwen.decode_graph()->Step(
         input.token_ids, input.positions, input.attn_meta, input.gdn_meta,
-        input.attn_kv, input.gdn_state, input.aux_tap);
+        input.attn_kv, input.gdn_state, input.aux_tap, input.hidden_tap);
+  }
+
+  // Prefill, mixed batches and unsupported graph shapes retain the eager
+  // owning MTP tap. Supported decode shapes publish leased graph outputs above.
+  if (input.hidden_tap != nullptr) {
+    if (weights.gptq4_checkpoint && Gptq4RouteTraceEnabled())
+      std::fprintf(stderr,
+                   "{\"event\":\"gptq4_route\",\"selected\":\"eager\","
+                   "\"reason\":\"hidden_tap\",\"tokens\":%zu,"
+                   "\"requests\":%d}\n",
+                   input.token_ids.size(), input.num_reqs);
+    return Qwen3_5DenseModel::ForwardDeviceTap(
+        input.token_ids, input.positions, input.attn_meta, input.gdn_meta,
+        input.attn_kv, input.gdn_state, weights, input.config, input.queue,
+        input.hidden_tap, input.logits_indices);
   }
 
   // SPEC-DSPARK W8 (#442): the aux multi-tap forward is the DFlash/DSpark

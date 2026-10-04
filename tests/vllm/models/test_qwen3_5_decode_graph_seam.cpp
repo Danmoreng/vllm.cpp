@@ -34,6 +34,7 @@
 
 #include <cmath>
 #include <cstdint>
+#include <cstring>
 #include <cstdlib>
 #include <memory>
 #include <stdexcept>
@@ -45,6 +46,7 @@
 #include "vllm/model_executor/models/model_registry.h"
 #include "vllm/model_executor/models/qwen3_5.h"
 #include "vllm/model_executor/models/qwen3_5_dense.h"
+#include "vllm/model_executor/models/qwen3_5_mtp.h"
 #include "vllm/transformers_utils/hf_config.h"
 #include "vllm/v1/worker/gpu/cudagraph_dispatch.h"  // W6 (#1374) dispatch counters
 #include "vt/backend.h"
@@ -568,6 +570,83 @@ TEST_CASE("G2: Qwen3_5DenseDecodeGraph captures and replays THROUGH the vt seam"
   CHECK(harness.backend().Count("Begin") == 1);
   CHECK(harness.backend().Count("EndCaptureGraph") == 1);
   CHECK(harness.backend().Count("ReplayGraph") >= 2);
+}
+
+TEST_CASE("R10: dense graph owns paired MTP outputs across replay and retirement") {
+  const HfConfig c = dense::TinyConfig();
+  const auto w = dense::MakeWeights(c);
+  vt::Queue q = Q();
+  vt::Queue consumer = Q();
+  CachePool ref(c, 4, 16);
+  vllm::Qwen3_5MTPHiddenStates expected_hidden;
+  auto initial = vllm::Qwen3_5DenseModel::ForwardDeviceTap(
+      {11}, {0}, DecodeAttnMeta(0), DecodeGdnMeta(), ref.attn_kv,
+      ref.gdn_state, w, c, q, &expected_hidden);
+  initial = {};
+  auto expected = vllm::Qwen3_5DenseModel::ForwardDeviceTap(
+      {12}, {1}, DecodeAttnMeta(1), DecodeGdnMeta(), ref.attn_kv,
+      ref.gdn_state, w, c, q, &expected_hidden);
+  const auto bytes = [](const vt::Tensor& t) {
+    size_t count = vt::SizeOf(t.dtype);
+    for (int dim = 0; dim < t.rank; ++dim) count *= size_t(t.shape[dim]);
+    std::vector<unsigned char> result(count);
+    std::memcpy(result.data(), t.data, count);
+    return result;
+  };
+  const auto expected_logits = bytes(expected.device_tensor);
+  const auto expected_tap = bytes(expected_hidden.tensor);
+
+  StaticGraphCpu harness;  // CPU routing/ownership, not numerical GPU replay.
+  CachePool pool(c, 4, 16);
+  auto graph = std::make_unique<vllm::Qwen3_5DenseDecodeGraph>(w, c, q, 4);
+  vllm::Qwen3_5MTPHiddenStates tap;
+  {
+    auto cold = graph->Step({11}, {0}, DecodeAttnMeta(0), DecodeGdnMeta(),
+                            pool.attn_kv, pool.gdn_state, nullptr, &tap);
+    CHECK_FALSE(cold.non_owning_view);
+    CHECK(tap.storage.get() == tap.tensor.data);
+  }
+  tap = {};  // release cold consumers before the capture step
+  auto captured = graph->Step({12}, {1}, DecodeAttnMeta(1), DecodeGdnMeta(),
+                              pool.attn_kv, pool.gdn_state, nullptr, &tap);
+  REQUIRE(graph->captured());
+  CHECK(bytes(captured.device_tensor) == expected_logits);
+  CHECK(bytes(tap.tensor) == expected_tap);
+  CHECK(captured.device_storage.get() == captured.device_tensor.data);
+  CHECK_FALSE(captured.non_owning_view);
+  REQUIRE(tap.producer_ready_event != nullptr);
+  tap.WaitReady(consumer);
+  const auto held_tap = tap;
+  const auto held_logits = captured;
+  tap = {}; captured = {};
+  void* held_address = held_tap.tensor.data;
+
+  {
+    auto replacement = graph->Step({13}, {2}, DecodeAttnMeta(2), DecodeGdnMeta(),
+                                    pool.attn_kv, pool.gdn_state, nullptr, &tap);
+    CHECK_FALSE(graph->captured());  // held generation forces safe retirement
+    CHECK(tap.tensor.data != held_address);
+    CHECK(bytes(held_tap.tensor) == expected_tap);
+    CHECK(bytes(held_logits.device_tensor) == expected_logits);
+  }
+  tap = {};
+  {
+    auto recaptured = graph->Step({14}, {3}, DecodeAttnMeta(3), DecodeGdnMeta(),
+                                   pool.attn_kv, pool.gdn_state, nullptr, &tap);
+    CHECK(graph->captured());
+  }
+  tap = {};
+  auto replay = graph->Step({15}, {4}, DecodeAttnMeta(4), DecodeGdnMeta(),
+                            pool.attn_kv, pool.gdn_state, nullptr, &tap);
+  CHECK(graph->replay_count() >= 1);
+  const auto final_tap = bytes(tap.tensor);
+  const auto final_logits = bytes(replay.device_tensor);
+  graph.reset();
+  tap.WaitReady(consumer);
+  CHECK(bytes(tap.tensor) == final_tap);
+  CHECK(bytes(replay.device_tensor) == final_logits);
+  CHECK(bytes(held_tap.tensor) == expected_tap);
+  CHECK(bytes(held_logits.device_tensor) == expected_logits);
 }
 
 TEST_CASE("G4: the seam changed no numerics on Qwen3_5DenseDecodeGraph's capture step") {

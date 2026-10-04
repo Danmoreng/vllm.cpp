@@ -11,7 +11,7 @@ import unittest
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tools/exl3_reference"))
 from capture_target import compare_repeats, observe_logits, probability_metrics, target_phases, load_trace, validate_prefix_witnesses
 from extract_projection import write_safetensors
-from compare_target import compare_row
+from compare_target import compare_row, write_comparison_report, parse_args
 
 
 class TargetCaptureTest(unittest.TestCase):
@@ -111,6 +111,51 @@ class TargetCaptureTest(unittest.TestCase):
             changed = json.loads(json.dumps(witnesses)); changed["d1"][key] = bad
             with self.assertRaises(ValueError): validate_prefix_witnesses(changed, [7,8], [13,198])
         with self.assertRaises(ValueError): validate_prefix_witnesses({"p128": witnesses["p128"]}, [7,8], [13,198])
+
+    def test_gate_failure_and_report_only_keep_the_same_failed_metrics(self):
+        failed = {"phase": "d29", **probability_metrics([math.log(3), 0], [0, 0])}
+        with tempfile.TemporaryDirectory() as directory:
+            records = []
+            for mode, code in (("gate", 1), ("report_only", 0)):
+                report = Path(directory) / (mode + ".json")
+                self.assertEqual(write_comparison_report(report, {"comparisons": [failed]}, mode), code)
+                record = json.loads(report.read_text()); records.append(record)
+                self.assertEqual(record["status"], "investigation_required")
+                self.assertFalse(record["logit_gate_pass"])
+                self.assertFalse(record["target_parity_pass"])
+                self.assertFalse(record["serving_qualified"])
+                self.assertEqual(record["gate_exit_code"], 1)
+                self.assertEqual(record["process_exit_code"], code)
+                self.assertEqual(record["blocking_issue_ids"], ["S1_D64"])
+                with self.assertRaises(FileExistsError):
+                    write_comparison_report(report, {"comparisons": [failed]}, mode)
+            self.assertEqual(records[0]["comparisons"], records[1]["comparisons"])
+            self.assertEqual(records[0]["investigation_triggers"], records[1]["investigation_triggers"])
+
+    def test_passing_logits_do_not_claim_state_or_serving_qualification(self):
+        passed = probability_metrics([0, 1, 2], [0, 1, 2])
+        with tempfile.TemporaryDirectory() as directory:
+            report = Path(directory) / "pass.json"
+            self.assertEqual(write_comparison_report(report, {"comparisons": [passed]}, "gate"), 0)
+            record = json.loads(report.read_text())
+            self.assertTrue(record["logit_gate_pass"])
+            self.assertEqual(record["status"], "passed_bounded_logit_comparison")
+            self.assertIsNone(record["target_parity_pass"])
+            self.assertIsNone(record["autonomous_smoke_pass"])
+            self.assertFalse(record["serving_qualified"])
+            with self.assertRaises(ValueError):
+                write_comparison_report(Path(directory) / "empty.json", {"comparisons": []}, "gate")
+            self.assertFalse((Path(directory) / "empty.json").exists())
+
+    def test_cli_defaults_to_gate_and_refuses_conflicting_modes(self):
+        argv = ["--native-prefix", "native", "--native-trace-json", "trace.json",
+                "--reference-dir", "reference", "--report", "report.json"]
+        self.assertEqual(parse_args(argv).mode, "gate")
+        self.assertEqual(parse_args(argv + ["--report-only"]).mode, "report_only")
+        self.assertEqual(parse_args(argv + ["--gate"]).mode, "gate")
+        with self.assertRaises(SystemExit) as failure:
+            parse_args(argv + ["--gate", "--report-only"])
+        self.assertEqual(failure.exception.code, 2)
 
 
 if __name__ == "__main__": unittest.main()

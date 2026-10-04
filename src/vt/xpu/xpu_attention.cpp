@@ -468,7 +468,7 @@ void PagedAttentionKernel(Queue& q, Tensor& out, const Tensor& query, const Tens
     const char* setting = std::getenv("VT_XPU_ATTENTION");
     const std::string_view mode = setting ? setting : "auto";
     VT_CHECK(mode == "auto" || mode == "reference" || mode == "split" ||
-                 mode == "prefill" || mode == "verify", "Invalid VT_XPU_ATTENTION");
+                 mode == "prefill" || mode == "verify" || mode == "exl3_onednn", "Invalid VT_XPU_ATTENTION");
     const auto device = NativeQueue(q).get_device();
     // Qualified against the pinned checkpoint's answer and probability corpus.
     // E4M3 cache storage is chosen by the caller; auto may use the fast
@@ -483,6 +483,12 @@ void PagedAttentionKernel(Queue& q, Tensor& out, const Tensor& query, const Tens
         std::string_view(__VERSION__) == "Intel(R) oneAPI DPC++/C++ Compiler 2026.1.1 (2026.1.1.20260724)" &&
         device.get_info<sycl::info::device::driver_version>() == "1.17.39758+10" &&
         device.get_platform().get_info<sycl::info::platform::version>() == "1.17";
+    bool onednn = false;
+#ifdef VLLM_CPP_XPU_GPTQ4
+    if (mode == "exl3_onednn" || (automatic && tokens > 128))
+      onednn = PagedAttentionExl3OneDnnKernel(q, target, query, key_cache, value_cache,
+          block_table, seq_lens, query_start_loc, args);
+#endif
     bool verify = false;
 #ifdef VLLM_CPP_XPU_XE2_VERIFY
     const char* verify_setting = std::getenv("VT_XPU_XE2_VERIFY");
@@ -492,26 +498,26 @@ void PagedAttentionKernel(Queue& q, Tensor& out, const Tensor& query, const Tens
           q, target, query, key_cache, value_cache,
           block_table, seq_lens, query_start_loc, args);
 #endif
-    const bool try_split = !verify &&
-        (automatic || mode == "split" || mode == "prefill" || mode == "verify");
+    const bool try_split = !onednn && !verify &&
+        (automatic || mode == "split" || mode == "prefill" || mode == "verify" || mode == "exl3_onednn");
     const bool split = try_split && PagedAttentionSplitKernel(
         q, target, query, key_cache, value_cache,
         block_table, seq_lens, query_start_loc, args);
 #ifdef VLLM_CPP_XPU_XE2_PREFILL
-    const bool xe2 = !verify && !split && (automatic || mode == "prefill") &&
+    const bool xe2 = !onednn && !verify && !split && (automatic || mode == "prefill") &&
         PagedAttentionXe2PrefillKernel(q, target, query, key_cache, value_cache,
                                       block_table, seq_lens, query_start_loc, args);
 #else
     const bool xe2 = false;
 #endif
-    const bool try_prefill = !verify && !split && !xe2 &&
+    const bool try_prefill = !onednn && !verify && !split && !xe2 &&
         (automatic || mode == "prefill");
     const bool prefill = try_prefill && PagedAttentionPrefillKernel(
         q, target, query, key_cache, value_cache,
         block_table, seq_lens, query_start_loc, args);
     if (const char* trace = std::getenv("VT_XPU_TRACE_FAST_PATH");
         trace != nullptr && trace[0] == '1' && trace[1] == '\0') {
-      const char* reason = verify || split || xe2 || prefill ? "eligible" :
+      const char* reason = onednn || verify || split || xe2 || prefill ? "eligible" :
           mode == "reference" ? "mode_reference" :
           mode == "auto" && !automatic ? "stack_gate_or_shape" :
           "kernel_declined";
@@ -520,12 +526,12 @@ void PagedAttentionKernel(Queue& q, Tensor& out, const Tensor& query, const Tens
                    "\"selected\":\"%s\",\"reason\":\"%s\","
                    "\"mode\":\"%.*s\",\"auto_eligible\":%s,"
                    "\"tokens\":%lld}\n",
-                   verify ? "xe2_verify" : split ? "split" : xe2 ? "xe2_prefill" :
+                   onednn ? "exl3_onednn" : verify ? "xe2_verify" : split ? "split" : xe2 ? "xe2_prefill" :
                    prefill ? "prefill" : "reference", reason,
                    static_cast<int>(mode.size()), mode.data(),
                    automatic ? "true" : "false", static_cast<long long>(tokens));
     }
-    if (verify || split || xe2 || prefill) return;
+    if (onednn || verify || split || xe2 || prefill) return;
     const View qs(query), kc(key_cache), vc(value_cache), dst(target);
     const auto event = NativeQueue(q).submit([&](sycl::handler& h) {
       sycl::local_accessor<float, 1> partial(sycl::range<1>(lanes), h);

@@ -50,6 +50,9 @@ struct HostProfileRecord {
   std::string stage;
   uint64_t queue_id = 0;
   uint64_t start_steady_ns = 0, end_steady_ns = 0;
+  // Staged-copy waits carry the bytes in this chunk and the calling PC.
+  // Other spans leave both zero. Resolve PCs against the captured process maps.
+  uint64_t copy_bytes = 0, caller_address = 0;
 };
 ProfileClockAnchor CaptureProfileClockAnchor(int index = 0);
 std::vector<ProfileRecord> DrainProfileEvents(int index = 0);

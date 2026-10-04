@@ -225,6 +225,27 @@ saved native rows against those matched-prefix original repeats using the same
 fixed TV/KL/top10 thresholds and preserves every investigation trigger. No
 new native GPU run or replacement of a failed test is implied.
 
+`compare_target.py --gate` (the default) returns exit1 when a frozen logit
+threshold fails. `--report-only` writes the same failed metrics with
+`status: investigation_required`, `logit_gate_pass: false` and `gate_exit_code: 1`,
+while its process returns0 for successful report creation. Structural/input
+validation failures still fail in either mode. A passing logit gate leaves
+whole-target/state qualification pending; it never certifies autonomous or
+serving behavior. Historical reports are not overwritten.
+
+Recovery R01's separate native test case is
+`XPU EXL3 autonomous target: real prompt native feedback cold reset`.
+Set `VT_B70_EXL3_MODEL`, `VT_B70_EXL3_SMOKE_PROMPT` to a JSON with
+`prompt_token_ids`, `rendered_prompt`, recorded actual chat prompt/template and
+`output_limit`16 or64, and `VT_B70_EXL3_SMOKE_OUTPUT` to a new directory.
+The native tokenizer checks the actual rendered P128 prompt. Each later input
+is the native full-head greedy selection; no continuation capture is read.
+Two requests reset all native caches/states. Result JSON records input/position
+witnesses, output IDs/text, EOS/output-limit stop reason and separate pending
+quality/serving status. Only layer0 initial/prefill/final Conv/FP32 state is
+exported. Host feedback/EOS/reset tests are `test_exl3_autonomous`; this smoke
+uses C1 eager execution without MTP, graphs or prefix reuse.
+
 The current observer also records actual embedding token IDs and all three
 position axes for every head step. Each prefix is checked against the recorded
 sequence before a capture is accepted. The host comparator requires these
@@ -265,8 +286,12 @@ Q/K and active FP8 K/V bytes match the original exactly, with numerical mixer
 bands passing. Scoped standalone XPU D256 Q/K RMS now shares those boundaries;
 with `VT_FUSE_ATTN_PREAMBLE=0` the own-cache mixer also passes657/657 assertions
 with exact Q/K and cache bytes. The current full64-layer P128/D1 target passes
-197/197 assertions against3 original repeats. D64 still fails6of807 assertions
-at D24/D27/D29; state/block and S1 remain open. See the execution map for
+197/197 assertions against3 original repeats. The subsequent scoped F16
+Gemma D5120 repair reproduces all4 frozen P128/D1 norm outputs exactly;
+norm/residual alias checks pass113/113. The final D64 rerun still fails5of807
+assertions at D11/D29, with a greedy mismatch at D7; the preceding run's
+4 failures and D27 greedy mismatch are also retained. State/block and S1
+remain open. See the execution map for
 retained failures and qualification limits.
 
 

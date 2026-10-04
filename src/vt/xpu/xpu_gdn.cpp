@@ -201,10 +201,12 @@ void CausalConv1dSpecUpdateKernel(Queue& q, Tensor& out, const Tensor& x,
         Store(dst, (begin + t) * channels + channel,
               activation ? Silu(acc) : acc);
       }
-      // Read from the right while copying left, so this needs no temporary.
-      // The one-tap shift plus next step's accepted-count offset selects the
-      // previous accepted prefix without committing rejected draft tokens.
-      const int64_t keep = state_len - length;
+      // Pinned causal_conv1d.py:845,1221 uses an EFFECTIVE state width of
+      // (taps-1)+(length-1), independent of physical speculative capacity.
+      // Retain width-1 valid history elements, then this step's provisional
+      // tokens. Using physical state_len-length puts short queries after stale
+      // rejected tokens. The spare tail stays untouched and inaccessible.
+      const int64_t keep = width - 1;
       for (int64_t j = 0; j < keep; ++j) {
         const int64_t source = off + j + 1;
         Store(cache, base + j,

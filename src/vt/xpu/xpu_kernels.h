@@ -14,6 +14,7 @@ void MatmulKernel(Queue&, Tensor&, const Tensor&, const Tensor&);
 void MatmulBTKernel(Queue&, Tensor&, const Tensor&, const Tensor&);
 void RmsNormKernel(Queue&, Tensor&, const Tensor&, const Tensor&, const RmsNormArgs&, Tensor*);
 void GreedyArgmaxKernel(Queue&, Tensor&, const Tensor&);
+void MappedGreedyArgmaxKernel(Queue&, Tensor&, const Tensor&, const Tensor&, int64_t);
 void GreedyRejectionSampleKernel(Queue&, Tensor&, Tensor&, Tensor&, const Tensor&,
                                  const Tensor&, const Tensor&);
 void ApplyTopKTopPKernel(Queue&, Tensor&, const Tensor*, const Tensor*);
@@ -30,6 +31,8 @@ void Exl3HadR128Kernel(Queue&, Tensor&, const Tensor&, const Exl3HadArgs&);
 void Exl3GemmKernel(Queue&, Tensor&, const Tensor&, const Tensor&, const Tensor&,
                     const Tensor&, Tensor&, const Exl3GemmArgs&);
 void Exl3GroupedLinearKernel(Queue&, Tensor&, const Tensor&, const Tensor&, const Tensor&,
+    const Tensor&, const Tensor&, Tensor&, Tensor&, const Exl3GroupedLinearArgs&);
+void Exl3GroupedW8A8Kernel(Queue&, Tensor&, const Tensor&, const Tensor&, const Tensor&,
     const Tensor&, const Tensor&, Tensor&, Tensor&, const Exl3GroupedLinearArgs&);
 // Eager diagnostic only: capture the selected packed/reference leaf's F32
 // intermediate in caller-owned storage. Refuses fused/prefill routes instead
@@ -87,6 +90,8 @@ bool PagedAttentionSplitKernel(Queue&, Tensor&, const Tensor&, const Tensor&, co
                                const Tensor&, const Tensor&, const Tensor&, const PagedAttentionArgs&);
 bool PagedAttentionPrefillKernel(Queue&, Tensor&, const Tensor&, const Tensor&, const Tensor&,
                                  const Tensor&, const Tensor&, const Tensor&, const PagedAttentionArgs&);
+bool PagedAttentionExl3OneDnnKernel(Queue&, Tensor&, const Tensor&, const Tensor&, const Tensor&,
+                                  const Tensor&, const Tensor&, const Tensor&, const PagedAttentionArgs&);
 #ifdef VLLM_CPP_XPU_XE2_PREFILL
 bool PagedAttentionXe2PrefillKernel(Queue&, Tensor&, const Tensor&, const Tensor&, const Tensor&,
                                     const Tensor&, const Tensor&, const Tensor&, const PagedAttentionArgs&);

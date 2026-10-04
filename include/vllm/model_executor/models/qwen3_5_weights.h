@@ -632,6 +632,9 @@ struct Exl3Weight {
   OwnedTensor trellis;
   OwnedTensor suh;   // F16 [k]  input-side Hadamard sign vector
   OwnedTensor svh;   // F16 [n]  output-side Hadamard sign vector
+  // Generated XPU one-group routing metadata, owned with the projection.
+  // Its immutable device address must survive every decode graph replay.
+  mutable OwnedTensor single_source_map;
   // NO DEFAULT ON PURPOSE. An implicit codebook is exactly what shipped a
   // wrong decode: `= 1` here would silently give MCG to every hand-constructed
   // `Exl3Weight`, which is the same shape as reading marker ABSENCE as MCG.

@@ -353,7 +353,10 @@ inline DBuf Exl3GroupedMatmulD(Dev d, const vt::Tensor& x,
                x.rank == 2 && x.shape[1] == K && w.codebook == 2,
            "exl3 grouped model: requires scoped XPU FP16 and matching K/mul1");
   const int bits = static_cast<int>(w.trellis.shape[2] / 32);
-  const auto plan = vt::PlanExl3SmallM(M, K, N, bits);
+  // Validate arithmetic/extent before uploading weights. Large prefills use
+  // the independent signed INT8 producer route, without dense reconstruction.
+  if (M > 128) (void)vt::PlanExl3W8A8(M, K, N, w.suh.shape[0], bits);
+  else (void)vt::PlanExl3SmallM(M, K, N, bits);
   const bool upload = !w.trellis.d_dev || !w.suh.d_dev || !w.svh.d_dev || !w.source_map.d_dev;
   auto trellis = ResidentWeight(d, w.trellis);
   auto suh = ResidentWeight(d, w.suh);
@@ -366,9 +369,19 @@ inline DBuf Exl3GroupedMatmulD(Dev d, const vt::Tensor& x,
     w.svh.ReleaseHost();
     w.source_map.ReleaseHost();
   }
+  DBuf out(d, vt::DType::kF16, {M, N});
+  if (M > 128) {
+    const auto plan = vt::PlanExl3W8A8(M, K, N, w.suh.shape[0], bits);
+    DBuf workspace(d, vt::DType::kI8, {static_cast<int64_t>(plan.workspace_bytes)});
+    DBuf panel(d, vt::DType::kI8, {K, 128});
+    vt::Exl3GroupedW8A8(d.q, out.t(), x, trellis, suh, svh, map,
+                       workspace.t(), panel.t(), {bits, w.codebook, w.name.c_str()});
+    // DBuf retirement completes these eager consumers before scratch reuse.
+    return out;
+  }
+  const auto plan = vt::PlanExl3SmallM(M, K, N, bits);
   DBuf had(d, vt::DType::kF16, {w.suh.shape[0], K / 16, plan.padded_rows, 16});
   DBuf parts(d, vt::DType::kF32, {plan.splits, M, N});
-  DBuf out(d, vt::DType::kF16, {M, N});
   vt::Exl3GroupedLinear(d.q, out.t(), x, trellis, suh, svh, map,
                        had.t(), parts.t(), {bits, w.codebook, w.name.c_str()});
   return out;
@@ -392,18 +405,34 @@ inline DBuf Exl3MatmulD(Dev d, const vt::Tensor& x, const Exl3Weight& w,
   // gate-up storage will use the same VT seam; legacy callers remain below.
   if (d.q.device.type == vt::DeviceType::kXPU &&
       d.activation_dtype == vt::DType::kF16 && x.dtype == vt::DType::kF16 &&
-      out_dtype == vt::DType::kF16 && M <= 128 && w.codebook == 2 &&
+      out_dtype == vt::DType::kF16 && w.codebook == 2 &&
       (w.Bits() == 4 || w.Bits() == 6)) {
-    const auto plan = vt::PlanExl3SmallM(M, K, N, w.Bits());
+    if (M > 128) (void)vt::PlanExl3W8A8(M, K, N, 1, w.Bits());
+    else (void)vt::PlanExl3SmallM(M, K, N, w.Bits());
     auto trellis = ResidentWeight(d, w.trellis);
     auto suh = Reshape(ResidentWeight(d, w.suh), {1, K});
     auto svh = ResidentWeight(d, w.svh);
-    DBuf shard(d, vt::DType::kI32, {N / 128});
-    shard.Zero(d);
+    if (w.single_source_map.rank == 0) {
+      w.single_source_map.dtype = vt::DType::kI32;
+      w.single_source_map.rank = 1;
+      w.single_source_map.shape[0] = N / 128;
+    }
+    Tensor shard = ResidentWeight(d, w.single_source_map, {}, [&](Tensor& t) {
+      d.b.Memset(d.q, t.data, 0, t.Bytes());
+    });
+    DBuf out(d, vt::DType::kF16, {M, N});
+    if (M > 128) {
+      const auto plan = vt::PlanExl3W8A8(M, K, N, 1, w.Bits());
+      DBuf workspace(d, vt::DType::kI8, {static_cast<int64_t>(plan.workspace_bytes)});
+      DBuf panel(d, vt::DType::kI8, {K, 128});
+      vt::Exl3GroupedW8A8(d.q, out.t(), x, trellis, suh, svh, shard,
+                         workspace.t(), panel.t(), {w.Bits(), w.codebook, w.name.c_str()});
+      return out;
+    }
+    const auto plan = vt::PlanExl3SmallM(M, K, N, w.Bits());
     DBuf had(d, vt::DType::kF16, {1, K / 16, plan.padded_rows, 16});
     DBuf parts(d, vt::DType::kF32, {plan.splits, M, N});
-    DBuf out(d, vt::DType::kF16, {M, N});
-    vt::Exl3GroupedLinear(d.q, out.t(), x, trellis, suh, svh, shard.t(),
+    vt::Exl3GroupedLinear(d.q, out.t(), x, trellis, suh, svh, shard,
                          had.t(), parts.t(), {w.Bits(), w.codebook, w.name.c_str()});
     return out;
   }

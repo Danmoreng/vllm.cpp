@@ -1498,3 +1498,637 @@ identical frozen operands, identify the first remaining mean/root/block
 arithmetic difference, then rerun the unchanged block/state/D64 gates after a
 source-backed repair. Complete S1 and then S2-S6; none is marked complete here.
 Production remains stopped and all jobs from this step are terminal.
+
+
+## 39. Exact bounded D5120 Gemma norm; BA/state and D64 remain failing
+
+The literal pinned Torch eager Gemma expression reproduces all4 frozen layer0
+P128/D1 input/post norms and both post-norm residual outputs exactly. It uses
+the checkpoint weight converted to F16, then F32 weight+1, unrounded F32
+input+residual, mean of F32 squares and rsqrt before F16 output narrowing.
+This is a same-input replay, not observation of live original-worker internals.
+
+The pinned contiguous vec4 reduction accumulates4 registers per virtual lane,
+folds those registers left-to-right, halves group-x lanes down to32, then uses
+ascending subgroup offsets. B70's maxWG1024 and min/maxSG16/32 determine a
+virtual width1024 divided by the largest power of two no greater than
+min(rows,32). At P128, width32 plus an F32 reciprocal factor reproduces all256
+replay means exactly. MeanOps projects by multiplication with F32(1/5120);
+division instead differs18 input/24 post means. D1's2 means coincide for
+width256/512/1024, so its width1024 is source/device-derived, not uniquely
+identified by those2 values.
+
+The new separate producer kernel emulates this tree with physical SG16,
+uses rsqrt and explicit F32 residual/square/Gemma multiplication boundaries,
+and returns the independently narrowed residual. Selection is scoped to
+Gemma D5120 F16 input/output/weight and optional F16 residual, maxWG1024,
+minSG16/maxSG32. Other geometries keep generic RMS; this step does not qualify
+those fallbacks. No public RMS argument or model policy changed.
+
+Focused v1/v2/v3 builds exit0. Initial captured norm run passes40/40;
+final2 Gemma cases pass **113/113 assertions,exit0**, including separate output,
+output/input aliases and output/residual aliases. All4 captured norm outputs
+have zero differing half words; residuals remain exact where still visible.
+The existing generic RMS regression passes **63928/63928,exit0**; its F32
+outputs/BF16 residuals do not exercise the new path. Internal native D5120
+means/inverses are not separately observed by these output checks. M4/12/16,
+other layer operands, performance and graph/multi-queue behavior remain open.
+Initial v1 used an unsupported trace environment variable and produced no
+trace; finalv3 uses VT_OP_PROVIDER_TRACE. An initial source command exits1
+because its second grep finds no MeanOps in ReduceOps.h; the actual
+SharedReduceOps MeanOps fragment is preserved separately.
+
+Both whole-target runs keep native cache/state and use the original captured
+input-token prefix, full64 layers/full248320 head, with MTP/graphs disabled.
+They are not autonomous native-greedy continuation. P128/D1 passes197/197
+in both runs. Finalv2 maxTV0.0039302/maxKL0.0000485418, top10all10, greedy13/198.
+Earlier v1 maxTV0.00311897/maxKL0.0000323448 is retained, not substituted.
+
+D64 remains failed in both runs. Initialv1: **803/807,exit1**; D27 TV0.0294933
+fails while KL0.00196467 passes; D29 TV0.247458/KL0.180265/top10overlap8 fails.
+Greedy differs atD27 (native74455/reference248045). Finalv2 against the final
+v3 binary: **802/807,exit1**; D11 TV0.023854/KL0.00201852 fails, D29
+TV0.281446/KL0.217539/top10overlap8 fails. Greedy differs atD7. The source/device
+eligibility guard does not establish a cause for this variation. All65 steps
+execute in each run; neither failed result is waived by the exact norm.
+Final traces have65 full-head M1 calls and zero BF16 arguments, CPU-reference
+or old scalar-packed selections. Independent same-prefix/3-position-axis
+witness comparison retains11/195 triggers forv1 and10/195 forfinalv2. Final
+maxTV0.2633897193/maxKL0.2041601301 remains failing; report generation's exit0
+is not a parity pass. Frozen thresholds and all earlier captures are unchanged.
+
+The unchanged own-state GDN seam starts from original input_norm_output,
+bypassing the repaired full-width norm. Current rerun passes **413/414,exit1**:
+P128 mixer relative4.97236e-5, P128 state relative1.74616e-5/maxerror0.00263786,
+16379 differing F32 values. Strict elementwise state REQUIRE fails atindex360512
+(head22); D1 never executes. The below-threshold relative norm does not waive
+the unchanged rtol1e-4/atol1e-5 elementwise failure. Bounded stage dumps show
+same-input BA differs in3 A and3 B half words. The B head22,row74 projection
+is native-0.33056640625 versus original-0.330810546875; this points to the next
+projection/gate/state investigation, not proven causality for D64.
+
+Source snapshots, both complete logit sets, traces, failed receipts and focused
+results are recorded in
+`reference_B.S1_Gemma5120_source_matched_norm_and_remaining_BA_state`.
+**Next:** inspect the same-input original/native oneDNN BA rounding and replay
+its affected raw gates/state without changing thresholds. Qualify remaining
+Gemma row counts and S1 requirements before S2-S6. Production remains stopped;
+all GPU/build processes from this step are terminal. No commit/push is made
+for this new step without another developer request.
+
+
+## 40. Same-input BA variability and causal P128 state attribution
+
+Literal pinned Torch F.linear with unchanged frozen P128/D1 norm inputs and
+byte-identical actual worker/checkpoint BA weights (B then A, SHA256
+e5dbd32b6b1adb82dc5803a7239b9ae005ed621af21a89984512a111022760e9) completes,
+exit0. Verbose identifies original oneDNN3.12; native uses the pinned3.13.
+Original P128 repeats differ8/7/3 half values from the frozen capture and
+5/7/6 from one another. All3 D1 repeats are exact. Split/F32 diagnostics
+retain10/14 P128 differences; neither replaces original F16 production math.
+All3 original repeats give the captured native B22,row74 value rather than
+the frozen original value. This strengthens the earlier live-operand variance
+observation; it does not qualify the failing strict state gate.
+
+A standalone native oneDNN3.13 probe reproduces VT's F16 descriptors, strict
+accumulation and user-scratchpad recipe. Build/run exit0. Default P128 repeats
+differ6/5/12 halves from original and9/9/10 from one another. Deterministic
+selection differs13 halves in each repeat, with zero pair differences, but
+still misses B22. D1 is exact in both selections. The source selector rejects
+kParallel catalogue candidates when deterministic is set; the physical selected
+subkernel is not separately observed here. This is not actual VT instrumentation.
+Its SYCL queue has no profiling, so verbose time0 fields are not measurements.
+Deterministic selection is not adopted as a product repair.
+
+Exact rational dot products of the6 differing FP16 operand pairs are a
+mathematical diagnostic. Correct rounding matches native at5 points and frozen
+original atB22,row74. That exact sum is-0.3306885194615461, only4.2899046e-8
+below the F16 midpoint-0.3306884765625. This shows rounding sensitivity; it
+does not require producer GEMM to use exact rational arithmetic.
+
+A bounded original fused GDN replay varies only BA, keeping QKVZ, weights,
+positions and cold-state contract fixed. The unchanged original BA baseline
+reproduces original core/state exactly, exit0. Using the actual native6-half
+BA difference gives1934 differing core halves and16379 differing F32 state
+words, relative1.7461556855e-5/max0.00263786316. It fails122 unchanged pointwise
+state bands, all head22, firstindex360512. Using only the native B22,row74
+value with otherwise original BA produces the same counts/first state value.
+Replacing that single value in the diagnostic native BA restores exact
+original core/state despite the5 remaining BA half differences.
+
+The actual native P128 core dump and original fused GDN core from the same
+actual native BA are byte-identical in all786432 halves. Both SHA256 values
+are7ebe5cf7cc828fe3a0f80e01ca7b201e5d820df7f30c329419101d1657af40eb.
+Thus the current bounded recurrence/core discrepancy is causally attributed
+to the BA operand, not unexplained downstream core arithmetic. Actual native
+state is not separately dumped for byte comparison in this step. A same-input
+original Torch BA repeat also produces220 strict state failures in3 heads
+when replayed by the original GDN body. Original variability is retained,
+not a replacement capture, relaxed threshold or whole-target parity claim.
+
+No BA selector/arithmetic or product B22 substitution is implemented. New
+root-owned safetensors initially had mode600; only those receipt read permissions
+were corrected to644 so host hashing/comparison could complete. Bytes remain
+unchanged. All identities/results are recorded in
+`reference_B.S1_BA_same_input_reproducibility_and_state_causality`.
+**Next:** qualify remaining Gemma M4/12/16 geometries and continue same-input
+block/D64 localization; S1 and S2-S6 remain open. Production remains inactive,
+and all jobs from this step are terminal. No commit/push is made for this step.
+
+
+## 41. Recovery R01: first autonomous native C1 output
+
+The developer adopted `docs/B70_CPP_EXL3_IMPLEMENTATION_FIRST_RECOVERY_PLAN_EN.md` as the active R01–R11 plan. The original S0–S6 plan remains scope/evidence. `RECOVERY_STATUS.json` separates implemented, locally tested, target-qualified and serving-qualified.
+
+R01 now uses one shared host-testable feedback driver and the existing full native model entry point. A rendered natural P128 prompt is encoded again by the native tokenizer; subsequent inputs are the native C++ greedy choices from the full 248320/6bpw target head. C1, no MTP/graph/prefix reuse. KV allocation derives from prompt/output budget and actual physical1600-token page size; GDN has one active slot. Each of two requests explicitly resets all caches/states. Only layer0 Conv/FP32 state is exported at initial/prefill/final boundaries.
+
+Focused tests: host3cases/35assertions; nativeGPU1case/366assertions, both exit0. Both cold requests emit11IDs includingEOS and the same text: `There are 12 tomato plants in total.<|im_end|>`. This proves functional native feedback on this prompt, not target/state parity. Layer0 FP32 state hashes differ between cold repeats although emitted IDs and Conv exports match; numerical repeatability is not claimed. Trace has no BF16 arguments, CPU reference or old scalar-packed selections.
+
+Exact source/executable/build/prompt/trace/export identities: `/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r01-control-v1/native-receipt-v1.json`. The strict `RunRealEagerTarget` body is unchanged; no new D64 replay was run. S1 D64/strict-state failures remain open. Remaining R01: report gate/accounting and real64-token output-cap check; then bounded same-input state work R02 and independently testable W8A8 R03.
+
+
+## 42. Recovery R01 complete: output-cap64 and explicit comparison gates
+
+The same native harness passes578/578 assertions for a second natural P128 prompt requesting a story: both cold requests emit exactly64IDs and stop at `output_limit`, with identical output IDs. The real EOS case remains366/366 and host feedback35/35. No production/quality/performance release is claimed.
+
+`compare_target.py` now defaults to `--gate`: threshold failures write `investigation_required` and return1. Explicit `--report-only` preserves those failures while returning0 for report creation; JSON records both gate/process exit codes. Passing bounded logits leave whole-target/state status pending. Twelve focused host tests pass. Applying the current CLI to existing native D64 Gemma v2 logits and three directly witnessed producer repeats returns1 with195comparisons/10failed rows, byte-equivalent metric values to the prior report. No GPU D64 rerun or changed thresholds/captures.
+
+Receipt and exact retained source snapshot: `/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r01-outcomes-v1/receipt.json`. R01 is complete as a functional development delivery. R02 starts with actual native final-state export, separately collected D1 and native VT B/A repeatability; numerical release blockers remain open.
+
+
+## 43. Recovery R02: actual final-state attribution closed locally
+
+The focused native test now exports all five physical Conv/FP32 state slots before frozen comparisons can abort. Its independent matched-state D1 case executes even when P128 fails. Current frozen run: two cases, one pass/one fail,463/464assertions,exit1; first strict P128 state failure nowindex34008. D1 mixer/state relative error0. These are retained current observations, not replacements for old failures.
+
+Pinned original GDN receives the current actual native BA matrix in full, unchanged QKVZ (native mixed inputs checked byte-exact) and identical logical initial values across active/inactive slots using producer physical strides. Actual native core786432halves, all Conv slots and all5x786432FP32state elements match original bitwise. Untouched slots remain unchanged in both implementations. Matched D1 Conv/state exports also match the frozen original bitwise. This closes the previously missing actual final-state comparison on these bounded operands; D64 is not explained or qualified.
+
+Three actual VT MatmulDenseF16 calls per shape, same F16[96,5120]weight/strides: P128 pair differences3/6/7halves; D1 all0. Diagnostic test30/30,exit0 classifies variability and finite execution; it does not assert P128 repeatability. Captured selected implementation `jit:gemm:any`, scratch2261120 forM128 and0 forM1. Profiling recorded selection, with no speed claim.
+
+Exact source/binary/build/fixture/run/export identities and original same-input script: `/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r02-state-v1/receipt.json`. R02 still needs Gemma5120 short/odd rows, aliases and second-layer operands. Independent W8A8 remains the next implementation item, without reopening this already attributed local consumer or hiding frozen qualification failures.
+
+
+## 44. Recovery R02 complete locally: required short-row norms
+
+Pinned Torch on real layer0/layer3 operands verifies the existing P128 captures before deriving20 operator cases: M3/4/12/16 and physicalM4/logicalM3, each with/without residual. Native contiguous independent/output-input/output-residual alias variants match active output and residual stores bitwise; poisoned inactive rows do not contaminate active rows. Noncontiguous tensors are explicitly refused by the public API before any mutation; strided arithmetic is not claimed. Focused native test821/821,exit0. Earlier failed test/build attempts remain in the receipt directory.
+
+The Gemma5120 tree uses physical subgroup16 while emulating pinned Torch logical subgroup32/virtual width1024 and its row-count-dependent reduction. Native capability checks are eligibility guards, not cross-device bit-equivalence proof. No new arithmetic or fast-math changes were needed in this step. Exact frozen fixture/source/build/binary/log/trace identities: `/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r02-norm-rows-v1/receipt.json`.
+
+R02 is complete as bounded same-input state and required-norm delivery. D64 and strict frozen full-target state failures remain release blockers. Next implementation is R03 typed true grouped EXL3 W8A8, beginning with real GDN-QKVZ M129/M256; no production restart or commit/push.
+
+
+## 45. Recovery R03: first actual grouped native W8A8 family
+
+A separately registered typed `Exl3GroupedW8A8` operator uses the pinned donor INT8 Hadamard/row-quantization and packed 4/6bpw reconstruction kernels. Shared pinned oneDNN3.13 executes signed INT8 row-major matmul with static3.453125/127 weight scale and per-row activation-scale binary post-op, rounds to FP16, then applies the donor output Hadamard/SV transform. M129–4096 is explicit; existing SmallM M<=128 dispatch is unchanged. No Packed/BF16/GPTQ alias or FP16-reconstruction fallback.
+
+Caller owns one aligned byte workspace and an I8[K,128]panel, used sequentially on the same in-order queue; existing queue-owned oneDNN user scratch is accounted separately. First GDN-QKVZ K5120/N16384/S2 uses11012160workspace bytes and655360temporary weight bytes, rather than caching full groups/model reconstructions. Zero and padded activation rows have INT8zero/scale1. Native refuses NaN/Inf and overflow at either FP16 transform boundary before output writes; the donor float-to-INT8 conversion has no defined nonfinite contract. Initial route is eager; graph/performance qualification is not claimed.
+
+Frozen pinned original references use actual packed GDN-QKVZ groups and real P128 norm rows repeated to M129/M256, with explicit zero/near-zero rows; these are same-input operator operands, not a real long-prompt trajectory. Allocation observation is checked against an ordinary original call. Native focused2cases/100assertions,exit0: actual INT8 activation, FP32 scales, last reconstructed panel, FP16 intermediate and final output all bit-exact. M128 control is exact; large/small/large workspace transitions and poisoned padding pass. Earlier instrumentation/compile/link failures remain in the receipt.
+
+Exact source/build/binary/frozen fixture/log/trace identities and snapshots: `/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r03-w8a8-gdn-v1/receipt.json`. R03 remains in progress: one real M4096 operator call and attention/remaining MLP/down/selected6bpw head family coverage are next; full-target integration is R05.
+
+
+## 46. Recovery R03 complete locally: 4K and required projection families
+
+One real GDN-QKVZ M4096 operator call passes18/18,exit0; actual INT8/row-scale/last-weight-panel bytes and all FP16 intermediate/output words match original exactly. It allocates176193600workspace bytes plus655360weight-panel bytes. This is cyclic real short-input operator evidence, not a complete 4K target/continuation run. Focused shared oneDNN packed/dense and repaired obsolete test-call coverage passes3cases/1277assertions,exit0. Retained first 4K attempt used the previous binary after the additional regression target failed compilation; it fails missing M129 rather than being a qualification pass. Freshly linked4K run passes.
+
+Additional original/native M128/129/256 fixtures: actual Layer3 attention QKV S3, Layer0 MLP gate/up S2 and down K17408/S1, and selected first/last128 columns of the6bpw target head. First4family tests58/58 each; final last-head60/60, all exit0 and bit-exact at every recorded INT8/FP32/F16 stage. Down uses the donor16-thread quantizer rather than the8-thread K5120 path. Temporary weights are only I8[K,128]:655360 or2228224bytes. Head operator inputs are real Layer0 norm operands of the correct width, not actual final-layer head inputs. Model head evaluation remains full248320/6bpw, selected-row-only.
+
+A focused GDN test also swaps the first/last complete packed128-column blocks, SV and sourceIDs to create a noncontiguous map, requiring the exact corresponding original output-byte permutation. It passes66/66,exit0 including invalid-map rejection before output writes and unchanged normal reuse cases. No new product arithmetic is changed for this extra coverage.
+
+Receipts/snapshots: `/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r03-w8a8-4k-v1/receipt.json` and `/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r03-w8a8-families-v1/receipt.json`. R03 is complete as a locally tested native operator delivery; target/serving qualification remains false, with target integration scheduled R05. Next is R04 variable producer GDN and one stable, accounted reservation before decode or prefill first allocation.
+
+
+## 47. Recovery R04 complete locally: variable C1 producer and stable reservation
+
+`PlanGdnFp16C1` defines exact logical1–4096 lengths, donor physicalT+63 capacity, aligned Q/K/V/A/W/U/rawA/beta/metadata regions. Maximum4K layout214538112bytes fits the explicitly chosen230686720byte (220MiB) reservation. Backend atomically accounts one shared serialized reservation on the first native-GDN consumer, including decode-first. Completion waits remain. Native raw-gate producer uses the actual logical offsets/length, zeroes the full physical tail, and consumes the caller-prepared zero or gathered persistent FP32 state. EXL3 C1 model Conv FP32/post-conv/raw-gate selection is generalized; full large-M model execution awaits R05 linear/attention integration.
+
+Focused layout test193/193; unchanged real P128/D1 raw-gate chain19/19, both exit0 and exact. Frozen original15case reference: coldP127/P128/P129/P256/P4096, each followed by one append3 prefill from its nonzero state and D1 decode. Each original fused/split endpoint must match bitwise before capture is accepted. Native end-to-end Conv/post-conv/raw-gate chain264/264,exit0: Q/K/V/beta/core/Conv state/FP32 state exact at every phase, four inactive slots unchanged. No captured state substitution; native cache carries each continuation. Preliminary zero decode and all subsequent short/large/append/decode calls assert the same230686720byte workspace capacity. Irregular tails and4K->short reuse are covered.
+
+Source/build/binary/fixture/test identities and snapshots: `/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r04-variable-gdn-v1/receipt.json`. Initial oracle capture failed only while packing differently shaped decode Q/K/V tensors; the corrected row packing precedes the accepted frozen capture. R04 is a locally qualified C1 operator delivery; full-target/serving/graph/maximum-context qualification is still pending. Next R05 integrates the already-tested true grouped W8A8 path into the target and performs a native4K autonomous smoke before extending exact-K attention.
+
+## 48. Recovery R05 partial: real autonomous4K and native CLI invocation
+
+The dense linear seam now dispatches M129–4096 to the typed W8A8 operator with caller-owned scratch/panel retirement. Attention QKV, GDN QKVZ and MLP gate/up retain their source transforms in model-owned groups at large M; SmallM arithmetic is unchanged. Grouped real seam19/19; single-down seam plus planner/operator125/125; synthetic grouped-vs-independent QKVZ/QKV at M1/M4/M12979/79, all exit0 and bit-exact.
+
+Existing `vllm-cli` accepts `--prompt-file`, `--max-model-len`, `--max-num-batched-tokens`, `--num-blocks` through the unchanged public C ABI. Six focused argument cases pass. A realP129/O16 invocation executes the scheduler/runner/model and returns fluent native text, exit0. Its first explicit4-block pool is correctly refused by hybrid admission; eight blocks support the4352-token configured length. That CLI call used the earlier separate-projection large-M implementation; subsequent source now selects grouped large-M projections.
+
+Real rendered natural P129/P512/P4096 prompts are independently reencoded by the native tokenizer. Each autonomous O64 test runs all64layers, all248320target logits, native-owned48GDN and16FP8KV caches, and two zero-state resets. Each passes579/579,exit0 with identical64token output IDs. No captured continuations/states are supplied. Initial4K attention uses native Xe2 prefill; decode uses native split. New oneDNN integration remains separately in progress.
+
+Development timings (model forward/full-row D2H/greedy and dispatch logging, excluding resets/state exports): resident-weight P1291.086s/118.82prompt-tok/s; P5121.342s/381.64; P40966.463s/633.74. Decode is2.91–2.98tok/s across these runs. First prefills11.20/11.39/15.91s include lazy uploads/JIT and are reported separately. These are functional-development measurements, not a matched serving performance qualification. Bitwise FP32 state repeatability and frozen D64 qualification are not asserted by identical output IDs.
+
+Exact eager source/build/binary/prompt/run identities: `/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r05-target-v1/receipt-eager-v1.json`. R05 is incomplete pending original exact-K attention agreement, intended-route target evidence, chunked32K and output-transition coverage. Target/serving qualification stays false.
+
+## 49. Recovery R05 local exact-K oneDNN attention
+
+The pinned fused SDPA graph uses the existing native oneDNN device engine/queue stream and explicit accounted user scratchpad. FP8 K/V are gathered one KV head at a time with actual physical page/token/head strides; half query groups are padded at the front to multiples256, while K keeps its exact GPU length. Bottom-right visibility is `j <= L-Q+r`. Runtime inverse attention scale, K/V scales and negative-infinity inputs remain owned through completed graph execution and native output copy. Neither host maximum lengths nor unused poisoned cache rows enter the mask. Completed eager calls permit bounded compiled-partition eviction; owned cache and library cache capacities are16. Decode and ineligible signatures retain native alternatives.
+
+Synthetic physical1600-page boundaries1599/1600/1601, Q3/Q129, unit/nonunit KV scales, two runtime attention scales and unequal C4 Q8/7/6/5 pass87/87,exit0 against native CPU mathematical reference within the existing F16 attention budget (observed relative errors about0.00029). C4 strided destinations receive explicit native contiguous-result copy, leaving head-tail padding unchanged. Public XPU attention admits only nonoverlapping supported destination strides; other backends retain their previous contract.
+
+Frozen original oneDNN using repeated real Layer3 Q/FP8 operands and the actual interleaved hybrid strides `[3276800,2048,512,1]`: (K,Q)=(1599,3),(1600,129),(1601,256),(4096,4096), including nonunit scales and reversed pages. All four native outputs match every original F16 word;26/26,exit0. The default pinned B70 auto route now chooses this leaf for eligible large-M queries. Default-route original cases plus18new lengths and first-length reuse after bounded eviction pass84/84,exit0; the cache remains at most16entries and the reused result is exact. Profile witnesses require four actual SDPA executions per C1 operator case, excluding a silent fallback pass.
+
+Receipt/source/build/binary/fixture identities: `/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r05-attention-v1/receipt-v1.json`. Failed const-event/doctest compile attempts and the first oracle's packaging-only missing metadata argument remain recorded. This qualifies the local attention operator and copy semantics; full-target, full-model C4/MTP and graph qualification are separate. Intended-route4K and chunked32K autonomous evidence remain the immediate R05 work.
+
+## 50. Recovery R05 complete functionally: intended-route4K and public32K
+
+The full autonomous target with the new default oneDNN prefill route passes579/579,exit0, with identical64 output IDs after two resets. Cold P4096 prefill12.064s; resident-weight prefill4.025s/1017.63prompt-tok/s. Decode2.909/2.961tok/s. These retain the development timing scope from section48; dispatch tracing is enabled and a matched serving comparison is not claimed.
+
+Public `vllm-cli` P4096/O64 exits0 and returns exactly the private autonomous driver's text, finish_reason=length,34.130s total generate time. Public P32768/O256 also exits0, length,137.347s total: eight scheduler-owned4096-token chunks, then256 native-selected output tokens. Trace records16 SDPA executions per chunk with exact K4096/8192/12288/16384/20480/24576/28672/32768; compiled partitions remain bounded at16. FP16 grouped W8A8 and full248320/6bpw target head are used. The reported1.864 emitted tokens per total second includes cold setup/prefill and is not decode throughput. The32K pool has48 blocks and max_model_len33024; no maximum-context or prefix/MTP claim follows.
+
+Receipt: `/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r05-target-v1/receipt-complete-v1.json`, linking frozen source/build identities and both public logs/prompts. R05 is complete as a bounded eager functional delivery. Target/serving qualification remains false; P4096/D64 teacher-forced qualification is conditional on repair of the retained shared S1 numerical blockers. R06 begins with scoped FP16 draft norms, followed by the exact compact draft subset, selected-row head dataflow and native global-token selection. Production stays inactive; no commit/push.
+
+## 51. Recovery R06 functional compact draft; numerical gate remains open
+
+The production loader resolves XPU dense EXL3 from actual FC storage and converts all seven draft norms directly to FP16. Two focused cases pass1104/1104. First run retained a stale CPU fixture missing its declared FP32 target recurrence; that fixture declaration is corrected, not the precision guard. Generic/GPTQ/MoE policy is unchanged.
+
+The compact builder selects exactly512 complete128-column blocks, preserving the supplied production order, all packed6bpw bytes and SV, with65536 stable global IDs. Invalid count/range/duplicates/types/metadata are refused. Three focused host cases45/45 include the actual production list and a permuted map. The public XPU MTP loader requires `EXL3_DRAFT_VOCAB` and exact artifact SHA256 `b4eadc088059190983fe0498af11864f5aaa2eaf2ec58ae9864f0715634d313d`. Historical corpus `vocab=248077` is not an extra mask; full blocks remain within the actual248320 target configuration, as in the donor.
+
+Draft ComputeLogits now explicitly uses FP16 SmallM and rounds to FP16 before F32 compact logits. Proposer gathers selected hidden rows before the head while retaining the whole forward for KV/feedback. A native XPU mapped argmax selects the lowest global ID on ties, downloads only chosen I32 IDs and retains completion waits. Selection6/6, three native trace calls; focused CPU shifted-prefill proposer4/4 and depth3 control20/20, all exit0. The target's full248320 head is not replaced or expanded.
+
+One original worker P128 MTP1 observation delegates every original call. Ordinary and observed IDs `[13,198]` match; resolved draft_sample_method=greedy, rejection_sample_method=standard. It records actual128x5120 target/draft hidden, selected row127, one compact head and global ID map. This model returns one normalized tensor for both draft logits and feedback. First root model hooks missed forward boundaries; second observer used an obsolete Attention.prefix attribute; both failures and executed source snapshots are retained. Successful observer wraps the actual speculator `_run_model` and reads Attention.layer_name.
+
+Native identical-head-input call matches all65536 logits bitwise and selects the same global ID. Full native draft produces the same global argmax, but **numerical test exits1**: hidden relative0.000533097 with34 pointwise failures; compact logits relative0.000699084 with77 failures. The unchanged bands are relative<0.002 and absolute0.003+relative0.01 per value. A nonfatal collector preserves those bands/process failure while allowing independent head checks. One bounded attention-route hypothesis changes only native prefill to exact-K oneDNN: still exit1, hidden29/logits45 pointwise failures. No default promotion, relaxed threshold or original-value substitution.
+
+Receipts: `/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r06-draft-norm-v1/receipt-v1.json`, `r06-compact-head-v1/receipt-builder-v1.json`, `r06-compact-head-v1/receipt-dataflow-v1.json`. Native F32 boundary exports, source/build/binary/trace/oracle identities and failed attempts are retained. R06 functional implementation is delivered; complete/numerical/target/serving qualification stays false. Next is public native MTP1 smoke and dependency-ready R07 transaction work, retaining R06 and S1 numerical failures. Production remains stopped; no commit/push.
+
+
+## 52. Recovery R07: public eager MTP1/MTP3 and shortened Conv rollback
+
+Public CLI C1 greedy math prompt26/O16 passes with k0/k1/k3, exit0; same output text. MTP1 proposed8/accepted8; MTP3 proposed15/accepted13. These are short functional observations, not a matched performance comparison.
+
+A focused production-loader engine test retains raw global IDs and counters, reuses one engine for two requests, and compares against the native spec-OFF baseline. Each64-token request is identical for k0/k1/k3; k0 test14/14, k1 21/21, k3 23/23, all exit0. Real MTP3 per-request proposed depths18/18/18, accepted17/15/15,19 proposer calls and38 completed draft decode forwards. Its two-request acceptance histogram is count0:2,count1:4,count2:0,count3:30. Native operator tests cover the missing count2; no original-target numerical qualification follows from native self-agreement.
+
+A new independent one-token Conv recurrence test exposes stale rejected history after a shortened verification: first k1/zero accepted drafts fails valid history and the following output, exit1. Pinned causal_conv1d.py:845,1221 uses effective state width=(taps-1)+(query_length-1), not physical speculative capacity. XPU and CPU reference now retain taps-2 history elements then append the current provisional tokens, leaving the spare tail untouched. CUDA is unchanged and untested in this XPU delivery. Focused Conv tests and actual27B FP32 GDN snapshot rollback for k1/k3 accepted0..k pass4cases453/453,exit0, including inactive-slot sentinels. Existing GDN MTP4 test uses the same extracted helper but was not run here. Two older post-conv test calls were updated to the explicit prefill=false argument so the focused test target compiles.
+
+The post-fix real k3 engine remains23/23. Added lifecycle checks pass90/90,exit0: limits1..5 emit exact baseline prefixes; stop string ends after11 IDs, stop token after5; synchronous cancel after verification/proposal and subsequent reuse emits the same64 baseline IDs. This tests safe engine step boundaries, not interruption of a queued GPU operation. Actual forced EOS and target sampling/processor behavior remain R07 work. The greedy verifier currently does not call the filter helper that sampled verification already uses; this is the next concrete gap to close.
+
+Receipt/source/build/binary/raw IDs/logs: `/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r07-mtp1-v1/receipt-v1.json` (SHA256 2e913cf02e8a6f2548d1f495533a566fcda2c286ca0a31d3e70a3cf2b21fc6ae). The shared MTP3 trace appends initial/post-fix/lifecycle processes; logs/results are separate. Red executable was not frozen before rebuild; final tested binaries and50 source files are frozen. R07 remains partial, target/serving false; S1 and R06 numerical failures stay open. Production inactive; no commit/push.
+
+
+## 53. Recovery R07: greedy target filters and actual EOS
+
+A focused real engine test restricts tokens to271 and the actual checkpoint EOS248044, adds EOS bias100 and min_tokens3. Before repair, two MTP3 requests ignore filters during verification, output eight normal tokens and finish length:17assertions/4failures,exit1. The red executable and executed sources are frozen.
+
+Greedy verify now clones only verification logits when allowed tokens/bias/min_tokens are active, applies the existing request/depth-aware filter helper, and uses those same rows for main-queue and copy-queue verification. Original forward logits stay intact; filtered storage is retained and synchronised before retirement. No full prefill-head temporary. The copy-queue branch is updated but was not independently exercised by this eager test.
+
+Greedy k0 passes15/15 and k1/k3 each17/17; sampled k0 passes15/15 and k3 passes17/17, all exit0. Each arm reuses the engine twice and outputs exactly[271,271,271,248044], finish stop. Sampled tests explicitly use temperature0.7/topk20/topp0.8/minp0.05/seed931. This forced point-mass case proves API/filter/min-length/EOS behavior, not nontrivial random distribution or RNG equivalence. Test-only temperature instrumentation was added after initial green k0/k3; their earlier sources/binaries are distinguished in the receipt.
+
+Receipt: `/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r07-sampling-v1/receipt-v1.json`. Bad words/penalties/custom processors remain missing for greedy verification and explicitly refused for sampled verification; provisional-history-aware support is next, followed by nontrivial sampled/RNG checks and R08. R07 stays partial, target/serving false; numerical failures remain unchanged. Production stopped; no commit/push.
+
+
+## 54. Recovery R07: full history-aware target processors and MTP3 RNG
+
+The shared verification processor pipeline now covers allowed tokens, bad words, min-tokens, bias, registered host callbacks and penalties in ordinary Sampler order. Each logical row receives committed output history plus exactly the preceding provisional draft inputs, excluding the anchor and future drafts. Structural metadata is validated before writes; min-token positions avoid uint64 overflow. Builtins remain native device operations. Explicit user callbacks preserve the ordinary sampler's host staging contract. Sampled verification no longer refuses these processors; speculative logprobs remain unsupported.
+
+Focused GPU pipeline against independent serial ordinary CPU Sampler histories for combined MTP1/MTP3 rows passes41/41,exit0. Callback-observed input logits match bitwise, final logits within the existing sampling comparison budget. Invalid row offsets/draft length/history/penalty vectors/request keys preserve input bytes.
+
+Public real advanced processor/EOS tests: greedy k1/k3 and sampled k3 each19/19, sampled spec-OFF17/17; two reused requests each emit[271,1206,271,248044], exit0. Real penalties/bad words/callback are active, and callback histories are retained. Controlled selections are point-mass tests, not general sampled parity. Repeated greedy k3 requests have differing proposal totals9/6 despite identical final IDs; no draft-proposal repeatability claim.
+
+Nontrivial native MTP3 one-hot rejection tests2048request seed/position identities. Target distributions by depth are[.2,.3,.5],[.1,.2,.7],[.25,.15,.6],[.4,.35,.25], with token2 proposed. Accepted0/1/2/3 counts1033/319/289/407, corrected draws preserve target mass on unproposed tokens0/1, and bonus tokens follow their target row. Per-depth chi-square0.268228/1.85503/2.32232/5.69638 is below the existing fixed-corpus threshold24. Reverse request order and condensed subset preserve all outputs/counts bitwise.30489/30489,exit0. This is operator RNG evidence; full-model C4 identity remains R08. First test build failed on two same-line doctest CAPTURE declarations; corrected source rebuilt successfully.
+
+Receipt/source/retained final binaries/builds/results: `/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r07-processors-v1/receipt-v1.json`. R07 C1 functional sampling delivery is available; numerical/target/serving qualification stays open. Next is dependency-ready R08 genuine simultaneous C2/C4, unequal lengths, request turnover and isolation. Production inactive; no commit/push.
+
+## 55. Recovery R08: genuine simultaneous eager C4/C2
+
+A focused public-engine test submits four unequal natural prompts before the first step, then reuses the engine for two requests. First C4 forward has actual67 tokens and offsets[0,26,37,54,67]. One request ends by EOS after5 IDs; the others hit distinct8/16/23 output caps. Spec-OFF passes127/127, MTP3 passes84/84, both exit0. All six completed raw-ID sequences exactly match their native spec-OFF controls.
+
+MTP3 C4 runs9 steps with request counts[4,4,4,3,2,2,1,1,1] and logical full-head rows[4,16,16,12,8,8,4,4,4], proposing54 drafts. C2 runs4 steps with counts[2,2,2,1], head rows[2,8,8,4], proposing15 drafts. Trace records full248320-token and compact65536-token heads; padded projection rows are distinguished from logical verification rows.
+
+Receipt/source/frozen tested executable/build/logs/results: `/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r08-batch-v1/receipt-v1.json`. This is native greedy functional batch evidence, not original numerical qualification. Groups C4 then C2 are serialized; continuous1->4->2->1, cancellation/replacement, state sentinels and page crossings remain next. Graphs/prefix disabled. R08 partial; target/serving false and S1/R06 failures preserved. Production inactive; no commit/push.
+
+## 56. Recovery R08: continuous turnover and one-token admission reset
+
+The public-engine test starts one48-token request, admits three unequal requests during decode, aborts one after a completed step, and admits a different one-token prompt into its freed slot. It follows stable request IDs and compact bases through reorder/condense, proves ordered1->4->2->1, and poisons unused Conv/FP32 SSM slots in the first/last GDN layers before C4 admission and during the final C1 tail.
+
+Initial off892/892 passes, but MTP3 fails470/471,exit1: replacement IDs differ. A one-token fresh prompt is classified decode, bypassing prefill has_initial_state reset, and a newly assigned recurrent slot retained the prior owner's bytes. Runner admission now zeros all published states and all k+1 slots on assignment to a new identity, before pinned-prefix restoration. Existing owners retain their states; unused slots are not cleared merely on release.
+
+Rebuilt off894/894 and MTP3 473/473 pass,exit0. All four completed raw-ID sequences agree exactly, including the one-token replacement also matching its standalone control. MTP3 request counts[1,4,4,4,3,3,2,2,2,2,1,1,1,1,1,1]; mixed spec/prefill is witnessed. Stable bases remain unique; replacement reuses cancelled base12; no later cancelled-ID output. First/last-layer unused-state sentinels remain bit-exact during tail. These are completed-step cancellation checks, not in-flight interruption.
+
+Red/green executables and sources, build logs and exact runs: `/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r08-lifecycle-v1/receipt-v1.json`. R08 functional lifecycle delivery passes; page-boundary integration is next. Prefix/graphs disabled, greedy controls only, target/serving false and S1/R06 numerical gates unchanged. Production inactive; no commit/push.
+
+## 57. Recovery R08: simultaneous exact page-boundary continuation
+
+Two C2 groups use real tokenized passage prefixes of[1599,1601] and[1600,1599] tokens, native feedback and8 emitted IDs each. Every active token's write slot is checked against its own physical block table and absolute position; no across-request duplicate write slots are allowed. Positions1599 and1600 are observed, and MTP3 must witness8 logical C2 verification rows.
+
+The initial bounded16-block pool passes off12898/12898 but serializes MTP3, whose12907/12909,exit1 fails only both genuine-C2 witnesses; all four outputs still equal off. Increasing the focused fixture pool to32 (already used for short C4) gives off12898/12898 and MTP3 12903/12903,exit0, with genuine C2 and exact raw-ID agreement for all four outputs. This adjusts admission capacity, not numerical thresholds or model arithmetic.
+
+Both pool16/pool32 executables, sources, build/run commands, logs and actual prompt IDs are frozen in `/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r08-page-v1/receipt-v1.json`. Batch/lifecycle/page functional R08 delivery is available. Greedy controls only; original numerical target and serving gates remain false. Next R09 is compatible prefix identity and joint recurrent/draft state protocol, retaining the explicit unsupported guard until that protocol is tested. Production inactive; no commit/push.
+
+## 58. Recovery R09: shifted MTP prefix identity
+
+The request hasher gains an explicit opt-in MTP boundary policy. Draft KV at the final position depends on the next token embedding, so the key includes that next token under a versioned extra-key tag; a full block with no known next token is deferred. Existing MM/LoRA/salt fields and parent chaining are retained. Ordinary hashing remains default and unchanged.
+
+Focused MTP key tests plus existing ordinary incremental byte-level control pass2cases30/30,exit0. They cover different next tokens, unchanged later-token effects on an earlier block, append vs cold construction, deferred block completion, one-token pages and salt/LoRA separation. Sources, tested binary, build and commands are frozen in `/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r09-prefix-hash-v1/receipt-v1.json`.
+
+This delivery is the key primitive; integration remains pending and both existing prefix/spec guards were retained at the tested snapshot. Next is joint target/recurrent/draft publication/restoration and bounded real cold/warm MTP3 checks before long-context runs. Numerical target/serving qualification remains false. Production inactive; no commit/push.
+
+## 59. Recovery R09: first joint native MTP3 prefix protocol
+
+Loader/runner now admit prefix speculation only with the native MTP model; other methods remain refused. MTP requests use the tested next-token boundary keys. Recurrent snapshot publication moves after completed MTP proposal/prefill, with a completion wait covering target and shifted draft KV. Shared target/draft prefix pages retain the engine's page identities; Conv/FP32 SSM snapshots are restored to the reset new owner's private slot. No cached proposal, sampling history or mutable running state is imported.
+
+Real eager MTP3 no-cache control passes56/56; prefix run55/55,exit0. P3201 requests start cold at0, repeat/append(P3217) restore3200, a changed following token1600 correctly starts cold at0, and the original prefix again restores3200. All five8-token raw-ID completions exactly match their independent no-cache controls; original prefix survives the alternate suffix. Actual publish/restore traces are retained. Target prefill chunks1600 align snapshot boundaries; no speed claim or original numerical qualification.
+
+Source/build/tested executable/raw prompts/commands/logs: `/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r09-prefix-native-v1/receipt-v1.json`. This is the first bounded native prefix/MTP3 protocol delivery, not R09 completion. Partial-hit/cancel/eviction and measured resources precede32K/64K/128K/exact261120+1024 capability. S1/R06 gates remain open, target/serving false. Production inactive; no commit/push.
+
+## 60. Recovery R09: partial hits, snapshot LRU, cancellation and short resources
+
+Extended native MTP3 tests add a1600-token partial hit, three new prefix identities that evict the original from the four-entry recurrent snapshot cache, original-prompt recomputation, and completed-step cancel/slot reuse after warm restore. Cold280/280 and prefix257/257 pass,exit0. All ten raw-ID controls match exactly; prefix starting positions[0,3200,3200,0,3200,1600,0,0,0,0]. The cancelled owner never emits again; subsequent output matches the original. Initial cold test260/261,exit1 incorrectly required a completion from an incomplete prefill chunk; the corrected test expects no output there. Failed executable/source/log retained.
+
+Prefix backend-owned device peak21,973,124,196B (20.46GiB); Linux host peak RSS13,581,844,480B (12.65GiB). Live backend bytes rise by1,353,540B on the first append shape, then remain21,958,837,284B for requests2..9. Engine release leaves947,295,772B in persistent backend resources and no pinned bytes; this is not a zero-allocation or repeated-engine leak-free claim. GPU high-water excludes driver/library-owned allocations; driver free is sampled at step boundaries. Fixed native GDN workspace230,686,720B (220MiB), graph bytes0.
+
+Receipt/executables/sources/raw outputs/resources/commands: `/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r09-prefix-lifecycle-v1/receipt-v1.json`. Short prefix protocol/lifecycle is functional, long-context and admission remain pending. Next real32K cold/warm/append, then64K reuse/eviction/cancel and memory/page accounting before128K/exact262144. Numerical/target/serving gates remain open. Production inactive; no commit/push.
+
+## 61. Recovery R09: real32K MTP3 cold/warm/append
+
+The focused prefix harness now accepts explicit prompt lengths through65536 for separate bounded runs; larger admission is not yet claimed. Real tokenized repeated passages P32768/P32768/P32784 with native MTP3 and O8 each pass cold303/303 and prefix147/147,exit0. Prefix first positions[0,32000,32000], steps23/3/3 versus cold23/23/23. All three raw-ID outputs exactly agree. Prefill chunks1600 align snapshot boundaries; appended16 prompt tokens are actual input tokens.
+
+Prefix backend-owned GPU peak22,967,503,784B (21.39GiB), host peak RSS13,598,646,272B (12.67GiB). Released backend live1,080,515,936B, pinned0, graph0. The fused oneDNN SDPA trace reports scratch descriptor0 throughout; no hypothetical full score-tensor allocation is inferred. Backend peak excludes driver/library-owned allocations; step-boundary driver free is retained. No timing score or numerical qualification.
+
+Initial build failed on an unparenthesized doctest boolean expression. A previous binary was launched too early, stopped with exit137 and excluded; stale-named artifacts retained. Corrected build-v2 succeeds before both counted32K runs. Frozen source/executable/build/commands/results: `/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r09-prefix-32k-v1/receipt-v1.json`. Next64K reuse/eviction/cancel, then admission/page accounting before128K/exact261120+1024. S1/R06 target/serving gates remain open. Production inactive; no commit/push.
+
+## 62. Recovery R09: real64K MTP3 reuse, eviction and cancel
+
+P65536/P65552 natural repeated-passage controls use native MTP3, FP8 KV, O8 each and139-block test pools. Cold914/914 and prefix599/599 pass,exit0. Prefix first positions[0,64000,64000,0,0]: genuine64K-near warm reuse/append, a distinct prefix, then recomputation after the original's snapshot/page cache is displaced. All five raw-ID outputs exactly equal their cold controls. A subsequent warm cancel restores64000, emits no later cancelled-ID output, and fresh reuse emits the original8 IDs.
+
+Prefix backend-owned GPU peak26,213,530,872B (24.41GiB), Linux host peak RSS13,592,801,280B (12.66GiB); released backend live945,934,000B, pinned0, graph0. Actual per-step driver free and live ownership are retained. Fused oneDNN scratch descriptors remain0. These backend GPU metrics exclude driver/library-owned allocations; no unmeasured total-driver peak or performance qualification is claimed.
+
+Frozen executable/source/build/commands/raw IDs/resources/traces: `/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r09-prefix-64k-v1/receipt-v1.json`. R09 functional32K/64K prefix/lifecycle delivery is available;128K and exact261120+1024 remain. Inspect shared target/draft page-table admission accounting before those runs, then R10 graph ownership and R11 final screen. Original S1/R06 numerical gates and target/serving false remain. Production inactive; no commit/push.
+
+## 63. Recovery R09: shared native MTP page allocation
+
+EXL3 MTP now registers its separately stored draft KV layer in the target FA group, matching the page IDs actually consumed by the proposer. The loader opts in only for MTP; other checkpoint/method topologies retain their separate draft group. Resolved names count every target/draft storage layer in the byte budget. The runner excludes the additional draft layer from the target membership mask and allocates its own KV buffer against the target geometry.
+
+Focused configuration2cases36/36 and actual MTP3 prefix lifecycle261/261 pass,exit0. All ten O8 raw-ID outputs equal retained cold controls; starts[0,3200,3200,0,3200,1600,0,0,0,0], cancel/restore reuse passes. Fixed64-block test storage remains unchanged; the savings are in duplicate global-ID reservation, not omitted KV bytes. Host configuration in this first receipt is synthetic48-layer16FA/32GDN; the native pinned model has64 layers,16FA/48GDN plus its draft. Initial build was deliberately stopped,exit137, before testing to limit the option to MTP; no stale executable run. Completed build-v2 exits0.
+
+Frozen sources/executables/commands/raw controls: `/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r09-shared-pages-v1/receipt-v1.json`. Numerical/target/serving gates remain open; no commit/push.
+
+## 64. Recovery R09: bounded recurrent admission and retirement
+
+The shared EXL3 MTP topology now selects the existing aligned Mamba allocator. Request-owned native Conv/FP32 SSM storage is unchanged. Page bookkeeping retains k+1 current identities plus one transition identity, while the logical block-table row remains full-length and null-padded. Non-shared configurations retain mode none.
+
+Focused host3cases1524/1524,exit0 verifies the pinned64-layer geometry's byte count, startup refusal below170 global blocks, every allocation through262144 positions, at most five live recurrent identities, second maximum request rejection, and free/readmission. Pool accounting includes164 target page identities, five recurrent identities and one null block; all17 actual FA/draft buffers are charged,55,705,600B per global block. This is metadata allocation evidence, not262K inference or1024 emitted tokens. Initial test61/62,exit1 wrongly applied waiting-only full-prompt reservation at every running chunk; corrected to the scheduler's actual calls without changing thresholds. Failed executable/source/log retained.
+
+Actual prefix MTP3 lifecycle261/261 and genuine C4/C2 control84/84 pass,exit0. All ten prefix outputs and six batch outputs exactly match retained cold/off controls. Prefix backend GPU peak21,973,124,196B; host RSS peak13,574,574,080B, released backend947,295,772B,pinned0,graph0. GPU backend metrics exclude driver/library allocations. Frozen evidence: `/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r09-recurrent-admission-v1/receipt-v1.json`. Next actual128K and exact261120+1024 native capacity. S1/R06 qualification failures remain open; production stays inactive; no commit/push.
+
+## 65. Recovery R09: actual128K MTP3 capacity
+
+A dedicated single-request capacity harness uses max_model_len262144,180 global blocks, four configured recurrent request slots, FP8 KV, native MTP3 and recurrent prefix publication. Actual tokenized natural repeated passage P131072/O8 completes in84 engine steps,786/786 assertions,exit0; six drafts proposed and eight native-selected emitted IDs retained. This proves one long request, not four simultaneous maximum contexts. Initial compile failed on a nonexistent StepInputs accessor; corrected build exits0 before any GPU run.
+
+Backend GPU peak30,443,559,840B (28.35GiB), Linux host RSS peak13,586,153,472B (12.65GiB). Released backend945,934,504B,pinned0,graph0; actual step-boundary driver-free observations retained. Backend peaks exclude driver/library-owned transient allocation. No numerical/oracle or matched-performance qualification is inferred. Frozen source/executable/build/commands/input IDs/output IDs/resources: `/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r09-capacity-128k-v1/receipt-v1.json`. Next exact261120+1024 native MTP3 capacity, thenR10/R11. Original S1/R06 failures remain open; production inactive; no commit/push.
+
+## 66. Recovery R09: exact261120+1024 native maximum context
+
+The same successfully built capacity executable completes actual P261120 and exactly1024 emitted output tokens:262144 total,420 engine steps,767 native draft proposals,4318/4318 assertions,exit0. Native MTP3, FP8 KV, full target/compact draft contract and recurrent prefix publication remain enabled; four recurrent request slots are provisioned with a180-block global pool. Highest target input position262142 is within the context. This is one long request with greedy ignore-EOS capacity output, not four concurrent maximum requests or a quality/oracle benchmark.
+
+Backend GPU peak30,608,586,304B (28.51GiB), Linux host RSS peak13,595,750,400B (12.66GiB). Engine release leaves983,960,968B in backend resources,pinned0,graph0. Live device and driver-free samples are retained across all420 steps; backend peak excludes driver/library-owned transient allocation. Complete input/output IDs, trace, resources, command and frozen parent executable/source identities: `/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r09-capacity-262k-v1/receipt-v1.json`.
+
+R09 eager functional prefix/lifecycle/admission/maximum-context delivery is demonstrated. S1/R06 numerical failures and target/serving qualification remain open; no thresholds changed. NextR10 persistent graph hidden/logit outputs and ownership/replay controls, thenR11 final screen. Production remains inactive; only chat UI remains in Docker; no commit/push.
+
+## 67. Recovery R10: paired graph hidden/logit output ownership
+
+Dense graph slots now hold a persistent normalized FP16 MTP hidden tap and logits. Holding either returned output retains both buffers and a one-shot producer readiness event; a live output lease retires the captured generation before its destinations are replaced. The proposer waits on the producer event before consuming the hidden tensor. CPU capture-routing/ownership controls pass5cases89/89,exit0, including held outputs after graph destruction and retirement/re-capture. Initial88/89 exposed the sticky captured() diagnostic; it now reflects live captured slots.
+
+Frozen component source/executable/build/red and green controls: /home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r10-graph-output-v1/receipt-v1.json. CPU events have no native handle; this is not real SYCL replay or cross-queue qualification. Public hidden-tap graph dispatch and real native controls follow. Existing S1/R06 numerical gates stay open, target/serving false; production inactive.
+
+## 68. Recovery R10: public native dispatch and metadata preflight attribution
+
+The public dense route passes MTP hidden taps into supported decode/speculative graphs while retaining eager prefill/mixed fallback. A fresh native MTP3 eager C1 control passes23/23,exit0: two64-token requests exactly match the existing no-MTP raw-ID baseline. The real graph arm refuses its first capture,exit1, before returning captured logits: metadata is being written inside capture. Both initial and first corrected graph executables/logs are retained, without claiming replay success.
+
+Per-layer step-local RoPE row indices moved into persistent StepDevInputs. Host ownership/routing controls remain89/89,exit0. Backend refusal diagnostics now identify the affected validation; the next real run narrows the remaining refusal to EXL3 SmallM shard_of_nb. Single-projection routing maps were zero-filled on every call. The current correction stores the immutable generated map with the weight, and adds a focused real single-projection graph replay/changed-input control. Compilation/testing of this correction is pending; a compile API typo is retained in build-v6.log and no stale executable was launched after it. XPU already mandates persistent graph input staging; its existing policy remains unchanged.
+
+Sources/executable identities, commands and incremental logs are under /home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r10-native-c1-v1. R10 remains partial; real native capture, state semantics, C2/C4 and GPU lifetime cases remain unqualified. Target/serving false, existing numerical thresholds unchanged; production inactive, no commit/push.
+
+## 69. Recovery R10: real C1 capture/replay functional control passes
+
+Generated one-group EXL3 routing metadata is now owned with its projection and initialized once outside capture. A focused real four-bit MLP-down projection test passes31/31,exit0: captured M128 output is bit-identical to eager and the frozen reference, the map address is stable, and a second replay observes changed zero input. The shared StepDevInputs RoPE row indices remain immutable and persist across capture. The backend preflight guard is unchanged apart from a diagnostic identifying the affected check.
+
+Corrected build-v7/v8 complete before counted tests; no stale binaries. Final host ownership/routing controls pass5cases89/89. Same frozen build native MTP3 C1 eager23/23 and graph27/27 pass,exit0. Two requests emit64 IDs each, exactly equal to eager and the prior ordinary control. Proposal/acceptance counters also agree:54 proposed/47 accepted each. The graph arm records two genuine SYCL segments and replays16 times by request0 and34 cumulatively by request1; eager records zero. Backend graph device bytes8192 are reported without inferring a total driver/library footprint or a serving speed.
+
+Frozen sources/executables, command lines, raw outputs and failed preflight attempts: /home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r10-native-c1-v1/receipt-v1.json. This completes the bounded native C1 functional graph component, not R10 state/lifecycle qualification. Next is all-layer Conv/F32 SSM comparison, C2/C4 supported forms and GPU queue/output/cache lifetime cases. Original S1/R06 numerical gates remain open and unchanged; target/serving false. Production inactive; no commit/push.
+
+## 70. Recovery R10: full C1 GDN state snapshots expose repeat variability
+
+The native C1 test optionally copies every Conv/F32 SSM row in all48 GDN layers after each of its two completed synchronous MTP3 requests. Both arms use the same frozen executable and independent read-only probe queue; snapshots are diagnostic outputs, never runtime inputs. Eager1180/1180 passes. Graph2656/3104,448 failures,exit1 fails exact-byte row equality while retaining exact64-token IDs, counters and all36 speculative transaction traces. Actual two captures/34replays remain witnessed.
+
+The first differing final state is GDN layer2 SSM, max absolute1.8067657947540283e-7, relativeL2 2.0658236797990362e-7. The identical eager request repeated in the same engine also differs there, and its second result exactly matches graph in this layer. Later layers amplify differences; last SSM graph/eager relativeL2 .0028929475093169062. This rules out attributing the observed final-state difference solely to graph dispatch; it does not resolve the earliest arithmetic cause or qualify states. Existing strict byte test and original numerical bands remain unchanged.
+
+Frozen snapshots/source/executable/commands/failed assertions and CPU-only diagnostic: /home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r10-c1-state-v1/receipt-v1.json. Full C1 state qualification remains open alongside S1/R06. Next dependency-ready work is supported C2/C4 native capture and lifecycle witnesses; no broad repeated D64 campaign follows this read-only evidence. Production inactive; no commit/push.
+
+## 71. Recovery R10: supported C4/C2 native graph witnesses pass
+
+The focused batch test has a separate matched graph-control mode with output caps16/20/24/31 and ignore_eos=true in both arms, allowing genuine C4 verification to outlive both cold ring slots. Historical R08 caps/EOS behavior remain the default. Per-step capture/replay counters are recorded; each group must witness a replay while the full requested concurrency and all four MTP verification rows/request are active, rather than merely a later C1 tail.
+
+Same frozen build eager112/112 and graph119/119 pass,exit0. All six raw-ID completions match: C4 outputs16/20/24/31, C2 outputs16/20. Full C4 replay steps3/4/5 and full C2 replay steps2/3/4/5 are observed. Total six captures/thirteen replays; the platform graph batch limit remains4. This is functional C4/C2 dispatch and reuse evidence, not EOS/in-flight/cancellation qualification or a performance score.
+
+Source/executable/commands/raw outputs/logs: /home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r10-batch-graph-v1/receipt-v1.json. Full C1 state comparison remains failed and preserved with native eager repeat variability; S1/R06 gates unchanged. Next is bounded same-input FP16 BA repeatability attribution and remaining GPU output/queue/cache lifecycle cases. Target/serving false, production inactive; no commit/push.
+
+## 72. Recovery R10/R02: deterministic dense FP16 BA closes native C1 state control
+
+The same-input BA operator had previously varied3/6/7 half values at P128. Dense FP16 oneDNN descriptors now request deterministic reductions; GPTQ4 and EXL3 W8A8 descriptors retain their prior policy. The focused actual P128/D1 BA test requires zero differing halves across all three repeat pairs, passes36/36,exit0, and observes jit:gemm:any/scratch descriptor0. This is native repeatability, not oracle qualification. Source/binary/logs: /home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r10-ba-deterministic-v1/receipt-v1.json.
+
+The newly linked full native C1 MTP3 eager1180/1180 and graph3104/3104 pass,exit0. All96 Conv/SSM tensors across48layers/all4slots are bit-identical between the two eager requests, and both graph requests'192 tensors/768rows exactly match their eager controls. Both64-token raw-ID sequences remain exact, with two actual captures/thirty-four replays. The earlier448-row failure and its source are preserved; only the native dense-F16 reduction policy changed in the product.
+
+Full-state source/executable/snapshots/commands: /home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r10-c1-state-deterministic-v1/receipt-v1.json. This closes the bounded native C1 state/control regression, not original S1/R06 target/draft numerical gates or R10 in-flight ownership. Next reconfirm C2/C4 on the arithmetic repair, then supported GPU event/output/cache/cancellation cases. No timing qualification; production inactive, no commit/push.
+
+## 73. Recovery R10: C4/C2 reconfirmed after dense FP16 repair
+
+The exact C1 state-qualified deterministic candidate binary is reused for matched C4/C2 controls. Eager112/112 and graph119/119 pass,exit0. All six outputs16/20/24/31 and16/20 exactly match; both full C4 and full C2 replay witnesses remain true. Source/executable identity is the C1 deterministic receipt, and independent batch logs/commands/results are frozen in /home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r10-batch-graph-deterministic-v1/receipt-v1.json.
+
+These are supported batch functional controls after the arithmetic change. C1 all48-layer/all4-slot state equivalence is established separately; full C4 states, original oracle numerical gates, in-flight output/event/cancellation/cache cases remain open. Next real GPU paired lease/queue/retirement tests; graph batch limit4 unchanged. Production inactive; no commit/push.
+
+## 74. Recovery R10: real GPU paired outputs survive retirement and engine destruction
+
+Read-only runner output accessors let the focused public engine test retain actual outputs. Hidden-only and logits-only owners each retain the paired FP16 hidden/F32 logits storage and producer event. Two independent consumer queues read all bytes after every subsequent native step and after engine destruction;341/341 assertions pass,exit0. Both64-token outputs are exactly equal; retained generations force retirement/new destinations and re-capture, with2captures/16replays. The sampler has already completed its queue when public step() returns, so this does not claim pending cancellation or arbitrary early release of asynchronous consumers.
+
+Frozen sources/executable/commands/raw result/build and prelaunch attempts: /home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r10-gpu-output-lifetime-v1/receipt-v1.json. Next direct supported forward pending/event cancellation and remaining graph lifecycle/cache/prefix controls. Original S1/R06 gates remain open, target/serving false. Production inactive; no commit/push.
+
+## 75. Recovery R10: pending native graph forward cancellation and event consumers
+
+The focused test uses the production Scheduler/GPUModelRunner execute_model/sample_tokens split over the real model. Completed warmup steps sample/propose/update normally using only native IDs. The next actual graph replay returns without sampling; its producer event is observed incomplete both before and immediately after scheduler abort. An independent consumer waits that one-shot producer event and enqueues device copies while the retained pair stays owned. A replacement request resets/reuses the native owner and emits the exact16 control IDs. All paired bytes remain exact after replacement and runner/graph destruction;76/76 assertions pass,exit0.
+
+Frozen source/executable/commands/provider trace/raw pending witnesses: /home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r10-pending-cancel-v1/receipt-v1.json. This qualifies the supported abandoned-forward/retained-consumer case, not arbitrary release before a consumer finishes. Public C4/C2 EOS/mixed graph lifecycle and prefix/cache controls follow; original S1/R06 numerical gates remain open. Target/serving false, production inactive; no commit/push.
+
+## 76. Recovery R10: public graph batch lifecycle and eager transition
+
+The public lifecycle test records actual captures/replays, checks mixed-prefill steps remain eager, retains early EOS and unused-slot sentinels, and compares cancelled-owner replacement with an independent native control. Eager497/497 and graph489/489 pass,exit0. Ordered1/4/2/1 concurrency, EOS after5 tokens, all raw IDs/finish reasons, exact sentinel bytes and cancelled-owner reuse agree. Four genuine captures/sixteen replays are observed. A separate26-token native prefill between already-active graph phases proves graph->eager->graph, with12 new output IDs exact across arms.
+
+The original one-token Hello reset case remains covered. v1 incorrectly expected that shape to be eager; graph482/484,exit1 and source/binary/logs are retained. It legitimately takes the single-row graph path, so v2 adds a real multi-token prefill instead of weakening the transition assertion or altering thresholds. Frozen evidence: /home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r10-public-lifecycle-v1/receipt-v1.json. Next graph prefix cache/reuse/eviction/cancel and full supported batch GDN states, thenR11. Original S1/R06 numerical gates remain open, target/serving false. Production inactive; no commit/push.
+
+## 77. Recovery R10: graph prefix warm/partial hits, LRU eviction and cancellation reuse
+
+Matched native prefix controls now use16 outputs only in the explicit graph-screen mode; legacy8-output mode remains. Eager396/396 and graph357/357 pass,exit0. All ten16-ID outputs and the16-ID continuation after cancellation agree exactly. First positions0/3200/3200/0/3200/1600/0/0/0/0 witness full/partial hits and LRU miss; cancellation uses3200. Every request has genuine graph replays (2/4/4/5/5/5/5/5/5/5); four captures/fifty-one replays total.
+
+Graph backend peak22,009,251,150B, host RSS13,567,651,840B. After engine release backend983,391,958B, graph0,pinned0; library/driver transients are not inferred from these counters. Frozen source/executable/commands/outputs/provider trace: /home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r10-prefix-graph-v1/receipt-v1.json. Next all48-layer/all16-slot C4/C2 state comparison, thenR11. Existing S1/R06 qualification remains open, target/serving false. Production inactive; no commit/push.
+
+## 78. Recovery R10: full native C4/C2 Conv and FP32 SSM states agree
+
+The batch control optionally snapshots every allocated recurrent row after each completed group. Same frozen candidate eager1270/1270 and graph7805/7805 pass,exit0. All192 Conv/F32 SSM tensors across48 GDN layers/all16 slots in C4 and C2 are bit-identical:3072 row checks, zero differing bytes, independent frozen SHA256 equality. All six raw-ID completions, finish reasons and proposal counts agree. Full C4 replay steps3/4/5 and C2 steps2/3/4/5 remain witnessed, with6captures/13replays total. Snapshots never enter runtime execution.
+
+Source/executable/commands/state files and hashes: /home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r10-batch-state-v1/receipt-v1.json. Together with C1 full states, paired output retirement/destruction/two queues, true pending cancellation/event consumers, public EOS/mixed/reset/sentinels/graph-eager-graph and prefix LRU/cancel controls, this completes the bounded supported R10 functional integration. R10 implemented/operator-tested true; original S1/R06 gates, target/serving qualification and overall completion remain open. NextR11 frozen practical capability screen and honest attributed serving measurements. Production inactive; no commit/push.
+
+The public dense-graph header now documents supported uniform verification, paired MTP ownership/readiness, the requirement to retain a carrier until cross-queue reads finish, and the separate aux/non-MTP slot-view contract. Documentation-only correction after the recorded state test; no automatic test needed, and the frozen test receipt remains identified by its original source snapshot. R11 will build/freeze the current source candidate.
+
+## 79. Recovery R11: frozen practical driver and first executable code task
+
+The public native engine driver uses one fixed262144/1600/C4/180-block MTP3/FP8/prefix configuration and the pinned chat template with thinking explicitlyfalse. Eight held-out tasks are frozen before inference: four executable Python functions, two60872-token retrieval questions and two schema-constrained JSON/tool records. The semantic checker executes code in a resource-bounded child with restricted definitions/builtins, checks outputs/exceptions/unchanged inputs and retains malformed/truncated output failures. Six positive/negative grader controls pass.
+
+First native merge-interval task79/79 passes,exit0; P98/O106 terminates atEOS and its four held-out execution checks pass without mutation. The partial grader deliberately exits1 because only1/8 tasks were selected. CPU-only pinned tokenizer confirms all98 first native input IDs exactly; retrieval bounds pass. Build optional-max_tokens typo and BatchEncoding diagnostic mistakes are retained, not claimed as model failures. Frozen source/executable/tasks/commands/results: /home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r11-capability-v1/receipt-first-code-v1.json. Full suite is running on the same candidate in b70-r11-capability-v1, tools session13985; continue polling that live handle, never restart solely on an observation timeout. Step wall times are labeled full engine steps, not target-forward timing or serving speed parity. R11/target/serving and original S1/R06 qualification remain open. Production inactive; no commit/push.
+
+## 80. Recovery R11: full practical screen passes6/8, structured MTP errors exposed
+
+All8 frozen tasks ran on the same native candidate. The request-completion harness341/341 exits0, which is not a quality success. Semantic validation exits1: four code functions/all20 held-out execution cases and both60872-token retrieval questions pass exactly; both schema/tool requests terminate error with incomplete JSON. Grader v2 has7/7 positive/negative controls and explicitly rejects error finish reasons; the original frozen grader/results are preserved.
+
+Scheduler.cpp1320 assigns FINISHED_ERROR when the structured FSM rejects returned IDs. Source attribution shows assemble_sample_logits still calls apply_grammar_bitmask with an empty spec-token map under a stale T0-only assumption, while failed requests actually have four verification rows. The manager also retains T0 row-capacity/draft-advance assumptions. Next correct full structured/MTP plumbing and test original failed tasks, preserving their inputs/limits/constraints; no switch to unconstrained output or MTP0. Frozen suite/raw answers/IDs/semantic checks/provider trace/source: /home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r11-capability-v1/receipt-suite-v1.json. Suite process/container is terminal; only chat UI remains. R11, original S1/R06 and target/serving qualification remain open. Performance comparisons follow feature correction; production inactive, no commit/push.
+
+## 81. Recovery R11: structured MTP/EOS integration closes frozen capability screen
+
+Scheduler now keeps only each grammar-valid draft prefix without mutating its real state, including async trim/validate/pad. Manager grows masks for all draft/bonus rows and rolls back actual successful advancements on either completion or failure. Runner retains scheduled spec row counts and masks every expanded logit row in dense request order. Focused scheduler/manager55/55 and mixed mask144/144 pass,exit0. First real native ticket now produces complete valid JSON but still terminates error;33/33 completion assertions are not a quality pass. This retained v1 exposes the second defect: backend only knows tokenizer.json EOS, while Engine InputProcessor resolves model/chat/generation EOS. The lazy factory now shares that resolved set; focused primary/secondary EOS15/15 passes,exit0.
+
+Both original schema tasks then finish stop and pass strict held-out validation with MTP3 and unchanged schemas/budgets. Selected single-task graders intentionally exit1 because each1/8 result is incomplete. Full same frozen v2 engine suite391/391 passes,exit0; semantic8/8 passes,exit0: four functions/all20 execution cases, both60872-token retrievals and both JSON/tool records. Every prompt ID matches the failed original suite; all six previously passing raw-ID completions remain exact. Schema outputs29/79tokens, accepted/proposed21/22 and58/58. After engine release graph bytes0. Async validation/padding is unit-tested; the GPU capability screen uses synchronous scheduler/runner.
+
+Frozen v1 failure/v2 sources, builds, executables, original tasks, commands, answers, provider traces and semantic outcomes: /home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r11-structured-mtp-v1/receipt-v1.json. R11 practical capability component is complete; wholeR11 measured optimization, original S1/R06 gates and target/serving qualification remain open. Next native serving timing/cost instrumentation and planned like-for-like sequential producer comparison; these capability step times are not performance qualification. Production inactive; no test/oracle container remains, no commit/push.
+
+## 82. Recovery R11: native serving timestamps, bounded profiling and MTP cache boundary repair
+
+The frozen native serving harness records actual emitted chunks, arrival/first-output/final timestamps, public MTP cycle wall times, proposed/accepted counts, actual scheduled positions and capture/replay deltas. Vendor-free optional target/draft queue brackets submit nothing when disabled; focused off/host/device-host controls pass68/68,71/71,81/81. The metric tool counts aggregate output in one common overlap interval and explicitly distinguishes diagnostic profiles from serving measurements.
+
+The initial exact C1P4096/O1024 run crashes in BlockPool::cache_full_blocks; GDB on the frozen old binary localizes the missing shifted MTP boundary hash. A tiny BS4 regression reproduces SIGSEGV after2 assertions. Cache publication now waits until both full computed page and committed next-token hash exist; the pool rejects missing hashes/allocations before mutation. Focused two-case29/29 passes,exit0. MTP3, prefix caching, budgets and hash policy remain unchanged. Corrected frozen v2 C1 passes2049/2049,exit0:1024 actual IDs,621/1209 accepted/proposed,2 captures/401 replays. Decode6.48217 emitted tokens/s,TTFT15.92221s,TPOT154.26925ms,E2E173.73968s. This cold first request includes native lazy kernel/graph warmup; model loading is excluded. It is one run, not a matched Python comparison or three-repeat qualification.
+
+The separate profile initially hits the fixed host record cap and aborts; retained failure is not a result. Harness-only per-cycle draining after each cycle timestamp bounds pending diagnostics without raising caps or changing the unprofiled arm. Frozen v3 profile passes2049/2049,exit0 and emits exactly the same1024 IDs. Its403 decode cycles average target queue span358.69250ms and draft33.66268ms; queue spans include host gaps and nested stages are not additive. The two real eager warmup cycles3/4 expose129 Gemma5120 norms each, totaling301.48938/295.35261ms of371.05510/361.11719ms target spans. Graph profiling exposes aggregate graph compute, not individual captured-node costs. This identifies a bounded norm optimization opportunity without guessing a GEMM bottleneck.
+
+Initial C4 identical prompts generate all four256-token outputs but fail three cold-position assertions at3200: prefix caching legitimately reuses earlier requests. Preserve that failure. Four natural vegetable variants, encoded on CPU by the pinned tokenizer with intact chat template and exactly4096 tokens each, have distinct first pages. With the same binary and unchanged strict cold assertions, C4 passes2353/2353,exit0; all four start0. Actual common overlap contains951 emitted tokens at19.74668 aggregate tokens/s, E2E138.29716s,569/1359 accepted/proposed,5 captures/110 replays. Neither case changes the original numerical bands.
+
+Frozen sources/binaries/workloads, failed builds/crashes, raw profiles, timestamps, source-identified cost split and commands: /home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r11-serving-timing-v1/receipt-v1.json. Next scoped compile-time norm geometry specialization and immediate original identical-operand/alias checks, then actual native remeasurement and remaining32K/mixed/finalC4 plus sequential pinned producer. Current performance candidate has not rerun the practical screen; historical8/8 is retained under its own source. R11/target/serving remain incomplete; production inactive, no commit/push.
+
+## 83. Recovery R11: native FP32 Gemma boundaries reduce measured C1 cycle cost
+
+The geometry-only specialization passes821/821 original controls and2049/2049 native C1, with exact1024 IDs, but measures6.47424 versus6.48217 decode tokens/s. It provides no demonstrated gain in this single focused trial and is removed from product source. Frozen source/binary/result/commands remain in norm-specialization-rejected-v1.json; this is not a speedup.
+
+The next scoped hypothesis replaces external explicit-RN calls only inside the eligible FP16 Gemma5120 path with native FP32 adds/multiplies. Local clang contract(off) and existing -fno-fast-math/-ffp-contract=off preserve separate F32 boundaries; precise division/sqrt flags remain. The original runtime row geometry, reduction tree, reciprocal factor, residual/output stores and shared Q/K helper are unchanged. Short/odd M3/M4/M12/M16, aliases/padding, layer0/layer3 controls pass821/821,exit0. Original P128/D1 input/post-norm plus aliases pass64/64,exit0; all four normalized outputs and residuals are byte-exact. The full target P128/D1 comparison against all three fixed producer repeats passes197/197,exit0. An initial existing default export-name refusal159/160,exit1 is retained; the retry uses a fresh output prefix on the separate receipt mount and never overwrites originals.
+
+Frozen v5 C1P4096/O1024 passes2049/2049,exit0, with every1024 raw ID and every per-cycle proposed/accepted count exact to the unprofiled baseline. Same406 cycles,621/1209 accepted/proposed and2 captures/401 replays. Decode27.92915 emitted tokens/s,TTFT14.70534s,TPOT35.80489ms,E2E51.33377s. The observed single-trial decode ratio is4.30861; neither this nor the earlier baseline is a three-repeat or Python parity qualification. Model load is excluded, lazy native startup remains included. Backend peak30,349,646,306B,host RSS13,582,405,632B; backend graph bytes0 after release.
+
+Separate same-candidate profiling also passes2049/2049,exit0 and emits identical IDs. Mean decode target queue span83.36417ms and draft8.41948ms, versus358.69250/33.66268ms before. The actual first two eager decode cycles'129 norm kernels total24.12636/20.42032ms, versus301.48938/295.35261ms. These diagnostic nested/queue intervals are not added to unprofiled serving throughput. The whole implementation is still unqualified: same frozen v5 D64 validation fails3 assertions,804/807,exit1. D11 TV.0221232, D29 TV.287664/KL.227609, minimum top10 overlap9; ancillary greedy mismatchD27. All original source failures and fixed TV.02/KL.002/top10>=9 bands remain. The greater D29 discrepancy is not explained away as harmless rounding; strict state and R06 draft/full-target qualification were not rerun or transferred.
+
+Source/compiler flags/executables/fixtures, original controls, raw logits, new/old cost splits, successful and failed runs: /home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r11-serving-timing-v1/receipt-norm-native-f32-v5.json. Next pinned producer timing with exact workload-v2 IDs and actual launch/cache/warmup receipts, remaining native32K/mixed/finalC4 cases, small sequential three-repeat comparison and current-source practical screen. Historical8/8 belongs to its earlier frozen source. R11/target/serving remain incomplete; production inactive, only chat UI remains, no commit/push.
+
+## 84. Recovery R11: matched warmup, pinned producer timing and current-source screen
+
+The native harness optionally runs the exact case with O32 per request, using native feedback and the same arrival policy, then clears prefix state before scoring. Frozen v6 changes only this harness relative to the v5 norm product. Incremental build exit0; warm C1 passes2071/2071 and final C4 passes7794/7794,exit0, with cold first positions0 and exactly1024 output IDs/request. C1 IDs remain exact to un-warmed v5. The shared report's producer branch passes its focused positive/negative controls; it records actual chunks and supplied proposal statistics without relabeling frontend batches as GPU MTP cycles.
+
+The pinned offline Python public-engine tool verifies checkpoint/image/plugin/subset and resolves actual worker/configuration receipts. Same FP16/FP32 GDN/FP8 policy/MTP3, max262144, batch1600,C4,pool180 and synchronous FULL_DECODE_ONLY capture sizes1/2/4/8/12/16. Exact original prompts, budgets and O32 warmup/reset are shared. Initial config misses the parent b70_inventory module; corrected frozen root mount passes configuration. The first real C1 completes warmup but refuses an incorrect physical-dtype assertion. Pinned FP8 cache policy uses torch.uint8 storage; v2 explicitly checks both, retains the failed v1 and completes actual C1/C4,exit0. No threshold or model behavior is relaxed.
+
+First matched C1: native27.77448 versus producer55.74871 emitted decode tokens/s; TTFT4.88902 versus1.94625s; E2E41.72142 versus20.29647s. Native621/1209, producer612/1239 accepted/proposed. Both emit1024 real IDs from the same4096 prompt; their free continuations differ. This is one trial each, not numerical/quality parity or three-repeat qualification. Constructor startup and real O32 warmup are excluded; prefix hits are forbidden during scoring.
+
+First submitted C4 final case: native133.62631s versus producer76.16722s E2E for4096 total output tokens,30.65265 versus53.77642 E2E tokens/s. Native common decode overlap contains3791 tokens at66.42725 aggregate tokens/s. Producer first/final times show four sequential decode phases with no common overlap, so its C4 overlap metric and the matched simultaneous-decode ratio are null. Do not compare native overlap throughput with producer E2E throughput. Native TTFT5.70256/33.17424/51.57680/71.42678s; producer1.95132/19.86078/39.21542/59.46450s. All prompt IDs match; all four free output sequences differ. Read-only pinned source supports an attribution: engine-core cache-block negotiation chooses the actual1600-token groups; align splitting rounds a fresh smaller first chunk to zero when a running decode has consumed part of the1600 budget, then defers waiting admission. This is source-based inference consistent with timestamps, not an instrumented scheduler trace. The fixed comparison configuration is retained.
+
+The remaining native constructor-only representative cases pass on v5: P32768/O256633/633,exit0, TTFT49.27112s/decode12.74296 tokens/s/E2E69.28233s; mixed P128/O256 plus P32768/O2561058/1058,exit0,512 emitted tokens/E2E224.04384s. The mixed trace witnesses21 actual short-decode/long-prefill cycles; the long request's relative TTFT190.86383s remains explicit. Its27.37338 tokens/s common overlap does not hide slow prefill. These cases have no explicit request warmup and are not compared with the newly warmed Python cases.
+
+Current frozen v6 practical screen passes391/391 and semantic8/8,exit0: four functions/all20 held-out cases, both60872-token retrievals and both structured/tool records. All8 prompt IDs and raw completions are exactly equal to the historical successful candidate; all finish stop. Peak backend30,461,556,091B; graph bytes0 after release. Historical evidence remains source-identified separately.
+
+Frozen source/build/workload identities, commands, failed attempts, actual config/allocations, outputs and comparisons: /home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r11-serving-timing-v1/receipt-serving-matched-v6.json. The planned small sequential three-repeat C1/C4 comparison is next; C1 native repeat2 is running on the same frozen candidate. Original S1/R06 and v5-product D64 failure804/807 remain release blockers, with unchanged bands. R11/target/serving false; goal active, production inactive,180W unchanged, no commit/push.
+
+## 85. Recovery R11: planned three-repeat C1/C4 comparison complete
+
+Frozen native v6 and pinned producer v2 run sequentially, three unprofiled trials per arm/case at180W, with identical case prompt IDs, output caps, MTP3/subset, FP16/FP32 GDN/FP8 contract and O32 request warmup followed by prefix reset. No performance trace is enabled. Every native C1 passes2071/2071; every native C4 passes7794/7794; all six producer runs finish length with exactly1024 tokens per request,exit0. Configuration/images/tool identities and actual proposal counters are recorded. No variant continuation is injected.
+
+C1 native decode27.77448/27.62786/27.81462 emitted tokens/s, median27.77448; producer55.74871/63.98214/64.01968, median63.98214. Median native/producer ratio.43410 describes these actual autonomous outputs, not same-continuation or numerical parity. Native IDs and621/1209 counters are identical in all trials. Producer repeat1 differs from repeat2/3 beginning at output index48 (39666 versus6761); repeat2/3 match exactly. Producer612/1239 then666/1074 accepted/proposed. Same prompt, tool/image and overrides are verified. This variation is retained rather than explained away as harmless rounding or converted into a confidence interval. Native median TTFT4.88902s; producer1.95314s.
+
+C4 E2E native133.62631/133.72834/133.77234s, median133.72834; producer76.16722/76.25775/76.38876s, median76.25775, for4096 actual output tokens each run. Median E2E throughput ratio.57024. Native aggregate common-overlap decode66.42725/66.43523/66.44828 tokens/s; producer common overlap remains null in all three trials. Never compare these native overlap rates with producer E2E throughput or label the producer frontend batches GPU cycles. Each arm repeats all four own raw ID sequences exactly; cross-arm sequences differ. The same fixed1600-token batch budget constrains the pinned producer's align admission; these results do not claim its best possible production configuration.
+
+Immutable six-run receipts/raws/logs/source/commands: /home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r11-producer-serving-v1/comparison-c1-three-repeat-v1.json and comparison-c4-three-repeat-v1.json. Both original first-trial comparisons remain intact. This completes the planned small three-repeat comparison component only. Warm matched32K/mixed producer comparison and numerical target/state/draft release qualification remain open. Separate native mixed short-decode/long-prefill profiling is now running on v6 with constructor-only startup matching its unprofiled v5 baseline; no cost result is claimed yet. R11/target/serving false, goal active; production inactive,180W unchanged, no commit/push.
+
+## 86. Recovery R11: mixed profiling narrows synchronous readback/queue waits
+
+Separate constructor-only native v6 mixed profiling passes1059/1059,exit0; both256-token raw sequences exactly match the unprofiled v5 baseline. The extra assertion is the optional warmup-environment validation; no workload cap, arrival policy, MTP3, prefix rule or numerical threshold changes. Actual135 cycles include21 mixed target steps6–26, short positions>=128 and long positions<32768. This diagnostic's239.25740s E2E includes profiling/draining and is not serving throughput.
+
+Device target brackets for those21 mixed steps total190.81499s; enclosing host target brackets independently total190.78906s. Host staged_D2H_wait totals161.58968s across33642 calls (84.695% of those host target spans). A representative step7 has9.02602s host target duration and8.25143s staged readback wait. These waits include previously queued GPU work; they are neither isolated transfer bandwidth nor exclusive CPU compute. Metadata validation16.08277s, metadata_D2H15.35598s and named validation-error intervals overlap and must not be summed. The next small code change is profile-only copy byte/caller attribution at this existing staged-copy seam, preserving its ordinary safety/ordering, followed by one narrowed readback/metadata repair and immediate operation/state checks.
+
+The kernel trace does not establish GDN arithmetic as the dominant cost. Across the same21 steps it witnesses the chunked GDN path, including11,856 pair prepares/inverses and24,672 cross/output/state events. W8A8 validation/reconstruction/output stages and oneDNN stream brackets are recorded separately. Queue/library brackets include host gaps; nested spans are not additive. A source-only suspicion about mixed GDN is superseded by the actual synchronization attribution, without changing arithmetic or disabling validation.
+
+For precision clarity the common cache contract is Conv history FP16 and recurrent SSM FP32, in addition to FP16 model boundaries and FP8 KV policy. The producer's actual MambaSpec dtype pair is[torch.float16,torch.float32]; pinned dtype-calculator source confirms(Conv,SSM) order. Native all-state snapshot controls likewise require Conv F16/SSM F32. This is no new qualification or cache-format change. Physical group allocation/layout and the open cross-stack numerical failures retain their separate evidence.
+
+Frozen source/commands,12 unprofiled comparison runs, failed attempts, profile/raw-ID checks and clock-separated cost reports: /home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r11-serving-timing-v1/receipt-three-repeat-mixed-cost-v6.json, mixed-cost-report-v6.json and mixed-host-cost-report-v6.json. Existing status now records completed small comparison and mixed cost capture; warm matched32K/mixed producer timing and original S1/R06/D64 qualification remain open. R11/target/serving false, goal active. GPU cases are terminal, production inactive;180W unchanged, no commit/push.
+
+## 87. Recovery R11: copy byte/caller attribution localizes W8A8 mapping waits
+
+Profile-only staged-copy records now carry actual chunk bytes and caller return PCs; ordinary copies, submission/completion ordering and staging lifetime stay unchanged. Incremental focused build exit0. Real4MiB+37-byte roundtrip and existing span/operation controls pass off72/72,host92/92,device-host117/117 assertions,exit0. Byte sums, both actual chunks, calling PCs and unchanged data are checked. Native raw exports preserve these diagnostic fields.
+
+Frozen v7 constructor-only mixed profile passes1059/1059,exit0; both256-token prompt/output ID sequences are exactly equal to unprofiled v5. Observed135 cycles again contain21 actual mixed steps6–26. Enclosing host target spans total189.95489s; staged D2H waits160.87910s across33642 calls. Observed process maps identify the non-PIE executable; addr2line resolves the return PCs against that frozen executable. W8A8 shard_of_nb readback at0x4a918b,160 bytes,2688 calls accounts for136.74704s; larger mapping chunks and other validation waits are recorded separately. Release symbols resolve function rather than precise source line; source inspection distinguishes the three W8A8 Copy calls.
+
+These host waits include previously queued work, and eliding mapping readback could move the wait into required svh/input validation. No isolated bandwidth or speedup is claimed. Next small diagnostic records the existing memcpy device events, adding no commands, to distinguish copy execution from preceding queue work before a runtime repair. Numerical thresholds and all failure receipts remain unchanged.
+
+Immutable source/build/binaries/commands/controls/raw/maps/caller report: /home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r11-serving-timing-v1/receipt-copy-attribution-v7.json and mixed-copy-caller-report-v7.json. New v7 profiling source has no inherited full practical8/8; canonical v6 screen and three-repeat measurements retain their own source identity. R11/target/serving remain false; goal active, no commit/push.
+
+## 88. Recovery R11: actual memcpy events exclude a shard-copy bandwidth bottleneck
+
+Frozen v8 records existing staged H2D/D2H memcpy events, without adding commands or changing waits/staging/arithmetic. Initial compile refuses const SYCL event.wait_and_throw; mutable handle correction builds successfully. The failed log remains immutable. Real multi-chunk copy controls require nonzero device timestamps, same-queue nonoverlapping copy intervals and exact roundtrip bytes: off74/74,host94/94,device-host146/146,all exit0. The existing norm/BA timestamp probe now explicitly includes its output readback event.
+
+Same constructor-only mixed case passes1059/1059,exit0; both256 IDs exactly match unprofiled v5 and21 mixed cycles remain6–26. Per-queue/per-direction ordinal pairing checks equal40594 D2H and10900 H2D host/device record counts and ordered synchronous device intervals. Host/device epochs are never subtracted. For2688 W8A8 shard-map160B copies, host wait totals136.62663s while the copies' device intervals total4.592927ms. Actual target host spans189.88124s and diagnostic E2E238.71719s. This excludes those small copies themselves as the measured transfer bottleneck and supersedes any inferred gain from eliding mapping readbacks. Required validation/lifetime checks remain.
+
+The preceding elementwise nonlinear and row-copy commands are not yet individually recorded in the original profile. Next small instrumentation records their existing events, then focused operator tests and this same mixed case, before any math/layout change. Frozen source/build/failure/control/raw/command evidence: /home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r11-serving-timing-v1/receipt-copy-events-v8.json and mixed-copy-event-report-v8.json. No current-v88/8 or numerical qualification is inherited; canonical v6 results remain distinct. Whole R11 and numerical/serving qualification remain open; goal active, production inactive,180W unchanged, no commit/push.
+
+## 89. Recovery R11: measured duplicate-row scatter is the dominant mixed kernel
+
+Frozen v9 records already-submitted copy/add/nonlinearity/gather/scatter device events with unchanged commands and arithmetic. Focused original dtype/stride/alias/index controls and profile probes pass5841/5841 off,5861/5861 host,5913/5913 device-host,all exit0. Same constructor-only mixed profile passes1059/1059,exit0; both256-token outputs exactly match unprofiled v5. Actual21 mixed target queue spans total190.28021s. IndexCopy accounts for137.36283s over2016 GPU kernel events, whereas SiLU totals1.48858s over1344 events. This supersedes the source-only nonlinearity suspicion.
+
+Source inspection identifies the actual repeated work: each scatter column searches every later source index to preserve last-write-wins for duplicate destination rows. Next scoped product change moves that check to one GPU workgroup per source row, uses a collective any-later result, then copies the row's columns. No new allocation, readback or host wait is introduced; existing index validation and WithOutput alias preservation stay in place. The developer explicitly prefers GPU-resident dataflow and avoiding host wait loops; measured producer work must still be completed safely. Immediate tests cover wide1600x5120 and ragged37x129 actual FP16 data, unsorted duplicate IDs, aliased snapshots, untouched destination rows and negative/out-of-range refusal before mutation, followed by selected unprofiled mixed serving remeasurement.
+
+Frozen diagnostics/source/build/commands/controls/raw/cost report: /home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r11-serving-timing-v1/receipt-elementwise-events-v9.json and mixed-elementwise-cost-report-v9.json. Numerical thresholds/failure artifacts unchanged; no new current full practical/target qualification. R11/serving incomplete, goal active, no commit/push.
+
+## 90. Recovery R11: GPU row-group last-write-wins removes the measured mixed scatter bottleneck
+
+Product v10 changes only IndexCopy with more128 source rows. One GPU workgroup searches later duplicate IDs collectively once for its source row, then distributes the row's byte copying across256 lanes. Existing small-row/decode launch, metadata validation and WithOutput alias snapshot stay in place. No new temporary allocation, readback, host wait or floating-point operation is introduced. Both unique and duplicate mappings preserve exact last-write-wins.
+
+Incremental focused builds exit0. Original dtype/stride/alias/index/profile controls plus new ragged37x129, optimized-boundary129x257 and wide1600x5120 controls pass5895/5895 off,5915/5915 host,5967/5967 device-host,all exit0. Actual GDN core is[T,48,128]; a test-only v11 extension with1600 such source rows passes72/72,exit0 on the same frozen product kernel. Every destination byte, untouched row and nonaliased source is checked; aliased inputs use their original snapshot. Real graph capture/replay recomputes changed unsorted duplicates, and negative/out-of-range indices fail before output mutation.
+
+Same unprofiled constructor-only mixed workload passes1059/1059,exit0. Both prompts/all512 emitted raw IDs and all135 cycles' positions, emitted/proposed/accepted counters and graph deltas exactly match v5. E2E224.04384->84.47434s, observed single-trial ratio2.65221. Long request relative TTFT190.86383->51.30697s; common decode overlap323 tokens at27.59495 emitted tok/s. Same21 actual mixed steps6–26,322/576 accepted/proposed,4 captures/109 replays. Peak backend30,467,049,480B unchanged,host RSS13,549,924,352B; graph bytes0 after release. This is one same-continuation before/after, not three-repeat or producer/quality/numerical qualification.
+
+Separate profiled v10 mixed run also passes1059/1059,exit0 with exact IDs. Old2016 scatter kernels total137.36283s; new1008 large-row workgroup kernels total191.978433ms plus unchanged1008 small kernels12.687621ms, aggregate204.666054ms. Actual21 target queue spans190.28021->51.13898s. Device-copy/host waits remain independently paired: small DMA intervals do not justify eliding guards. Profile E2E100.00090s is diagnostic only. The reduction confirms a GPU kernel bottleneck rather than transfer bandwidth or presumed SiLU/GDN arithmetic.
+
+Frozen sources/builds/controls/commands/raws/comparison/metrics/costs: /home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r11-serving-timing-v1/receipt-index-copy-optimization-v10.json. Current runtime candidate is v10; extra rank3 controls change tests only. Canonical v6 three-repeat and practical8/8 remain separately identified; no new current full practical/target qualification is inherited. Next current-source practical evidence and matched O32-warmup/reset32K/mixed native/producer cases, then one measured remaining GPU-resident metadata/wait opportunity. Original S1/R06/D64 failures and bands remain explicit. Whole R11/target/serving incomplete, goal active; production inactive,180W unchanged, no commit/push.
+
+## 91. Recovery R11: current scatter candidate passes the unchanged practical8-task screen
+
+Same frozen product v10 capability run passes391/391,exit0; unchanged semantic validator passes8/8,exit0: four code functions/all20 held-out cases, both60872-token retrieval tasks, strict ticket/tool schemas. All8 original prompt IDs and autonomous raw output sequences are exactly equal to canonical v6; all finish stop. Graph bytes0 after release. This is current-source practical evidence and does not transfer original target/state/draft numerical qualification or unmeasured performance.
+
+The initial start accidentally retained the old provider trace filename. That own test is aborted(exit137), its full appended trace preserved separately, and the original35,847,296-byte v6 prefix restored only after verifying SHA256 d069d4f232b0ff0c4410be82fc57810b1d12e46df7fa451f436dc23c527495eb. Host restoration initially refuses root-owned output permissions; CPU-only no-device helper performs the same verified restoration. The retry uses separate raw/log/trace files and completes normally. Neither abort nor failed restoration is counted as a passed test.
+
+Source/binary/commands/current answers/validator/provider trace and failed-attempt/recovery artifacts: /home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r11-serving-timing-v1/receipt-capability-index-copy-v10.json. Next matched O32 warmup/reset32K and mixed native/producer cases, at unchanged180W and sequential GPU ownership. Whole R11 and numerical/serving release qualification remain open, goal active; production inactive, no commit/push.
+
+## 92. Recovery R11: actual matched warm32K native/producer case measured
+
+Frozen current native v10 runs P32768/O256 after identical real-request O32 warmup then successful prefix reset. Native653/653,exit0; exactly256 outputs finish length,first scheduled position0,all prompt/output IDs exact to constructor-only v5. TTFT39.98335s,TPOT79.15018ms,decode12.63421 emitted tokens/s,E2E60.16680s;148/327 accepted/proposed. The un-warmed v5 result retains its own startup state and is not used as a matched producer comparison.
+
+Sequential pinned producer v2 uses unchanged image/tool/checkpoint/subset/FP16 Conv-FP32 SSM/FP8 policy/MTP3/max262144/C4/batch1600/pool180 and actual0-prefix-hit guard after its O32/reset. Actual producer exit0:256 outputs finish length,TTFT18.57784s,TPOT20.22534ms,decode49.44291 emitted tokens/s,E2E23.73536s;153/315 accepted/proposed. Every prompt ID and cap matches. Cross-arm free IDs differ starting index0=56(46040 versus70269),retained explicitly. This is one trial per arm at unchanged180W, not numerical/quality/same-continuation or three-repeat qualification.
+
+Frozen raws/metric/source identities: /home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r11-producer-serving-v1/comparison-32k-warm-v10-v2.json. Current warm mixed native run is next,then sequential producer. Repaired scatter also serves native overlapped C4 prefills; the final small C4 comparison must receive current v10 measurements rather than transfer v6 timings. Current practical8/8 remains source-identified; original S1/R06/D64 release gates remain open. Whole R11/target/serving false,goal active,production inactive,no commit/push.
+
+## 93. Recovery R11: matched warm mixed submitted workload completes with explicit admission difference
+
+Current native v10 warm mixed case passes1091/1091,exit0 after40 real O32 warmup cycles and successful prefix reset; first scoring positions0. All512 prompt/output IDs exactly match un-warmed current v10 and the original v5 outputs. Same135 cycles,21 actual mixed steps6–26 and322/576 accepted/proposed. E2E70.79778s,shortTTFT.20633s,long relativeTTFT48.71200s; common decode overlap323 tokens at27.36299 emitted tokens/s. Constructor startup/request warmup are excluded,scoring prefix state cold.
+
+Pinned producer v2 actual same workload and O32/reset completes exit0 with512 emitted outputs,0cached prompt tokens,all finish length,320/585 accepted/proposed. E2E27.68211s,shortTTFT.17469s,long relativeTTFT22.19185s. Its short request finishes4.09047s before long first output; common decode overlap and matched simultaneous-decode ratio are null. Public arrival remains triggered by actual short>=16 emitted tokens,not injected IDs; output delivery intervals do not prove exact GPU scheduler cycles. The earlier pinned align/block1600 source inference remains consistent with deferred long prefill admission; no new scheduler-cycle capture or best-production-config claim.
+
+All actual prompt IDs, caps, sampling and fixed comparison configuration match. Cross-arm autonomous outputs differ: short first output index0=0(26104 vs479),long index0=51(10345 vs7854). Differences are retained,not explained as harmless rounding or counted as numerical/quality parity. This completes the one-trial representative matched warm32K/mixed component only. C4 overlap uses the newly repaired scatter too; current-source three-repeat C4 measurement starts next rather than inherit canonical v6 timings.
+
+Frozen sources/commands/initialized worker allocations/raws/metrics/comparisons: /home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r11-serving-timing-v1/receipt-warm-long-comparison-v10-v2.json and /home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r11-producer-serving-v1/comparison-mixed-warm-v10-v2.json. Current practical8/8 is recorded,original S1/R06/D64 numerical gates remain open. WholeR11/target/serving false,goal active,production inactive,180W unchanged,no commit/push.
+
+
+## 94. Recovery R11: current scatter candidate three-repeat C4 measurement
+
+Frozen product v10 independently runs all three unprofiled warm C4 P4096/O1024 trials after per-request O32 warmup and prefix reset. Each passes7794/7794,exit0. Every4x1024 raw output/prompt ID and all405 cycle positions/proposal/acceptance/logical-token/graph-delta fields are exact to the original v6 control. E2E84.821714179/84.706619327/85.049605669s, median84.821714179s versus original native median133.728335310s: descriptive1.576581x reduction in time ratio. Native common decode66.658994/66.768751/66.483336tok/s, median66.658994tok/s.
+
+The unchanged source/image/config/power-identified pinned producer three trials remain76.167219/76.257753/76.388756s, median76.257753s. Native E2E throughput ratio0.899036; native elapsed time is11.23% larger. Producer has no common four-request decode interval, so no matched simultaneous decode ratio is reported. Cross-arm free IDs differ; no quality/numerical parity or optimal producer settings claim. All prior native/producer trials remain frozen.
+
+Comparison with source/binary/raw/log/report hashes and launch commands: /home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r11-producer-serving-v1/comparison-c4-three-repeat-v10-v2.json. Current-source practical8/8 and warm32K/mixed were measured separately. Next bounded product step combines GPU SVH/input finite checks in existing W8A8 workspace and one readback, retaining errors/output invariants; focused operator checks run first. Numerical S1/R06/D64 and full target/serving qualification remain open. Production inactive; no commit/push.
+
+
+## 95. Recovery R11: W8A8 finite checks stay on GPU with one combined readback
+
+The product replaces the separate serial SVH metadata check/allocation with parallel ESIMD128-element SVH blocks. SVH/input flags share spare words in the existing64B scale region and one8B readback. SVH error priority, raw input checks, mapping bounds and output-before-error invariants remain. This removes one metadata allocation, readback/wait and retirement drain per large-M call; mapping readback and finite-result synchronization remain. No completely wait-free or large-M graph qualification claim.
+
+Expanded NaN/Inf/overflow controls exposed an existing finite-contract hole. Initial merge v12 and diagnostic v13 fail104/106,exit1. Actual original R03 wrapper/identical ValidateRows control v14 also fails104/106,exit1 at FP16 product overflow and output mutation. Explicit pre-narrow F32 integer-bit bounds fix product overflow, then v16 exposes the second Hadamard boundary107/109,exit1. Both pre-conversion checks now compare absolute bits against0x477ff000, the65520 round-to-nearest FP16 overflow boundary, before preserving the half bit checks. The donor input quantization, GEMM and output transform themselves are unchanged; no original operands are substituted. The initial const ESIMD view build error v15 is retained. Post-conversion checks were insufficient in the observed fast-math build; no compiler-IR causal claim.
+
+Frozen v17 focused real grouped4-bpw GDN controls198/198 and6-bpw head controls192/192 pass,exit0. Captured quantized activations/scales/last packed panel remain exact; F16 intermediates/final outputs report zero differing halves; M128 boundary, padding, noncontiguous group routing and reuse remain covered. NaN/positive/negativeInf SVH first/last blocks and input, combined-invalid error priority, both finite-operand overflow boundaries, unchanged output on rejection and valid reuse after failed calls pass. No CPU reference route selected.
+
+Source/binary/build/fixture/control identities, launch commands and failed variants: /home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r11-serving-timing-v1/receipt-w8a8-validation-operator-v17.json. No v17 serving/capability timing or numerical qualification is transferred from v10. User explicitly requested checkpoint commit/push; follow with current-source mixed serving/exact-ID cycle comparison and separate cost profiling, then bounded numerical target/draft localization. Original S1/R06/D64 and target/serving gates remain open; production inactive.

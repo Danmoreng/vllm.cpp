@@ -570,6 +570,12 @@ struct KVCacheConfig {
   // Optional bounded, immutable recurrent prefix rows shared by scheduler and runner.
   std::shared_ptr<RecurrentPrefixSnapshotIndex> recurrent_prefix_snapshots = {};
 
+  // Native EXL3 MTP uses the target's physical page IDs for a separate draft
+  // KV buffer. The draft layer therefore belongs to the target attention
+  // group (and its layer count/byte budget), not a second page allocator.
+  // False retains the existing topology for other checkpoints.
+  bool mtp_draft_shares_target_pages = false;
+
   // Upstream property has_mamba_layers.
   bool has_mamba_layers() const;
   // Upstream property needs_kv_cache_zeroing.

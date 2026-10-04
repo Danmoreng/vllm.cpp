@@ -2,6 +2,87 @@
 #include "xpu_kernels.h"
 #include "xpu_qk_norm.h"
 namespace vt::xpu {
+namespace {
+template <bool Residual>
+float Gemma5120Value(View src, View res, int64_t row, int col) {
+#pragma clang fp contract(off)
+  const float value = Load(src, row * src.stride[0] + col);
+  if constexpr (Residual)
+    return value + Load(res, row * res.stride[0] + col);
+  return value;
+}
+
+float Gemma5120OutputValue(float value, float inverse, float weight) {
+#pragma clang fp contract(off)
+  // Keep each producer F32 boundary with native arithmetic. The XPU target
+  // also uses -fno-fast-math/-ffp-contract=off; no fused multiply/add or
+  // reassociation is permitted. Avoid external directed-rounding library calls
+  // in this finite FP16-operand path.
+  const float effective_weight = 1.0f + weight;
+  const float normalized = value * inverse;
+  return normalized * effective_weight;
+}
+
+template <bool Residual>
+void Gemma5120Kernel(Queue& q, View dst, View src, View w, View res,
+                     int64_t rows, float eps) {
+  // Pinned Torch ReduceConfig: max WG1024, logical SG32, contiguous vec4.
+  // Output count determines group_height; group_x_reduce first halves the
+  // virtual lanes down to32, then uses ascending subgroup offsets.
+  int height = 1;
+  while (height < 32 && height * 2 <= rows) height *= 2;
+  const int width = 1024 / height;
+  constexpr int lanes = 16, workgroup = 128;
+  const auto global = ((rows * lanes + workgroup - 1) / workgroup) * workgroup;
+  const auto event = NativeQueue(q).parallel_for(
+      sycl::nd_range<1>(sycl::range<1>(global), sycl::range<1>(workgroup)),
+      [=](sycl::nd_item<1> item) [[sycl::reqd_sub_group_size(16)]] {
+#pragma clang fp contract(off)
+    const int64_t row = item.get_global_linear_id() / lanes;
+    if (row >= rows) return;
+    const int lane = item.get_local_linear_id() % lanes;
+    float first[32], second[32];
+    const int chunks = width / 32;
+    for (int chunk = 0; chunk < chunks; ++chunk) {
+      float partial[2];
+      for (int half = 0; half < 2; ++half) {
+        float regs[4] = {};
+        for (int col = 4 * (32 * chunk + lane + half * lanes); col < 5120;
+             col += 4 * width) {
+          for (int j = 0; j < 4; ++j) {
+            const float value = Gemma5120Value<Residual>(src, res, row, col + j);
+            regs[j] += value * value;
+          }
+        }
+        partial[half] = ((regs[0] + regs[1]) + regs[2]) + regs[3];
+      }
+      first[chunk] = partial[0]; second[chunk] = partial[1];
+    }
+    for (int offset = chunks / 2; offset > 0; offset /= 2)
+      for (int chunk = 0; chunk < offset; ++chunk) {
+        first[chunk] += first[chunk + offset];
+        second[chunk] += second[chunk + offset];
+      }
+    auto group = item.get_sub_group();
+    float a = first[0], b = second[0];
+    for (int offset = 1; offset < lanes; offset *= 2) {
+      a += sycl::shift_group_left(group, a, offset);
+      b += sycl::shift_group_left(group, b, offset);
+    }
+    // MeanOps projects with an F32 reciprocal factor, not division by D.
+    const float mean = sycl::group_broadcast(group, a + b, 0) * (1.0f / 5120.0f);
+    const float inverse = sycl::rsqrt(mean + eps);
+    for (int col = lane; col < 5120; col += lanes) {
+      const float value = Gemma5120Value<Residual>(src, res, row, col);
+      if constexpr (Residual) Store(res, row * res.stride[0] + col, value);
+      Store(dst, row * dst.stride[0] + col,
+            Gemma5120OutputValue(value, inverse, Load(w, col)));
+    }
+  });
+  RecordProfileEvent(q, "rms_norm_gemma5120_fp16", event);
+}
+}  // namespace
+
 void RmsNormKernel(Queue& q, Tensor& out, const Tensor& x, const Tensor& weight,
                    const RmsNormArgs& args, Tensor* residual) {
   TraceXpuOp(OpId::kRmsNorm, q, {&out, &x, &weight, residual});
@@ -48,6 +129,19 @@ void RmsNormKernel(Queue& q, Tensor& out, const Tensor& x, const Tensor& weight,
         RecordProfileEvent(q, "rms_norm_qk_fp16_scalar", event);
       }
       return;
+    }
+    if (width == 5120 && gemma && src.dtype == DType::kF16 &&
+        dst.dtype == DType::kF16 && w.dtype == DType::kF16 &&
+        (!has_res || res.dtype == DType::kF16)) {
+      const auto device = NativeQueue(q).get_device();
+      const auto sizes = device.get_info<sycl::info::device::sub_group_sizes>();
+      if (device.get_info<sycl::info::device::max_work_group_size>() == 1024 &&
+          !sizes.empty() && *std::min_element(sizes.begin(), sizes.end()) == 16 &&
+          *std::max_element(sizes.begin(), sizes.end()) == 32) {
+        if (has_res) Gemma5120Kernel<true>(q, dst, src, w, res, x.shape[0], eps);
+        else Gemma5120Kernel<false>(q, dst, src, w, res, x.shape[0], eps);
+        return;
+      }
     }
     // Pinned EXL3 FP16 GemmaRMSNorm uses the native producer IR:
     // normalize x.float()+res.float(), but return that sum narrowed as res.

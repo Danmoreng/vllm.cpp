@@ -362,6 +362,13 @@ class GPUModelRunner final : public ModelRunnerBase {
   const GDNAttentionMetadata& last_gdn_meta() const {
     return exec_state_.gdn_meta;
   }
+  // Read-only output inspection. Copy the carrier to retain an owning output
+  // across execute_model; the reference itself is step-local. These accessors
+  // do not wait for GPU work or extend a non-owning logits view.
+  const ForwardLogits& last_forward_logits() const { return exec_state_.logits; }
+  const Qwen3_5MTPHiddenStates& last_spec_hidden() const {
+    return exec_state_.spec_hidden;
+  }
   // SPEC-MTP I5d acceptance telemetry accessors (the gate reads these).
   int64_t spec_drafts_proposed() const { return spec_drafts_proposed_; }
   int64_t spec_drafts_accepted() const { return spec_drafts_accepted_; }
@@ -1523,6 +1530,9 @@ class GPUModelRunner final : public ModelRunnerBase {
     CommonAttentionMetadata attn_meta;
     GDNAttentionMetadata gdn_meta;
     std::vector<std::string> req_ids;  // dense order (== input_batch order)
+    // Per-request expanded verify row counts, retained until sampling. The
+    // grammar mask uses sizes only; async draft values may be filled later.
+    std::map<std::string, std::vector<int32_t>> scheduled_spec_decode_tokens;
     // SPEC-MTP I5d: the target's post-final-norm [T,H] hidden tap captured this
     // step (ModelForwardInput::hidden_tap output), consumed by propose_drafts to
     // run the MTP drafter. Empty (null storage) unless spec is on.

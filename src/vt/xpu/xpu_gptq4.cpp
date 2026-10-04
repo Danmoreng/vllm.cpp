@@ -20,17 +20,18 @@ namespace {
 constexpr char kExpectedOneDnnHash[] =
     "0e2a5bfeef1bfbffc3137464606540233086ce9b";
 
-enum class Kind : uint8_t { kGptq4, kDenseF16 };
+enum class Kind : uint8_t { kGptq4, kDenseF16, kExl3W8A8 };
 
 struct PrimitiveKey {
   Kind kind;
   int64_t m, k, n;
   int group_size;
   bool bias;
+  int64_t dst_stride;
 
   friend bool operator<(const PrimitiveKey& a, const PrimitiveKey& b) {
-    return std::tie(a.kind, a.m, a.k, a.n, a.group_size, a.bias) <
-           std::tie(b.kind, b.m, b.k, b.n, b.group_size, b.bias);
+    return std::tie(a.kind, a.m, a.k, a.n, a.group_size, a.bias, a.dst_stride) <
+           std::tie(b.kind, b.m, b.k, b.n, b.group_size, b.bias, b.dst_stride);
   }
 };
 
@@ -42,6 +43,7 @@ struct PrimitiveEntry {
   dnnl::memory::desc dst;
   dnnl::memory::desc bias;
   dnnl::memory::desc scales;
+  dnnl::memory::desc row_scales;
   dnnl::memory::desc zero_points;
   dnnl::memory::desc scratchpad;
   std::unique_ptr<dnnl::matmul> primitive;
@@ -119,14 +121,21 @@ std::shared_ptr<PrimitiveEntry> GetPrimitive(DeviceRuntime& runtime,
 
   using dt = dnnl::memory::data_type;
   auto entry = std::make_shared<PrimitiveEntry>();
-  entry->src = dnnl::memory::desc({key.m, key.k}, dt::f16, {key.k, 1});
-  entry->dst = dnnl::memory::desc({key.m, key.n}, dt::f16, {key.n, 1});
+  entry->src = dnnl::memory::desc({key.m, key.k},
+      key.kind == Kind::kExl3W8A8 ? dt::s8 : dt::f16, {key.k, 1});
+  entry->dst = dnnl::memory::desc({key.m, key.n}, dt::f16, {key.dst_stride, 1});
   entry->weights = key.kind == Kind::kGptq4
       ? dnnl::memory::desc({key.k, key.n}, dt::u4, {1, key.k})
       : dnnl::memory::desc({key.k, key.n}, dt::f16, {1, key.k});
+  if (key.kind == Kind::kExl3W8A8)
+    entry->weights = dnnl::memory::desc({key.k, key.n}, dt::s8, {key.n, 1});
 
   dnnl::primitive_attr attr;
   attr.set_scratchpad_mode(dnnl::scratchpad_mode::user);
+  // Fixed-input dense FP16 BA projections must not vary across native
+  // request resets or graph/eager controls. Ask oneDNN for deterministic
+  // reductions; quantized GPTQ4 and EXL3 W8A8 descriptors retain their policy.
+  if (key.kind == Kind::kDenseF16) attr.set_deterministic(true);
   if (key.kind == Kind::kGptq4) {
     attr.set_scales(DNNL_ARG_WEIGHTS, 3, {key.group_size, 1}, dt::f16);
     attr.set_zero_points(DNNL_ARG_WEIGHTS, 0, {}, dt::s8);
@@ -135,6 +144,14 @@ std::shared_ptr<PrimitiveEntry> GetPrimitive(DeviceRuntime& runtime,
         {key.k / key.group_size, key.n}, dt::f16,
         {key.n, 1});
     entry->zero_points = dnnl::memory::desc({1}, dt::s8, {1});
+  }
+  if (key.kind == Kind::kExl3W8A8) {
+    attr.set_scales_mask(DNNL_ARG_WEIGHTS, 0);
+    entry->scales = dnnl::memory::desc({1}, dt::f32, {1});
+    entry->row_scales = dnnl::memory::desc({key.m, 1}, dt::f32, {1, 1});
+    dnnl::post_ops post;
+    post.append_binary(dnnl::algorithm::binary_mul, entry->row_scales);
+    attr.set_post_ops(post);
   }
   if (key.bias) entry->bias = dnnl::memory::desc({1, key.n}, dt::f16,
                                                  {key.n, 1});
@@ -182,10 +199,11 @@ void* Scratchpad(DeviceRuntime& runtime, Queue& queue, size_t bytes) {
 
 void Execute(Queue& queue, Tensor& out, const Tensor& activation,
              const Tensor& weights, const Tensor* bias, Kind kind,
-             int group_size, const Tensor* scales, const Tensor* zero_points) {
+             int group_size, const Tensor* scales, const Tensor* zero_points,
+             const Tensor* row_scales = nullptr) {
   auto& runtime = Runtime(queue);
   const PrimitiveKey key{kind, activation.shape[0], activation.shape[1],
-                         out.shape[1], group_size, bias != nullptr};
+                         out.shape[1], group_size, bias != nullptr, out.stride[0]};
   const auto entry = GetPrimitive(runtime, key);
   auto& binding = Binding(*entry, queue.id);
   std::lock_guard<std::mutex> binding_lock(binding.mutex);
@@ -204,6 +222,11 @@ void Execute(Queue& queue, Tensor& out, const Tensor& activation,
     bind(DNNL_ARG_ATTR_SCALES | DNNL_ARG_WEIGHTS, entry->scales, scales->data);
     bind(DNNL_ARG_ATTR_ZERO_POINTS | DNNL_ARG_WEIGHTS,
          entry->zero_points, zero_points->data);
+  }
+  if (kind == Kind::kExl3W8A8) {
+    bind(DNNL_ARG_ATTR_SCALES | DNNL_ARG_WEIGHTS, entry->scales, scales->data);
+    bind(DNNL_ARG_ATTR_MULTIPLE_POST_OP(0) | DNNL_ARG_SRC_1,
+         entry->row_scales, row_scales->data);
   }
   if (entry->scratchpad_bytes != 0) {
     auto* scratch = Scratchpad(runtime, queue, entry->scratchpad_bytes);
@@ -230,8 +253,9 @@ void Execute(Queue& queue, Tensor& out, const Tensor& activation,
         " N=" + std::to_string(key.n) + " impl=" + entry->implementation +
         " scratch=" + std::to_string(entry->scratchpad_bytes);
     RecordProfileSpan(queue,
-                      kind == Kind::kGptq4 ? "onednn_gptq4_stream"
-                                           : "onednn_dense_f16_stream",
+                      kind == Kind::kGptq4 ? "onednn_gptq4_stream" :
+                      kind == Kind::kExl3W8A8 ? "onednn_exl3_w8a8_stream" :
+                                              "onednn_dense_f16_stream",
                       *profile_begin, profile_end,
                       static_cast<uint64_t>(host_ns), detail);
   }
@@ -253,12 +277,23 @@ void MatmulDenseF16Kernel(Queue& queue, Tensor& out, const Tensor& activation,
 
 }  // namespace
 
+void Exl3W8A8Matmul(Queue& q, Tensor& out, const Tensor& in,
+                   const Tensor& weights, const Tensor& sx, const Tensor& sw) {
+  Execute(q, out, in, weights, nullptr, Kind::kExl3W8A8, 0, &sw, nullptr, &sx);
+}
+
 Gptq4RuntimeStats GetGptq4RuntimeStats(int device_index) {
   std::lock_guard<std::mutex> runtimes_lock(runtimes_mutex);
   const auto it = runtimes.find(device_index);
   if (it == runtimes.end()) return {};
   std::lock_guard<std::mutex> runtime_lock(it->second->mutex);
   return it->second->stats;
+}
+
+dnnl::engine& Exl3OneDnnEngine(Queue& queue) { return Runtime(queue).engine; }
+dnnl::stream& Exl3OneDnnStream(Queue& queue) { return Stream(Runtime(queue), queue); }
+void* Exl3OneDnnScratchpad(Queue& queue, size_t bytes) {
+  return Scratchpad(Runtime(queue), queue, bytes);
 }
 
 void ReleaseGptq4Queue(const Queue& queue) {

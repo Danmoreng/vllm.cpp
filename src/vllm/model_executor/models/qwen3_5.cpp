@@ -2767,13 +2767,13 @@ FullAttnQkvOutput ProjectFullAttnQkv(Dev d, const FullAttnLayerWeights& w,
   // EMPTY, so a non-empty EXL3 weight IS the scheme -- the same rung order the
   // loader uses, read from the forward's end.
   //
-  // Scoped FP16 SmallM uses one packed projection with three independent input
+  // Scoped FP16 SmallM/W8A8 uses one packed projection with three independent input
   // transforms. Stride-aware consumers borrow views; other consumers receive
   // exact native copies. The packed owner stays alive alongside all views.
   if (w.IsExl3()) {
     const DType dtype = d.activation_dtype.value_or(DType::kBF16);
     if (d.q.device.type == vt::DeviceType::kXPU && dtype == DType::kF16 &&
-        h.dtype == DType::kF16 && t <= 128) {
+        h.dtype == DType::kF16) {
       out.packed_owner.emplace(dense_exl3::GroupedLinear(
           d, h, {&w.q_proj_exl3, &w.k_proj_exl3, &w.v_proj_exl3}, w.qkv_proj_exl3));
       const Tensor all = out.packed_owner->t();
@@ -4396,7 +4396,7 @@ GdnQkvzOutput ProjectGdnQkvzRaw(Dev d, const GdnLayerWeights& w,
   // loader rung: an EXL3 load populates NO other in-projection field, so every
   // branch below would fall through to an empty owner and refuse by name.
   //
-  // Scoped FP16 SmallM retains both transforms in a model-owned packed group.
+  // Scoped FP16 SmallM/W8A8 retains both transforms in a model-owned packed group.
   // Conv and gated norm already accept its row-strided mixed/Z views.
   if (!w.in_proj_qkv_exl3.Empty()) {
     VT_CHECK(w.in_proj_qkv_exl3.OutFeatures() == conv_dim &&
@@ -4406,7 +4406,7 @@ GdnQkvzOutput ProjectGdnQkvzRaw(Dev d, const GdnLayerWeights& w,
              "conv_dim/value_dim disagree");
     if (d.q.device.type == vt::DeviceType::kXPU &&
         d.activation_dtype == DType::kF16 && h.dtype == DType::kF16 &&
-        indt == DType::kF16 && outdt == DType::kF16 && h.shape[0] <= 128) {
+        indt == DType::kF16 && outdt == DType::kF16) {
       out.packed_owner.emplace(dense_exl3::GroupedLinear(
           d, h, {&w.in_proj_qkv_exl3, &w.in_proj_z_exl3}, w.in_proj_qkvz_exl3));
       const Tensor all = out.packed_owner->t();
@@ -4968,7 +4968,16 @@ struct StepDevInputs {
   // stub when the toggle is off (has_attn_cos_sin=false).
   DBuf attn_cos_sin;
   bool has_attn_cos_sin = false;
+  // Indices into the step-local RoPE cache. Read-only during capture/replay;
+  // allocating/uploading these per attention layer would invalidate preflight.
+  DBuf attn_cache_rows;
 };
+
+DBuf BuildAttnCacheRows(Dev d, int64_t tokens) {
+  std::vector<int32_t> rows(tokens);
+  std::iota(rows.begin(), rows.end(), 0);
+  return DBuf(d, DType::kI32, {tokens}, rows.data());
+}
 
 StepDevInputs BuildStepDevInputs(Dev d, const std::vector<int32_t>& positions,
                                  const CommonAttentionMetadata& am,
@@ -5026,6 +5035,7 @@ StepDevInputs BuildStepDevInputs(Dev d, const std::vector<int32_t>& positions,
       0,                           // gdn_spec_num_cols
       DBuf(d, DType::kF32, {1}),  // attn cos|sin stub (filled by MaybeBuildAttnCosSin)
       false,
+      BuildAttnCacheRows(d, T),  // immutable step-local RoPE cache rows
   };
   // Full non-spec state indices are shared by decode and mixed-prefill paths.
   // Decode consumes their leading num_decodes rows; indexed W1 gather/scatter
@@ -5663,12 +5673,12 @@ DBuf GdnBlockPaged(Dev d, const GdnLayerWeights& w, const HfConfig& cfg,
   // f32-accumulated conv math are unchanged. The post-conv split reads dconv's
   // dtype (GdnPostConv/GdnConvSplit are templated on it). The conv reads the
   // merged mixed_qkv view's padded row stride directly — no materialization.
-  // The qualified EXL3 P128 producer retains the unrounded FP32 Conv result
+  // The EXL3 C1 producer retains the unrounded FP32 Conv result
   // through normalization, rounds scaled Q to FP16, and prepares gate prefixes
   // directly from raw A. Its state remains FP32 across the following decode.
   const bool fp16_producer_prefill = d.q.device.type == vt::DeviceType::kXPU &&
       d.activation_dtype == DType::kF16 && mixed.dtype == DType::kF16 && gptq == nullptr &&
-      !w.in_proj_qkv_exl3.Empty() && !spec && np == 1 && nd == 0 && T == 128 &&
+      !w.in_proj_qkv_exl3.Empty() && !spec && np == 1 && nd == 0 && T >= 1 && T <= 4096 &&
       Hk == 16 && Hv == 48 && Dk == 128 && Dv == 128 && Kw == 4 &&
       vt::OpRegistered(vt::OpId::kGdnPrefillRawGate, d.q.device.type);
   const DType convdt = fp16_producer_prefill ? DType::kF32 : mixed.dtype;
@@ -6370,9 +6380,7 @@ DBuf FullAttnBlockPaged(Dev d, const FullAttnLayerWeights& w, const HfConfig& cf
       if (rope.fp16_intermediates) {
         VT_CHECK(sdi.has_attn_cos_sin, "EXL3 FP16 attention requires its per-step RoPE cache");
         // The cache contains selected rows for this step, not positions0..P.
-        std::vector<int32_t> rows(T); std::iota(rows.begin(), rows.end(), 0);
-        DBuf cache_rows(d, DType::kI32, {T}, rows.data());
-        vt::RopeFromCache(d.q, dq3.t(), &dk3.t(), cache_rows.t(),
+        vt::RopeFromCache(d.q, dq3.t(), &dk3.t(), sdi.attn_cache_rows.t(),
                           sdi.attn_cos_sin.t(), rope);
       } else {
         vt::RopeNeox(d.q, dq3.t(), dk3.t(), sdi.positions.t(), rope);
@@ -8742,6 +8750,7 @@ StepDevInputs BuildFullAttnStepDevInputs(Dev d,
       0,                           // gdn_spec_num_cols
       DBuf(d, DType::kF32, {1}),  // attn cos|sin stub (MaybeBuildAttnCosSin fills)
       false,
+      BuildAttnCacheRows(d, T),  // immutable step-local RoPE cache rows
   };
 }
 
@@ -10075,11 +10084,13 @@ Qwen3_5MTPHiddenStates Qwen3_5MTPModel::Forward(
   VT_CHECK(target_hidden_states.rank == 2 &&
                target_hidden_states.shape[0] == tokens &&
                target_hidden_states.shape[1] == hidden_size &&
-               target_hidden_states.dtype == DType::kBF16 &&
+               (target_hidden_states.dtype == DType::kBF16 ||
+                (queue.device.type == vt::DeviceType::kXPU &&
+                 target_hidden_states.dtype == DType::kF16)) &&
                target_hidden_states.IsContiguous() &&
                target_hidden_states.device == queue.device,
            "qwen3_5 MTP forward: target hidden states must be contiguous "
-           "bf16 [T,H] on the queue device");
+           "bf16 or xpu f16 [T,H] on the queue device");
   // MODEL-QWEN35-EXL3-HEAD (#2495 item 5): ONE precondition, two containers.
   // The trellis stores [K=2H, N=H] where the torch Linear stores [N=H, K=2H],
   // so the same projection is asserted through the orientation its own owner
@@ -10112,7 +10123,9 @@ Qwen3_5MTPHiddenStates Qwen3_5MTPModel::Forward(
   // overload gains a caller, and adding the guard later with the caller is how
   // this row lost its step boundary the first time.
   const Qwen35ExpertStreamStep expert_stream_step;
-  Dev device{vt::GetBackend(queue.device.type), queue};
+  Dev device{vt::GetBackend(queue.device.type), queue,
+             target_hidden_states.dtype == DType::kF16
+                 ? std::optional<DType>(DType::kF16) : std::nullopt};
 
   // Qwen3_5MultiTokenPredictor.forward head: shared embedding + independent Gemma
   // RMSNorms + cat + fc (extracted into MtpHeadHidden, shared with ForwardPaged).
@@ -10270,7 +10283,24 @@ ForwardLogits Qwen3_5MTPModel::ComputeLogits(
                hidden_states.device == queue.device,
            "qwen3_5 MTP logits: hidden states must be contiguous bf16 or xpu f16 [T,H] "
            "on the queue device");
-  Dev device{vt::GetBackend(queue.device.type), queue};
+  Dev device{vt::GetBackend(queue.device.type), queue,
+             hidden_states.dtype == DType::kF16
+                 ? std::optional<DType>(DType::kF16) : std::nullopt};
+  if (weights_->IsExl3() && queue.device.type == vt::DeviceType::kXPU) {
+    const auto& compact = weights_->draft_head_exl3;
+    VT_CHECK(hidden_states.dtype == DType::kF16 && !compact.Empty() &&
+                 compact.target_vocab == config_->vocab_size &&
+                 compact.weight.InFeatures() == hidden_size &&
+                 compact.weight.OutFeatures() == 65536,
+             "EXL3 MTP: requires FP16 hidden and the exact compact draft head");
+    DBuf half = dense_exl3::Linear(device, hidden_states, OwnedTensor{},
+                                   compact.weight, DType::kF16);
+    DBuf logits(device, DType::kF32, {hidden_states.shape[0], 65536});
+    vt::CastF32(device.q, logits.t(), half.t());
+    // The eager completion boundary retains the half output through its cast.
+    device.b.Synchronize(device.q);
+    return WrapDeviceLogits(device, std::move(logits), 65536);
+  }
   if (weights_->IsGptq4Draft()) {
     VT_CHECK(weights_->draft_lm_head_gptq4.k == hidden_size &&
                  weights_->draft_lm_head_gptq4.n == config_->vocab_size,
@@ -10298,6 +10328,33 @@ ForwardLogits Qwen3_5MTPModel::ComputeLogits(
                  ? MatmulNvfp4F32D(device, hidden_states, *lm_head_fp4_)
                  : MatmulF32D(device, hidden_states, *lm_head_));
   return WrapDeviceLogits(device, std::move(logits), config_->vocab_size);
+}
+
+std::vector<int32_t> Qwen3_5MTPModel::SelectDraftTokens(
+    const ForwardLogits& logits, vt::Queue& queue) const {
+  VT_CHECK(logits.on_device() && logits.rows > 0 &&
+               logits.device_tensor.device == queue.device,
+           "MTP selection: expected owned device logits on the queue");
+  Dev device{vt::GetBackend(queue.device.type), queue};
+  if (weights_->IsExl3() && queue.device.type == vt::DeviceType::kXPU) {
+    const auto& compact = weights_->draft_head_exl3;
+    VT_CHECK(!compact.Empty() && logits.vocab == 65536,
+             "EXL3 MTP selection: expected compact logits and validated token map");
+    Tensor map = ResidentWeight(device, compact.token_ids);
+    DBuf chosen(device, DType::kI32, {logits.rows});
+    vt::MappedGreedyArgmax(queue, chosen.t(), logits.device_tensor, map, compact.target_vocab);
+    std::vector<int32_t> ids(static_cast<size_t>(logits.rows));
+    chosen.Download(device, ids.data());  // synchronizes before releasing consumers
+    for (const auto id : ids)
+      VT_CHECK(id >= 0 && id < compact.target_vocab,
+               "EXL3 MTP selection: invalid map or nonfinite draft logits");
+    return ids;
+  }
+  DBuf chosen(device, DType::kI64, {logits.rows});
+  vt::GreedyArgmax(queue, chosen.t(), logits.device_tensor);
+  std::vector<int64_t> wide(static_cast<size_t>(logits.rows));
+  chosen.Download(device, wide.data());
+  return std::vector<int32_t>(wide.begin(), wide.end());
 }
 
 std::vector<float> Qwen3_5MTPModel::ForwardLogitsHost(
@@ -11368,6 +11425,7 @@ ForwardLogits Qwen3_5DenseModel::ForwardDeviceTap(
                                   attn_kv, gdn_state, weights, config,
                                   logits_indices, &tap_view);
   if (hidden_out != nullptr) {
+    hidden_out->producer_ready_event.reset();
     hidden_out->tensor = tap.t();
     hidden_out->storage = tap.ReleaseShared();
   }
@@ -12597,6 +12655,10 @@ struct Qwen3_5DenseDecodeGraph::Impl {
                            "replays across %zu captured size(s)\n",
                    static_cast<long long>(replays), slots.size());
     Backend& b = vt::GetBackend(queue.device.type);
+    bool leased_outputs = false;
+    for (const auto& kv : slots)
+      for (const auto& s : kv.second.slot) leased_outputs |= bool(s.mtp_hidden);
+    if (leased_outputs) b.Synchronize(queue);
     for (auto& kv : slots)
       for (auto& s : kv.second.slot) {
         // No DestroyGraph: every segment handle belongs to the slot's
@@ -12619,7 +12681,8 @@ struct Qwen3_5DenseDecodeGraph::Impl {
     v1::CommonAttentionMetadata attn_meta;
     v1::GDNAttentionMetadata gdn_meta;
     std::unique_ptr<DBuf> hidden;     // [S,H] bf16 persistent embed target
-    std::unique_ptr<DBuf> logits;     // [S,vocab] f32 held graph output
+    std::shared_ptr<DBuf> logits;     // [S,vocab] f32 held graph output
+    std::shared_ptr<DBuf> mtp_hidden;  // [S,H] normalized leased output
     // SPEC-DSPARK W8 (#442): the DFlash/DSpark verify must ALSO emit the
     // [S, H*taps] aux hidden capture the drafter conditions on. That is exactly
     // why the verify never reached this graph: ForwardDeviceMultiTap returns
@@ -12758,7 +12821,12 @@ Qwen3_5DenseDecodeGraph::Qwen3_5DenseDecodeGraph(const Qwen3_5DenseWeights& weig
 
 Qwen3_5DenseDecodeGraph::~Qwen3_5DenseDecodeGraph() = default;
 
-bool Qwen3_5DenseDecodeGraph::captured() const { return impl_->any_captured; }
+bool Qwen3_5DenseDecodeGraph::captured() const {
+  for (const auto& kv : impl_->slots)
+    for (const auto& slot : kv.second.slot)
+      if (slot.graph.captured()) return true;
+  return false;
+}
 int64_t Qwen3_5DenseDecodeGraph::replay_count() const { return impl_->replays; }
 
 ForwardLogits Qwen3_5DenseDecodeGraph::Step(
@@ -12766,7 +12834,10 @@ ForwardLogits Qwen3_5DenseDecodeGraph::Step(
     const v1::CommonAttentionMetadata& attn_meta,
     const v1::GDNAttentionMetadata& gdn_meta,
     const std::vector<PagedKvCache>& attn_kv,
-    const std::vector<GdnStateCache>& gdn_state, Qwen3_5AuxTaps* aux_out) {
+    const std::vector<GdnStateCache>& gdn_state, Qwen3_5AuxTaps* aux_out,
+    Qwen3_5MTPHiddenStates* hidden_out) {
+  VT_CHECK(hidden_out == nullptr || aux_out == nullptr,
+           "dense graph: MTP hidden and auxiliary taps are mutually exclusive");
   CheckDensePagedForward(token_ids, positions, attn_meta, gdn_meta, attn_kv,
                          gdn_state, impl_->weights, impl_->config);
   const int64_t B = static_cast<int64_t>(token_ids.size());
@@ -12875,7 +12946,8 @@ ForwardLogits Qwen3_5DenseDecodeGraph::Step(
   // question out of the spec path. The shape count stays bounded by max_num_seqs
   // because num_reqs is.
   const bool spec_step = has_gdn && gdn_meta.num_spec_decodes > 0;
-  const int64_t S = spec_step ? B : PadToCaptureSize(B, impl_->max_num_reqs);
+  const int64_t S = (spec_step || hidden_out != nullptr)
+                        ? B : PadToCaptureSize(B, impl_->max_num_reqs);
   if (sph.on) sph.S = S;
   // ENG-CUDAGRAPH-BREAK W6 (#1374): this step's uniform query length, and the
   // ring key built from it. `Q == 0` means the batch does not divide evenly into
@@ -12896,6 +12968,12 @@ ForwardLogits Qwen3_5DenseDecodeGraph::Step(
   if (!impl_->enabled || S < 0 || !servable_shape || qlen_capped ||
       (has_gdn && !detail::CanUseGdnDecodeGraphSize(
           B, S, IndexedGdnStateIoEnabled(impl_->queue.device)))) {
+    if (hidden_out != nullptr) {
+      return Qwen3_5DenseModel::ForwardDeviceTap(
+          token_ids, positions, attn_meta, gdn_meta, attn_kv, gdn_state,
+          impl_->weights, impl_->config, impl_->queue, hidden_out,
+          spec_step ? std::vector<int32_t>{} : LastTokenLogitsIndices(attn_meta, B));
+    }
     if (aux_out != nullptr && !aux_out->layer_ids.empty()) {
       // The graph cannot serve this batch (disabled / unsupported size), so fall
       // back to the EAGER multi-tap forward, which fills aux_out itself. Without
@@ -12954,6 +13032,55 @@ ForwardLogits Qwen3_5DenseDecodeGraph::Step(
     if (s.reuse_event.handle == nullptr)
       s.reuse_event = b.CreateEvent(/*blocking=*/true);
     b.RecordEvent(s.reuse_event, impl_->queue);
+  };
+
+  // A retained output lease makes its buffers immutable. A mode change or
+  // live lease retires the graph before replacing a destination it baked.
+  if ((bool(s.mtp_hidden) != (hidden_out != nullptr)) ||
+      (s.mtp_hidden && (s.mtp_hidden.use_count() > 1 ||
+                       (s.logits && s.logits.use_count() > 1)))) {
+    b.Synchronize(impl_->queue);
+    s.graph.Reset();
+    Pool(b).UnpinForGraph(b, s.pinned);
+    s.pinned.clear();
+    s.warm = false;
+    s.mtp_hidden.reset();
+    s.logits.reset();
+  }
+  if (hidden_out != nullptr && !s.mtp_hidden) {
+    s.mtp_hidden = std::make_shared<DBuf>(d, ActDType(d),
+                                        std::vector<int64_t>{S, H});
+  }
+  Tensor mtp_view{};
+  const Tensor* mtp_arg = nullptr;
+  if (s.mtp_hidden) { mtp_view = s.mtp_hidden->t(); mtp_arg = &mtp_view; }
+
+  // Paired outputs own one immutable, one-shot producer completion event.
+  // Holding either output retains both buffers beyond graph/cache retirement.
+  struct OutputLease {
+    std::shared_ptr<DBuf> hidden, logits;
+    Backend* backend;
+    vt::Event ready;
+    OutputLease(std::shared_ptr<DBuf> h, std::shared_ptr<DBuf> l,
+                Backend& b, vt::Queue& q)
+        : hidden(std::move(h)), logits(std::move(l)), backend(&b),
+          ready(b.CreateEvent(/*blocking=*/true)) { b.RecordEvent(ready, q); }
+    ~OutputLease() {
+      if (ready.handle != nullptr) backend->SynchronizeEvent(ready);
+      backend->DestroyEvent(ready);
+    }
+  };
+  const auto publish_mtp = [&] {
+    ForwardLogits fl = ViewDeviceLogits(s.logits->ptr(), d.q.device, B, vocab);
+    if (hidden_out != nullptr) {
+      auto lease = std::make_shared<OutputLease>(s.mtp_hidden, s.logits, b, impl_->queue);
+      hidden_out->tensor = s.mtp_hidden->t();
+      hidden_out->storage = std::shared_ptr<void>(lease, s.mtp_hidden->ptr());
+      hidden_out->producer_ready_event = std::shared_ptr<vt::Event>(lease, &lease->ready);
+      fl.device_storage = std::shared_ptr<void>(lease, s.logits->ptr());
+      fl.non_owning_view = false;
+    }
+    return fl;
   };
 
   // SPEC-DSPARK W8 (#442): size this slot's PERSISTENT aux buffer and invalidate a
@@ -13210,7 +13337,7 @@ ForwardLogits Qwen3_5DenseDecodeGraph::Step(
     ++impl_->replays;
     publish_aux();
     tap_emit("replay", s.logits->ptr());
-    return ViewDeviceLogits(s.logits->ptr(), d.q.device, B, vocab);
+    return publish_mtp();
   }
 
   // Warm: the pool + residency were warmed for this size by the previous (eager)
@@ -13400,7 +13527,7 @@ ForwardLogits Qwen3_5DenseDecodeGraph::Step(
       }
       lg = DenseForwardLayers(d, s.hidden->t(), s.positions, s.attn_meta,
                               s.gdn_meta, attn_kv, gdn_state, impl_->weights,
-                              impl_->config, {}, nullptr, nullptr,
+                              impl_->config, {}, mtp_arg, nullptr,
                               aux_ids_arg, aux_out_arg, /*return_hidden=*/false,
                               dbuf ? s.dev.get() : nullptr);
       // R2 (the qwen3.cpp:1054-1061 port): advance cur_pos on-device
@@ -13468,6 +13595,10 @@ ForwardLogits Qwen3_5DenseDecodeGraph::Step(
         vt::tenstorrent::StepPhaseNoteLaunch("eager");
         StepPhaseEmit(sph, "capture-eager");
       }
+      if (hidden_out != nullptr) {
+        s.logits = std::make_shared<DBuf>(std::move(*lg));
+        return publish_mtp();
+      }
       ForwardLogits drained = WrapDeviceLogits(d, std::move(*lg), vocab);
       if (drained.rows != B) {
         drained.rows = B;
@@ -13507,7 +13638,7 @@ ForwardLogits Qwen3_5DenseDecodeGraph::Step(
         sph.on ? StepPhaseClk::now() : sph.t0;
     if (s.pinned.empty()) s.pinned = Pool(b).PinForGraph(b, s.demand);
     if (sph.on) sph.pin_ms = StepPhaseMsOf(sph_tpin0, StepPhaseClk::now());
-    s.logits = std::make_unique<DBuf>(std::move(*lg));
+    s.logits = std::make_shared<DBuf>(std::move(*lg));
     impl_->any_captured = true;
     if (std::getenv("VT_DECODE_GRAPH_STATS") != nullptr)
       std::fprintf(stderr, "[DenseDecodeGraph] captured Qwen3.5 dense decode graph "
@@ -13526,7 +13657,7 @@ ForwardLogits Qwen3_5DenseDecodeGraph::Step(
     ++impl_->replays;
     publish_aux();
     tap_emit("capture", s.logits->ptr());
-    return ViewDeviceLogits(s.logits->ptr(), d.q.device, B, vocab);
+    return publish_mtp();
   }
 
   // Cold size: run one EAGER step (pre-warms the DevicePool + resident weights /
@@ -13557,7 +13688,7 @@ ForwardLogits Qwen3_5DenseDecodeGraph::Step(
       sph.on ? StepPhaseClk::now() : sph.t0;
   DBuf lg = DenseForwardLayers(d, s.hidden->t(), s.positions, s.attn_meta,
                                s.gdn_meta, attn_kv, gdn_state, impl_->weights,
-                               impl_->config, {}, nullptr, nullptr, aux_ids_arg,
+                               impl_->config, {}, mtp_arg, nullptr, aux_ids_arg,
                                aux_out_arg);
   if (sph.on) {
     sph.body_ms = StepPhaseMsOf(sph_tb1, StepPhaseClk::now());
@@ -13575,6 +13706,10 @@ ForwardLogits Qwen3_5DenseDecodeGraph::Step(
   publish_aux();
   record_staged();
   // lg is [S,vocab]; hand ownership out but expose only the first B (real) rows.
+  if (hidden_out != nullptr) {
+    s.logits = std::make_shared<DBuf>(std::move(lg));
+    return publish_mtp();
+  }
   ForwardLogits fl = WrapDeviceLogits(d, std::move(lg), vocab);
   if (fl.rows != B) {
     fl.rows = B;

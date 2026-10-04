@@ -425,6 +425,8 @@ const char* OpNameImpl(OpId op) {
       return "ApplyTemperature";
     case OpId::kGreedyArgmax:
       return "GreedyArgmax";
+    case OpId::kMappedGreedyArgmax:
+      return "MappedGreedyArgmax";
     case OpId::kApplyTopKTopP:
       return "ApplyTopKTopP";
     case OpId::kComputeProbs:
@@ -654,6 +656,8 @@ const char* OpNameImpl(OpId op) {
       return "Exl3Gemm";
     case OpId::kExl3GroupedLinear:
       return "Exl3GroupedLinear";
+    case OpId::kExl3GroupedW8A8:
+      return "Exl3GroupedW8A8";
     case OpId::kExl3ReconstructGemm:
       return "Exl3ReconstructGemm";
     case OpId::kExl3MoeMlp:

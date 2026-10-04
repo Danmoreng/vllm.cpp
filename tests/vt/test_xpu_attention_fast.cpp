@@ -1,6 +1,9 @@
 #include "xpu_test_helpers.h"
 #include "vt/xpu.h"
 #include "vt/fp8_kv.h"
+#include "vllm/model_executor/model_loader/safetensors_reader.h"
+#include "vt/unaligned.h"
+#include <filesystem>
 #include <chrono>
 #include <cstdlib>
 #include <fstream>
@@ -89,6 +92,134 @@ struct Fixture {
   std::vector<float> result() { auto data = out.floats(); data.resize(tokens * 24 * 256); return data; }
 };
 }
+#ifdef VLLM_CPP_XPU_GPTQ4
+TEST_CASE("XPU EXL3 oneDNN attention: exact page boundaries scales and query padding"
+          * doctest::skip(!std::getenv("VT_XPU_PROFILE"))) {
+  Queue cpu(vt::DeviceType::kCPU), gpu(vt::DeviceType::kXPU);
+  REQUIRE(std::getenv("VT_XPU_PROFILE") != nullptr);
+  (void)vt::xpu::DrainProfileEvents();
+  for (int length : {1599, 1600, 1601}) for (int rows : {3, 129}) {
+    CAPTURE(length);
+    CAPTURE(rows);
+    Fixture ref(cpu.q, 1, rows, length, true, false, 1600, DType::kF16, DType::kF32,
+                DType::kF16, rows == 129);
+    Fixture got(gpu.q, 1, rows, length, true, false, 1600, DType::kF16, DType::kF16,
+                DType::kF16, rows == 129);
+    // A second attention scale exercises the runtime FP16 divisor input;
+    // cache partitions must not reuse the first call's model constant.
+    for (float scale : {0.0625f, 0.125f}) {
+      ref.args.scale = got.args.scale = scale;
+      ref.run("reference"); got.run("exl3_onednn");
+      Accuracy(got.result(), ref.result(), false, true);
+      int sdpa = 0;
+      for (const auto& event : vt::xpu::DrainProfileEvents())
+        if (event.stage == "exl3_onednn_sdpa") ++sdpa;
+      CHECK(sdpa == 4);
+    }
+  }
+  CHECK(vt::GetReferenceTierHits() == 0);
+}
+
+TEST_CASE("XPU EXL3 oneDNN attention: unequal C4 and strided output copy"
+          * doctest::skip(!std::getenv("VT_XPU_PROFILE"))) {
+  Queue cpu(vt::DeviceType::kCPU), gpu(vt::DeviceType::kXPU);
+  REQUIRE(std::getenv("VT_XPU_PROFILE") != nullptr);
+  (void)vt::xpu::DrainProfileEvents();
+  Fixture ref(cpu.q, 4, 8, 1601, true, true, 1600, DType::kF16, DType::kF32);
+  Fixture got(gpu.q, 4, 8, 1601, true, true, 1600, DType::kF16, DType::kF16);
+  Buffer padded(gpu.q, DType::kF16, {got.tokens, 24, 258});
+  padded.put(std::vector<float>(padded.tensor.Numel(), -7));
+  auto view = padded.tensor; view.shape[2] = 256;
+  ref.run("reference");
+  setenv("VT_XPU_ATTENTION", "exl3_onednn", 1);
+  vt::PagedAttention(gpu.q, view, got.query.tensor, got.kc, got.vc, got.table.tensor,
+                     got.lens.tensor, got.offsets.tensor, got.args);
+  vt::GetBackend(gpu.q.device).Synchronize(gpu.q);
+  const auto physical = padded.floats();
+  std::vector<float> active;
+  bool padding_unchanged = true;
+  for (int64_t row = 0; row < got.tokens*24; ++row) {
+    active.insert(active.end(), physical.begin()+row*258, physical.begin()+row*258+256);
+    padding_unchanged &= physical[row*258+256] == -7 && physical[row*258+257] == -7;
+  }
+  CHECK(padding_unchanged);
+  Accuracy(active, ref.result(), false, true);
+  int sdpa = 0;
+  for (const auto& event : vt::xpu::DrainProfileEvents())
+    if (event.stage == "exl3_onednn_sdpa") ++sdpa;
+  CHECK(sdpa == 16);
+  CHECK(vt::GetReferenceTierHits() == 0);
+}
+
+TEST_CASE("XPU EXL3 oneDNN attention: original real operands and physical hybrid strides"
+          * doctest::skip(!std::getenv("VT_XPU_PROFILE"))) {
+  const char* env = std::getenv("VT_B70_EXL3_EXACT_K_FIXTURE");
+  if (!env) std::exit(77);
+  const std::filesystem::path path(env);
+  auto file = vllm::SafetensorsFile::Open(path.string());
+  auto receipt_path = path; receipt_path.replace_extension(".json");
+  std::ifstream stream(receipt_path);
+  const auto receipt = nlohmann::json::parse(stream);
+  Queue gpu(vt::DeviceType::kXPU);
+  REQUIRE(std::getenv("VT_XPU_PROFILE") != nullptr);
+  for (const auto& item : receipt.at("cases")) {
+    const auto label = item.at("label").get<std::string>();
+    CAPTURE(label);
+    const int rows = item.at("logical_q"), length = item.at("exact_k"), blocks = item.at("blocks");
+    Buffer query(gpu.q, DType::kF16, {rows, 24, 256}), output(gpu.q, DType::kF16, {rows, 24, 256});
+    Buffer cache(gpu.q, DType::kI8, {blocks, 1600, 4, 512}), pages(gpu.q, DType::kI32, {1, blocks});
+    Buffer lengths(gpu.q, DType::kI32, {1}), offsets(gpu.q, DType::kI32, {2});
+    query.upload(file.Get(label+"_query").data); cache.upload(file.Get(label+"_cache").data);
+    pages.upload(file.Get(label+"_pages").data);
+    lengths.upload(&length); const int32_t qsl[]{0, rows}; offsets.upload(qsl);
+    auto key = cache.tensor; key.shape[3] = 256;
+    auto value = key; value.data = static_cast<uint8_t*>(key.data)+256;
+    vt::PagedAttentionArgs args; args.causal = true;
+    args.kv_cache_dtype = vt::Fp8KVCacheDataType::kFp8E4M3;
+    args.k_scale = item.at("k_scale"); args.v_scale = item.at("v_scale");
+    args.scale = item.at("attention_scale");
+    // An intentionally loose host maximum must never enter the mask or the
+    // compiled key dimensions: only the actual GPU sequence length is valid.
+    args.max_seq_len = length+1600;
+    setenv("VT_XPU_ATTENTION", rows > 128 ? "auto" : "exl3_onednn", 1);
+    (void)vt::xpu::DrainProfileEvents();
+    vt::PagedAttention(gpu.q, output.tensor, query.tensor, key, value, pages.tensor,
+                       lengths.tensor, offsets.tensor, args);
+    const auto raw = output.download();
+    const auto& expected = file.Get(label+"_output");
+    REQUIRE(expected.dtype == "F16"); REQUIRE(raw.size() == expected.nbytes);
+    std::vector<float> gold(raw.size()/2);
+    size_t half_differences = 0;
+    for (size_t i = 0; i < gold.size(); ++i) {
+      const auto bits = vt::LoadUnaligned<uint16_t>(expected.data+2*i);
+      gold[i] = vt::F16ToF32(bits);
+      half_differences += bits != vt::LoadUnaligned<uint16_t>(raw.data()+2*i);
+    }
+    std::cout << "ORIGINAL_EXACT_K " << label << " half_differences=" << half_differences << '\n';
+    Accuracy(output.floats(), gold, false, true);
+    int sdpa = 0;
+    for (const auto& event : vt::xpu::DrainProfileEvents())
+      if (event.stage == "exl3_onednn_sdpa") ++sdpa;
+    CHECK(sdpa == 4);
+  }
+  CHECK(vt::GetReferenceTierHits() == 0);
+}
+
+TEST_CASE("XPU EXL3 oneDNN attention: bounded eviction preserves reused output") {
+  Queue gpu(vt::DeviceType::kXPU);
+  Fixture first(gpu.q, 1, 3, 513, true, false, 1600, DType::kF16, DType::kF16);
+  first.run("exl3_onednn"); const auto initial = first.result();
+  for (int length = 514; length < 532; ++length) {
+    Fixture current(gpu.q, 1, 3, length, true, false, 1600, DType::kF16, DType::kF16);
+    current.run("exl3_onednn");
+    const auto values = current.result();
+    CHECK(std::all_of(values.begin(), values.end(), [](float x) { return std::isfinite(x); }));
+  }
+  first.run("exl3_onednn"); CHECK(first.result() == initial);
+  CHECK(vt::GetReferenceTierHits() == 0);
+}
+#endif
+
 TEST_CASE("XPU split-KV: 32k, batch4, M2-5, uneven requests and windowed softcap") {
   Queue cpu(vt::DeviceType::kCPU), gpu(vt::DeviceType::kXPU);
   for (bool fp8 : {false, true}) for (int chunk : {1, 2, 3, 4, 5}) {
