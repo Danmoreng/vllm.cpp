@@ -18,8 +18,8 @@ from runtime_layout import describe, tensor_layout
 
 
 def select_gdn_layer(modules, layer_index):
-    headers.require(type(layer_index) is int and layer_index in (0, 1),
-                    "bounded block capture supports only target GDN layers0/1")
+    headers.require(type(layer_index) is int and layer_index in (0, 1, 21),
+                    "bounded block capture supports only target GDN layers0/1/21")
     suffix = f"language_model.model.layers.{layer_index}"
     layers = [(name, module) for name, module in modules if name.endswith(suffix)]
     headers.require(len(layers) == 1, "requires one unique real target GDN layer")
@@ -207,5 +207,5 @@ if __name__ == "__main__":
     parser.add_argument("--reference-manifest", type=Path, required=True)
     parser.add_argument("--model-dir", type=Path, required=True)
     parser.add_argument("--image-identity", required=True)
-    parser.add_argument("--layer-index", type=int, choices=(0, 1), default=0)
+    parser.add_argument("--layer-index", type=int, choices=(0, 1, 21), default=0)
     capture(parser.parse_args())

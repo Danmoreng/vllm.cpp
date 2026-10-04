@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Replay original fused/split XPU GDN on immutable real layer0/1 operands.
+"""Replay original fused/split XPU GDN on immutable real layer0/1/21 operands.
 
 The split operators are from the same pinned binary, not reimplementations.
 Require exact fused/split/full-worker endpoints before accepting intermediates.
@@ -15,7 +15,7 @@ from extract_projection import digest, headers, write_safetensors
 
 def block_layer_index(receipt):
     index = receipt.get("layer_index", 0)
-    headers.require(type(index) is int and index in (0, 1), "unsupported captured GDN layer")
+    headers.require(type(index) is int and index in (0, 1, 21), "unsupported captured GDN layer")
     return index
 
 
