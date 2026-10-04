@@ -15,9 +15,17 @@ from extract_projection import write_safetensors
 from compare_target import compare_row, write_comparison_report, parse_args
 from capture_block import select_gdn_layer
 from capture_gdn import block_layer_index
+from capture_target import validate_gdn_history
 
 
 class TargetCaptureTest(unittest.TestCase):
+    def test_gdn_history_requires_selected_d29_gdn21(self):
+        validate_gdn_history(-1, -1, False)
+        validate_gdn_history(29, 21, True)
+        for step, layer, enabled in [(29, 1, True), (29, 3, True), (1, 21, True),
+                                     (-1, 21, True), (29, 21, 1)]:
+            with self.assertRaises(ValueError): validate_gdn_history(step, layer, enabled)
+
     def test_selected_detail_requires_d29_and_exact_supported_layer(self):
         self.assertEqual(selected_detail_kind(-1, -1), "none")
         self.assertEqual(selected_detail_kind(29, 1), "gdn")
@@ -51,6 +59,7 @@ class TargetCaptureTest(unittest.TestCase):
     def test_gdn_replay_keeps_legacy_layer_and_validates_selected_weights(self):
         self.assertEqual(block_layer_index({}), 0)
         self.assertEqual(block_layer_index({"layer_index": 1}), 1)
+        self.assertEqual(block_layer_index({"layer_index": 21}), 21)
         for index in (-1, 2, True, "1"):
             with self.assertRaises(ValueError): block_layer_index({"layer_index": index})
 
@@ -58,9 +67,11 @@ class TargetCaptureTest(unittest.TestCase):
         gdn = SimpleNamespace(layer_type="linear_attention")
         attn = SimpleNamespace(layer_type="full_attention")
         modules = [("language_model.model.layers.0", gdn),
-                   ("language_model.model.layers.1", gdn), ("draft.layers.1", attn)]
+                   ("language_model.model.layers.1", gdn), ("draft.layers.1", attn),
+                   ("language_model.model.layers.21", gdn)]
         self.assertEqual(select_gdn_layer(modules, 1), (modules[1]))
         self.assertEqual(select_gdn_layer(modules, 0), (modules[0]))
+        self.assertEqual(select_gdn_layer(modules, 21), (modules[3]))
         for entries, index in ((modules[:1], 1), (modules + [modules[1]], 1),
                                ([(modules[1][0], attn)], 1), (modules, 2), (modules, True)):
             with self.assertRaises(ValueError): select_gdn_layer(entries, index)

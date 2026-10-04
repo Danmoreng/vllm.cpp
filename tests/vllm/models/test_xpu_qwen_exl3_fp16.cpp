@@ -1480,15 +1480,17 @@ static void ExportAttention3Kv(const std::string& phase, vt::Queue& q,
 }
 
 static void RunRealEagerTarget(int decode_steps, int diagnostic_stop = -1,
-                               bool attention3_detail = false, int gdn_detail_layer = 1) {
+                               bool attention3_detail = false, int gdn_detail_layer = 1,
+                               bool gdn_history = false) {
   const char* model = std::getenv("VT_B70_EXL3_MODEL");
   const char* fixtures = std::getenv("VT_B70_EXL3_S1_FIXTURES");
   if (!model || !fixtures) std::exit(77);
   const std::filesystem::path model_dir(model), receipts(fixtures);
   REQUIRE((decode_steps == 1 || decode_steps == 64));
-  REQUIRE((diagnostic_stop == -1 || (decode_steps == 64 && diagnostic_stop == 29) ||
+  REQUIRE((diagnostic_stop == -1 || (decode_steps == 64 && (diagnostic_stop == 29 || diagnostic_stop == 1)) ||
            (decode_steps == 1 && diagnostic_stop == 1)));
   const bool diagnostic = diagnostic_stop >= 0;
+  if (gdn_history) { REQUIRE(diagnostic_stop == 1); REQUIRE(gdn_detail_layer == 21); }
   const vllm::actdump::StepSelectionScope dump_selection(
       diagnostic && diagnostic_stop != 1 ? diagnostic_stop : -1);
   const char* diagnostic_output = std::getenv("VT_B70_EXL3_DIAGNOSTIC_OUTPUT");
@@ -1581,8 +1583,10 @@ static void RunRealEagerTarget(int decode_steps, int diagnostic_stop = -1,
     std::cout << "REAL_TARGET_FORWARD_START " << phase << '\n' << std::flush;
     const bool capture_hidden = diagnostic &&
         (step == 0 || step == 1 || step == 11 || step == 27 || step == 29);
-    const bool capture_gdn_state = diagnostic && step == 29 && !attention3_detail &&
+    const bool capture_gdn_state = diagnostic && !attention3_detail &&
+        (step == 29 || (gdn_history && step <= 1)) &&
         std::getenv("VT_B70_EXL3_STATE_OUTPUT") != nullptr;
+    const std::string state_phase = step == 29 ? "D29" : phase;
     if (attention3_detail && step == 29) {
       REQUIRE(owners[6]->tensor.data == caches[0].data);
       ExportAttention3Kv("own-D29-attention3-before", gpu.q, caches[0], 156);
@@ -1598,8 +1602,11 @@ static void RunRealEagerTarget(int decode_steps, int diagnostic_stop = -1,
       }
       REQUIRE(owners[owner_index]->tensor.data == states[gdn_index].conv_state.data);
       REQUIRE(owners[owner_index + 1]->tensor.data == states[gdn_index].ssm_state.data);
-      ExportGdnState("own-D29-layer" + std::to_string(gdn_detail_layer) + "-before",
-                     *owners[owner_index], *owners[owner_index + 1]);
+      // Cold prefill ignores its seed; compare only the produced state.
+      if (!prefill)
+        ExportGdnState("own-" + state_phase + "-layer" +
+                       std::to_string(gdn_detail_layer) + "-before",
+                       *owners[owner_index], *owners[owner_index + 1]);
     }
     vllm::Qwen3_5MTPHiddenStates actual_hidden;
     const auto out = vllm::Qwen3_5DenseModel::ForwardDeviceTap(
@@ -1614,7 +1621,8 @@ static void RunRealEagerTarget(int decode_steps, int diagnostic_stop = -1,
       size_t owner_index = 0;
       for (int i = 0; i < gdn_detail_layer; ++i)
         owner_index += weights.layers[i].is_linear_attention ? 2 : 1;
-      ExportGdnState("own-D29-layer" + std::to_string(gdn_detail_layer) + "-after",
+      ExportGdnState("own-" + state_phase + "-layer" +
+                     std::to_string(gdn_detail_layer) + "-after",
                      *owners[owner_index], *owners[owner_index + 1]);
     }
     if (attention3_detail && step == 29)
@@ -1715,6 +1723,14 @@ TEST_CASE("XPU EXL3 real target diagnostic: D29 attention3 boundaries") {
   REQUIRE(std::getenv("VT_B70_EXL3_STATE_OUTPUT") != nullptr);
   const vllm::actdump::StageLayerSelectionScope only_attention3(3);
   RunRealEagerTarget(64, 29, true);
+}
+
+TEST_CASE("XPU EXL3 real target diagnostic: P128 D1 GDN21 history") {
+  REQUIRE(std::getenv("VT_DUMP_ACT_SUB") != nullptr);
+  REQUIRE(std::getenv("VT_B70_EXL3_STATE_OUTPUT") != nullptr);
+  const vllm::actdump::StageLayerSelectionScope only_gdn21(21);
+  // The D64 prefix is retained; this early collector is not its qualification.
+  RunRealEagerTarget(64, 1, false, 21, true);
 }
 
 TEST_CASE("XPU EXL3 real target diagnostic: D29 GDN21 boundaries") {

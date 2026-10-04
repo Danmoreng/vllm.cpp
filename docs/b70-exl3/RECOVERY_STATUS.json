@@ -39,7 +39,7 @@
       "target_qualified": false,
       "serving_qualified": false,
       "complete": true,
-      "next_code_change": "Bound GDN21 P128/D1 initial/final SSM and actual operands with the same original capture protocol, then identical-input producer/history attribution without state substitution or reference promotion.",
+      "next_code_change": "Bound earlier P128 outer boundaries through layer21; incoming P128 norm already differs59 halves, so isolate upstream history before changing GDN21 arithmetic.",
       "same_input_core_final_state_pass": true,
       "actual_VT_BA_repeatability": "P128 varying 3/6/7 halves; D1 exact in three repeats",
       "result_receipt": {
@@ -340,6 +340,30 @@
         "target_qualified": false,
         "serving_qualified": false,
         "next_code_change": "Bound GDN21 P128/D1 initial/final SSM and actual operands with the same original capture protocol, then identical-input producer/history attribution without state substitution or reference promotion."
+      },
+      "D29_GDN21_P128_D1_history": {
+        "receipt": {
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r02-D29-head-v1/receipt-gdn21-history-v76.json",
+          "bytes": 36679,
+          "sha256": "52a44bbfc0c2d029dd513f96a8a6cb90212594b925ba99bf84f950947c3beaf5"
+        },
+        "CPU_selection_cases": 3,
+        "CPU_selection_exit": 0,
+        "focused_build_exit": 0,
+        "original_exit": 0,
+        "native_cases": 1,
+        "native_assertions": 230,
+        "native_passed": 230,
+        "native_exit": 0,
+        "original_parent_tensors_bit_exact": 496,
+        "parent_logits_bit_exact": 2,
+        "p128_input_norm_differing_halves": 59,
+        "p128_SSM_differing_f32": 429708,
+        "p128_SSM_relativeL2": 9.912469552303826e-05,
+        "d1_SSM_relativeL2": 6.930553747933543e-05,
+        "next": "Bound earlier P128 outer boundaries through layer21; incoming P128 norm already differs59 halves, so isolate upstream history before changing GDN21 arithmetic.",
+        "target_qualified": false,
+        "serving_qualified": false
       }
     },
     {

@@ -56,6 +56,12 @@ def selected_detail_kind(block_step, detail_layer):
     return {-1: "none", 1: "gdn", 3: "attention", 21: "gdn"}[detail_layer]
 
 
+def validate_gdn_history(block_step, detail_layer, enabled):
+    headers.require(type(enabled) is bool and
+                    (not enabled or (block_step == 29 and detail_layer == 21)),
+                    "early GDN history is bounded to the selected D29 GDN21 capture")
+
+
 def selected_block_layers(modules, first_layer):
     prefix = first_layer.rsplit(".", 1)[0] + "."
     layers = [(int(name[len(prefix):]), module) for name, module in modules.items()
@@ -136,12 +142,24 @@ class TargetCapture(BlockCapture):
         del self._deterministic_ba_originals
         return {"restored_modules": 48}
 
-    def install_target_capture(self, output, decode_steps=1, block_step=-1, detail_layer=-1):
+    def install_target_capture(self, output, decode_steps=1, block_step=-1, detail_layer=-1,
+                               gdn_history=False):
         import torch
         headers.require(block_step == -1 or (decode_steps == 29 and block_step == 29),
                         "selected block observation is bounded to D29")
         detail_kind = selected_detail_kind(block_step, detail_layer)
+        validate_gdn_history(block_step, detail_layer, gdn_history)
         installed = self.install_block_capture(output)
+        self._gdn_history_capture = None
+        if gdn_history:
+            # Reuse the bounded P128/D1 observer. It skips uninitialized,
+            # unconsumed cold-prefill state and delegates every original op.
+            observer = BlockCapture()
+            observer.model_runner = self.model_runner
+            path = Path(output)
+            observer.install_block_capture(
+                path.with_name(path.stem + "-gdn21-history.safetensors"), 21)
+            self._gdn_history_capture = observer
         self._target_phases = []
         self._target_expected_phases = target_phases(decode_steps)
         self._target_layouts = []
@@ -283,10 +301,16 @@ class TargetCapture(BlockCapture):
                 for hook in self._block_hooks:
                     hook.remove()
                 self._block_hooks.clear()
+                if self._gdn_history_capture is not None:
+                    for hook in self._gdn_history_capture._block_hooks:
+                        hook.remove()
+                    self._gdn_history_capture._block_hooks.clear()
         model.compute_logits = observe_logits(self._target_original_logits, save)
         return installed | {"target_observer": "compute_logits delegates original once; bounded active copies"}
 
     def finish_target_capture(self):
+        history_record = (self._gdn_history_capture.finish_block_capture()
+                          if self._gdn_history_capture is not None else None)
         attention = self._selected_attention_capture
         attention_record = attention.finish_block_capture() if attention is not None else None
         self.model_runner.model.compute_logits = self._target_original_logits
@@ -301,6 +325,7 @@ class TargetCapture(BlockCapture):
         return self.finish_block_capture() | {"selected_block_step": self._selected_block_step,
                                               "selected_attention_record": attention_record,
                                               "selected_detail_record": self._selected_detail_record,
+                                              "gdn_history_record": history_record,
                                               "selected_block_counts": self._selected_block_counts,
                                               "target_layouts": self._target_layouts,
                                               "actual_input_witnesses": self._target_witnesses}
@@ -381,7 +406,8 @@ def capture(args):
             headers.require(llm.reset_prefix_cache(), "prefix reset failed")
             path = args.output_dir / f"repeat-{repeat}.safetensors"
             llm.collective_rpc("install_target_capture", timeout=60,
-                               args=(str(path), args.decode_steps, args.block_step, args.detail_layer))
+                               args=(str(path), args.decode_steps, args.block_step,
+                                     args.detail_layer, args.gdn_history))
             observed = llm.generate({"prompt_token_ids": tokens}, params, use_tqdm=False)
             ids = [list(o.outputs[0].token_ids) for o in observed]
             result = llm.collective_rpc("finish_target_capture", timeout=60)
@@ -422,6 +448,7 @@ def capture(args):
               "comparisons": compare_repeats(paths, args.decode_steps),
               "selected_block_step": args.block_step,
               "selected_detail_layer": args.detail_layer,
+              "selected_gdn_history": args.gdn_history,
               "diagnostic_deterministic_ba": bool(args.deterministic_ba), "ba_policy": ba_policy,
               "scope": "Bounded original full-target capture; layer0 states P128/D1, optional read-only D29 block/norm boundaries. Not a native pass or a new numerical envelope."}
     with (args.output_dir / "comparison.json").open("x") as stream:
@@ -438,6 +465,8 @@ if __name__ == "__main__":
     parser.add_argument("--decode-steps", type=int, choices=(1, 29, 64), default=1)
     parser.add_argument("--block-step", type=int, choices=(-1, 29), default=-1)
     parser.add_argument("--detail-layer", type=int, choices=(-1, 1, 3, 21), default=-1)
+    parser.add_argument("--gdn-history", action="store_true",
+                        help="also observe selected GDN21 P128/D1 states and operands")
     parser.add_argument("--deterministic-ba", action="store_true",
                         help="separate diagnostic policy: original BA matmul deterministic; frozen gates unchanged")
     parser.add_argument("--repeats", type=int, choices=(1, 2, 3), default=3)
