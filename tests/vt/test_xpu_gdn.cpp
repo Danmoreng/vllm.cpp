@@ -2,6 +2,11 @@
 #include "vt/xpu.h"
 #include <cstdlib>
 #include <string>
+#include <chrono>
+#include <filesystem>
+#include <fstream>
+#include <iostream>
+#include <nlohmann/json.hpp>
 
 namespace {
 using vt::DType;
@@ -409,6 +414,87 @@ TEST_CASE("XPU speculative GDN MTP1 uses 27B FP16 activations and FP32 snapshots
       Close(state.floats(), expected_state, 1e-4f, 1e-5f);
     }
   }
+}
+
+TEST_CASE("XPU P5 speculative GDN: bounded Q4 C1 C4 baseline and complete snapshots") {
+  const char* request_env = std::getenv("VT_B70_GDN_BENCH_REQUESTS");
+  if (!request_env) { MESSAGE("Set VT_B70_GDN_BENCH_REQUESTS for P5 baseline inspection"); return; }
+  REQUIRE((std::string(request_env) == "1" || std::string(request_env) == "4"));
+  const int requests = std::atoi(request_env), tokens = 4 * requests;
+  constexpr int hk = 16, hv = 48, dk = 128, dv = 128, cols = 4;
+  constexpr size_t slot_elements = size_t(hv) * dv * dk;
+  const int slots = requests * cols + 2;
+  Queue gpu(vt::DeviceType::kXPU);
+  Buffer query(gpu.q, DType::kF16, {tokens, hk, dk}), key(gpu.q, DType::kF16, {tokens, hk, dk});
+  Buffer value(gpu.q, DType::kF16, {tokens, hv, dv}), g(gpu.q, DType::kF32, {tokens, hv});
+  const auto output_dtype = std::getenv("VT_B70_GDN_OUTPUT_F32") ? DType::kF32 : DType::kF16;
+  Buffer beta(gpu.q, DType::kF32, {tokens, hv}), out(gpu.q, output_dtype, {tokens, hv, dv});
+  Buffer state(gpu.q, DType::kF32, {slots, hv, dv, dk});
+  Buffer cu(gpu.q, DType::kI32, {requests + 1}), ids(gpu.q, DType::kI32, {requests, cols});
+  Buffer accepted(gpu.q, DType::kI32, {requests});
+  query.put(Values(tokens * hk * dk, 31, .01f)); key.put(Values(tokens * hk * dk, 32, .01f));
+  value.put(Values(tokens * hv * dv, 33, .01f));
+  auto gates = Values(tokens * hv, 34, .01f), betas = Values(tokens * hv, 35, .01f);
+  for (auto& x : gates) x -= .3f;
+  for (auto& x : betas) x += .5f;
+  g.put(gates); beta.put(betas);
+  auto initial = Values(size_t(slots) * slot_elements, 36, .002f);
+  const uint32_t poison = 0x7fc12345u;
+  for (size_t j = 0; j < slot_elements; ++j) {
+    std::memcpy(initial.data() + j, &poison, 4);
+    std::memcpy(initial.data() + size_t(slots - 1) * slot_elements + j, &poison, 4);
+  }
+  state.put(initial);
+  std::vector<int32_t> offsets(requests + 1), indices(requests * cols), counts(requests);
+  for (int r = 0; r < requests; ++r) {
+    offsets[r] = r * cols; counts[r] = r % cols + 1;
+    for (int c = 0; c < cols; ++c) indices[r * cols + c] = 1 + r * cols + c;
+  }
+  offsets.back() = tokens; cu.upload(offsets.data()); ids.upload(indices.data()); accepted.upload(counts.data());
+  const auto before = state.download(), qb = query.download(), kb = key.download(), vb = value.download();
+  const auto gb = g.download(), bb = beta.download();
+  auto& backend = vt::GetBackend(gpu.q.device);
+  auto execute = [&] { vt::GdnSpecDecode(gpu.q, out.tensor, query.tensor, key.tensor, value.tensor,
+      g.tensor, beta.tensor, state.tensor, cu.tensor, ids.tensor, accepted.tensor, {.0883883476f}); };
+  execute(); const auto expected_out = out.download(), expected_state = state.download();
+  for (auto x : out.floats()) REQUIRE(std::isfinite(x));
+  for (int warm = 0; warm < 2; ++warm) { state.upload(before.data()); execute(); backend.Synchronize(gpu.q); }
+  (void)vt::xpu::DrainProfileEvents();
+  std::vector<double> ms;
+  for (int sample = 0; sample < 3; ++sample) {
+    // Restore the identical initial slots outside the operator timer.
+    state.upload(before.data()); const auto start = std::chrono::steady_clock::now();
+    execute(); backend.Synchronize(gpu.q);
+    ms.push_back(std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count());
+  }
+  SameBytes(out.download(), expected_out); SameBytes(state.download(), expected_state);
+  SameBytes(query.download(), qb); SameBytes(key.download(), kb); SameBytes(value.download(), vb);
+  SameBytes(g.download(), gb); SameBytes(beta.download(), bb);
+  SameBytes(std::vector<unsigned char>(expected_state.begin(), expected_state.begin() + slot_elements * 4),
+            std::vector<unsigned char>(before.begin(), before.begin() + slot_elements * 4));
+  SameBytes(std::vector<unsigned char>(expected_state.end() - slot_elements * 4, expected_state.end()),
+            std::vector<unsigned char>(before.end() - slot_elements * 4, before.end()));
+  nlohmann::json report = {{"requests", requests}, {"queries_each", cols}, {"hk", hk}, {"hv", hv},
+      {"dk", dk}, {"dv", dv}, {"output_f32", output_dtype == DType::kF32},
+      {"accepted_selectors", counts}, {"state_bytes", state.bytes},
+      {"complete_operator_wall_ms", ms}, {"seed", "deterministic synthetic distinct slots; not original model operands"},
+      {"profiled", std::getenv("VT_XPU_PROFILE") && std::string(std::getenv("VT_XPU_PROFILE")) == "1"}};
+  report["device_events"] = nlohmann::json::array();
+  for (const auto& e : vt::xpu::DrainProfileEvents())
+    if (e.stage.find("gdn_spec_decode") == 0)
+      report["device_events"].push_back({{"stage", e.stage}, {"ms", (e.end_ns - e.start_ns) / 1e6}});
+  if (const char* dir = std::getenv("VT_B70_GDN_BASELINE_OUTPUT")) {
+    const auto root = std::filesystem::path(dir); std::filesystem::create_directories(root);
+    for (const auto& entry : {std::make_pair("initial.f32", &before),
+                             std::make_pair("snapshots.f32", &expected_state),
+                             std::make_pair(output_dtype == DType::kF32 ? "output.f32" : "output.f16", &expected_out)}) {
+      const auto path = root / entry.first; REQUIRE_FALSE(std::filesystem::exists(path));
+      std::ofstream f(path, std::ios::binary); f.write(reinterpret_cast<const char*>(entry.second->data()), entry.second->size());
+      f.close(); REQUIRE(f.good());
+    }
+  }
+  CHECK(vt::GetReferenceTierHits() == 0);
+  std::cout << "P5_GDN_BASELINE " << report.dump() << std::endl;
 }
 
 static void CheckSpecSnapshotRollback(int first_rows) {
