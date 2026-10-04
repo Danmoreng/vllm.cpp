@@ -1551,8 +1551,10 @@ static void RunRealEagerTarget(int decode_steps, int diagnostic_stop = -1,
       diagnostic && diagnostic_stop != 1 ? diagnostic_stop : -1);
   const char* diagnostic_output = std::getenv("VT_B70_EXL3_DIAGNOSTIC_OUTPUT");
   if (diagnostic && !diagnostic_output) std::exit(77);
-  const auto output_dir = diagnostic ? std::filesystem::path(diagnostic_output) : receipts;
-  if (diagnostic) std::filesystem::create_directories(output_dir);
+  // Full D64 qualification can keep immutable reference fixtures read-only
+  // while writing its complete outputs to an isolated receipt directory.
+  const auto output_dir = diagnostic_output ? std::filesystem::path(diagnostic_output) : receipts;
+  if (diagnostic_output) std::filesystem::create_directories(output_dir);
   const auto capture_dir = receipts / (decode_steps == 1 ? "target-repeats" : "target-d64");
   const int repeats = decode_steps == 1 ? 3 : 1;
   std::ifstream record(capture_dir / "repeat-0.json");
