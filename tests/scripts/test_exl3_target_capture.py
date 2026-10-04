@@ -7,14 +7,76 @@ import struct
 import sys
 import tempfile
 import unittest
+from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tools/exl3_reference"))
-from capture_target import compare_repeats, observe_logits, probability_metrics, target_phases, load_trace, validate_prefix_witnesses
+from capture_target import compare_repeats, observe_logits, probability_metrics, target_phases, load_trace, validate_prefix_witnesses, selected_block_layers, deterministic_ba_forward, selected_detail_kind
 from extract_projection import write_safetensors
 from compare_target import compare_row, write_comparison_report, parse_args
+from capture_block import select_gdn_layer
+from capture_gdn import block_layer_index
 
 
 class TargetCaptureTest(unittest.TestCase):
+    def test_selected_detail_requires_d29_and_exact_supported_layer(self):
+        self.assertEqual(selected_detail_kind(-1, -1), "none")
+        self.assertEqual(selected_detail_kind(29, 1), "gdn")
+        self.assertEqual(selected_detail_kind(29, 3), "attention")
+        for step, layer in [(-1, 1), (-1, 3), (1, 3), (29, 2), (29, True), (29, "3")]:
+            with self.assertRaises(ValueError): selected_detail_kind(step, layer)
+
+    def test_deterministic_ba_scope_delegates_and_restores_success_and_failure(self):
+        setting = [False, True]
+        changes, calls = [], []
+        value, extra, result = object(), object(), object()
+        def read(): return tuple(setting)
+        def write(state):
+            setting[:] = state; changes.append(state)
+        def original(*args, **kwargs):
+            self.assertEqual(setting, [True, False])
+            calls.append((args, kwargs)); return result
+        wrapped = deterministic_ba_forward(original, read, write)
+        self.assertIs(wrapped(value, option=extra), result)
+        self.assertEqual(calls, [((value,), {"option": extra})])
+        self.assertEqual(changes, [(True, False), (False, True)])
+        self.assertEqual(setting, [False, True])
+        def failed(*args):
+            self.assertEqual(setting, [True, False]); raise RuntimeError("original failed")
+        with self.assertRaisesRegex(RuntimeError, "original failed"):
+            deterministic_ba_forward(failed, read, write)(value)
+        self.assertEqual(setting, [False, True])
+
+    def test_gdn_replay_keeps_legacy_layer_and_validates_selected_weights(self):
+        self.assertEqual(block_layer_index({}), 0)
+        self.assertEqual(block_layer_index({"layer_index": 1}), 1)
+        for index in (-1, 2, True, "1"):
+            with self.assertRaises(ValueError): block_layer_index({"layer_index": index})
+
+    def test_block_selection_rejects_missing_duplicate_or_non_gdn_target(self):
+        gdn = SimpleNamespace(layer_type="linear_attention")
+        attn = SimpleNamespace(layer_type="full_attention")
+        modules = [("language_model.model.layers.0", gdn),
+                   ("language_model.model.layers.1", gdn), ("draft.layers.1", attn)]
+        self.assertEqual(select_gdn_layer(modules, 1), (modules[1]))
+        self.assertEqual(select_gdn_layer(modules, 0), (modules[0]))
+        for entries, index in ((modules[:1], 1), (modules + [modules[1]], 1),
+                               ([(modules[1][0], attn)], 1), (modules, 2), (modules, True)):
+            with self.assertRaises(ValueError): select_gdn_layer(entries, index)
+
+    def test_d29_selection_requires_complete_target_blocks_and_exact_trace(self):
+        modules = {f"language_model.model.layers.{i}": object() for i in reversed(range(64))}
+        modules["draft.layers.0"] = object()
+        layers = selected_block_layers(modules, "language_model.model.layers.0")
+        self.assertEqual([i for i, _ in layers], list(range(64)))
+        del modules["language_model.model.layers.63"]
+        with self.assertRaises(ValueError): selected_block_layers(modules, "language_model.model.layers.0")
+        self.assertEqual(target_phases(29), ["p128"] + [f"d{i}" for i in range(1, 30)])
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "trace.json"
+            path.write_text(json.dumps({"output_ids": [list(range(30))]}))
+            self.assertEqual(load_trace(path, 29), list(range(30)))
+            with self.assertRaises(ValueError): load_trace(path, 64)
+
     def test_observer_preserves_arguments_result_and_single_original_call(self):
         hidden, result, extra = object(), object(), object()
         calls, copies = [], []

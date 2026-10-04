@@ -1,5 +1,6 @@
 #include "xpu_common.h"
 #include "xpu_kernels.h"
+#include <sycl/ext/intel/math.hpp>
 #include <cstdio>
 #include <cstdlib>
 #include <algorithm>
@@ -662,6 +663,53 @@ void RmsNormGatedKernel(Queue& q, Tensor& out, const Tensor& x, const Tensor& ga
     }
     VT_CHECK(norm_mode != NormMode::kSubgroup || subgroup,
              "VT_XPU_GDN_GATED_NORM=subgroup requires width 128 and SG16");
+    if (subgroup && src.dtype == DType::kF16 && z.dtype == DType::kF16 &&
+        (w.dtype == DType::kF32 || w.dtype == DType::kF16) && !sigmoid && rows >= 32) {
+      // Original eager GDN: D128 non-vectorized Torch mean, virtual SG32,
+      // F32 rsqrt/SiLU and separate multiply boundaries before narrowing.
+      // Typed operands keep this producer route separate from the generic
+      // dtype and reciprocal-sqrt alternatives.
+      const auto* input = static_cast<const sycl::half*>(src.data);
+      const auto* gate_data = static_cast<const sycl::half*>(z.data);
+      constexpr int lanes = 16, workgroup = 128;
+      const auto global = ((rows * lanes + workgroup - 1) / workgroup) * workgroup;
+      const auto event = NativeQueue(q).parallel_for(
+          sycl::nd_range<1>(global, workgroup),
+          [=](sycl::nd_item<1> item) [[sycl::reqd_sub_group_size(16)]] {
+#pragma clang fp contract(off)
+        const int64_t row = item.get_global_linear_id() / lanes;
+        if (row >= rows) return;
+        const int lane = item.get_local_linear_id() % lanes;
+        auto sg = item.get_sub_group();
+        float halves[2];
+        for (int half = 0; half < 2; ++half) {
+          float partial = 0.0f;
+          for (int j = 0; j < 4; ++j) {
+            const float value = input[row * 128 + lane + half * lanes + 32 * j];
+            partial += value * value;
+          }
+          halves[half] = partial;
+        }
+        for (int offset = 1; offset < lanes; offset *= 2) {
+          halves[0] += sycl::shift_group_left(sg, halves[0], offset);
+          halves[1] += sycl::shift_group_left(sg, halves[1], offset);
+        }
+        const float mean = sycl::group_broadcast(sg, halves[0] + halves[1], 0) / 128.0f;
+        const float inverse = sycl::rsqrt(mean + eps);
+        const auto gbase = (row / group) * z.stride[0] + (row % group) * 128;
+        for (int j = 0; j < 8; ++j) {
+          const int col = lane + lanes * j;
+          const float value = input[row * 128 + col];
+          const float g = gate_data[gbase + col];
+          const float act = sycl::ext::intel::math::fdiv_rn(g, 1.0f + sycl::exp(-g));
+          const float normalized = value * inverse;
+          const float weighted = normalized * Load(w, col);
+          Store(dst, row * 128 + col, weighted * act);
+        }
+      });
+      RecordProfileEvent(q, "gdn_gated_norm_fp16_producer", event);
+      return;
+    }
     if (subgroup) {
       constexpr int lanes = 16, tile = 8, workgroup = 128;
       const auto global = ((rows * lanes + workgroup - 1) / workgroup) * workgroup;
