@@ -1640,14 +1640,14 @@
     },
     {
       "task": "P1",
-      "status": "native_C1_page1600_Q4_actual_original_bit_exact_family_pending",
+      "status": "native_C1_family_original_exact_refusals_graph_C4_model_pending",
       "complete": false,
       "original_capture_exit": 0,
       "host_test_cases_passed": 2,
       "receipt": {
-        "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p1-native-C1-v1/receipt-v1.json",
-        "bytes": 37776,
-        "sha256": "b83f7320fa8d9ee0394d3acc0f3c7dd4ab2db9e608e165de9ade2b1fdad9b867"
+        "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p1-C1-family-v1/receipt-v1.json",
+        "bytes": 24268,
+        "sha256": "f503ec65233605a11a21fe3d97917ad60b68c0f10ad827052b6f4a6053c5d4bf"
       },
       "original_active_length": 4100,
       "original_splits": 16,
@@ -1670,7 +1670,16 @@
         "verify": 0.15017
       },
       "native_C1_scope": "Actualoriginal Q4 C1 length4100, page1600, interleavedFP8 KV and fullphysicalIDs3/10/23 on180blocks, poisoned inactivebytes and164column table, direct/aliased FP16 output byte-exact; caller logicaloffsets unchanged, donor physicaloffsets private. Q2/Q3/Q5, other lengths/layouts, graph/C4/modelcycle quality and speed pending. Auto remains opt-in.",
-      "retained_failures": "Baseline7571half differences/genericroute; firstlauncher24576NaN from Vtail; tailmask12half differences; scopedoriginalmath zero. Failed resourcefilename attempt retained before GPUworker. Frozen defaultD64 four failures unchanged."
+      "retained_failures": "Baseline7571half differences/genericroute; firstlauncher24576NaN from Vtail; tailmask12half differences; scopedoriginalmath zero. Failed resourcefilename attempt retained before GPUworker. Frozen defaultD64 four failures unchanged.",
+      "first_native_C1_receipt": {
+        "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p1-native-C1-v1/receipt-v1.json",
+        "bytes": 37776,
+        "sha256": "b83f7320fa8d9ee0394d3acc0f3c7dd4ab2db9e608e165de9ade2b1fdad9b867"
+      },
+      "native_C1_family_assertions": 1915,
+      "native_C1_family_exit": 0,
+      "native_C1_original_operator_cases": 39,
+      "native_C1_poison_forms": 78
     },
     {
       "task": "P2",
@@ -1809,5 +1818,5 @@
     }
   ],
   "performance_baseline": "7536aededc049b2157f12eadb0f4cc6bbf29b7b7",
-  "performance_next": "P1 executed-original Q2/Q3/Q5, page1599/1600/1601 and4799/4800/4801, L32768, precise layouts/refusals and graph ownership; then distinct C4/ragged and emittedcycle model qualification before auto promotion. P2 bounded performance package complete; laterP3 exactSiLU/P4 rowvalidation remain material. DefaultD64/reference/fullstate gates open."
+  "performance_next": "P1 focused unsupported noncausal/nonunit scale/stride fallback and C1 graph replay/metadata/scratch lifetime; then distinct original/native trueC4/ragged and emittedcycle model qualification before automatic verifier promotion. P2 bounded performance package complete; laterP3/P4 remain material. DefaultD64/reference/fullstate gates open."
 }
