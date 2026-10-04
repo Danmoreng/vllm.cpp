@@ -1,4 +1,5 @@
 #include "vt/exl3_grouped.h"
+#include "vt/exl3_w8a8_panel_plan.h"
 #include <algorithm>
 #include <limits>
 
@@ -35,7 +36,8 @@ Exl3W8A8Plan PlanExl3W8A8(int64_t m, int64_t k, int64_t n,
   const size_t sx = region(multiply(rows, sizeof(float)));
   const size_t y = region(multiply(multiply(size_t(ms), size_t(n)), size_t{2}));
   const size_t sw = region(sizeof(float));
-  return {ms, act, sx, y, sw, cursor, multiply(size_t(k), size_t{128})};
+  const auto panel = PlanExl3W8A8PanelCapacity(k, n, 128);
+  return {ms, act, sx, y, sw, cursor, panel.bytes};
 }
 
 void Exl3GroupedW8A8(Queue& q, Tensor& out, const Tensor& in, const Tensor& tr,

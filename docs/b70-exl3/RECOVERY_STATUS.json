@@ -1656,8 +1656,20 @@
     },
     {
       "task": "P2",
-      "status": "pending",
-      "complete": false
+      "status": "panel_geometry_implemented_and_host_tested",
+      "complete": false,
+      "panel_geometry_implemented": true,
+      "wider_GPU_kernel_implemented": false,
+      "shared_model_scratch_implemented": false,
+      "real_M256_M1600_M896_tested": false,
+      "receipt": {
+        "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p2-panel-plan-v1/receipt-v1.json",
+        "bytes": 3558,
+        "sha256": "7937448baf454aebb67cddba3f96f35c82fe409c6dfbd29c383e5360e576b945"
+      },
+      "focused_cases": 3,
+      "focused_assertions": 817,
+      "focused_exit": 0
     },
     {
       "task": "P3",
@@ -1686,5 +1698,5 @@
     }
   ],
   "performance_baseline": "7536aededc049b2157f12eadb0f4cc6bbf29b7b7",
-  "performance_next": "P2 wider group-correct W8A8 panel planning/allocation and first actualM256 path; P1 actual original fixture now available, native matching/admission remains pending."
+  "performance_next": "Integrate selected bounded panel width into public workspace/shape validation and reconstruction/GEMM loop; provide one completion-owned reusable model scratch for grouped and single wrappers. Then real grouped M256128/1024/2048 A/B with Xq/scales/reconstructed/Y/final checks and complete-operator timing, thenM1600/M896 and one complete4Kprefill."
 }
