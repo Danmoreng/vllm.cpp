@@ -55,6 +55,11 @@
 #include "vt/dtype.h"
 #include "vt/persistent_step_input.h"
 #include "vt/tensor.h"
+#ifdef VLLM_CPP_XPU
+#include "vt/xpu.h"
+#endif
+#include <algorithm>
+#include <iostream>
 
 namespace {
 
@@ -1538,3 +1543,281 @@ TEST_CASE("P1: XPU attention graph policy bounds only qualified C4 packed verifi
   kv.block_size = 1664; CHECK(bound() == 4992);
   meta.num_reqs = 1; CHECK(bound() == 4100);
 }
+
+
+#ifdef VLLM_CPP_XPU
+namespace {
+// Real XPU replay through the model driver, with reduced materialized weights.
+// This qualifies ownership and exact eager/replay state, not checkpoint EXL3
+// arithmetic, a prefilling trajectory, or serving speed. Attention alone has
+// the production 24Q/4KV/D256/page1600 geometry; GDN/MLP/hidden stay small.
+struct P1XpuQueue {
+  vt::Queue q = vt::CreateQueue({vt::DeviceType::kXPU, 0});
+  ~P1XpuQueue() { vt::DestroyQueue(q); }
+};
+struct P1XpuBuffer {
+  vt::Queue& q;
+  size_t bytes;
+  void* data;
+  P1XpuBuffer(vt::Queue& queue, size_t count)
+      : q(queue), bytes(count), data(vt::Alloc(q.device, count)) {
+    vt::GetBackend(q.device).Memset(q, data, 0, bytes);
+  }
+  ~P1XpuBuffer() { vt::Free(q.device, data); }
+  P1XpuBuffer(const P1XpuBuffer&) = delete;
+  std::vector<unsigned char> Read() const {
+    std::vector<unsigned char> result(bytes);
+    auto& b = vt::GetBackend(q.device);
+    b.Copy(q, result.data(), data, bytes); b.Synchronize(q);
+    return result;
+  }
+  void Write(const std::vector<unsigned char>& contents) {
+    REQUIRE(contents.size() == bytes);
+    auto& b = vt::GetBackend(q.device);
+    b.Copy(q, data, contents.data(), bytes); b.Synchronize(q);
+  }
+};
+void P1ToF16(OwnedTensor& t) {
+  if (t.dtype != DType::kBF16) return;
+  for (size_t i = 0; i < t.bytes.size(); i += 2) {
+    uint16_t bits; std::memcpy(&bits, t.bytes.data() + i, 2);
+    bits = vt::F32ToF16(vt::BF16ToF32(bits));
+    std::memcpy(t.bytes.data() + i, &bits, 2);
+  }
+  t.dtype = DType::kF16;
+}
+void P1ToNK(OwnedTensor& t) {
+  REQUIRE(t.rank == 2); REQUIRE(t.dtype == DType::kF16);
+  const int64_t k = t.shape[0], n = t.shape[1];
+  auto bytes = t.bytes;
+  for (int64_t i = 0; i < k; ++i)
+    for (int64_t j = 0; j < n; ++j)
+      std::memcpy(t.bytes.data() + (j * k + i) * 2, bytes.data() + (i * n + j) * 2, 2);
+  t.shape[0] = n; t.shape[1] = k; t.nk = true;
+}
+dense::Qwen3_5DenseWeights P1XpuWeights(const HfConfig& c) {
+  auto w = dense::MakeWeights(c);
+  // Explicit synthetic materialized fixture selecting the same FP16 Dev as
+  // EXL3. No quantized shard is provided or substituted by captured values.
+  w.exl3_checkpoint = true;
+  w.precision.activation = w.precision.dense_weight = DType::kF16;
+  w.precision.gdn_conv_state = w.precision.gdn_recurrent_state = DType::kF32;
+  P1ToF16(w.embed_tokens); P1ToF16(w.final_norm); P1ToF16(w.lm_head);
+  for (auto& l : w.layers) {
+    P1ToF16(l.input_layernorm); P1ToF16(l.post_attention_layernorm);
+    for (auto* t : {&l.mlp.gate_proj, &l.mlp.up_proj, &l.mlp.down_proj,
+                   &l.gdn.in_proj_qkv, &l.gdn.in_proj_z, &l.gdn.in_proj_b,
+                   &l.gdn.in_proj_a, &l.gdn.conv1d_weight, &l.gdn.norm_weight,
+                   &l.gdn.out_proj, &l.attn.q_proj, &l.attn.k_proj,
+                   &l.attn.v_proj, &l.attn.o_proj, &l.attn.q_norm,
+                   &l.attn.k_norm}) P1ToF16(*t);
+    // Raw-NK projections emit the scoped model dtype, as the checkpoint
+    // projection does. Legacy synthetic KN projections deliberately emit F32
+    // and are incompatible with this FP16 Q/K + FP8 KV fixture.
+    if (!l.is_linear_attention)
+      for (auto* t : {&l.attn.q_proj, &l.attn.k_proj, &l.attn.v_proj}) P1ToNK(*t);
+  }
+  return w;
+}
+struct P1XpuCaches {
+  vt::Queue& q;
+  std::vector<std::unique_ptr<P1XpuBuffer>> kv_buffers, state_buffers;
+  std::vector<PagedKvCache> kv;
+  std::vector<GdnStateCache> gdn;
+  P1XpuCaches(vt::Queue& queue, const HfConfig& c) : q(queue) {
+    for (const auto& type : c.layer_types) {
+      if (type == "full_attention") {
+        auto cache = XpuPolicyKv(nullptr); cache.num_blocks = 16;
+        cache.head_size_v = 256;
+        kv_buffers.push_back(std::make_unique<P1XpuBuffer>(q,
+            size_t(cache.num_blocks * 2 * cache.block_size * 4 * 256)));
+        cache.data = kv_buffers.back()->data; kv.push_back(cache);
+      } else {
+        GdnStateCache state;
+        const int64_t conv_dim = 2 * c.linear_num_key_heads * c.linear_key_head_dim +
+            c.linear_num_value_heads * c.linear_value_head_dim;
+        state.ssm_state = vt::Tensor::Contiguous(nullptr, DType::kF32, q.device,
+            {16, c.linear_num_value_heads, c.linear_value_head_dim, c.linear_key_head_dim});
+        state.conv_state = vt::Tensor::Contiguous(nullptr, DType::kF32, q.device,
+            {16, conv_dim, 6});
+        for (auto* t : {&state.ssm_state, &state.conv_state}) {
+          state_buffers.push_back(std::make_unique<P1XpuBuffer>(q, t->Bytes()));
+          t->data = state_buffers.back()->data;
+        }
+        gdn.push_back(state);
+      }
+    }
+    vt::GetBackend(q.device).Synchronize(q);
+  }
+};
+int32_t P1PhysicalPage(int request, int page) { return request * 4 + 3 - page; }
+CommonAttentionMetadata P1XpuMeta(int32_t pos, int32_t page) {
+  CommonAttentionMetadata m;
+  m.num_reqs = 4; m.num_actual_tokens = 16; m.max_query_len = 4;
+  m.query_start_loc = m.query_start_loc_cpu = {0, 4, 8, 12, 16};
+  // Unequal contexts share the same host partition/bound, but have distinct
+  // disjoint request pages and fresh lengths/positions/slots on every replay.
+  for (int r = 0; r < 4; ++r) m.seq_lens.push_back(pos + 4 - r * 7);
+  m.seq_lens_cpu = m.seq_lens; m.max_seq_len = pos + 4;
+  m.block_table_num_cols = 164;
+  m.block_table_tensor.assign(4 * 164, -1);
+  for (int r = 0; r < 4; ++r) {
+    const int active = (m.seq_lens[r] + page - 1) / page;
+    for (int p = 0; p < active; ++p)
+      m.block_table_tensor[r * 164 + p] = P1PhysicalPage(r, p);
+    for (int j = 0; j < 4; ++j) {
+      const int position = pos + j - r * 7;
+      m.slot_mapping.push_back(P1PhysicalPage(r, position / page) * page + position % page);
+    }
+  }
+  m.causal = true; return m;
+}
+std::vector<unsigned char> P1XpuLogits(const vllm::ForwardLogits& logits, vt::Queue& q) {
+  REQUIRE(logits.rows == 16); REQUIRE(logits.vocab == 40);
+  REQUIRE(logits.device_tensor.dtype == DType::kF32);
+  std::vector<unsigned char> result(16 * 40 * sizeof(float));
+  auto& b = vt::GetBackend(q.device);
+  b.Copy(q, result.data(), logits.device_tensor.data, result.size()); b.Synchronize(q);
+  bool nonzero = false;
+  for (size_t i = 0; i < result.size(); i += sizeof(float)) {
+    float value; std::memcpy(&value, result.data() + i, sizeof(float));
+    REQUIRE(std::isfinite(value)); nonzero |= value != 0;
+  }
+  REQUIRE(nonzero); return result;
+}
+// Repack logical positions to a different physical page width, preserving all
+// existing KV values. Old allocations stay alive as stale-write sentinels.
+std::vector<unsigned char> P1Repage(const std::vector<unsigned char>& old,
+                                  int old_page, int page) {
+  const size_t row = 4 * 256;
+  std::vector<unsigned char> result(size_t(16 * 2 * page) * row, 0);
+  for (int r = 0; r < 4; ++r)
+    for (int p = 0; p < 4 * old_page; ++p)
+      for (int plane = 0; plane < 2; ++plane) {
+        const size_t from = (size_t(P1PhysicalPage(r, p / old_page)) * 2 * old_page +
+                            plane * old_page + p % old_page) * row;
+        const size_t to = (size_t(P1PhysicalPage(r, p / page)) * 2 * page +
+                          plane * page + p % page) * row;
+        std::memcpy(result.data() + to, old.data() + from, row);
+      }
+  return result;
+}
+}  // namespace
+
+TEST_CASE("P1: XPU dense model retires route and cache graphs with exact own-state replay") {
+  if (std::getenv("VT_B70_EXL3_MODEL_POLICY_TEST") == nullptr) {
+    MESSAGE("Set VT_B70_EXL3_MODEL_POLICY_TEST=1 for the bounded real XPU model-owner test");
+    return;
+  }
+  REQUIRE(vt::xpu::DeviceCount() > 0);
+  XpuPolicyEnv env;
+  REQUIRE(setenv("VT_XPU_ATTENTION", "auto", 1) == 0);
+  REQUIRE(setenv("VT_XPU_XE2_VERIFY", "1", 1) == 0);
+  P1XpuQueue queue; auto& q = queue.q;
+  REQUIRE(vt::GetBackend(q.device).SupportsGraphCapture());
+  REQUIRE(vt::GraphCaptureEnabled());
+  auto config = dense::TinyConfig();
+  config.layer_types = {"linear_attention", "full_attention", "linear_attention", "full_attention"};
+  config.num_attention_heads = 24; config.num_key_value_heads = 4; config.head_dim = 256;
+  config.max_position_embeddings = 6656;
+  auto weights = P1XpuWeights(config);
+  P1XpuCaches eager(q, config), captured(q, config);
+  auto gm = SpecGdnMeta(4, 4);
+  for (int i = 0; i < 16; ++i) (*gm.spec_state_indices_tensor)[i] = i;
+  // The graph is declared after every baked input owner. Retired allocations
+  // and their byte snapshots remain valid until all graph work has completed.
+  std::vector<std::unique_ptr<P1XpuBuffer>> retired;
+  std::vector<std::vector<unsigned char>> retired_bytes;
+  vt::ResetGraphBreakStats();
+  auto graph = std::make_unique<vllm::Qwen3_5DenseDecodeGraph>(weights, config, q, 4);
+  int step = 0, captures = 0, launches = 0;
+  const auto phase = [&](const char* name, int pos, int count, int expected_captures) {
+    const auto before = vt::GetGraphBreakStats();
+    vt::xpu::DrainProfileEvents();
+    const int64_t replay_before = graph->replay_count();
+    for (int i = 0; i < count; ++i, ++step) {
+      CAPTURE(name);
+      CAPTURE(i);
+      CAPTURE(step);
+      const int page = int(captured.kv.front().block_size);
+      auto meta = P1XpuMeta(pos + 4 * i, page);
+      std::vector<int32_t> tokens, positions;
+      for (int r = 0; r < 4; ++r)
+        for (int j = 0; j < 4; ++j) {
+          tokens.push_back((step * 3 + r * 11 + j * 5) % 40);
+          positions.push_back(pos + 4 * i + j - r * 7);
+        }
+      std::vector<unsigned char> expected;
+      {
+        auto logits = vllm::Qwen3_5DenseModel::ForwardDevice(tokens, positions, meta, gm,
+            eager.kv, eager.gdn, weights, config, q, {});
+        expected = P1XpuLogits(logits, q);
+      }
+      {
+        auto logits = graph->Step(tokens, positions, meta, gm, captured.kv, captured.gdn);
+        REQUIRE(P1XpuLogits(logits, q) == expected);
+      }
+      for (size_t k = 0; k < captured.kv_buffers.size(); ++k)
+        REQUIRE(captured.kv_buffers[k]->Read() == eager.kv_buffers[k]->Read());
+      for (size_t k = 0; k < captured.state_buffers.size(); ++k)
+        REQUIRE(captured.state_buffers[k]->Read() == eager.state_buffers[k]->Read());
+    }
+    const auto after = vt::GetGraphBreakStats();
+    const int got = int(after.segments_captured - before.segments_captured);
+    CHECK(got == expected_captures);
+    // Each policy transition needs two cold steps (one per ring slot); the
+    // capture step executes its graph once and counts as a replay launch.
+    CHECK(graph->replay_count() - replay_before == count - expected_captures);
+    CHECK(graph->captured()); CHECK(vt::xpu::GetMemoryInfo().graph_count == 2);
+    captures += got; launches += int(graph->replay_count() - replay_before);
+    const auto events = vt::xpu::DrainProfileEvents();
+    const auto packs = std::count_if(events.begin(), events.end(), [](const auto& event) {
+      return event.stage == "attention_verify_pack";
+    });
+    if (const char* profile = std::getenv("VT_XPU_PROFILE"); profile && std::string(profile) == "1") {
+      if (std::string(name) == "auto-generic-verifier-off") CHECK(packs == 0);
+      else CHECK(packs > 0);
+    }
+    std::cout << "P1_MODEL_OWNER_PHASE name=" << name << " steps=" << count
+              << " captures=" << got << " launches=" << graph->replay_count() - replay_before
+              << " live_graphs=" << vt::xpu::GetMemoryInfo().graph_count << " observed_eager_pack_events=" << packs << std::endl;
+    for (size_t k = 0; k < retired.size(); ++k) CHECK(retired[k]->Read() == retired_bytes[k]);
+  };
+  phase("auto-packed-within-page", 4096, 8, 2);
+  REQUIRE(setenv("VT_XPU_XE2_VERIFY", "0", 1) == 0);
+  phase("auto-generic-verifier-off", 4128, 8, 2);
+  REQUIRE(setenv("VT_XPU_ATTENTION", "verify", 1) == 0);
+  phase("explicit-packed-verifier-flag-off", 4160, 8, 2);
+  // Change the SECOND full-attention binding only. Checking the first layer's
+  // pointer (or only cache shapes) would miss this and write the old sentinel.
+  for (auto* arm : {&eager, &captured}) {
+    auto bytes = arm->kv_buffers[1]->Read();
+    auto next = std::make_unique<P1XpuBuffer>(q, bytes.size()); next->Write(bytes);
+    retired_bytes.push_back(std::move(bytes)); retired.push_back(std::move(arm->kv_buffers[1]));
+    arm->kv_buffers[1] = std::move(next); arm->kv[1].data = arm->kv_buffers[1]->data;
+  }
+  phase("second-full-attention-cache-base", 4192, 8, 2);
+  // Deliberately jump across a zero-filled synthetic prefix, then cross4800
+  // while both ring slots are live. This is an owner test, not real prefill.
+  phase("active-page-cross-4800", 4780, 12, 2);
+  for (auto* arm : {&eager, &captured})
+    for (size_t k = 0; k < arm->kv.size(); ++k) {
+      auto bytes = arm->kv_buffers[k]->Read();
+      auto repacked = P1Repage(bytes, 1600, 1664);
+      auto next = std::make_unique<P1XpuBuffer>(q, repacked.size()); next->Write(repacked);
+      retired_bytes.push_back(std::move(bytes)); retired.push_back(std::move(arm->kv_buffers[k]));
+      arm->kv_buffers[k] = std::move(next); arm->kv[k].data = arm->kv_buffers[k]->data;
+      arm->kv[k].block_size = 1664;
+    }
+  phase("physical-page-layout-1664", 4828, 8, 2);
+  CHECK(step == 52); CHECK(captures == 12); CHECK(launches == 40);
+  const auto peak = vt::xpu::GetMemoryInfo().peak_allocated_bytes;
+  graph.reset();  // destroys every model graph before its baked buffers die
+  CHECK(vt::xpu::GetMemoryInfo().graph_count == 0);
+  CHECK(vt::xpu::GetMemoryInfo().graph_device_bytes == 0);
+  for (size_t k = 0; k < retired.size(); ++k) CHECK(retired[k]->Read() == retired_bytes[k]);
+  std::cout << "P1_MODEL_OWNER_DONE steps=" << step << " captures=" << captures
+            << " launches=" << launches << " graph_bytes_after=" << vt::xpu::GetMemoryInfo().graph_device_bytes
+            << " peak_backend_bytes=" << peak << std::endl;
+}
+#endif
