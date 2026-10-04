@@ -15,6 +15,8 @@ struct Exl3GroupedLinearArgs {
   int bits = 4;
   int codebook = 2;
   const char* debug_name = nullptr;
+  // Internal large-M A/B control; SmallM arithmetic is unaffected.
+  int w8a8_panel_columns = 128;
 };
 using Exl3GroupedLinearFn = void (*)(Queue&, Tensor&, const Tensor&, const Tensor&,
     const Tensor&, const Tensor&, const Tensor&, Tensor&, Tensor&,
@@ -36,14 +38,16 @@ void Exl3GroupedLinear(Queue&, Tensor& out, const Tensor& in, const Tensor& trel
 // Independent large-M arithmetic, with the producer's 256-row GEMM padding.
 // Offsets are bytes in one caller-owned I8 workspace. All regions start on a
 // 64-byte boundary: I8[S,Ms,K], F32[S,Ms], F16[Ms,N], F32[1]. No weight cache:
-// a separate I8[K,128] panel is overwritten on the same in-order queue.
+// a separate bounded I8[K,weight_panel_columns] panel is overwritten on the
+// same in-order queue. Tail panels use a compact prefix of that capacity.
 struct Exl3W8A8Plan {
   int padded_rows;
   size_t activation_offset, row_scale_offset, intermediate_offset;
   size_t weight_scale_offset, workspace_bytes, weight_panel_bytes;
+  int weight_panel_columns;
 };
 Exl3W8A8Plan PlanExl3W8A8(int64_t m, int64_t k, int64_t n,
-                         int64_t groups, int bits);
+                         int64_t groups, int bits, int panel_columns = 128);
 
 // F16 input/output and packed/group metadata have the same layouts as SmallM.
 // M must be in [129,4096]; dispatch is explicit, never an FP16/GPTQ fallback.

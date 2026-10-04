@@ -5,7 +5,7 @@
 
 namespace vt {
 Exl3W8A8Plan PlanExl3W8A8(int64_t m, int64_t k, int64_t n,
-                         int64_t groups, int bits) {
+                         int64_t groups, int bits, int panel_columns) {
   VT_CHECK(m > 128 && m <= 4096, "EXL3 W8A8 requires physical M in [129,4096]");
   VT_CHECK(k > 0 && n > 0 && k % 128 == 0 && n % 128 == 0 &&
                k <= std::numeric_limits<int>::max() &&
@@ -36,8 +36,8 @@ Exl3W8A8Plan PlanExl3W8A8(int64_t m, int64_t k, int64_t n,
   const size_t sx = region(multiply(rows, sizeof(float)));
   const size_t y = region(multiply(multiply(size_t(ms), size_t(n)), size_t{2}));
   const size_t sw = region(sizeof(float));
-  const auto panel = PlanExl3W8A8PanelCapacity(k, n, 128);
-  return {ms, act, sx, y, sw, cursor, panel.bytes};
+  const auto panel = PlanExl3W8A8PanelCapacity(k, n, panel_columns);
+  return {ms, act, sx, y, sw, cursor, panel.bytes, panel.columns};
 }
 
 void Exl3GroupedW8A8(Queue& q, Tensor& out, const Tensor& in, const Tensor& tr,
@@ -46,7 +46,7 @@ void Exl3GroupedW8A8(Queue& q, Tensor& out, const Tensor& in, const Tensor& tr,
   VT_CHECK(in.rank == 2 && out.rank == 2 && suh.rank == 2,
            "EXL3 W8A8 requires rank-2 input/output/suh");
   const int64_t m = in.shape[0], k = in.shape[1], n = out.shape[1];
-  const auto plan = PlanExl3W8A8(m, k, n, suh.shape[0], args.bits);
+  const auto plan = PlanExl3W8A8(m, k, n, suh.shape[0], args.bits, args.w8a8_panel_columns);
   VT_CHECK(args.codebook == 2 && out.shape[0] == m &&
                in.dtype == DType::kF16 && out.dtype == DType::kF16,
            "EXL3 W8A8 requires mul1 and matching F16 input/output");
@@ -62,8 +62,8 @@ void Exl3GroupedW8A8(Queue& q, Tensor& out, const Tensor& in, const Tensor& tr,
                workspace.shape[0] >= 0 && size_t(workspace.shape[0]) >= plan.workspace_bytes,
            "EXL3 W8A8 byte workspace too small or wrong layout");
   VT_CHECK(panel.dtype == DType::kI8 && panel.rank == 2 &&
-               panel.shape[0] == k && panel.shape[1] == 128,
-           "EXL3 W8A8 requires bounded I8[K,128] weight panel");
+               panel.shape[0] == k && panel.shape[1] == plan.weight_panel_columns,
+           "EXL3 W8A8 weight panel does not match bounded planned capacity");
   for (const Tensor* t : std::initializer_list<const Tensor*>{
            &out, &in, &tr, &suh, &svh, &shard, &workspace, &panel}) {
     VT_CHECK(t->IsContiguous(), "EXL3 W8A8 requires contiguous tensors");

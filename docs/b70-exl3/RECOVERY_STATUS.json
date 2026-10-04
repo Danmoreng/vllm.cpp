@@ -1656,20 +1656,42 @@
     },
     {
       "task": "P2",
-      "status": "panel_geometry_implemented_and_host_tested",
+      "status": "wider_GPU_operator_M256_bitexact_and_faster_model_integration_pending",
       "complete": false,
       "panel_geometry_implemented": true,
-      "wider_GPU_kernel_implemented": false,
+      "wider_GPU_kernel_implemented": true,
       "shared_model_scratch_implemented": false,
       "real_M256_M1600_M896_tested": false,
       "receipt": {
+        "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p2-wide-operator-v1/receipt-v1.json",
+        "bytes": 11746,
+        "sha256": "ecefea6e9febc241efdecade5e4a8c4a1d7ff775d2489016c0dc29bc6a8dc573"
+      },
+      "focused_cases": 3,
+      "focused_assertions": 825,
+      "focused_exit": 0,
+      "planning_receipt": {
         "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p2-panel-plan-v1/receipt-v1.json",
         "bytes": 3558,
         "sha256": "7937448baf454aebb67cddba3f96f35c82fe409c6dfbd29c383e5360e576b945"
       },
-      "focused_cases": 3,
-      "focused_assertions": 817,
-      "focused_exit": 0
+      "M256_operator_assertions": 24,
+      "M256_operator_exit": 0,
+      "existing_boundary_assertions": 156,
+      "existing_boundary_exit": 0,
+      "model_panel_columns": 128,
+      "M256_warm_operator_median_ms": {
+        "128": 5.104696,
+        "1024": 1.536389,
+        "2048": 1.067679
+      },
+      "M256_panel_submissions": {
+        "128": 272,
+        "1024": 34,
+        "2048": 18
+      },
+      "M256_rounded_intermediates_and_output_exact": true,
+      "model_gain_measured": false
     },
     {
       "task": "P3",
@@ -1698,5 +1720,5 @@
     }
   ],
   "performance_baseline": "7536aededc049b2157f12eadb0f4cc6bbf29b7b7",
-  "performance_next": "Integrate selected bounded panel width into public workspace/shape validation and reconstruction/GEMM loop; provide one completion-owned reusable model scratch for grouped and single wrappers. Then real grouped M256128/1024/2048 A/B with Xq/scales/reconstructed/Y/final checks and complete-operator timing, thenM1600/M896 and one complete4Kprefill."
+  "performance_next": "P2 completion-owned shared model scratch for grouped/single wrappers, actualM1600/M896 original fixtures and intermediate/tail/non-monotonic/6bpw proof, then complete unprofiled P4096 prefill and measured model submissions/combined memory. Wider operator retained as internal128/1024/2048 A/B; model remains128. P1 verifier qualification follows."
 }

@@ -6,6 +6,7 @@
 #include "xpu_kernels.h"
 #include "xpu_gptq4.h"
 #include "vt/exl3_grouped.h"
+#include "vt/exl3_w8a8_panel_plan.h"
 #pragma clang diagnostic pop
 #include <exl3xpu/exl3_esimd.h>
 #include <nlohmann/json.hpp>
@@ -86,11 +87,13 @@ struct ValidateOutputScale {
 };
 
 template<int Bits>
-void Reconstruct(Queue& q, const Tensor& tr, Tensor& panel, int k, int n, int nb) {
+void Reconstruct(Queue& q, const Tensor& tr, Tensor& panel, int k, int n,
+                 int first_column, int columns) {
   ::exl3::ReconstructKernel<Bits, 2, 8, int8_t> kernel{
       static_cast<const uint32_t*>(tr.data), static_cast<int8_t*>(panel.data),
-      n / 16, nb * 8, 128, 1, k / 16, 127.0f / 3.453125f};
-  Launch(q, k / 16, 8, kernel, "exl3_w8a8_weight_reconstruct");
+      n / 16, first_column / 16, columns, columns / 128, k / 16, 127.0f / 3.453125f};
+  Launch(q, int64_t(k / 16) * (columns / 128), 8, kernel,
+         "exl3_w8a8_weight_reconstruct");
 }
 }  // namespace
 
@@ -104,7 +107,7 @@ void Exl3GroupedW8A8Kernel(Queue& q, Tensor& out, const Tensor& in, const Tensor
              {&out, &in, &tr, &suh, &svh, &shard, &workspace, &panel});
   const int m = int(in.shape[0]), k = int(in.shape[1]), n = int(out.shape[1]);
   const int groups = int(suh.shape[0]);
-  const auto plan = PlanExl3W8A8(m, k, n, groups, args.bits);
+  const auto plan = PlanExl3W8A8(m, k, n, groups, args.bits, args.w8a8_panel_columns);
   for (const Tensor* t : std::initializer_list<const Tensor*>{
            &out, &in, &tr, &suh, &svh, &shard, &workspace, &panel})
     VT_CHECK(reinterpret_cast<uintptr_t>(t->data) % 16 == 0,
@@ -121,8 +124,7 @@ void Exl3GroupedW8A8Kernel(Queue& q, Tensor& out, const Tensor& in, const Tensor
   auto& backend = GetBackend(q.device);
   backend.Copy(q, mapping.data(), shard.data, mapping.size() * sizeof(int32_t));
   backend.Synchronize(q);
-  for (const int group : mapping)
-    VT_CHECK(group >= 0 && group < groups, "EXL3 W8A8 shard_of_nb group out of range");
+  const auto panels = PlanExl3W8A8Panels(mapping, groups, args.w8a8_panel_columns);
   const auto* sv_bits = static_cast<const uint16_t*>(svh.data);
 
   auto* bytes = static_cast<uint8_t*>(workspace.data);
@@ -169,18 +171,21 @@ void Exl3GroupedW8A8Kernel(Queue& q, Tensor& out, const Tensor& in, const Tensor
   }
 
   const auto weight_scale = Tensor::Contiguous(sw, DType::kF32, q.device, {1});
-  for (int nb = 0; nb < n / 128; ++nb) {
-    if (args.bits == 4) Reconstruct<4>(q, tr, panel, k, n, nb);
-    else Reconstruct<6>(q, tr, panel, k, n, nb);
-    const int group = mapping[nb];
+  for (const auto& part : panels) {
+    if (args.bits == 4) Reconstruct<4>(q, tr, panel, k, n, part.first_column, part.columns);
+    else Reconstruct<6>(q, tr, panel, k, n, part.first_column, part.columns);
+    const int group = part.source_group;
     const auto a = Tensor::Contiguous(xq + size_t(group) * plan.padded_rows * k,
         DType::kI8, q.device, {plan.padded_rows, k});
     const auto scales = Tensor::Contiguous(sx + size_t(group) * plan.padded_rows,
         DType::kF32, q.device, {plan.padded_rows});
-    auto dst = Tensor::Contiguous(y + nb * 128, DType::kF16, q.device,
-                                  {plan.padded_rows, 128});
+    auto dst = Tensor::Contiguous(y + part.first_column, DType::kF16, q.device,
+                                  {plan.padded_rows, part.columns});
     dst.stride[0] = n;
-    Exl3W8A8Matmul(q, dst, a, panel, scales, weight_scale);
+    // Reconstruction writes a compact K*width prefix, including short tails.
+    const auto weight_view = Tensor::Contiguous(panel.data, DType::kI8, q.device,
+                                                {k, part.columns});
+    Exl3W8A8Matmul(q, dst, a, weight_view, scales, weight_scale);
   }
   // oneDNN rounds to F16 before the output Hadamard, as the production donor
   // does. The fallback I32 HadOutQ8 recipe is a different arithmetic route.
@@ -195,6 +200,7 @@ void Exl3GroupedW8A8Kernel(Queue& q, Tensor& out, const Tensor& in, const Tensor
         {"k", k}, {"n", n}, {"groups", groups}, {"bits", args.bits},
         {"leaf", "signed_int8_onednn_f16_hadamard"}, {"intermediate_stride", n},
         {"weight_panel_bytes", plan.weight_panel_bytes}, {"workspace_bytes", plan.workspace_bytes},
+        {"weight_panel_columns", plan.weight_panel_columns}, {"panel_submissions", panels.size()},
         {"input_dtype", Name(in.dtype)}, {"output_dtype", Name(out.dtype)}};
     std::fprintf(stderr, "EXL3_W8A8_DISPATCH %s\n", event.dump().c_str());
   }

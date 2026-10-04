@@ -51,6 +51,13 @@ TEST_CASE("EXL3 W8A8 panels: real gate-up geometry and bounded reusable capacity
   // wider kernel/allocation path is qualified on real GPU operands.
   CHECK(vt::PlanExl3W8A8(256, 17408, 34816, 2, 4).weight_panel_bytes ==
         vt::PlanExl3W8A8PanelCapacity(17408, 34816, 128).bytes);
+  for (int width : {1024, 2048}) {
+    const auto p = vt::PlanExl3W8A8(1600, 17408, 34816, 2, 4, width);
+    CHECK(p.padded_rows == 1792);
+    CHECK(p.weight_panel_columns == width);
+    CHECK(p.weight_panel_bytes == size_t(17408) * width);
+    CHECK(p.workspace_bytes == vt::PlanExl3W8A8(1600, 17408, 34816, 2, 4).workspace_bytes);
+  }
 }
 
 TEST_CASE("EXL3 W8A8 panels: invalid source and unsafe geometry are refused") {
