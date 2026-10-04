@@ -1640,8 +1640,19 @@
     },
     {
       "task": "P1",
-      "status": "pending",
-      "complete": false
+      "status": "original_C1_page1600_Q4_fixture_obtained",
+      "complete": false,
+      "original_capture_exit": 0,
+      "host_test_cases_passed": 2,
+      "receipt": {
+        "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p1-verify-capture-v1/receipt-v1.json",
+        "bytes": 7343,
+        "sha256": "ffa48c4dcbc856fd76b50334ff2b080a08ff7e12aa89a8e1adc474b2e6d55443"
+      },
+      "original_active_length": 4100,
+      "original_splits": 16,
+      "original_tile": 8,
+      "native_admission_qualified": false
     },
     {
       "task": "P2",
@@ -1675,5 +1686,5 @@
     }
   ],
   "performance_baseline": "7536aededc049b2157f12eadb0f4cc6bbf29b7b7",
-  "performance_next": "One actually executed pinned original page1600/Q4 route/operand capture (P1), then first P2 panel planning/allocation/implementation at1024/2048. If P1 fixture is unavailable record dependency and proceed with independent P2/P3; no full D64 rerun."
+  "performance_next": "P2 wider group-correct W8A8 panel planning/allocation and first actualM256 path; P1 actual original fixture now available, native matching/admission remains pending."
 }
