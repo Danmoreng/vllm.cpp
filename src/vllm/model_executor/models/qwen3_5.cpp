@@ -70,6 +70,7 @@
 #include "vllm/model_executor/model_loader/nvfp4_dequant.h"
 #include "vllm/v1/attention/metadata_validation.h"
 #include "vt/backend.h"
+#include "vt/paged_attn_route.h"
 #include "vt/breakable_graph.h"  // ENG-CUDAGRAPH-BREAK W4: the shared capture seam
 #include "vt/persistent_step_input.h"  // ENG-CUDAGRAPH-BREAK W4: the persistent step inputs
 #ifdef VT_BENCH_PROFILE_CONTROL
@@ -12706,6 +12707,7 @@ struct Qwen3_5DenseDecodeGraph::Impl {
     // hand. `vt::BreakableGraph` is non-copyable and is constructed in place.
     vt::BreakableGraph graph;
     int fa_cols = -1;                 // captured block-table column count
+    int xpu_short_decode_region = -1; // captured host attention policy
     bool warm = false;
     // tt-27b-region-capture: a named per-region over-budget DECLINE (see the
     // census below) is sticky for this size — an over-budget layer's command
@@ -13155,8 +13157,15 @@ ForwardLogits Qwen3_5DenseDecodeGraph::Step(
   // A block-table column-count change reallocates the persistent block_table (the
   // staged/baked H2D dest shape moves) → invalidate this slot's graph + device inputs.
   const bool cols_changed = (s.fa_cols != -1 && s.fa_cols != cols);
+  // XPU C1 attention changes host policy at the short one-split boundary.
+  // Refreshed device lengths cannot change a dispatch baked into the graph.
+  const int short_decode_region = d.q.device.type == vt::DeviceType::kXPU &&
+      S == 1 && Q == 1 && vt::PagedAttnXpuShortDecodeBound(pam.max_seq_len);
+  const bool attention_policy_changed = s.xpu_short_decode_region != -1 &&
+      s.xpu_short_decode_region != short_decode_region;
   s.Refresh(ptok, ppos, pam, pgm);
   s.fa_cols = cols;
+  s.xpu_short_decode_region = short_decode_region;
   bool seq_continuation = true;  // no seq_lens -> no boundary to detect
   // TT-27B-STEP-DECOMPOSE: the per-step TT refresh block is the "warmup
   // passes" phase — every Warm* call the captured arm makes per step is
@@ -13258,7 +13267,8 @@ ForwardLogits Qwen3_5DenseDecodeGraph::Step(
   }
   const bool tt_boundary =
       d.q.device.type == vt::DeviceType::kTENSTORRENT && !seq_continuation;
-  if (((cols_changed || tt_boundary) && s.graph.captured()) ||
+  if (((cols_changed || attention_policy_changed || tt_boundary) &&
+       s.graph.captured()) ||
       (conv_shadow_stale && (s.graph.captured() || s.warm))) {
     s.graph.Reset();
     Pool(b).UnpinForGraph(b, s.pinned);  // #2274: no graph, nothing baked

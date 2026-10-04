@@ -239,6 +239,87 @@ TEST_CASE("XPU EXL3 public engine: target filters and EOS during verification") 
   CHECK(vt::GetReferenceTierHits() == 0);
 }
 
+TEST_CASE("XPU EXL3 public engine: C1 short decode graph boundary") {
+  const char* model = std::getenv("VT_B70_EXL3_MODEL");
+  const char* output = std::getenv("VT_B70_EXL3_ENGINE_OUTPUT");
+  const char* state_prefix = std::getenv("VT_B70_EXL3_ENGINE_STATE_PREFIX");
+  REQUIRE(model != nullptr);
+  REQUIRE(output != nullptr);
+  REQUIRE(state_prefix != nullptr);
+  REQUIRE_FALSE(std::filesystem::exists(output));
+  vllm::entrypoints::EngineParams params;
+  params.max_model_len = 2048;
+  params.max_num_batched_tokens = 1024;
+  params.max_num_seqs = 1;
+  params.num_blocks = 8;
+  params.kv_cache_dtype = "fp8";
+  params.enable_prefix_caching = false;
+  auto loaded = vllm::entrypoints::LoadedEngine::FromModelDir(model, params);
+  std::string text;
+  for (int i = 0; i < 100; ++i)
+    text += "A garden has twelve tomato plants in each row. Explain how to count "
+            "the plants and water them evenly during a warm summer. ";
+  auto prompt = loaded->tokenizer().Encode(text);
+  REQUIRE(prompt.size() >= 956);
+  prompt.resize(956);
+  vllm::SamplingParams sampling;
+  sampling.temperature = 0;
+  sampling.max_tokens = 12;
+  sampling.ignore_eos = true;
+  sampling.output_kind = vllm::RequestOutputKind::kCumulative;
+  const char* graph_setting = std::getenv("VT_B70_EXL3_ENGINE_GRAPH");
+  const bool graph_requested = graph_setting && std::stoi(graph_setting) == 1;
+  nlohmann::json result = {{"prompt_ids", prompt}, {"graph_requested", graph_requested},
+      {"steps", nlohmann::json::array()}, {"ids", nlohmann::json::array()}};
+  vt::ResetGraphBreakStats();
+  loaded->engine().add_request("short-decode-boundary", prompt, sampling);
+  bool replay_below = false, replay_above = false;
+  std::set<int> lengths;
+  for (int cycle = 0; loaded->engine().has_unfinished_requests() && cycle < 20; ++cycle) {
+    const auto before = vt::GetGraphBreakStats();
+    const auto outputs = loaded->engine().step();
+    const auto after = vt::GetGraphBreakStats();
+    const auto& runner = loaded->runner();
+    const int length = runner.last_attn_meta().max_seq_len;
+    const bool replayed = after.replays > before.replays;
+    lengths.insert(length);
+    replay_below |= length <= 960 && replayed;
+    replay_above |= length > 960 && replayed;
+    result["steps"].push_back({{"length", length},
+        {"input_rows", runner.last_step().input_token_ids.size()},
+        {"captures", after.segments_captured}, {"replays", after.replays},
+        {"replayed", replayed}});
+    for (const auto& request : outputs) {
+      REQUIRE(request.outputs.size() == 1);
+      result["ids"] = request.outputs.front().token_ids;
+      if (request.finished) result["finish_reason"] = request.outputs.front().finish_reason;
+    }
+  }
+  CHECK_FALSE(loaded->engine().has_unfinished_requests());
+  CHECK(result["ids"].size() == 12);
+  for (int length : {959, 960, 961, 962}) CHECK(lengths.count(length) == 1);
+  if (graph_requested) {
+    CHECK(replay_below);
+    CHECK(replay_above);
+  }
+  if (const char* baseline = std::getenv("VT_B70_EXL3_ENGINE_BASELINE")) {
+    std::ifstream file(baseline);
+    REQUIRE(file.good());
+    const auto reference = nlohmann::json::parse(file);
+    CHECK(result["prompt_ids"] == reference["prompt_ids"]);
+    CHECK(result["ids"] == reference["ids"]);
+  }
+  xpu_test::Queue probe(vt::DeviceType::kXPU);
+  result["gdn_states"] = SnapshotGdnStates(loaded->runner().gdn_state(), probe.q,
+      state_prefix, std::getenv("VT_B70_EXL3_ENGINE_STATE_BASELINE_PREFIX"), 0);
+  loaded.reset();
+  CHECK(vt::xpu::GetMemoryInfo().graph_device_bytes == 0);
+  std::ofstream file(output);
+  file << result.dump(2) << '\n';
+  file.close();
+  REQUIRE(file.good());
+}
+
 TEST_CASE("XPU EXL3 public engine: autonomous fixed MTP depth and request reuse") {
   const char* model = std::getenv("VT_B70_EXL3_MODEL");
   const char* output = std::getenv("VT_B70_EXL3_ENGINE_OUTPUT");

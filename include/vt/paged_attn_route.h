@@ -24,6 +24,14 @@
 
 namespace vt {
 
+// Shared host bound for the original one-split B70 C1 decode policy.
+// A graph captured below this boundary must be retired before crossing it;
+// the device sequence length changes on replay, but host dispatch does not.
+inline constexpr int64_t kXpuShortDecodeMaxSeqLen = 15 * 64;
+inline bool PagedAttnXpuShortDecodeBound(int64_t max_seq_len) {
+  return max_seq_len > 0 && max_seq_len <= kXpuShortDecodeMaxSeqLen;
+}
+
 // The shape-consistency guard for a CLASSIFIED uniform speculative batch:
 // `uniform_spec_query_len` (PagedAttentionArgs) is trusted for uniformity —
 // the classifier verified it against per-request query lengths the kernel
