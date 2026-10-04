@@ -26,8 +26,12 @@ page1600 original fixture, including NaN page-tail poison and output aliasing.
 Packed metadata is private `{0,1}`, while the public logical `{0,4}` remains
 unchanged. Inactive V tail operands are zeroed before DPAS for causal
 verification too. The original icpx math model is scoped to the verifier
-translation unit. Q2/Q3/Q5, other lengths/layouts, C4 and graph qualification
-remain pending; this proof does not enable automatic verification by default.
+translation unit. Derived original Q2/Q3/Q5 and Q4 page-boundary/32K
+operator inputs match across planar/interleaved/padded layouts. Focused
+unsupported-form tests and C1 raw graph replay qualify shared scratch, fresh
+metadata validation and retirement. These are isolated operator proofs; C4,
+ragged batches, model graph policy and emitted-cycle qualification remain
+pending. Automatic verification stays off by default.
 
 `src/vt/xpu/xpu_attention_decode_xe2.cpp` uses a separate short C1 policy:
 FP16 Q/output, Hq24/Hkv4/D256, unit E4M3 scales, page1600/1664 and
