@@ -1869,7 +1869,17 @@ if(VLLM_CPP_XPU)
       target_compile_definitions(vllm_xpu_xe2_prefill PRIVATE VT_XE2_PREFILL_NO_PREFETCH)
     endif()
     target_compile_options(vllm_xpu_xe2_prefill PRIVATE -fsycl)
-    add_library(vllm_xpu_xe2_verify OBJECT src/vt/xpu/xpu_attention_verify_xe2.cpp)
+    target_compile_definitions(vllm_xpu PRIVATE VLLM_CPP_XPU_XE2_PREFILL)
+    target_sources(vllm PRIVATE $<TARGET_OBJECTS:vllm_xpu_xe2_prefill>)
+  endif()
+  if(VLLM_CPP_XPU_XE2_PREFILL OR VLLM_CPP_XPU_XE2_GDN)
+    # Short FP16 decode shares the Torch-free XMX policy with verification;
+    # it does not require the experimental long-prefill route.
+    add_library(vllm_xpu_xe2_verify OBJECT src/vt/xpu/xpu_attention_verify_xe2.cpp
+      src/vt/xpu/xpu_attention_decode_xe2.cpp)
+    # Match the original icpx default math model only for the C1 producer.
+    set_source_files_properties(src/vt/xpu/xpu_attention_decode_xe2.cpp PROPERTIES
+      COMPILE_OPTIONS "-fp-model=fast")
     set_target_properties(vllm_xpu_xe2_verify PROPERTIES POSITION_INDEPENDENT_CODE ON)
     target_include_directories(vllm_xpu_xe2_verify PRIVATE include src)
     target_include_directories(vllm_xpu_xe2_verify SYSTEM PRIVATE
@@ -1878,12 +1888,11 @@ if(VLLM_CPP_XPU)
       "${VLLM_CPP_SYCL_TLA_DIR}/tools/util/include"
       "${VLLM_CPP_SYCL_TLA_DIR}/applications")
     target_compile_definitions(vllm_xpu_xe2_verify PRIVATE
-      CUTLASS_ENABLE_SYCL SYCL_INTEL_TARGET VLLM_XPU_ENABLE_XE2)
+      CUTLASS_ENABLE_HEADERS_ONLY CUTLASS_ENABLE_SYCL SYCL_INTEL_TARGET
+      CUTLASS_VERSIONS_GENERATED VLLM_XPU_ENABLE_XE2)
     target_compile_options(vllm_xpu_xe2_verify PRIVATE -fsycl)
-    target_compile_definitions(vllm_xpu PRIVATE VLLM_CPP_XPU_XE2_PREFILL
-      VLLM_CPP_XPU_XE2_VERIFY)
-    target_sources(vllm PRIVATE $<TARGET_OBJECTS:vllm_xpu_xe2_prefill>
-      $<TARGET_OBJECTS:vllm_xpu_xe2_verify>)
+    target_compile_definitions(vllm_xpu PRIVATE VLLM_CPP_XPU_XE2_VERIFY)
+    target_sources(vllm PRIVATE $<TARGET_OBJECTS:vllm_xpu_xe2_verify>)
   endif()
   # Preserve the existing prefill build while allowing focused GDN builds.
   if(VLLM_CPP_XPU_XE2_PREFILL OR VLLM_CPP_XPU_XE2_GDN)

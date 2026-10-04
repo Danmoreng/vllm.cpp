@@ -7,9 +7,10 @@ This optional Torch-free Q2–Q5 FP8 verification policy derives from
 The root Apache-2.0 license is in `LICENSE`; copied collective and kernel
 headers retain their BSD-3-Clause notices.
 
-The source is built only with `VLLM_CPP_XPU_XE2_PREFILL=ON`, the pinned
+The source is built with `VLLM_CPP_XPU_XE2_PREFILL=ON` or
+`VLLM_CPP_XPU_XE2_GDN=ON`, the pinned
 SYCL-TLA checkout `87f6850680a580654b9ea2c80dbc01aeb36ad231` and
-oneAPI 2026.1.1. It is off by default at runtime. Set
+oneAPI 2026.1.1. Packed Q2–Q5 verification is off by default at runtime. Set
 `VT_XPU_XE2_VERIFY=1` for the eligible automatic route or
 `VT_XPU_ATTENTION=verify` for an explicit diagnostic; unsupported shapes
 fall back to the existing attention implementation.
@@ -18,3 +19,19 @@ fall back to the existing attention implementation.
 contains the Torch dispatcher. `src/vt/xpu/xpu_attention_verify_xe2.cpp`
 adapts VT's head-contiguous FP8 K/V pages and Q layout to the donor's
 packed Q layout. No Python or Torch code is loaded for C++ inference.
+
+`src/vt/xpu/xpu_attention_decode_xe2.cpp` uses a separate short C1 policy:
+FP16 Q/output, Hq24/Hkv4/D256, unit E4M3 scales, page1600/1664 and
+max sequence length1–960. The automatic B70 route preserves FP16
+unnormalized probabilities before XMX P*V and uses one split. It consumes
+the caller's Q/output directly and masks invalid V tail operands before
+DPAS; no Q packing, scale upload or host readback is needed. The original
+icpx math model is scoped to this translation unit; verification keeps its
+existing compiler options.
+
+The `flash_attention_v2/collective/{fmha_fusion,copy_block_slm}.hpp` and
+`cutlass/util/packed_stride.hpp` helpers are unmodified copies from the
+same SYCL-TLA commit87f6850680a580654b9ea2c80dbc01aeb36ad231, extracted
+from the already available local Git objects. They retain their BSD-3-Clause
+notices. Unused GEMM adapter/reference utility includes were removed from
+the native launcher; the full utility/tool dependency tree is unnecessary.

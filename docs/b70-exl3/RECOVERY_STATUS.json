@@ -39,7 +39,7 @@
       "target_qualified": false,
       "serving_qualified": false,
       "complete": true,
-      "next_code_change": "R03 typed grouped W8A8 and real M129/M256 GDN-QKVZ operator reference",
+      "next_code_change": "Narrow existing native P128 prefill base2 exponential/scaled FMA/reduction boundaries, immediately rerun strict same-input P128/D1, then bounded own-state integration. Qualify current-source graph selector/capture thresholds separately.",
       "same_input_core_final_state_pass": true,
       "actual_VT_BA_repeatability": "P128 varying 3/6/7 halves; D1 exact in three repeats",
       "result_receipt": {
@@ -232,6 +232,55 @@
         "target_qualified": false,
         "serving_qualified": false,
         "next_code_change": "Bounded repaired native-owned P128+29 against unchanged gates; then isolate remaining split-K attention-core arithmetic on identical operands"
+      },
+      "post_gate_D29_core_attribution": {
+        "receipt": {
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r02-D29-head-v1/receipt-attention-core-D29-v49.json",
+          "bytes": 31187,
+          "sha256": "247c95a6a462d00b0640ff62ecf839b5248c01d41c8279b29aaad6d49577a9ad"
+        },
+        "product_checkpoint_pushed": "7f7ebc5bd4293edab721716819e283f4a211028a",
+        "bounded_model_exit": 1,
+        "bounded_model_assertions_passed": 529,
+        "bounded_model_assertions_total": 535,
+        "isolated_core_exit": 1,
+        "isolated_core_assertions_passed": 14,
+        "isolated_core_assertions_total": 16,
+        "both_cache_layouts_core_differences": 1104,
+        "core_elements": 6144,
+        "gate_differences_after_repair": 1011,
+        "independent_tiled_FP16_probability_approximation_differences": 113,
+        "new_GPU_core_route_implemented": false,
+        "target_qualified": false,
+        "serving_qualified": false,
+        "next_code_change": "Port bounded original short-decode tiled FP16 probability/XMX arithmetic onto native queue with completion-owned workspace; immediately run isolated D29 consumer before any larger model step"
+      },
+      "short_decode_XMX_repair": {
+        "receipt": {
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r02-D29-head-v1/receipt-short-XMX-v58.json",
+          "bytes": 64255,
+          "sha256": "fc4ae14e3ff76f28c954907c04c7204b392b51d321137f3b0db7768328d405df"
+        },
+        "build_exit": 0,
+        "operator_assertions": "60/60",
+        "operator_exit": 0,
+        "sixteen_page_layout_padding_alias_controls_bit_exact": true,
+        "actual_D29_attention3_all_observed_boundaries_and_initialized_KV_bit_exact": true,
+        "bounded_model_assertions": "528/535",
+        "bounded_model_exit": 1,
+        "controlled_diagnostic_D29_TV_before": 0.060607799604992844,
+        "controlled_diagnostic_D29_TV_after": 0.17098872657286,
+        "overall_numerical_improvement_claimed": false,
+        "P128_D1_strict_assertions": "42/43",
+        "P128_D1_strict_exit": 1,
+        "P128_differing_halves": 1542,
+        "P128_total_halves": 786432,
+        "D1_differing_halves": 0,
+        "new_host_waits_or_readbacks": false,
+        "current_performance_remeasured": false,
+        "target_qualified": false,
+        "serving_qualified": false,
+        "next_code_change": "Narrow existing native P128 prefill base2 exponential/scaled FMA/reduction boundaries, immediately rerun strict same-input P128/D1, then bounded own-state integration. Qualify current-source graph selector/capture thresholds separately."
       }
     },
     {
