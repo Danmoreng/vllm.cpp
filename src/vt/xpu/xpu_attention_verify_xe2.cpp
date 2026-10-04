@@ -35,16 +35,17 @@ bool PagedAttentionXe2VerifyKernel(Queue& q, Tensor& out, const Tensor& query,
       key_cache.dtype != DType::kI8 || value_cache.dtype != DType::kI8 ||
       args.kv_cache_dtype != Fp8KVCacheDataType::kFp8E4M3 ||
       key_cache.shape[0] != value_cache.shape[0] ||
-      page != 1664 || value_cache.shape[1] != page ||
+      (page != 1600 && page != 1664) || value_cache.shape[1] != page ||
       key_cache.shape[2] != 4 || value_cache.shape[2] != 4 ||
       key_cache.shape[3] != 256 || value_cache.shape[3] != 256 ||
-      key_cache.stride[1] != 4 * 256 ||
+      (key_cache.stride[1] != 4 * 256 && key_cache.stride[1] != 4 * 512) ||
       value_cache.stride[1] != key_cache.stride[1] ||
       key_cache.stride[2] != key_cache.stride[1] / 4 ||
       value_cache.stride[2] != key_cache.stride[2] ||
       key_cache.stride[3] != 1 || value_cache.stride[3] != 1 ||
       key_cache.stride[0] != value_cache.stride[0] ||
       key_cache.stride[0] % key_cache.stride[1] != 0 ||
+      key_cache.stride[0] / key_cache.stride[1] < page ||
       block_table.rank != 2 || block_table.dtype != DType::kI32 ||
       block_table.shape[0] != 1 || block_table.stride[1] != 1 ||
       seq_lens.rank != 1 || seq_lens.dtype != DType::kI32 ||
@@ -73,7 +74,7 @@ bool PagedAttentionXe2VerifyKernel(Queue& q, Tensor& out, const Tensor& query,
   const size_t temp_bytes = packed_bytes * splits;
   const size_t stats_bytes = size_t(tokens) * 24 * splits * sizeof(float);
   const size_t total = 2 * Align(packed_bytes) + Align(temp_bytes) +
-      2 * Align(stats_bytes) + Align(2 * sizeof(float));
+      2 * Align(stats_bytes) + Align(2 * sizeof(float)) + Align(2 * sizeof(int32_t));
   // Split-K may reuse this queue later and needs the full persistent workspace.
   VT_CHECK(total <= 16 * 1024 * 1024, "verification workspace exceeds Split-K allocation");
   return WithAttentionWorkspace(q, 16 * 1024 * 1024, [&](void* storage) {
@@ -83,8 +84,14 @@ bool PagedAttentionXe2VerifyKernel(Queue& q, Tensor& out, const Tensor& query,
     auto* temp = reinterpret_cast<uint16_t*>(ptr); ptr += Align(temp_bytes);
     auto* sums = reinterpret_cast<float*>(ptr); ptr += Align(stats_bytes);
     auto* maxima = reinterpret_cast<float*>(ptr); ptr += Align(stats_bytes);
-    auto* scales = reinterpret_cast<float*>(ptr);
-    NativeQueue(q).fill(scales, 1.0f, 2);
+    auto* scales = reinterpret_cast<float*>(ptr); ptr += Align(2 * sizeof(float));
+    auto* packed_offsets = reinterpret_cast<int32_t*>(ptr);
+    // Logical {0,Q} metadata stays caller-owned. Like the original wrapper,
+    // the donor sees {0,1}: one physical row with Q packed into the heads.
+    NativeQueue(q).parallel_for(sycl::range<1>(2), [=](sycl::id<1> i) {
+      scales[i[0]] = 1.0f;
+      packed_offsets[i[0]] = int32_t(i[0]);
+    });
     const auto* src = static_cast<const uint16_t*>(query.data);
     const int count = int(tokens * 24 * 256);
     const auto pack = NativeQueue(q).parallel_for(sycl::range<1>(count),
@@ -107,7 +114,7 @@ bool PagedAttentionXe2VerifyKernel(Queue& q, Tensor& out, const Tensor& query,
     donor.exp_sums = sums;
     donor.max_logits = maxima;
     donor.block_table = block_table.data;
-    donor.cu_seqlens_q = query_start_loc.data;
+    donor.cu_seqlens_q = packed_offsets;
     donor.cu_seqlens_k = seq_lens.data;
     donor.max_queries = 1;
     donor.max_keys = args.max_seq_len;

@@ -1033,6 +1033,185 @@ TEST_CASE("XPU FP8 prefill: captured 4096-token Python operator replay"
   }
 }
 
+TEST_CASE("XPU FP8 attention P1: captured original C1 page1600 Q4 verifier"
+          * doctest::skip(!std::getenv("VT_B70_EXL3_VERIFY_FIXTURE"))) {
+  const std::filesystem::path path = std::getenv("VT_B70_EXL3_VERIFY_FIXTURE");
+  const auto fixture = vllm::SafetensorsFile::Open(path.string());
+  auto metadata_path = path;
+  metadata_path.replace_extension(".json");
+  std::ifstream metadata(metadata_path);
+  REQUIRE(metadata.good());
+  const auto meta = nlohmann::json::parse(metadata);
+  REQUIRE(meta.at("route").at("operator") ==
+          "b70_exl3_attention.shared_kv_verify_out.default");
+  REQUIRE(meta.at("route").at("splits") == 16);
+  REQUIRE(meta.at("route").at("tile") == 8);
+  REQUIRE(meta.at("active_length") == 4100);
+  const auto& query_ref = fixture.Get("query");
+  const auto& output_ref = fixture.Get("output");
+  REQUIRE(query_ref.dtype == "F16");
+  REQUIRE(output_ref.dtype == "F16");
+  REQUIRE((query_ref.shape == std::vector<int64_t>{4, 24, 256}));
+  REQUIRE(output_ref.shape == query_ref.shape);
+  REQUIRE(meta.at("layouts").at("k").at("shape") ==
+          nlohmann::json::array({180, 1600, 4, 256}));
+  REQUIRE(meta.at("layouts").at("k").at("strides_elements") ==
+          nlohmann::json::array({3276800, 2048, 512, 1}));
+  REQUIRE(meta.at("layouts").at("v").at("strides_elements") ==
+          meta.at("layouts").at("k").at("strides_elements"));
+  REQUIRE(meta.at("layouts").at("v").at("storage_offset_elements") == 256);
+  REQUIRE(meta.at("scale") == 0.0625f);
+  REQUIRE(meta.at("causal") == true);
+  for (const auto* name : {"k_descale", "v_descale"}) {
+    const auto& scale = fixture.Get(name);
+    REQUIRE(scale.dtype == "F32");
+    REQUIRE(scale.nbytes == sizeof(float));
+    REQUIRE(vt::LoadUnaligned<float>(scale.data) == 1.0f);
+  }
+  const auto& ids = fixture.Get("block_table");
+  REQUIRE(ids.dtype == "I32");
+  REQUIRE((ids.shape == std::vector<int64_t>{1, 3}));
+  const auto& offsets_ref = fixture.Get("query_offsets");
+  REQUIRE(offsets_ref.dtype == "I32");
+  REQUIRE(offsets_ref.nbytes == 2 * sizeof(int32_t));
+  REQUIRE(vt::LoadUnaligned<int32_t>(offsets_ref.data) == 0);
+  REQUIRE(vt::LoadUnaligned<int32_t>(offsets_ref.data + 4) == 4);
+  const auto& lengths_ref = fixture.Get("lengths");
+  REQUIRE(lengths_ref.dtype == "I32");
+  REQUIRE(lengths_ref.nbytes == sizeof(int32_t));
+  REQUIRE(vt::LoadUnaligned<int32_t>(lengths_ref.data) == 4100);
+
+  Queue gpu(vt::DeviceType::kXPU);
+  Buffer query(gpu.q, DType::kF16, {4, 24, 256});
+  Buffer output(gpu.q, DType::kF16, {4, 24, 256});
+  // Rebuild the actual head-interleaved layout, including physical block IDs,
+  // with NaN poison everywhere the original capture deliberately did not read.
+  Buffer cache(gpu.q, DType::kI8, {180, 1600, 4, 512});
+  std::vector<unsigned char> cache_host(cache.bytes, 0x7f);
+  for (int p = 0; p < 3; ++p) {
+    const int block = vt::LoadUnaligned<int32_t>(ids.data + p * 4);
+    const int rows = p == 2 ? 900 : 1600;
+    REQUIRE(block == meta.at("pages").at(p).at("physical_block"));
+    REQUIRE(block >= 0);
+    REQUIRE(block < 180);
+    for (const auto* kind : {"k", "v"}) {
+      const auto& source = fixture.Get(std::string(kind) + "_page" + std::to_string(p));
+      REQUIRE(source.dtype == "U8");
+      REQUIRE((source.shape == std::vector<int64_t>{rows, 4, 256}));
+      for (int row = 0; row < rows; ++row) for (int head = 0; head < 4; ++head) {
+        const size_t destination = size_t(block) * 3276800 + row * 2048 +
+                                   head * 512 + (kind[0] == 'v' ? 256 : 0);
+        std::memcpy(cache_host.data() + destination,
+                    source.data + size_t(row * 4 + head) * 256, 256);
+      }
+    }
+  }
+  Buffer table(gpu.q, DType::kI32, {1, 164});
+  Buffer lengths(gpu.q, DType::kI32, {1});
+  Buffer offsets(gpu.q, DType::kI32, {2});
+  std::vector<int32_t> table_host(164, -1);
+  std::memcpy(table_host.data(), ids.data, ids.nbytes);
+  query.upload(query_ref.data); cache.upload(cache_host.data());
+  table.upload(table_host.data()); lengths.upload(lengths_ref.data);
+  offsets.upload(offsets_ref.data);
+  auto key = vt::Tensor::Contiguous(cache.tensor.data, DType::kI8, gpu.q.device,
+                                     {180, 1600, 4, 256});
+  key.stride[0] = 3276800; key.stride[1] = 2048; key.stride[2] = 512;
+  auto value = key;
+  value.data = static_cast<unsigned char*>(key.data) + 256;
+  vt::PagedAttentionArgs args;
+  args.kv_cache_dtype = vt::Fp8KVCacheDataType::kFp8E4M3;
+  args.max_seq_len = 4100;
+  args.scale = 0.0625f;
+  args.causal = true;
+  struct RestoreMode {
+    std::string old;
+    bool had;
+    ~RestoreMode() {
+      if (had) setenv("VT_XPU_ATTENTION", old.c_str(), 1);
+      else unsetenv("VT_XPU_ATTENTION");
+    }
+  } restore{std::getenv("VT_XPU_ATTENTION") ? std::getenv("VT_XPU_ATTENTION") : "",
+            std::getenv("VT_XPU_ATTENTION") != nullptr};
+  REQUIRE(setenv("VT_XPU_ATTENTION", "verify", 1) == 0);
+  if (std::getenv("VT_XPU_PROFILE")) (void)vt::xpu::DrainProfileEvents();
+  const auto start = std::chrono::steady_clock::now();
+  vt::PagedAttention(gpu.q, output.tensor, query.tensor, key, value,
+                     table.tensor, lengths.tensor, offsets.tensor, args);
+  vt::GetBackend(gpu.q.device).Synchronize(gpu.q);
+  const double cold_ms = std::chrono::duration<double, std::milli>(
+      std::chrono::steady_clock::now() - start).count();
+  const auto actual = output.download();
+  size_t differences = 0, nonfinite = 0;
+  double error2 = 0, norm2 = 0, max_error = 0;
+  for (size_t i = 0; i < actual.size(); i += 2) {
+    const auto got_bits = vt::LoadUnaligned<uint16_t>(actual.data() + i);
+    const auto ref_bits = vt::LoadUnaligned<uint16_t>(output_ref.data + i);
+    const double got = vt::F16ToF32(got_bits), ref = vt::F16ToF32(ref_bits);
+    differences += got_bits != ref_bits; nonfinite += !std::isfinite(got);
+    error2 += (got - ref) * (got - ref); norm2 += ref * ref;
+    max_error = std::max(max_error, std::abs(got - ref));
+  }
+  std::cout << nlohmann::json{{"event", "p1_original_C1_page1600_Q4"},
+      {"half_differences", differences}, {"nonfinite", nonfinite},
+      {"relative_l2", std::sqrt(error2 / std::max(norm2, 1e-30))},
+      {"max_abs", max_error}, {"cold_complete_operator_ms", cold_ms}}.dump() << '\n';
+  CHECK(nonfinite == 0);
+  CHECK(differences == 0);
+  if (std::getenv("VT_XPU_PROFILE")) {
+    int packs = 0, unpacks = 0, generic = 0;
+    for (const auto& event : vt::xpu::DrainProfileEvents()) {
+      packs += event.stage == "attention_verify_pack";
+      unpacks += event.stage == "attention_verify_unpack";
+      generic += event.stage == "attention_split_partial";
+    }
+    CHECK(packs == 1);
+    CHECK(unpacks == 1);
+    CHECK(generic == 0);
+  }
+  xpu_test::SameBytes(cache.download(), cache_host);
+  xpu_test::SameBytes(query.download(),
+      std::vector<unsigned char>(query_ref.data, query_ref.data + query_ref.nbytes));
+  xpu_test::SameBytes(table.download(),
+      std::vector<unsigned char>(reinterpret_cast<const unsigned char*>(table_host.data()),
+                                reinterpret_cast<const unsigned char*>(table_host.data() + 164)));
+  xpu_test::SameBytes(lengths.download(),
+      std::vector<unsigned char>(lengths_ref.data, lengths_ref.data + lengths_ref.nbytes));
+  xpu_test::SameBytes(offsets.download(),
+      std::vector<unsigned char>(offsets_ref.data, offsets_ref.data + offsets_ref.nbytes));
+  const std::vector<unsigned char> expected(output_ref.data,
+                                            output_ref.data + output_ref.nbytes);
+  // Public WithOutput must retire unpack and copy before the caller's query
+  // storage becomes the result. No captured input is substituted in inference.
+  vt::PagedAttention(gpu.q, query.tensor, query.tensor, key, value,
+                     table.tensor, lengths.tensor, offsets.tensor, args);
+  vt::GetBackend(gpu.q.device).Synchronize(gpu.q);
+  xpu_test::SameBytes(query.download(), expected);
+  query.upload(query_ref.data);
+  if (std::getenv("VT_B70_EXL3_VERIFY_BENCH")) {
+    REQUIRE(!std::getenv("VT_XPU_PROFILE"));  // Score outside the profiler.
+    for (const auto* mode : {"split", "verify"}) {
+      REQUIRE(setenv("VT_XPU_ATTENTION", mode, 1) == 0);
+      auto execute = [&] {
+        const auto begin = std::chrono::steady_clock::now();
+        vt::PagedAttention(gpu.q, output.tensor, query.tensor, key, value,
+                           table.tensor, lengths.tensor, offsets.tensor, args);
+        vt::GetBackend(gpu.q.device).Synchronize(gpu.q);
+        return std::chrono::duration<double, std::milli>(
+            std::chrono::steady_clock::now() - begin).count();
+      };
+      const double first = execute();
+      std::vector<double> samples{execute(), execute(), execute()};
+      auto sorted = samples;
+      std::sort(sorted.begin(), sorted.end());
+      std::cout << nlohmann::json{{"event", "p1_complete_operator_timing"},
+          {"mode", mode}, {"first_call_ms", first}, {"warm_samples_ms", samples},
+          {"warm_median_ms", sorted[1]}}.dump() << '\n';
+    }
+    xpu_test::SameBytes(output.download(), expected);
+  }
+}
+
 TEST_CASE("XPU FP8 attention: captured Python M04 Q5 operator replay"
           * doctest::skip(!std::getenv("VT_B70_M04_REPLAY_DIR"))) {
   const std::string directory = std::getenv("VT_B70_M04_REPLAY_DIR");

@@ -1640,19 +1640,37 @@
     },
     {
       "task": "P1",
-      "status": "original_C1_page1600_Q4_fixture_obtained",
+      "status": "native_C1_page1600_Q4_actual_original_bit_exact_family_pending",
       "complete": false,
       "original_capture_exit": 0,
       "host_test_cases_passed": 2,
       "receipt": {
-        "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p1-verify-capture-v1/receipt-v1.json",
-        "bytes": 7343,
-        "sha256": "ffa48c4dcbc856fd76b50334ff2b080a08ff7e12aa89a8e1adc474b2e6d55443"
+        "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p1-native-C1-v1/receipt-v1.json",
+        "bytes": 37776,
+        "sha256": "b83f7320fa8d9ee0394d3acc0f3c7dd4ab2db9e608e165de9ade2b1fdad9b867"
       },
       "original_active_length": 4100,
       "original_splits": 16,
       "original_tile": 8,
-      "native_admission_qualified": false
+      "native_admission_qualified": false,
+      "original_fixture_receipt": {
+        "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p1-verify-capture-v1/receipt-v1.json",
+        "bytes": 7343,
+        "sha256": "ffa48c4dcbc856fd76b50334ff2b080a08ff7e12aa89a8e1adc474b2e6d55443"
+      },
+      "native_C1_Q4_actual_fixture_bit_exact": true,
+      "automatic_verifier_enabled": false,
+      "native_C1_profile_alias_assertions": 69,
+      "native_C1_unprofiled_operator_assertions": 71,
+      "native_C1_exit_each": 0,
+      "short_decode_regression_assertions": 60,
+      "short_decode_regression_exit": 0,
+      "warm_complete_operator_median_ms": {
+        "split": 1.840158,
+        "verify": 0.15017
+      },
+      "native_C1_scope": "Actualoriginal Q4 C1 length4100, page1600, interleavedFP8 KV and fullphysicalIDs3/10/23 on180blocks, poisoned inactivebytes and164column table, direct/aliased FP16 output byte-exact; caller logicaloffsets unchanged, donor physicaloffsets private. Q2/Q3/Q5, other lengths/layouts, graph/C4/modelcycle quality and speed pending. Auto remains opt-in.",
+      "retained_failures": "Baseline7571half differences/genericroute; firstlauncher24576NaN from Vtail; tailmask12half differences; scopedoriginalmath zero. Failed resourcefilename attempt retained before GPUworker. Frozen defaultD64 four failures unchanged."
     },
     {
       "task": "P2",
@@ -1791,5 +1809,5 @@
     }
   ],
   "performance_baseline": "7536aededc049b2157f12eadb0f4cc6bbf29b7b7",
-  "performance_next": "Complete P1 C1 page1600 verifier admission/packing/causality/arithmetic against executed originalQ4 fixture, thenQ2/Q3/Q5/page boundaries and distinct C4/lifetime proof. P3 exactSiLU (~205ms/chunk) and P4 rowvalidation (~184ms/chunk) remain material after P2. DefaultD64/reference/state gates remain open."
+  "performance_next": "P1 executed-original Q2/Q3/Q5, page1599/1600/1601 and4799/4800/4801, L32768, precise layouts/refusals and graph ownership; then distinct C4/ragged and emittedcycle model qualification before auto promotion. P2 bounded performance package complete; laterP3 exactSiLU/P4 rowvalidation remain material. DefaultD64/reference/fullstate gates open."
 }

@@ -1323,19 +1323,17 @@ struct DecodeFwdMainloop<
         // reorder() performs the (vectorized) fp8 -> ElementQ cast; the
         // per-tensor scale_v is applied once after the K loop below.
         reorder(tVrV, tArV);
-        if constexpr (!CausalMask) {
-          // VT pages need not initialize the unused tail. A zero attention
-          // weight cannot suppress NaN V through DPAS (0*NaN is NaN), so
-          // discard invalid V operands before the matrix product.
-          if (check_remainder_k && K == total_blk - 1) {
-            auto cV_tile = make_identity_tensor(make_shape(
-                get<1>(TileShapePV{}), get<2>(TileShapePV{})));
-            auto tVc = thr_mma_pv.partition_B(cV_tile);
-            CUTLASS_PRAGMA_UNROLL
-            for (int i = 0; i < tArV.size(); ++i) {
-              const int key = K * get<1>(TileShapeQK{}) + get<1>(tVc(i));
-              if (key >= seq_len) tArV(i) = ElementQ(0);
-            }
+        // Both ordinary decode and packed causal verification may see an
+        // uninitialized page tail. Masking scores cannot suppress NaN V in
+        // DPAS (0*NaN is NaN); discard inactive operands before P*V.
+        if (check_remainder_k && K == total_blk - 1) {
+          auto cV_tile = make_identity_tensor(make_shape(
+              get<1>(TileShapePV{}), get<2>(TileShapePV{})));
+          auto tVc = thr_mma_pv.partition_B(cV_tile);
+          CUTLASS_PRAGMA_UNROLL
+          for (int i = 0; i < tArV.size(); ++i) {
+            const int key = K * get<1>(TileShapeQK{}) + get<1>(tVc(i));
+            if (key >= seq_len) tArV(i) = ElementQ(0);
           }
         }
         cute::gemm(mma_pv, tArP, tArV, tArA(_, _, _, VV));
