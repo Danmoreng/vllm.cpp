@@ -103,11 +103,27 @@ void Exl3GroupedW8A8Kernel(Queue& q, Tensor& out, const Tensor& in, const Tensor
 #ifndef VLLM_CPP_XPU_GPTQ4
   VT_CHECK(false, "EXL3 W8A8 requires the pinned oneDNN 3.13 build");
 #else
-  TraceXpuOp(OpId::kExl3GroupedW8A8, q,
-             {&out, &in, &tr, &suh, &svh, &shard, &workspace, &panel});
   const int m = int(in.shape[0]), k = int(in.shape[1]), n = int(out.shape[1]);
   const int groups = int(suh.shape[0]);
   const auto plan = PlanExl3W8A8(m, k, n, groups, args.bits, args.w8a8_panel_columns);
+  if (workspace.rank == 0 && panel.rank == 0) {
+    VT_CHECK(plan.weight_panel_bytes <= SIZE_MAX - plan.workspace_bytes,
+             "EXL3 W8A8 shared scratch size overflow");
+    const bool acquired = WithExl3W8A8Workspace(q, plan.workspace_bytes + plan.weight_panel_bytes,
+        [&](void* storage) {
+          auto scratch = Tensor::Contiguous(storage, DType::kI8, q.device,
+                                             {int64_t(plan.workspace_bytes)});
+          auto weights = Tensor::Contiguous(static_cast<uint8_t*>(storage) + plan.workspace_bytes,
+              DType::kI8, q.device, {k, plan.weight_panel_columns});
+          // Re-enter the explicit public seam: identical shape, overlap and
+          // arithmetic validation applies to owned and caller-provided buffers.
+          vt::Exl3GroupedW8A8(q, out, in, tr, suh, svh, shard, scratch, weights, args);
+        });
+    VT_CHECK(acquired, "EXL3 W8A8 shared scratch exceeds device memory budget");
+    return;
+  }
+  TraceXpuOp(OpId::kExl3GroupedW8A8, q,
+             {&out, &in, &tr, &suh, &svh, &shard, &workspace, &panel});
   for (const Tensor* t : std::initializer_list<const Tensor*>{
            &out, &in, &tr, &suh, &svh, &shard, &workspace, &panel})
     VT_CHECK(reinterpret_cast<uintptr_t>(t->data) % 16 == 0,

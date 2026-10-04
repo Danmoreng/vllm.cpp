@@ -134,7 +134,7 @@ struct Context {
   sycl::device device;
   sycl::context context;
   std::mutex mutex;
-  Workspace exl3, gdn, attention, sampling, native_gdn;
+  Workspace exl3, gdn, attention, sampling, native_gdn, w8a8;
   std::unordered_map<sycl::queue*, std::unique_ptr<sycl::queue>> queues;
   std::vector<PendingProfileEvent> profile_events;
   std::vector<HostProfileRecord> host_profile_records;
@@ -769,6 +769,7 @@ MemoryInfo GetMemoryInfo(int index) {
   info.native_gdn_workspace_bytes = c.native_gdn.bytes;
   info.attention_workspace_bytes = c.attention.bytes;
   info.sampling_workspace_bytes = c.sampling.bytes;
+  info.w8a8_workspace_bytes = c.w8a8.bytes;
   info.peak_allocated_bytes = c.peak_allocated;
   info.graph_count = c.graphs.size(); info.graph_nodes = c.graph_nodes;
   info.graph_device_bytes = c.graph_bytes;
@@ -832,6 +833,49 @@ bool WithExl3Workspace(Queue& q, size_t bytes, const std::function<void(void*)>&
   VT_CHECK(bytes > 0 && bytes <= 32 * 1024 * 1024, "XPU EXL3 workspace exceeds 32 MiB budget");
   return WithWorkspace(q, GetContext(q.device.index).exl3, 1,
                        "workspace_wait_exl3", bytes, launch);
+}
+bool WithExl3W8A8Workspace(Queue& q, size_t bytes, const std::function<void(void*)>& launch) {
+  VT_CHECK(bytes > 0, "XPU W8A8 workspace must be nonempty");
+  auto& native = NativeQueue(q);
+  auto& c = GetContext(q.device.index);
+  auto& workspace = c.w8a8;
+  std::lock_guard execution(workspace.mutex);
+  {
+    std::lock_guard lock(c.mutex);
+    // No W8A8 pool address enters a graph. Existing SmallM graph ownership is
+    // independent, so eager growth cannot invalidate a captured panel.
+    VT_CHECK(!c.recordings.count(&native), "XPU shared W8A8 workspace is eager-only");
+    if (bytes > workspace.bytes) {
+      if (bytes - workspace.bytes > c.budget - c.allocated - c.graph_bytes) return false;
+      // Every previous lease completed before returning, including exceptions.
+      // Free first to avoid retaining both the old and new high-water capacities.
+      if (workspace.data) {
+        sycl::free(workspace.data, c.context);
+        c.allocations.erase(workspace.data);
+        c.allocated -= workspace.bytes;
+        workspace.data = nullptr; workspace.bytes = 0;
+      }
+      void* storage = sycl::aligned_alloc_device(64, bytes, c.device, c.context);
+      VT_CHECK(storage != nullptr, "XPU shared W8A8 workspace allocation failed");
+      try { c.allocations.emplace(storage, bytes); }
+      catch (...) { sycl::free(storage, c.context); throw; }
+      c.allocated += bytes;
+      c.peak_allocated = std::max(c.peak_allocated, c.allocated);
+      workspace.data = storage; workspace.bytes = bytes;
+    }
+  }
+  try {
+    launch(workspace.data);
+    // Retain this completion fence until an asynchronous panel-lease protocol
+    // can safely retire all validation, oneDNN and output-Hadamard consumers.
+    const auto start = HostProfileEnabled() ? SteadyNs() : 0;
+    native.wait_and_throw();
+    if (start) RecordHostProfileSpan(q, "workspace_wait_w8a8", start, SteadyNs());
+  } catch (...) {
+    try { native.wait_and_throw(); } catch (...) {}
+    throw;
+  }
+  return true;
 }
 bool WithGdnWorkspace(Queue& q, size_t bytes, const std::function<void(void*)>& launch) {
   VT_CHECK(bytes > 0 && bytes <= 32 * 1024 * 1024, "XPU GDN workspace exceeds 32 MiB budget");

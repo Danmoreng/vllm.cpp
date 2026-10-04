@@ -40,9 +40,10 @@ Exl3W8A8Plan PlanExl3W8A8(int64_t m, int64_t k, int64_t n,
   return {ms, act, sx, y, sw, cursor, panel.bytes, panel.columns};
 }
 
-void Exl3GroupedW8A8(Queue& q, Tensor& out, const Tensor& in, const Tensor& tr,
-    const Tensor& suh, const Tensor& svh, const Tensor& shard,
-    Tensor& workspace, Tensor& panel, const Exl3GroupedLinearArgs& args) {
+namespace {
+Exl3W8A8Plan ValidateW8A8Operands(Queue& q, const Tensor& out, const Tensor& in,
+    const Tensor& tr, const Tensor& suh, const Tensor& svh, const Tensor& shard,
+    const Exl3GroupedLinearArgs& args) {
   VT_CHECK(in.rank == 2 && out.rank == 2 && suh.rank == 2,
            "EXL3 W8A8 requires rank-2 input/output/suh");
   const int64_t m = in.shape[0], k = in.shape[1], n = out.shape[1];
@@ -58,17 +59,41 @@ void Exl3GroupedW8A8(Queue& q, Tensor& out, const Tensor& in, const Tensor& tr,
            "EXL3 W8A8 requires F16 suh[S,K] and svh[N]");
   VT_CHECK(shard.dtype == DType::kI32 && shard.rank == 1 && shard.shape[0] == n / 128,
            "EXL3 W8A8 requires I32 shard_of_nb[N/128]");
+  for (const Tensor* t : {&out, &in, &tr, &suh, &svh, &shard}) {
+    VT_CHECK(t->IsContiguous(), "EXL3 W8A8 requires contiguous tensors");
+    VT_CHECK(t->device == q.device, "EXL3 W8A8 device mismatch");
+  }
+  return plan;
+}
+}  // namespace
+
+void Exl3GroupedW8A8(Queue& q, Tensor& out, const Tensor& in, const Tensor& tr,
+    const Tensor& suh, const Tensor& svh, const Tensor& shard,
+    Tensor& workspace, Tensor& panel, const Exl3GroupedLinearArgs& args) {
+  const auto plan = ValidateW8A8Operands(q, out, in, tr, suh, svh, shard, args);
+  const int64_t k = in.shape[1];
   VT_CHECK(workspace.dtype == DType::kI8 && workspace.rank == 1 &&
                workspace.shape[0] >= 0 && size_t(workspace.shape[0]) >= plan.workspace_bytes,
            "EXL3 W8A8 byte workspace too small or wrong layout");
   VT_CHECK(panel.dtype == DType::kI8 && panel.rank == 2 &&
                panel.shape[0] == k && panel.shape[1] == plan.weight_panel_columns,
            "EXL3 W8A8 weight panel does not match bounded planned capacity");
-  for (const Tensor* t : std::initializer_list<const Tensor*>{
-           &out, &in, &tr, &suh, &svh, &shard, &workspace, &panel}) {
+  for (const Tensor* t : {&workspace, &panel}) {
     VT_CHECK(t->IsContiguous(), "EXL3 W8A8 requires contiguous tensors");
     VT_CHECK(t->device == q.device, "EXL3 W8A8 device mismatch");
   }
+  reinterpret_cast<Exl3GroupedLinearFn>(GetOp(OpId::kExl3GroupedW8A8, q.device.type))(
+      q, out, in, tr, suh, svh, shard, workspace, panel, args);
+}
+
+void Exl3GroupedW8A8(Queue& q, Tensor& out, const Tensor& in, const Tensor& tr,
+    const Tensor& suh, const Tensor& svh, const Tensor& shard,
+    const Exl3GroupedLinearArgs& args) {
+  (void)ValidateW8A8Operands(q, out, in, tr, suh, svh, shard, args);
+  VT_CHECK(q.device.type == DeviceType::kXPU, "EXL3 shared W8A8 requires XPU");
+  // Rank-zero private scratch signals the managed overload to the registered
+  // XPU operator. The explicit public overload never admits rank-zero scratch.
+  Tensor workspace, panel;
   reinterpret_cast<Exl3GroupedLinearFn>(GetOp(OpId::kExl3GroupedW8A8, q.device.type))(
       q, out, in, tr, suh, svh, shard, workspace, panel, args);
 }
