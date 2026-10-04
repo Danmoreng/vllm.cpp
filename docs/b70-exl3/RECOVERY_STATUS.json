@@ -39,7 +39,7 @@
       "target_qualified": false,
       "serving_qualified": false,
       "complete": true,
-      "next_code_change": "Run current bounded native-owned P128+29 against unchanged legacy logit gates and controlled original v81, then isolate first remaining boundary or qualify full D64. No performance transfer or graph/capability completion inferred.",
+      "next_code_change": "R06 current-source isolated compact draft numeric replay with identical original target-hidden/state/operands. Retain existing frozen default-producer gates; a reference-contract correction requires independent held-out evidence and an explicit proposal, never silent promotion.",
       "same_input_core_final_state_pass": true,
       "actual_VT_BA_repeatability": "P128 varying 3/6/7 halves; D1 exact in three repeats",
       "result_receipt": {
@@ -440,6 +440,59 @@
         "target_qualified": false,
         "serving_qualified": false,
         "next": "Run current bounded native-owned P128+29 against unchanged legacy logit gates and controlled original v81, then isolate first remaining boundary or qualify full D64. No performance transfer or graph/capability completion inferred."
+      },
+      "D29_after_SwiGLU_controlled_exact": {
+        "receipt": {
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r02-D29-head-v1/receipt-D29-swiglu-v98.json",
+          "bytes": 235524,
+          "sha256": "15c6cc08a441b0b35850fb2d3d5fd8ed39aafa531a24fa6845201338a08bc54a"
+        },
+        "native_cases": 1,
+        "native_passed": 504,
+        "native_assertions": 508,
+        "native_exit": 1,
+        "frozen_failures": [
+          "D27_TV",
+          "D27_KL",
+          "D29_TV",
+          "D29_KL"
+        ],
+        "legacy_D29_TV": 0.212752,
+        "legacy_D29_KL": 0.163144,
+        "controlled_original_bit_exact_logit_rows": 30,
+        "controlled_original_bit_exact_D29_outer_boundaries": 192,
+        "controlled_D29_TV": 0.0,
+        "controlled_D29_KL": 0.0,
+        "target_qualified": false,
+        "serving_qualified": false
+      },
+      "D64_after_SwiGLU_controlled_exact": {
+        "receipt": {
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r02-D29-head-v1/receipt-controlled-D64-v103.json",
+          "bytes": 48719,
+          "sha256": "4063e16fd8404073aff740dc902218a7dc9f2c259abb62f1061fbf01c2c5db95"
+        },
+        "native_cases": 1,
+        "native_passed": 804,
+        "native_assertions": 808,
+        "native_exit": 1,
+        "focused_build_exit": 0,
+        "original_exit": 0,
+        "frozen_failures": [
+          "D27_TV",
+          "D27_KL",
+          "D29_TV",
+          "D29_KL"
+        ],
+        "controlled_original_bit_exact_logit_rows": 65,
+        "controlled_max_TV": 0.0,
+        "controlled_max_KL": 0.0,
+        "bounded_D29_prefix_bit_exact_rows": 30,
+        "original_frozen_D64_qualified": false,
+        "target_qualified": false,
+        "serving_qualified": false,
+        "current_performance_remeasured": false,
+        "next": "R06 current-source isolated compact draft numeric replay with identical original target-hidden/state/operands. Retain existing frozen default-producer gates; a reference-contract correction requires independent held-out evidence and an explicit proposal, never silent promotion."
       }
     },
     {
@@ -548,7 +601,7 @@
         "bytes": 3022
       },
       "tests": "Seven norms and existing CPU paged draft:2cases1104/1104,exit0; compact head builder3cases45/45,exit0; mapped XPU selection6/6; CPU proposer4/4 and depth3 20/20. Real isolated head65536 logits bit-exact/global-ID exact. Real forward gate exit1:34 hidden/77 logits pointwise failures; explicit oneDNN also exit1:29/45.",
-      "next_code_change": "R07 public native MTP1 smoke, transaction/rollback integration; retain R06 numerical gate",
+      "next_code_change": "Rebuild and rerun the existing isolated real compact-draft numerical gate on current source after target attention/GDN/SwiGLU repairs, with identical original target-hidden/state/operands; localize any first remaining draft operation before new arithmetic changes.",
       "compact_builder_receipt": {
         "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r06-compact-head-v1/receipt-builder-v1.json",
         "sha256": "47aa7bd30ca637cae6ca06ff646a98ae763cf4f52dec1c85f5212e273bd512ca",
