@@ -438,11 +438,24 @@ void PagedAttentionKernel(Queue& q, Tensor& out, const Tensor& query, const Tens
   const auto* lengths = static_cast<const int32_t*>(seq_lens.data);
   const auto* offsets = static_cast<const int32_t*>(query_start_loc.data);
   const auto* table = static_cast<const int32_t*>(block_table.data);
+  int64_t packed_verify_rows = 0;
+#ifdef VLLM_CPP_XPU_XE2_VERIFY
+  if (requests > 1)
+    packed_verify_rows = PagedAttentionXe2VerifyQueryLength(
+        tokens, requests, args.query_start_loc_host);
+#endif
+  const int64_t max_length = args.max_seq_len;
   CheckDeviceMetadata(q, [=] {
     if (offsets[0] != 0 || offsets[requests] != tokens) return false;
     for (int64_t r = 0; r < requests; ++r) {
       const int64_t first = offsets[r], end = offsets[r + 1], length = lengths[r];
       if (first < 0 || end < first || end > tokens) return false;
+      // A uniform host hint selects the packed C4 layout. Prove it against
+      // fresh device offsets inside the existing eager/graph metadata check;
+      // never trust total-token division or add a per-layer host readback.
+      if (packed_verify_rows && (first != r * packed_verify_rows ||
+          end != (r + 1) * packed_verify_rows ||
+          (max_length > 0 && length > max_length))) return false;
       if (end == first) continue;  // Padded/inactive rows need no valid cache entries.
       if (length < end - first) return false;
       const auto needed = (length + page - 1) / page;

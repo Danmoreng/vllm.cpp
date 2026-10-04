@@ -99,6 +99,10 @@ bool PagedAttentionXe2PrefillKernel(Queue&, Tensor&, const Tensor&, const Tensor
 #ifdef VLLM_CPP_XPU_XE2_VERIFY
 bool PagedAttentionXe2DecodeKernel(Queue&, Tensor&, const Tensor&, const Tensor&, const Tensor&,
                                    const Tensor&, const Tensor&, const Tensor&, const PagedAttentionArgs&);
+// C4 admission requires a uniform host offset hint, proved against device
+// offsets by PagedAttentionKernel before any output/workspace write.
+int64_t PagedAttentionXe2VerifyQueryLength(int64_t tokens, int64_t requests,
+                                         const int32_t* host_offsets);
 bool PagedAttentionXe2VerifyKernel(Queue&, Tensor&, const Tensor&, const Tensor&, const Tensor&,
                                    const Tensor&, const Tensor&, const Tensor&, const PagedAttentionArgs&);
 #endif

@@ -1640,14 +1640,14 @@
     },
     {
       "task": "P1",
-      "status": "native_C1_operator_admission_graph_qualified_C4_model_pending",
+      "status": "native_C1_C4_operators_ragged_fallback_qualified_C4_graph_model_pending",
       "complete": false,
       "original_capture_exit": 0,
       "host_test_cases_passed": 2,
       "receipt": {
-        "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p1-C1-refusal-v1/receipt-v1.json",
-        "bytes": 27223,
-        "sha256": "8138e3864fd89173285129a2bac7fe5babded98323d2f992f658aae95e39e1a1"
+        "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p1-C4-native-v1/receipt-v1.json",
+        "bytes": 80133,
+        "sha256": "c76f1d06858e00662aa65c2569cca6d7f1346e7405b3af1f469160c9f2579dfd"
       },
       "original_active_length": 4100,
       "original_splits": 16,
@@ -1669,7 +1669,7 @@
         "split": 1.840158,
         "verify": 0.15017
       },
-      "native_C1_scope": "Actualoriginal Q4L4100 and derived39 originaloperator Q2/Q3/Q4/Q5, boundary/32K/layout forms match1915/1915; zero/NaN inactive storage and aliases qualified. Unsupported public forms fallback exactly or reject beforewrites133/133. RawC1 operator graphs qualified108/108,2captures/20successfulreplays across3queues, fresh metadata validation,16MiB shared scratch and0retired graphbytes. C4/ragged/modelgraphpolicy/emittedcycle quality and speed pending. Automatic verifier off.",
+      "native_C1_scope": "Actualoriginal Q4L4100 and derived39 originaloperator Q2/Q3/Q4/Q5, boundary/32K/layout forms match1915/1915; zero/NaN inactive storage and aliases qualified. Unsupported public forms fallback exactly or reject beforewrites133/133. RawC1 operator graphs qualified108/108,2captures/20successfulreplays across3queues, fresh metadata validation,16MiB shared scratch and0retired graphbytes. C4 operator and raggedfallback now qualified separately; C4 rawgraph/modelgraphpolicy/emittedcycle quality and speed pending. Automatic verifier off.",
       "retained_failures": "Baseline7571half differences/genericroute; firstlauncher24576NaN from Vtail; tailmask12half differences; scopedoriginalmath zero. Failed resourcefilename attempt retained before GPUworker. Frozen defaultD64 four failures unchanged. Refusaltestv1 expected unsupported paddedquery fallback but existing publiccontiguous contract threw after77assertions(exit1); correctedtest preserves contract. Firstgraphcommand omitted required VT_XPU_PROFILE=1 and rejected after10assertions(exit1); samebinary correctedcommand passes.",
       "first_native_C1_receipt": {
         "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p1-native-C1-v1/receipt-v1.json",
@@ -1700,7 +1700,25 @@
       "original_C4_operator_cases": 9,
       "original_C4_exit": 0,
       "original_C4_isolated_request_comparisons": 12,
-      "original_C4_scope": "Derived original C4 Q4 isolated operators, lengths1599/1601/4100/4801, disjoint nonmonotonic physicalpages,3layouts,permutation,request2 causal tail mutation; exact acrosslayouts/permutation/isolatedC1,one actual batchedcall perform. Not model trajectory, nativeC4 implementation or serving gain."
+      "original_C4_scope": "Derived original C4 Q4 isolated operators, lengths1599/1601/4100/4801, disjoint nonmonotonic physicalpages,3layouts,permutation,request2 causal tail mutation; exact acrosslayouts/permutation/isolatedC1,one actual batchedcall per form. Not model trajectory, serving gain.",
+      "C1_refusal_graph_receipt": {
+        "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p1-C1-refusal-v1/receipt-v1.json",
+        "bytes": 27223,
+        "sha256": "8138e3864fd89173285129a2bac7fe5babded98323d2f992f658aae95e39e1a1"
+      },
+      "native_C4_operator_qualified": true,
+      "native_C4_family_assertions": 518,
+      "native_C4_family_exit": 0,
+      "native_C4_metadata_assertions": 37,
+      "native_C4_metadata_exit": 0,
+      "native_C4_bench_assertions": 469,
+      "native_C4_bench_exit": 0,
+      "native_C4_warm_complete_operator_median_ms": {
+        "split": 2.89725,
+        "verify": 0.23134
+      },
+      "native_C4_operator_elapsed_reduction_percent": 92.01518681508327,
+      "native_C4_scope": "True singlebatched C4Q4 donor, hostuniform offsets proved against fresh device metadata in existing check, private offsets0/1/2/3/4.9originalderived cases x zero/NaN, distinct lengths/pages,permutation/tailmutation; direct/alias/stridedcopy exact with guards/noKVwrites. Ragged2/4/4/4 and missinghint use current generic route exactly; mismatched uniformGPUoffsets/too-small hostbound reject beforewrites. No C4 rawgraph/modeltrajectory/automatic promotion yet."
     },
     {
       "task": "P2",
@@ -1839,5 +1857,5 @@
     }
   ],
   "performance_baseline": "7536aededc049b2157f12eadb0f4cc6bbf29b7b7",
-  "performance_next": "P1 native trueC4/ragged using nowexecuted original9case fixture, precise uniform host/device metadata contract; model route/layout/partition graph identity and emittedcycle qualification before automatic promotion. C1 operator/refusal/rawgraph and boundedP2 complete. LaterP3/P4 material; defaultD64/reference/fullstate gates open."
+  "performance_next": "P1 C4 rawgraph mutation/freshmetadata/sharedC1C4 scratch/retirement; model route/layout/activepage/partition policy identity and current emittedcycle C1P4096/O1024 plusC4 sentinel before automatic promotion. C1/C4 boundedoperator/raggedfallback and P2 complete; laterP3/P4 material. DefaultD64/reference/fullstate gates open."
 }
