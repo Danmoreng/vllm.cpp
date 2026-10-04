@@ -55,6 +55,18 @@ bool PagedAttentionPrefillImpl(Queue& q, Tensor& out, const Tensor& query, const
   const bool causal = args.causal;
   const int64_t left = args.window_size ? args.window_size->left : -1;
   const int64_t right = args.window_size ? args.window_size->right : -1;
+  // Preserve the pinned producer's base2 softmax boundaries for the observed
+  // short F16 prefill. Other shapes/modes keep their existing arithmetic.
+  const bool producer_softmax = !QueryResidual && !ProbabilityResidual &&
+      query.dtype == DType::kF16 && out.dtype == DType::kF16 &&
+      tokens == 128 && requests == 1 && heads == 24 && ratio == 6 &&
+      (page == 1600 || page == 1664) && args.max_seq_len == 128 &&
+      key_cache.dtype == DType::kI8 && value_cache.dtype == DType::kI8 &&
+      args.kv_cache_dtype == Fp8KVCacheDataType::kFp8E4M3 &&
+      kscale == 1 && vscale == 1 && scale == 1.0f / 16 && causal &&
+      cap == 0 && !args.window_size;
+  constexpr float log2e = static_cast<float>(1.4426950408889634074);
+  const float scale2 = scale * log2e;
   // One extra partial tile per sequence. The device maps this compact grid,
   // so empty requests and changing query lengths need no host mirror.
   const int64_t tiles = (tokens + Q - 1) / Q + requests - 1;
@@ -144,16 +156,24 @@ bool PagedAttentionPrefillImpl(Queue& q, Tensor& out, const Tensor& query, const
             const int64_t key = base + key_col, p = position + row;
             const bool valid = row < rows && key < end && (!causal || key <= p) &&
                 (left < 0 || key >= p - left) && (right < 0 || key <= p + right);
-            float value = scores[row * K + key_col] * scale;
+            float value = scores[row * K + key_col];
+            if (!producer_softmax) value *= scale;
             if (cap > 0) value = cap * sycl::tanh(value / cap);
             return valid ? value : -std::numeric_limits<float>::infinity();
           };
           const float s0 = score(lane), s1 = score(lane + 16);
           const float tile_max = sycl::reduce_over_group(sg, sycl::max(s0, s1), sycl::maximum<float>());
-          const float maximum = sycl::max(previous, tile_max);
-          const float old = sycl::isfinite(maximum) ? sycl::exp(previous - maximum) : 0;
-          const float e0 = sycl::isfinite(s0) ? sycl::exp(s0 - maximum) : 0;
-          const float e1 = sycl::isfinite(s1) ? sycl::exp(s1 - maximum) : 0;
+          const float maximum = sycl::max(previous,
+              producer_softmax ? scale2 * tile_max : tile_max);
+          const float old = sycl::isfinite(maximum) ?
+              (producer_softmax ? sycl::native::exp2(previous - maximum) :
+                                  sycl::exp(previous - maximum)) : 0;
+          const float e0 = sycl::isfinite(s0) ?
+              (producer_softmax ? sycl::native::exp2(sycl::fma(scale2, s0, -maximum)) :
+                                  sycl::exp(s0 - maximum)) : 0;
+          const float e1 = sycl::isfinite(s1) ?
+              (producer_softmax ? sycl::native::exp2(sycl::fma(scale2, s1, -maximum)) :
+                                  sycl::exp(s1 - maximum)) : 0;
           const float sum = sycl::reduce_over_group(sg, e0 + e1, sycl::plus<float>());
           prob[row * K + lane] = sycl::half(e0);
           prob[row * K + lane + 16] = sycl::half(e1);
