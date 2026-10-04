@@ -39,7 +39,7 @@
       "target_qualified": false,
       "serving_qualified": false,
       "complete": true,
-      "next_code_change": "Narrow existing native P128 prefill base2 exponential/scaled FMA/reduction boundaries, immediately rerun strict same-input P128/D1, then bounded own-state integration. Qualify current-source graph selector/capture thresholds separately.",
+      "next_code_change": "Bound first remaining divergent block/state after repaired attention3 using current P128/D1 and identical original inputs; retain strict target/state/draft gates. Qualify graph policy thresholds before current-source serving/performance transfer.",
       "same_input_core_final_state_pass": true,
       "actual_VT_BA_repeatability": "P128 varying 3/6/7 halves; D1 exact in three repeats",
       "result_receipt": {
@@ -281,6 +281,35 @@
         "target_qualified": false,
         "serving_qualified": false,
         "next_code_change": "Narrow existing native P128 prefill base2 exponential/scaled FMA/reduction boundaries, immediately rerun strict same-input P128/D1, then bounded own-state integration. Qualify current-source graph selector/capture thresholds separately."
+      },
+      "P128_prefill_base2_repair": {
+        "receipt": {
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r02-D29-head-v1/receipt-prefill-base2-v64.json",
+          "bytes": 47894,
+          "sha256": "acac2bded54987d0d5b87ef1c0cecec45ca5f10f9d86a70fcd8b57da3b642ba1"
+        },
+        "build_exit": 0,
+        "operator_Q64_assertions": "86/86",
+        "operator_Q32_assertions": "86/86",
+        "operator_exits": [
+          0,
+          0
+        ],
+        "both_page_sizes_P128_D1_outputs_bit_exact": true,
+        "active_FP8_cache_exact_and_inactive_poison_unchanged": true,
+        "bounded_model_assertions": "530/535",
+        "bounded_model_exit": 1,
+        "D29_legacy_TV": 0.0234147,
+        "D29_legacy_KL": 0.0083951,
+        "controlled_diagnostic_TV_before": 0.17098872657286,
+        "controlled_diagnostic_TV_after": 0.2119165981809272,
+        "actual_attention3_D29_all_observed_boundaries_and_initialized_KV_still_bit_exact": true,
+        "overall_numerical_improvement_claimed": false,
+        "new_host_waits_or_readbacks": false,
+        "current_performance_remeasured": false,
+        "target_qualified": false,
+        "serving_qualified": false,
+        "next_code_change": "Bound first remaining divergent block/state after repaired attention3 using current P128/D1 and identical original inputs; retain strict target/state/draft gates. Qualify graph policy thresholds before current-source serving/performance transfer."
       }
     },
     {

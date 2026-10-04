@@ -348,7 +348,7 @@ TEST_CASE("XPU EXL3 real attention core: identical D29 operands and FP8 state") 
   CHECK(vt::GetReferenceTierHits() == 0);
 }
 
-static void RunRealAttentionCore(bool strict_halves) {
+static void RunRealAttentionCore(bool strict_halves, int64_t page = 1600) {
   const char* captures = std::getenv("VT_B70_EXL3_S1_FIXTURES");
   if (!captures) { std::cerr << "Set VT_B70_EXL3_S1_FIXTURES.\n"; std::exit(77); }
   const auto dir = std::filesystem::path(captures);
@@ -361,8 +361,8 @@ static void RunRealAttentionCore(bool strict_halves) {
   const int32_t dblock = *reinterpret_cast<const int32_t*>(oracle.Get("d1_block_table").data);
   REQUIRE(pblock >= 0); REQUIRE(dblock == pblock);
   const int64_t blocks = int64_t(pblock) + 1;
-  constexpr int64_t page = 1600, heads = 24, kvheads = 4, dim = 256;
-  constexpr int64_t block_bytes = page * kvheads * 2 * dim;
+  constexpr int64_t heads = 24, kvheads = 4, dim = 256;
+  const int64_t block_bytes = page * kvheads * 2 * dim;
   xpu_test::Queue gpu(vt::DeviceType::kXPU);
   // Match the observed interleaved physical layout, including head/page
   // strides. Every inactive byte starts poisoned and must remain untouched.
@@ -395,7 +395,15 @@ static void RunRealAttentionCore(bool strict_halves) {
     xpu_test::Buffer lengths(gpu.q, DType::kI32, {1});
     xpu_test::Buffer offsets(gpu.q, DType::kI32, {2});
     query.upload(get("q_rope").data); key.upload(get("k_rope").data);
-    value.upload(get("value").data); slots.upload(get("slot_mapping").data);
+    value.upload(get("value").data);
+    std::vector<int64_t> mapped_slots(static_cast<size_t>(rows));
+    for (int64_t i = 0; i < rows; ++i) {
+      int64_t slot;
+      std::memcpy(&slot, get("slot_mapping").data + i * sizeof(slot), sizeof(slot));
+      // Preserve the captured logical positions when testing another page size.
+      mapped_slots[i] = slot < 0 ? slot : (slot / 1600) * page + slot % 1600;
+    }
+    slots.upload(mapped_slots.data());
     table.upload(get("block_table").data); lengths.upload(get("seq_lens").data);
     offsets.upload(get("query_start_loc").data);
     vt::ReshapeAndCacheFp8(gpu.q, key.tensor, value.tensor, kc, vc, slots.tensor,
@@ -465,7 +473,7 @@ TEST_CASE("XPU EXL3 real attention: identical original operands FP8 bytes P128 D
 }
 
 TEST_CASE("XPU EXL3 real attention core: strict P128 D1 original endpoints") {
-  RunRealAttentionCore(true);
+  for (const int64_t page : {1600, 1664}) RunRealAttentionCore(true, page);
 }
 
 TEST_CASE("XPU EXL3 attention RoPE: actual FP16 operands and coefficients") {
