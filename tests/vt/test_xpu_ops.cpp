@@ -12,6 +12,10 @@
 #include <limits>
 #include <string>
 #include <vector>
+#include <chrono>
+#include <iostream>
+#include <nlohmann/json.hpp>
+#include "vllm/model_executor/model_loader/safetensors_reader.h"
 
 TEST_CASE("XPU profile spans: optional queue brackets preserve bytes and nested intervals") {
   const vt::Device gpu{vt::DeviceType::kXPU, 0};
@@ -340,6 +344,191 @@ TEST_CASE("XPU FP16 SwiGLU: real half midpoint packed aliases and strided reject
     vt::SiluAndMul(qs.gpu, target, source);
     CHECK((alias ? input.raw() : output.raw()) == wanted);
     if (!alias) CHECK(input.raw() == input_before);
+  }
+  CHECK(vt::GetReferenceTierHits() == 0);
+}
+
+namespace {
+struct P3SiluEnv {
+  bool present = std::getenv("VT_XPU_SILU_FP16_TYPED") != nullptr;
+  std::string value = present ? std::getenv("VT_XPU_SILU_FP16_TYPED") : "";
+  ~P3SiluEnv() {
+    if (present) setenv("VT_XPU_SILU_FP16_TYPED", value.c_str(), 1);
+    else unsetenv("VT_XPU_SILU_FP16_TYPED");
+  }
+  void Select(bool typed) { REQUIRE(setenv("VT_XPU_SILU_FP16_TYPED", typed ? "1" : "0", 1) == 0); }
+};
+void P3SameBits(const std::vector<unsigned char>& actual, const std::vector<unsigned char>& expected) {
+  REQUIRE(actual.size() == expected.size());
+  const auto mismatch = std::mismatch(actual.begin(), actual.end(), expected.begin());
+  const auto first_byte = mismatch.first - actual.begin();
+  CAPTURE(first_byte);
+  REQUIRE(mismatch.first == actual.end());
+}
+void P3SameFp16Behavior(const std::vector<unsigned char>& actual,
+                        const std::vector<unsigned char>& expected) {
+  REQUIRE(actual.size() == expected.size());
+  size_t mismatches = 0, nan_payloads = 0;
+  for (size_t i = 0; i < actual.size(); i += 2) {
+    uint16_t a, b;
+    std::memcpy(&a, actual.data() + i, 2); std::memcpy(&b, expected.data() + i, 2);
+    if (a == b) continue;
+    const auto nan = [](uint16_t bits) { return (bits & 0x7c00) == 0x7c00 && (bits & 0x3ff) != 0; };
+    // IEEE arithmetic does not specify which payload wins when both operands
+    // are NaNs. Finite values, +/-Inf and signed zeros remain bit-exact; every
+    // original NaN must remain a NaN, with no finite/nonfinite conversion.
+    if (nan(a) && nan(b)) ++nan_payloads; else ++mismatches;
+  }
+  CAPTURE(mismatches);
+  REQUIRE(mismatches == 0);
+  if (nan_payloads) std::cout << "P3_SILU_NAN_PAYLOAD_ONLY differences=" << nan_payloads << std::endl;
+}
+}
+
+TEST_CASE("XPU P3 FP16 SiLU: exhaustive gate bits preserve generic materialization and graph replay") {
+  Queues qs; P3SiluEnv route;
+  constexpr int rows = 512, width = 128, n = 65536;
+  Buffer input(qs.gpu, DType::kF16, {rows, 2 * width});
+  Buffer generic(qs.gpu, DType::kF16, {rows, width});
+  Buffer typed(qs.gpu, DType::kF16, {rows, width});
+  std::vector<uint16_t> raw(2 * n);
+  const auto fill = [&](uint16_t up, int shift = 0) {
+    for (int i = 0; i < n; ++i) {
+      const int offset = (i / width) * (2 * width) + i % width;
+      raw[offset] = uint16_t(i + shift); raw[offset + width] = up;
+    }
+    input.upload(raw.data());
+  };
+  // Every gate bit pattern, including both signed zeros, subnormals, infinities
+  // and all NaN payloads. Ups include the real midpoint, extremes, zero and
+  // exceptional values. Reference is the preserved original GPU expression,
+  // not a host approximation or a duplicate typed kernel in the test.
+  for (uint16_t up : {uint16_t(0x3c00), uint16_t(0x0000), uint16_t(0x8000),
+                     uint16_t(0x0001), uint16_t(0x7bff), uint16_t(0xfbff),
+                     vt::F32ToF16(-0.346923828125f), uint16_t(0x7c00),
+                     uint16_t(0xfc00), uint16_t(0x7e35)}) {
+    CAPTURE(up);
+    fill(up); const auto before = input.raw();
+    route.Select(false); vt::SiluAndMul(qs.gpu, generic.t, input.t);
+    const auto expected = generic.raw();
+    route.Select(true); vt::SiluAndMul(qs.gpu, typed.t, input.t);
+    P3SameFp16Behavior(typed.raw(), expected); CHECK(input.raw() == before);
+  }
+  // No new persistent table or scratch: a captured typed kernel re-reads fresh
+  // gate/up bytes. Graph owner dies before any baked buffers.
+  if (vt::GetBackend(qs.gpu.device).SupportsGraphCapture()) {
+    route.Select(true); vt::SiluAndMul(qs.gpu, typed.t, input.t);
+    vt::GetBackend(qs.gpu.device).Synchronize(qs.gpu);
+    vt::BreakableGraph graph;
+    {
+      vt::GraphCaptureScope scope(vt::GetBackend(qs.gpu.device), qs.gpu, graph,
+                                  vt::GraphCaptureMode::kFull);
+      vt::SiluAndMul(qs.gpu, typed.t, input.t);
+    }
+    REQUIRE(graph.captured());
+    for (int shift : {0, 17, 4097}) {
+      fill(vt::F32ToF16(-0.346923828125f), shift);
+      route.Select(false); vt::SiluAndMul(qs.gpu, generic.t, input.t);
+      const auto expected = generic.raw();
+      route.Select(true); graph.Replay(qs.gpu); P3SameBits(typed.raw(), expected);
+    }
+    graph.Reset(); CHECK(vt::xpu::GetMemoryInfo().graph_device_bytes == 0);
+    std::cout << "P3_SILU_GRAPH captured=1 fresh_input_replays=3 retired_graph_bytes=0" << std::endl;
+  }
+  CHECK(vt::GetReferenceTierHits() == 0);
+  std::cout << "P3_SILU_EXHAUSTIVE gate_patterns=65536 up_patterns=10 products=655360 finite_inf_signed_zero_exact=1 nan_classification_exact=1" << std::endl;
+}
+
+TEST_CASE("XPU P3 FP16 SiLU: threshold rows tail guards and shifted aliases") {
+  Queues qs; P3SiluEnv route;
+  constexpr int guard = 32;
+  const uint16_t gate = vt::F32ToF16(-2.724609375f), up = vt::F32ToF16(-0.346923828125f);
+  const uint16_t expected = vt::F32ToF16(0.058135986328125f);
+  for (int rows : {1, 3, 4, 16, 63, 64, 65}) for (int width : {1, 129})
+    for (int alias_offset : {-1, 0, 17}) {
+      CAPTURE(rows);
+      CAPTURE(width);
+      CAPTURE(alias_offset);
+      Buffer input(qs.gpu, DType::kF16, {2 * guard + rows * 2 * width});
+      Buffer result(qs.gpu, DType::kF16, {2 * guard + rows * width});
+      std::vector<uint16_t> raw(input.bytes / 2, 0x7e35), out(result.bytes / 2, 0x7e35);
+      for (int row = 0; row < rows; ++row) for (int col = 0; col < width; ++col) {
+        raw[guard + row * 2 * width + col] = gate;
+        raw[guard + row * 2 * width + width + col] = up;
+      }
+      input.upload(raw.data()); result.upload(out.data());
+      auto source = vt::Tensor::Contiguous(static_cast<uint16_t*>(input.t.data) + guard,
+          DType::kF16, qs.gpu.device, {rows, 2 * width});
+      const bool alias = alias_offset >= 0;
+      const int offset = guard + (alias ? alias_offset : 0);
+      auto target = vt::Tensor::Contiguous(static_cast<uint16_t*>(alias ? input.t.data : result.t.data) + offset,
+          DType::kF16, qs.gpu.device, {rows, width});
+      auto wanted = alias ? raw : out;
+      std::fill(wanted.begin() + offset, wanted.begin() + offset + rows * width, expected);
+      std::vector<unsigned char> bits(wanted.size() * 2);
+      std::memcpy(bits.data(), wanted.data(), bits.size());
+      route.Select(true); vt::SiluAndMul(qs.gpu, target, source);
+      P3SameBits(alias ? input.raw() : result.raw(), bits);
+      if (!alias) {
+        std::vector<unsigned char> input_bits(raw.size() * 2);
+        std::memcpy(input_bits.data(), raw.data(), input_bits.size());
+        CHECK(input.raw() == input_bits);
+      }
+    }
+  CHECK(vt::GetReferenceTierHits() == 0);
+}
+
+TEST_CASE("XPU P3 FP16 SiLU: real MLP operands complete operator gain") {
+  const char* fixture = std::getenv("VT_B70_EXL3_SILU_OPERANDS");
+  if (!fixture) { MESSAGE("Set VT_B70_EXL3_SILU_OPERANDS for the bounded real-row benchmark"); return; }
+  Queues qs; P3SiluEnv route;
+  const auto original = vllm::SafetensorsFile::Open(fixture);
+  const auto& gu = original.Get("p128_l20_detail_gate_up");
+  const auto& act = original.Get("p128_l20_detail_swiglu");
+  REQUIRE(gu.dtype == "F16"); REQUIRE(act.dtype == "F16");
+  REQUIRE(gu.shape == std::vector<int64_t>{128, 34816});
+  REQUIRE(act.shape == std::vector<int64_t>{128, 17408});
+  constexpr int width = 17408, guard = 32;
+  const bool profile = std::getenv("VT_XPU_PROFILE") && std::string(std::getenv("VT_XPU_PROFILE")) == "1";
+  for (int rows : {4, 128, 896, 1600}) {
+    CAPTURE(rows);
+    Buffer input(qs.gpu, DType::kF16, {2 * guard + rows * 2 * width});
+    Buffer result(qs.gpu, DType::kF16, {2 * guard + rows * width});
+    std::vector<uint16_t> data(input.bytes / 2, 0x7e35), expected(result.bytes / 2, 0x7e35);
+    for (int row = 0; row < rows; ++row) {
+      // Cyclic frozen real P128 rows, not a fresh M1600 model trajectory.
+      std::memcpy(data.data() + guard + row * 2 * width,
+                  gu.data + (row % 128) * 2 * width * 2, 2 * width * 2);
+      std::memcpy(expected.data() + guard + row * width,
+                  act.data + (row % 128) * width * 2, width * 2);
+    }
+    input.upload(data.data()); result.upload(expected.data());
+    auto source = vt::Tensor::Contiguous(static_cast<uint16_t*>(input.t.data) + guard,
+        DType::kF16, qs.gpu.device, {rows, 2 * width});
+    auto target = vt::Tensor::Contiguous(static_cast<uint16_t*>(result.t.data) + guard,
+        DType::kF16, qs.gpu.device, {rows, width});
+    const auto wanted = result.raw(), before = input.raw();
+    for (bool typed : {false, true}) {
+      route.Select(typed);
+      for (int warm = 0; warm < 2; ++warm) vt::SiluAndMul(qs.gpu, target, source);
+      vt::GetBackend(qs.gpu.device).Synchronize(qs.gpu);
+      (void)vt::xpu::DrainProfileEvents();
+      std::vector<double> times;
+      for (int sample = 0; sample < 3; ++sample) {
+        const auto begin = std::chrono::steady_clock::now();
+        vt::SiluAndMul(qs.gpu, target, source);
+        vt::GetBackend(qs.gpu.device).Synchronize(qs.gpu);
+        times.push_back(std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - begin).count());
+      }
+      P3SameBits(result.raw(), wanted); CHECK(input.raw() == before);
+      nlohmann::json event = {{"rows", rows}, {"width", width}, {"typed_requested", typed},
+          {"profiled", profile}, {"complete_operator_wall_ms", times}, {"exact_original_bytes", true}};
+      event["device_events"] = nlohmann::json::array();
+      for (const auto& e : vt::xpu::DrainProfileEvents())
+        if (e.stage.find("silu_and_mul") == 0)
+          event["device_events"].push_back({{"stage", e.stage}, {"ms", (e.end_ns - e.start_ns) / 1e6}});
+      std::cout << "P3_SILU_BENCH " << event.dump() << std::endl;
+    }
   }
   CHECK(vt::GetReferenceTierHits() == 0);
 }
