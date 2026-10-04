@@ -1656,19 +1656,19 @@
     },
     {
       "task": "P2",
-      "status": "operator_and_shared_pool_qualified_ready_for_full_prefill_AB",
-      "complete": false,
+      "status": "complete_bounded_panel_performance_package",
+      "complete": true,
       "panel_geometry_implemented": true,
       "wider_GPU_kernel_implemented": true,
       "shared_model_scratch_implemented": true,
       "real_M256_M1600_M896_tested": true,
       "receipt": {
-        "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p2-tails-budget-v1/receipt-v1.json",
-        "bytes": 17161,
-        "sha256": "e5a2f9720b634225a482c06a262616c042a1cca6337f1c1592c86f2933a549e3"
+        "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p2-model-prefill-v1/receipt-v1.json",
+        "bytes": 46078,
+        "sha256": "34db2fe2eae58e747e48c690f911aefb446f645cb77cda46e69a48786dbf7e6f"
       },
-      "focused_cases": 3,
-      "focused_assertions": 825,
+      "focused_cases": 4,
+      "focused_assertions": 843,
       "focused_exit": 0,
       "planning_receipt": {
         "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p2-panel-plan-v1/receipt-v1.json",
@@ -1679,7 +1679,7 @@
       "M256_operator_exit": 0,
       "existing_boundary_assertions": 156,
       "existing_boundary_exit": 0,
-      "model_panel_columns": 128,
+      "model_panel_columns": 1024,
       "M256_warm_operator_median_ms": {
         "128": 5.104696,
         "1024": 1.536389,
@@ -1691,7 +1691,7 @@
         "2048": 18
       },
       "M256_rounded_intermediates_and_output_exact": true,
-      "model_gain_measured": false,
+      "model_gain_measured": true,
       "operator_receipt": {
         "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p2-wide-operator-v1/receipt-v1.json",
         "bytes": 11746,
@@ -1702,7 +1702,7 @@
       "selected6bpw_single_model_graph_assertions": 34,
       "shared_tests_exit_each": 0,
       "isolated_M256_max_shared_scratch_bytes": 30935104,
-      "shared_scope": "Sequential cross-queue, growth/reuse/error/recovery/capture refusal and budget-pressure growth refusal pass. M256/M1600/M896 operator geometry qualified; selected2176-column6bpw original exact. Model128 until fullprefill A/B.",
+      "shared_scope": "Completion-owned grow/reuse/queue/error/capture/budget checks pass. M256/M1600/M896 plus selected2176-column6bpw original comparisons pass. Both LargeM model seams use selected1024; SmallM routing unchanged.",
       "shared_scratch_receipt": {
         "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p2-shared-scratch-v1/receipt-v1.json",
         "bytes": 15843,
@@ -1721,7 +1721,7 @@
         "1024": 3.000283,
         "2048": 2.235775
       },
-      "timing_limit": "Ordered three-call warmed operator samples. Bothv1/v2 retained; control medians vary. No model gain or serving parity.",
+      "timing_limit": "Three warmed samples per isolated operator; variable128 timings retained. FullC1P4096/O8 MTP3 one unprofiled trial perwidth plus fresh default confirmation, separate profiles. No refreshedO1024 decode/Python parity/C4/32K claim.",
       "prefill_rows_receipt": {
         "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p2-prefill-rows-v1/receipt-v1.json",
         "bytes": 25219,
@@ -1730,7 +1730,39 @@
       "wider_non_monotonic_128_tail_assertions": 104,
       "pool_budget_refusal_assertions": 19,
       "wider_selected6bpw_assertions": 36,
-      "qualification_exit_each": 0
+      "qualification_exit_each": 0,
+      "tails_budget_receipt": {
+        "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p2-tails-budget-v1/receipt-v1.json",
+        "bytes": 17161,
+        "sha256": "e5a2f9720b634225a482c06a262616c042a1cca6337f1c1592c86f2933a549e3"
+      },
+      "full_prefill_wall_s": {
+        "128": 4.876190444,
+        "1024": 3.438340968,
+        "2048": 3.427246024,
+        "default1024_confirmation": 3.42776493
+      },
+      "full_prefill_1024_elapsed_reduction_fraction": 0.29487147651692514,
+      "full_prefill_scope": "Exact same frozen4096prompt, warmupO32 then prefix reset, cold request, chunks1600/1600/896 padded1792/1792/1024, O8 MTP3; all8IDs and7non-timing cycle records exact. Three candidate and two profiled cases plus no-override default each75/75 exit0.",
+      "observed_target_panel_calls_per_chunk": {
+        "128": 30464,
+        "1024": 3808
+      },
+      "observed_draft_panel_calls_per_chunk": {
+        "128": 504,
+        "1024": 63
+      },
+      "combined_backend_peak_device_bytes": {
+        "128": 30281585987,
+        "1024": 30294553923,
+        "2048": 30299796803
+      },
+      "combined_w8a8_workspace_bytes": {
+        "128": 143800384,
+        "1024": 148387904,
+        "2048": 153630784
+      },
+      "remaining_qualification": "P2 implementation/performance package complete in stated scope. DefaultD64 four failures, strict full all-layer state/reference proof and currentP7 serving qualification remain separate/open; no independent observation of every reconstructed panel or full-head LargeM worker."
     },
     {
       "task": "P3",
@@ -1759,5 +1791,5 @@
     }
   ],
   "performance_baseline": "7536aededc049b2157f12eadb0f4cc6bbf29b7b7",
-  "performance_next": "P2 internal model128/1024/2048 A/B selection and complete unprofiledP4096prefill, then separate measured submission/device/host/combined-memory profile. Keep model128 until full-path gain and exact native outputs are demonstrated. P1 native verifier qualification follows."
+  "performance_next": "Complete P1 C1 page1600 verifier admission/packing/causality/arithmetic against executed originalQ4 fixture, thenQ2/Q3/Q5/page boundaries and distinct C4/lifetime proof. P3 exactSiLU (~205ms/chunk) and P4 rowvalidation (~184ms/chunk) remain material after P2. DefaultD64/reference/state gates remain open."
 }

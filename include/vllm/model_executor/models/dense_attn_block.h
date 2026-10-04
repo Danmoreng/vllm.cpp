@@ -355,7 +355,8 @@ inline DBuf Exl3GroupedMatmulD(Dev d, const vt::Tensor& x,
   const int bits = static_cast<int>(w.trellis.shape[2] / 32);
   // Validate arithmetic/extent before uploading weights. Large prefills use
   // the independent signed INT8 producer route, without dense reconstruction.
-  if (M > 128) (void)vt::PlanExl3W8A8(M, K, N, w.suh.shape[0], bits);
+  const int panel_columns = M > 128 ? vt::Exl3W8A8ModelPanelColumns() : 128;
+  if (M > 128) (void)vt::PlanExl3W8A8(M, K, N, w.suh.shape[0], bits, panel_columns);
   else (void)vt::PlanExl3SmallM(M, K, N, bits);
   const bool upload = !w.trellis.d_dev || !w.suh.d_dev || !w.svh.d_dev || !w.source_map.d_dev;
   auto trellis = ResidentWeight(d, w.trellis);
@@ -372,7 +373,7 @@ inline DBuf Exl3GroupedMatmulD(Dev d, const vt::Tensor& x,
   DBuf out(d, vt::DType::kF16, {M, N});
   if (M > 128) {
     vt::Exl3GroupedW8A8(d.q, out.t(), x, trellis, suh, svh, map,
-                       {bits, w.codebook, w.name.c_str()});
+                       {bits, w.codebook, w.name.c_str(), panel_columns});
     // One backend-owned completion lease replaces per-projection DBuf scratch.
     return out;
   }
@@ -404,7 +405,8 @@ inline DBuf Exl3MatmulD(Dev d, const vt::Tensor& x, const Exl3Weight& w,
       d.activation_dtype == vt::DType::kF16 && x.dtype == vt::DType::kF16 &&
       out_dtype == vt::DType::kF16 && w.codebook == 2 &&
       (w.Bits() == 4 || w.Bits() == 6)) {
-    if (M > 128) (void)vt::PlanExl3W8A8(M, K, N, 1, w.Bits());
+    const int panel_columns = M > 128 ? vt::Exl3W8A8ModelPanelColumns() : 128;
+    if (M > 128) (void)vt::PlanExl3W8A8(M, K, N, 1, w.Bits(), panel_columns);
     else (void)vt::PlanExl3SmallM(M, K, N, w.Bits());
     auto trellis = ResidentWeight(d, w.trellis);
     auto suh = Reshape(ResidentWeight(d, w.suh), {1, K});
@@ -420,7 +422,7 @@ inline DBuf Exl3MatmulD(Dev d, const vt::Tensor& x, const Exl3Weight& w,
     DBuf out(d, vt::DType::kF16, {M, N});
     if (M > 128) {
       vt::Exl3GroupedW8A8(d.q, out.t(), x, trellis, suh, svh, shard,
-                         {w.Bits(), w.codebook, w.name.c_str()});
+                         {w.Bits(), w.codebook, w.name.c_str(), panel_columns});
       return out;
     }
     const auto plan = vt::PlanExl3SmallM(M, K, N, w.Bits());

@@ -600,6 +600,7 @@ TEST_CASE("XPU EXL3 W8A8 model seam: grouped and single projection own scratch r
   w.source_map = owned(f.Get("source_map"), DType::kI32, {n / 128});
   Queue gpu(vt::DeviceType::kXPU);
   vllm::dense_attn::Dev d{vt::GetBackend(gpu.q.device.type), gpu.q, DType::kF16};
+  size_t capacity = vt::xpu::GetMemoryInfo().w8a8_workspace_bytes;
   for (int m : {129, 256, 128}) {
     Buffer input(gpu.q, DType::kF16, {m, k}); input.upload(f.Get("input_m" + std::to_string(m)).data);
     auto out = vllm::dense_attn::Exl3GroupedMatmulD(d, input.tensor, w);
@@ -608,8 +609,9 @@ TEST_CASE("XPU EXL3 W8A8 model seam: grouped and single projection own scratch r
     Accuracy(raw, f.Get("output_m" + std::to_string(m)), "grouped_model_seam");
     CHECK(w.trellis.bytes.empty()); CHECK(w.suh.bytes.empty());
     if (m > 128) {
-      const auto p = vt::PlanExl3W8A8(m, k, n, groups, bits);
-      CHECK(vt::xpu::GetMemoryInfo().w8a8_workspace_bytes >= p.workspace_bytes + p.weight_panel_bytes);
+      const auto p = vt::PlanExl3W8A8(m, k, n, groups, bits, vt::Exl3W8A8ModelPanelColumns());
+      capacity = std::max(capacity, p.workspace_bytes + p.weight_panel_bytes);
+      CHECK(vt::xpu::GetMemoryInfo().w8a8_workspace_bytes == capacity);
     }
   }
   if (groups == 1) {
@@ -622,8 +624,9 @@ TEST_CASE("XPU EXL3 W8A8 model seam: grouped and single projection own scratch r
     std::vector<unsigned char> raw(129 * n * 2);
     d.b.Copy(d.q, raw.data(), out.t().data, raw.size()); d.b.Synchronize(d.q);
     Accuracy(raw, f.Get("output_m129"), "single_model_seam");
-    const auto p = vt::PlanExl3W8A8(129, k, n, 1, bits);
-    CHECK(vt::xpu::GetMemoryInfo().w8a8_workspace_bytes >= p.workspace_bytes + p.weight_panel_bytes);
+    const auto p = vt::PlanExl3W8A8(129, k, n, 1, bits, vt::Exl3W8A8ModelPanelColumns());
+    capacity = std::max(capacity, p.workspace_bytes + p.weight_panel_bytes);
+    CHECK(vt::xpu::GetMemoryInfo().w8a8_workspace_bytes == capacity);
     // Exercise the projection's generated routing metadata under real XPU
     // capture. A per-call zero-filled map must fail backend preflight.
     Buffer decode_input(gpu.q, DType::kF16, {128, k});

@@ -1,6 +1,29 @@
 #include <doctest/doctest.h>
 #include "vt/exl3_w8a8_panel_plan.h"
 #include "vt/exl3_grouped.h"
+#include <cstdlib>
+#include <optional>
+#include <string>
+
+TEST_CASE("EXL3 W8A8 model selection: exact internal widths and invalid admission") {
+  constexpr auto key = "VT_XPU_EXL3_W8A8_PANEL_COLUMNS";
+  struct Restore {
+    const char* key;
+    std::optional<std::string> old;
+    ~Restore() { if (old) setenv(key, old->c_str(), 1); else unsetenv(key); }
+  } restore{key, std::getenv(key) ? std::optional<std::string>(std::getenv(key)) : std::nullopt};
+  REQUIRE(unsetenv(key) == 0);
+  CHECK(vt::Exl3W8A8ModelPanelColumns() == 1024);
+  for (const auto width : {"128", "1024", "2048"}) {
+    REQUIRE(setenv(key, width, 1) == 0);
+    CHECK(vt::Exl3W8A8ModelPanelColumns() == std::atoi(width));
+  }
+  for (const auto invalid : {"", "256", "1024junk", " 2048", "-128"}) {
+    REQUIRE(setenv(key, invalid, 1) == 0);
+    CHECK_THROWS_WITH_AS(vt::Exl3W8A8ModelPanelColumns(), doctest::Contains("must be128/1024/2048"),
+                         std::runtime_error);
+  }
+}
 
 TEST_CASE("EXL3 W8A8 panels: nonmonotonic groups retain tails and exact coverage") {
   std::vector<int32_t> map(9, 0);
