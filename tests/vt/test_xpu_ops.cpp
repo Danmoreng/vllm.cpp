@@ -300,6 +300,50 @@ TEST_CASE("XPU Add, SiLU, MoeSiluMul and sigmoid: input rounding and aliases") {
   }
 }
 
+TEST_CASE("XPU FP16 SwiGLU: real half midpoint packed aliases and strided rejection") {
+  Queues qs;
+  // Pinned original block20/token48/column16742: the SiLU is materialized
+  // as FP16 before multiplying. Ordinary approximate division selects the
+  // adjacent half and changes the full MLP's quantized down-projection row.
+  constexpr float gate = -2.724609375f, up = -0.346923828125f;
+  constexpr float expected = 0.058135986328125f;
+  for (int width : {1, 129}) for (int padding : {0, 5}) for (bool alias : {false, true}) {
+    CAPTURE(width);
+    CAPTURE(padding);
+    CAPTURE(alias);
+    const int input_stride = 2 * width + padding, output_stride = width + padding;
+    Buffer input(qs.gpu, DType::kF16, {3, input_stride});
+    Buffer output(qs.gpu, DType::kF16, {3, output_stride});
+    std::vector<float> values(3 * input_stride, std::numeric_limits<float>::quiet_NaN());
+    for (int row = 0; row < 3; ++row) for (int col = 0; col < width; ++col) {
+      values[row * input_stride + col] = gate;
+      values[row * input_stride + width + col] = up;
+    }
+    input.put(values); output.put(std::vector<float>(3 * output_stride, 17));
+    const auto input_before = input.raw();
+    auto wanted = alias ? input_before : output.raw();
+    const int result_stride = alias ? width : output_stride;
+    const uint16_t half = vt::F32ToF16(expected);
+    for (int row = 0; row < 3; ++row) for (int col = 0; col < width; ++col)
+      std::memcpy(wanted.data() + (row * result_stride + col) * 2, &half, 2);
+    auto source = input.t; source.shape[1] = 2 * width;
+    auto target = alias ? input.t : output.t; target.shape[1] = width;
+    if (alias) target.stride[0] = width;
+    if (padding) {
+      const auto output_before = output.raw();
+      CHECK_THROWS_WITH_AS(vt::SiluAndMul(qs.gpu, target, source),
+                          doctest::Contains("contiguous required"), std::runtime_error);
+      CHECK(input.raw() == input_before);
+      CHECK(output.raw() == output_before);
+      continue;
+    }
+    vt::SiluAndMul(qs.gpu, target, source);
+    CHECK((alias ? input.raw() : output.raw()) == wanted);
+    if (!alias) CHECK(input.raw() == input_before);
+  }
+  CHECK(vt::GetReferenceTierHits() == 0);
+}
+
 TEST_CASE("XPU RMSNorm: weight versus 1+weight, residual rounding and in-place aliases") {
   Queues qs;
   for (auto dtype : floats) for (bool gemma : {false, true}) for (int width : {1, 129, 5120}) {

@@ -217,6 +217,25 @@ class TargetCapture(BlockCapture):
                             value = output[0] if isinstance(output, tuple) else output
                             save_boundary(f"{phase}_l{index}_{label}", value, 128 if phase == "p128" else 1)
                     self._selected_block_hooks.append(norm.register_forward_hook(norm_after, with_kwargs=True))
+        if gdn_history:
+            # The first preceding P128 divergence is block20's MLP. Observe
+            # its three real module outputs on that forward only.
+            mlp = modules[installed["layer"].rsplit(".", 1)[0] + ".20"].mlp
+            for label, module, width in (("gate_up", mlp.gate_up_proj, 34816),
+                                         ("swiglu", mlp.act_fn, 17408),
+                                         ("down", mlp.down_proj, 5120)):
+                def mlp_after(module, args, kwargs, output, label=label, width=width):
+                    if self._target_phases:
+                        return
+                    value = output[0] if isinstance(output, tuple) else output
+                    key = "p128_l20_detail_" + label
+                    headers.require(key not in self._block_tensors and
+                                    value.dtype == torch.float16 and value.shape == (128, width),
+                                    "duplicate/unbounded P128 MLP20 boundary")
+                    host = value.detach().cpu().contiguous()
+                    headers.require(torch.isfinite(host).all().item(), "nonfinite P128 MLP20 boundary")
+                    self._block_tensors[key] = ("F16", [128, width], host.numpy().tobytes())
+                self._selected_block_hooks.append(module.register_forward_hook(mlp_after, with_kwargs=True))
         self._selected_block_step = block_step
         self._selected_detail_record = None
         self._selected_attention_capture = None

@@ -79,7 +79,12 @@ void SiluAndMulKernel(Queue& q, Tensor& out, const Tensor& in) {
     const auto event = NativeQueue(q).parallel_for(sycl::range<1>(out.Numel()), [=](sycl::id<1> item) {
       const auto i = item[0]; const auto off = (i / width) * src.stride[0] + i % width;
       const float gate = Load(src, off);
-      Store(dst, dst.offset(i), Round(src.dtype, gate / (1.0f + sycl::exp(-gate))) * Load(src, off + width));
+      // Preserve the eager FP16 SiLU boundary before multiplying by up.
+      // An approximate division can cross a half midpoint on real MLP rows.
+      const float denominator = 1.0f + sycl::exp(-gate);
+      const float silu = src.dtype == DType::kF16 && dst.dtype == DType::kF16
+          ? sycl::ext::intel::math::fdiv_rn(gate, denominator) : gate / denominator;
+      Store(dst, dst.offset(i), Round(src.dtype, silu) * Load(src, off + width));
     });
     RecordProfileEvent(q, "silu_and_mul", event);
   });
