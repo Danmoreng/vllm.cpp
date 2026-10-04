@@ -17,6 +17,18 @@ using VerifyQ8 = PagedDecodeConfig<Shape<_8, _64, _64>,
 constexpr size_t Align(size_t bytes) { return (bytes + 63) & ~size_t{63}; }
 }  // namespace
 
+int64_t PagedAttentionXe2VerifyQueryLength(int64_t tokens, int64_t requests,
+                                         const int32_t* host_offsets) {
+  if (requests == 1) return tokens >= 2 && tokens <= 5 ? tokens : 0;
+  // Initially qualify only the actual C4/Q4 family, not shape-only inference
+  // or the unrelated speculative routing hint. Missing/ragged host metadata
+  // leaves the generic route available without an extra D2H readback.
+  if (requests != 4 || tokens != 16 || !host_offsets) return 0;
+  for (int64_t r = 0; r <= requests; ++r)
+    if (host_offsets[r] != r * 4) return 0;
+  return 4;
+}
+
 bool PagedAttentionXe2VerifyKernel(Queue& q, Tensor& out, const Tensor& query,
     const Tensor& key_cache, const Tensor& value_cache, const Tensor& block_table,
     const Tensor& seq_lens, const Tensor& query_start_loc,
@@ -24,7 +36,10 @@ bool PagedAttentionXe2VerifyKernel(Queue& q, Tensor& out, const Tensor& query,
   const auto& device = NativeQueue(q).get_device();
   const int64_t tokens = query.shape[0];
   const int64_t page = key_cache.shape[1];
-  if (tokens < 2 || tokens > 5 || query.rank != 3 || out.rank != 3 ||
+  const int64_t requests = seq_lens.Numel();
+  const int64_t rows = PagedAttentionXe2VerifyQueryLength(
+      tokens, requests, args.query_start_loc_host);
+  if (!rows || query.rank != 3 || out.rank != 3 ||
       query.dtype != DType::kF16 || out.dtype != DType::kF16 ||
       query.shape[1] != 24 || query.shape[2] != 256 ||
       out.shape[0] != tokens || out.shape[1] != 24 || out.shape[2] != 256 ||
@@ -47,11 +62,12 @@ bool PagedAttentionXe2VerifyKernel(Queue& q, Tensor& out, const Tensor& query,
       key_cache.stride[0] % key_cache.stride[1] != 0 ||
       key_cache.stride[0] / key_cache.stride[1] < page ||
       block_table.rank != 2 || block_table.dtype != DType::kI32 ||
-      block_table.shape[0] != 1 || block_table.stride[1] != 1 ||
+      block_table.shape[0] != requests || block_table.stride[1] != 1 ||
+      (requests > 1 && block_table.stride[0] != block_table.shape[1]) ||
       seq_lens.rank != 1 || seq_lens.dtype != DType::kI32 ||
-      seq_lens.Numel() != 1 || query_start_loc.rank != 1 ||
-      query_start_loc.dtype != DType::kI32 || query_start_loc.Numel() != 2 ||
-      args.max_seq_len < tokens ||
+      query_start_loc.rank != 1 ||
+      query_start_loc.dtype != DType::kI32 || query_start_loc.Numel() != requests + 1 ||
+      args.max_seq_len < rows ||
       block_table.shape[1] < (args.max_seq_len + page - 1) / page ||
       !args.causal || args.window_size || args.logits_soft_cap != 0 ||
       args.k_scale != 1.0f || args.v_scale != 1.0f ||
@@ -69,12 +85,12 @@ bool PagedAttentionXe2VerifyKernel(Queue& q, Tensor& out, const Tensor& query,
           (key_cache.stride[0] / key_cache.stride[1]))
     return false;
 
-  const int splits = tokens == 2 ? 32 : tokens == 3 ? 8 : 16;
+  const int splits = rows == 2 ? 32 : rows == 3 ? 8 : 16;
   const size_t packed_bytes = size_t(tokens) * 24 * 256 * sizeof(uint16_t);
   const size_t temp_bytes = packed_bytes * splits;
   const size_t stats_bytes = size_t(tokens) * 24 * splits * sizeof(float);
   const size_t total = 2 * Align(packed_bytes) + Align(temp_bytes) +
-      2 * Align(stats_bytes) + Align(2 * sizeof(float)) + Align(2 * sizeof(int32_t));
+      2 * Align(stats_bytes) + Align(2 * sizeof(float)) + Align(size_t(requests + 1) * sizeof(int32_t));
   // Split-K may reuse this queue later and needs the full persistent workspace.
   VT_CHECK(total <= 16 * 1024 * 1024, "verification workspace exceeds Split-K allocation");
   return WithAttentionWorkspace(q, 16 * 1024 * 1024, [&](void* storage) {
@@ -86,10 +102,10 @@ bool PagedAttentionXe2VerifyKernel(Queue& q, Tensor& out, const Tensor& query,
     auto* maxima = reinterpret_cast<float*>(ptr); ptr += Align(stats_bytes);
     auto* scales = reinterpret_cast<float*>(ptr); ptr += Align(2 * sizeof(float));
     auto* packed_offsets = reinterpret_cast<int32_t*>(ptr);
-    // Logical {0,Q} metadata stays caller-owned. Like the original wrapper,
-    // the donor sees {0,1}: one physical row with Q packed into the heads.
-    NativeQueue(q).parallel_for(sycl::range<1>(2), [=](sycl::id<1> i) {
-      scales[i[0]] = 1.0f;
+    // Logical {0,Q,...,B*Q} stays caller-owned. Like the original wrapper,
+    // donor offsets {0,1,...,B} describe one packed physical row per request.
+    NativeQueue(q).parallel_for(sycl::range<1>(requests + 1), [=](sycl::id<1> i) {
+      if (i[0] < 2) scales[i[0]] = 1.0f;
       packed_offsets[i[0]] = int32_t(i[0]);
     });
     const auto* src = static_cast<const uint16_t*>(query.data);
@@ -97,11 +113,13 @@ bool PagedAttentionXe2VerifyKernel(Queue& q, Tensor& out, const Tensor& query,
     const auto pack = NativeQueue(q).parallel_for(sycl::range<1>(count),
         [=](sycl::id<1> item) {
       const int index = item[0], dim = index % 256;
-      const int head = index / 256;
-      const int kv_head = head / (int(tokens) * 6);
-      const int row = (head / 6) % int(tokens);
+      const int request = index / (int(rows) * 24 * 256);
+      const int head = (index / 256) % (int(rows) * 24);
+      const int kv_head = head / (int(rows) * 6);
+      const int row = (head / 6) % int(rows);
       const int group_head = head % 6;
-      packed_q[index] = src[(row * 24 + kv_head * 6 + group_head) * 256 + dim];
+      packed_q[index] = src[((request * int(rows) + row) * 24 +
+                             kv_head * 6 + group_head) * 256 + dim];
     });
     RecordProfileEvent(q, "attention_verify_pack", pack);
 
@@ -118,14 +136,14 @@ bool PagedAttentionXe2VerifyKernel(Queue& q, Tensor& out, const Tensor& query,
     donor.cu_seqlens_k = seq_lens.data;
     donor.max_queries = 1;
     donor.max_keys = args.max_seq_len;
-    donor.total_seqlen_q = 1;
+    donor.total_seqlen_q = requests;
     donor.total_seqlen_k = key_cache.shape[0] *
         (key_cache.stride[0] / key_cache.stride[1]);
     donor.k_scale = scales;
     donor.v_scale = scales + 1;
     donor.sm_scale = args.scale;
-    donor.batch_size = 1;
-    donor.num_heads_q = tokens * 24;
+    donor.batch_size = requests;
+    donor.num_heads_q = rows * 24;
     donor.num_heads_k = 4;
     donor.head_size = 256;
     donor.v_head_size = 256;
@@ -135,7 +153,7 @@ bool PagedAttentionXe2VerifyKernel(Queue& q, Tensor& out, const Tensor& query,
     donor.is_paged = true;
     donor.is_causal = true;
     donor.num_kv_splits = splits;
-    donor.q_stride_seq = tokens * 24 * 256;
+    donor.q_stride_seq = rows * 24 * 256;
     donor.q_stride_heads = 256;
     donor.k_stride_page = key_cache.stride[0];
     donor.k_stride_seq = key_cache.stride[1];
@@ -151,9 +169,10 @@ bool PagedAttentionXe2VerifyKernel(Queue& q, Tensor& out, const Tensor& query,
         [=](sycl::id<1> item) {
       const int index = item[0], dim = index % 256;
       const int head = index / 256;
-      const int row = head / 24, kv_head = (head / 6) % 4;
+      const int request = head / (int(rows) * 24);
+      const int row = (head / 24) % int(rows), kv_head = (head / 6) % 4;
       const int group_head = head % 6;
-      dst[index] = packed_out[((kv_head * int(tokens) + row) * 6 +
+      dst[index] = packed_out[(((request * 4 + kv_head) * int(rows) + row) * 6 +
                                 group_head) * 256 + dim];
     });
     RecordProfileEvent(q, "attention_verify_unpack", unpack);

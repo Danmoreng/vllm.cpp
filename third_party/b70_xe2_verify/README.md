@@ -29,9 +29,15 @@ verification too. The original icpx math model is scoped to the verifier
 translation unit. Derived original Q2/Q3/Q5 and Q4 page-boundary/32K
 operator inputs match across planar/interleaved/padded layouts. Focused
 unsupported-form tests and C1 raw graph replay qualify shared scratch, fresh
-metadata validation and retirement. These are isolated operator proofs; C4,
-ragged batches, model graph policy and emitted-cycle qualification remain
-pending. Automatic verification stays off by default.
+metadata validation and retirement. The native C4/Q4 path uses one batched donor invocation and private
+physical offsets `{0,1,2,3,4}`. It requires the existing uniform host query
+offsets; the existing GPU metadata check proves their agreement with device
+offsets before writes. Distinct request pages/lengths, permutation, poisoned
+padding, aliases and strided output copies match the executed original. Missing
+or ragged host offsets retain the generic route; the speculative classification
+hint alone does not admit a packed batch. C4 graph ownership, model graph policy
+and emitted-cycle qualification remain pending. These are isolated operator
+proofs; automatic verification stays off by default.
 
 `src/vt/xpu/xpu_attention_decode_xe2.cpp` uses a separate short C1 policy:
 FP16 Q/output, Hq24/Hkv4/D256, unit E4M3 scales, page1600/1664 and
