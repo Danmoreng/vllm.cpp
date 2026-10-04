@@ -1640,14 +1640,14 @@
     },
     {
       "task": "P1",
-      "status": "native_C1_family_original_exact_refusals_graph_C4_model_pending",
+      "status": "native_C1_operator_admission_graph_qualified_C4_model_pending",
       "complete": false,
       "original_capture_exit": 0,
       "host_test_cases_passed": 2,
       "receipt": {
-        "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p1-C1-family-v1/receipt-v1.json",
-        "bytes": 24268,
-        "sha256": "f503ec65233605a11a21fe3d97917ad60b68c0f10ad827052b6f4a6053c5d4bf"
+        "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p1-C1-refusal-v1/receipt-v1.json",
+        "bytes": 27223,
+        "sha256": "8138e3864fd89173285129a2bac7fe5babded98323d2f992f658aae95e39e1a1"
       },
       "original_active_length": 4100,
       "original_splits": 16,
@@ -1669,8 +1669,8 @@
         "split": 1.840158,
         "verify": 0.15017
       },
-      "native_C1_scope": "Actualoriginal Q4 C1 length4100, page1600, interleavedFP8 KV and fullphysicalIDs3/10/23 on180blocks, poisoned inactivebytes and164column table, direct/aliased FP16 output byte-exact; caller logicaloffsets unchanged, donor physicaloffsets private. Q2/Q3/Q5, other lengths/layouts, graph/C4/modelcycle quality and speed pending. Auto remains opt-in.",
-      "retained_failures": "Baseline7571half differences/genericroute; firstlauncher24576NaN from Vtail; tailmask12half differences; scopedoriginalmath zero. Failed resourcefilename attempt retained before GPUworker. Frozen defaultD64 four failures unchanged.",
+      "native_C1_scope": "Actualoriginal Q4L4100 and derived39 originaloperator Q2/Q3/Q4/Q5, boundary/32K/layout forms match1915/1915; zero/NaN inactive storage and aliases qualified. Unsupported public forms fallback exactly or reject beforewrites133/133. RawC1 operator graphs qualified108/108,2captures/20successfulreplays across3queues, fresh metadata validation,16MiB shared scratch and0retired graphbytes. C4/ragged/modelgraphpolicy/emittedcycle quality and speed pending. Automatic verifier off.",
+      "retained_failures": "Baseline7571half differences/genericroute; firstlauncher24576NaN from Vtail; tailmask12half differences; scopedoriginalmath zero. Failed resourcefilename attempt retained before GPUworker. Frozen defaultD64 four failures unchanged. Refusaltestv1 expected unsupported paddedquery fallback but existing publiccontiguous contract threw after77assertions(exit1); correctedtest preserves contract. Firstgraphcommand omitted required VT_XPU_PROFILE=1 and rejected after10assertions(exit1); samebinary correctedcommand passes.",
       "first_native_C1_receipt": {
         "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p1-native-C1-v1/receipt-v1.json",
         "bytes": 37776,
@@ -1679,7 +1679,19 @@
       "native_C1_family_assertions": 1915,
       "native_C1_family_exit": 0,
       "native_C1_original_operator_cases": 39,
-      "native_C1_poison_forms": 78
+      "native_C1_poison_forms": 78,
+      "C1_family_receipt": {
+        "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p1-C1-family-v1/receipt-v1.json",
+        "bytes": 24268,
+        "sha256": "f503ec65233605a11a21fe3d97917ad60b68c0f10ad827052b6f4a6053c5d4bf"
+      },
+      "native_C1_refusal_assertions": 133,
+      "native_C1_refusal_exit": 0,
+      "native_C1_graph_assertions": 108,
+      "native_C1_graph_exit": 0,
+      "native_C1_graph_captures": 2,
+      "native_C1_graph_successful_replays": 20,
+      "native_C1_graph_device_bytes_after_retirement": 0
     },
     {
       "task": "P2",
@@ -1818,5 +1830,5 @@
     }
   ],
   "performance_baseline": "7536aededc049b2157f12eadb0f4cc6bbf29b7b7",
-  "performance_next": "P1 focused unsupported noncausal/nonunit scale/stride fallback and C1 graph replay/metadata/scratch lifetime; then distinct original/native trueC4/ragged and emittedcycle model qualification before automatic verifier promotion. P2 bounded performance package complete; laterP3/P4 remain material. DefaultD64/reference/fullstate gates open."
+  "performance_next": "P1 trueC4/ragged original and native execution with precise uniform host/device metadata contract, then model route/layout/partition graph identity and emittedcycle model qualification before automatic promotion. C1 operator/refusal/rawgraph packages qualify; P2 bounded performance package complete. LaterP3/P4 remain material; defaultD64/reference/fullstate gates open."
 }

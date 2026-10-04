@@ -4,6 +4,8 @@
 #include "vllm/model_executor/model_loader/safetensors_reader.h"
 #include "vt/unaligned.h"
 #include <filesystem>
+#include <array>
+#include <memory>
 #include <chrono>
 #include <cstdlib>
 #include <fstream>
@@ -1352,6 +1354,239 @@ TEST_CASE("XPU FP8 attention P1: original C1 verifier family boundaries and layo
     }
   }
   CHECK(vt::GetReferenceTierHits() == 0);
+}
+
+TEST_CASE("XPU FP8 attention P1: verifier declines unsupported forms before metadata writes"
+          * doctest::skip(!std::getenv("VT_XPU_PROFILE"))) {
+  Queue gpu(vt::DeviceType::kXPU);
+  Fixture f(gpu.q, 1, 4, 4100, true, false, 1600,
+            DType::kF16, DType::kF16, DType::kF16, true);
+  auto& backend = vt::GetBackend(gpu.q.device);
+  Buffer table(gpu.q, DType::kI32, {1, 3});
+  const int32_t table_data[] = {2, 1, 0};
+  table.upload(table_data);
+  const auto cache_before = f.cache.download(), query_before = f.query.download();
+  Buffer padded_query(gpu.q, DType::kF16, {4, 24 * 256 + 16});
+  std::vector<unsigned char> padded_host(padded_query.bytes, 0xff);
+  for (int row = 0; row < 4; ++row)
+    std::memcpy(padded_host.data() + row * (24 * 256 + 16) * 2,
+                query_before.data() + row * 24 * 256 * 2, 24 * 256 * 2);
+  padded_query.upload(padded_host.data());
+  auto padded = vt::Tensor::Contiguous(padded_query.tensor.data, DType::kF16,
+                                      gpu.q.device, {4, 24, 256});
+  padded.stride[0] = 24 * 256 + 16;
+  struct RestoreMode {
+    std::string old;
+    bool had;
+    ~RestoreMode() {
+      if (had) setenv("VT_XPU_ATTENTION", old.c_str(), 1);
+      else unsetenv("VT_XPU_ATTENTION");
+    }
+  } restore{std::getenv("VT_XPU_ATTENTION") ? std::getenv("VT_XPU_ATTENTION") : "",
+            std::getenv("VT_XPU_ATTENTION") != nullptr};
+  auto execute = [&](const char* mode, const vt::Tensor& q, const vt::Tensor& bt,
+                     const vt::PagedAttentionArgs& args) {
+    REQUIRE(setenv("VT_XPU_ATTENTION", mode, 1) == 0);
+    vt::PagedAttention(gpu.q, f.out.tensor, q, f.kc, f.vc,
+                       bt, f.lens.tensor, f.offsets.tensor, args);
+    backend.Synchronize(gpu.q);
+  };
+  (void)vt::xpu::DrainProfileEvents();
+  execute("verify", f.query.tensor, table.tensor, f.args);
+  int admitted = 0;
+  for (const auto& event : vt::xpu::DrainProfileEvents())
+    admitted += event.stage == "attention_verify_pack";
+  REQUIRE(admitted == 1);  // The control really reaches the guarded route.
+  for (const int variant : {0, 1, 2, 3, 4, 5, 7}) {
+    CAPTURE(variant);
+    auto args = f.args;
+    if (variant == 0) args.causal = false;
+    if (variant == 1) args.k_scale = 0.5f;
+    if (variant == 2) args.v_scale = 0.3f;
+    if (variant == 3) args.scale = 0.03125f;
+    if (variant == 4) args.window_size = vt::AttentionWindow{13, 3};
+    if (variant == 5) args.logits_soft_cap = 0.7f;
+    const auto& q = f.query.tensor;
+    const auto& bt = variant == 7 ? f.table.tensor : table.tensor;
+    execute("split", q, bt, args);
+    const auto expected = f.out.download();
+    (void)vt::xpu::DrainProfileEvents();
+    execute("verify", q, bt, args);
+    int packs = 0, unpacks = 0;
+    for (const auto& event : vt::xpu::DrainProfileEvents()) {
+      packs += event.stage == "attention_verify_pack";
+      unpacks += event.stage == "attention_verify_unpack";
+    }
+    CHECK(packs == 0); CHECK(unpacks == 0);
+    xpu_test::SameBytes(f.out.download(), expected);
+    xpu_test::SameBytes(f.cache.download(), cache_before);
+    xpu_test::SameBytes(f.query.download(), query_before);
+    xpu_test::SameBytes(padded_query.download(), padded_host);
+  }
+  execute("verify", f.query.tensor, table.tensor, f.args);
+  const auto output_before = f.out.download();
+  // Contiguous query/out is a public API requirement, so an unsupported
+  // query stride is rejected before the XPU route chooser rather than copied.
+  CHECK_THROWS_AS(execute("verify", padded, table.tensor, f.args), std::runtime_error);
+  xpu_test::SameBytes(f.out.download(), output_before);
+  xpu_test::SameBytes(padded_query.download(), padded_host);
+  xpu_test::SameBytes(f.cache.download(), cache_before);
+  const int32_t valid_offsets[] = {0, 4}, valid_length[] = {4100};
+  for (int invalid = 0; invalid < 3; ++invalid) {
+    CAPTURE(invalid);
+    table.upload(table_data); f.offsets.upload(valid_offsets); f.lens.upload(valid_length);
+    const int32_t bad_table[] = {-1, 1, 0}, bad_offsets[] = {0, 3}, bad_length[] = {3};
+    if (invalid == 0) table.upload(bad_table);
+    if (invalid == 1) f.offsets.upload(bad_offsets);
+    if (invalid == 2) f.lens.upload(bad_length);
+    const auto table_before = table.download(), offsets_before = f.offsets.download();
+    const auto lengths_before = f.lens.download();
+    CHECK_THROWS_AS(execute("verify", f.query.tensor, table.tensor, f.args), std::runtime_error);
+    xpu_test::SameBytes(f.out.download(), output_before);
+    xpu_test::SameBytes(f.cache.download(), cache_before);
+    xpu_test::SameBytes(table.download(), table_before);
+    xpu_test::SameBytes(f.offsets.download(), offsets_before);
+    xpu_test::SameBytes(f.lens.download(), lengths_before);
+  }
+}
+
+TEST_CASE("XPU FP8 attention P1: C1 graphs share verifier scratch and revalidate metadata"
+          * doctest::skip(!std::getenv("VT_B70_EXL3_VERIFY_FAMILY"))) {
+  const std::filesystem::path path = std::getenv("VT_B70_EXL3_VERIFY_FAMILY");
+  const auto fixture = vllm::SafetensorsFile::Open(path.string());
+  auto sidecar = path; sidecar.replace_extension(".json");
+  std::ifstream file(sidecar); REQUIRE(file.good());
+  const auto meta = nlohmann::json::parse(file);
+  REQUIRE(meta.at("physical_blocks") == 29);
+  auto record = [&](const std::string& id) -> nlohmann::json {
+    for (const auto& item : meta.at("cases")) if (item.at("id") == id) return item;
+    throw std::runtime_error("missing original graph fixture case " + id);
+  };
+  const auto& keys = fixture.Get("base_keys");
+  const auto& values = fixture.Get("base_values");
+  REQUIRE(keys.dtype == "U8"); REQUIRE(values.dtype == "U8");
+  REQUIRE((keys.shape == std::vector<int64_t>{4100, 4, 256}));
+  REQUIRE(values.shape == keys.shape);
+  auto blocks = meta.at("block_ids").get<std::vector<int32_t>>();
+  REQUIRE(blocks.size() == 29);
+  Queue first(vt::DeviceType::kXPU), second(vt::DeviceType::kXPU), eager(vt::DeviceType::kXPU);
+  auto& backend = vt::GetBackend(first.q.device);
+  REQUIRE(backend.SupportsGraphCapture());
+  const auto before = vt::xpu::GetMemoryInfo();
+  const auto captures = backend.GraphsCaptured(), replays = backend.GraphReplays();
+  Buffer cache(eager.q, DType::kI8, {29, 1600, 4, 512});
+  Buffer table(eager.q, DType::kI32, {1, 164});
+  std::vector<int32_t> table_host(164, -1);
+  std::copy_n(blocks.begin(), (32768 + 1599) / 1600, table_host.begin());
+  table.upload(table_host.data());
+  auto key = vt::Tensor::Contiguous(cache.tensor.data, DType::kI8, eager.q.device, {29, 1600, 4, 256});
+  key.stride[0] = 1600 * 2048; key.stride[1] = 2048; key.stride[2] = 512;
+  auto value = key; value.data = static_cast<unsigned char*>(key.data) + 256;
+  std::vector<unsigned char> state;
+  auto populate = [&](int length) {
+    state.assign(cache.bytes, 0x7f);
+    for (int row = 0; row < length; ++row) for (int head = 0; head < 4; ++head) {
+      const size_t src = size_t((row % 4100) * 4 + head) * 256;
+      const size_t dst = size_t(blocks[row / 1600]) * 1600 * 2048 +
+                         (row % 1600) * 2048 + head * 512;
+      std::memcpy(state.data() + dst, keys.data + src, 256);
+      std::memcpy(state.data() + dst + 256, values.data + src, 256);
+    }
+    cache.upload(state.data());
+  };
+  populate(4100);
+  std::array<vt::Queue*, 2> queues{&first.q, &second.q};
+  std::array<std::unique_ptr<Buffer>, 2> queries, output, reference, lengths, offsets;
+  struct Graphs {
+    vt::Backend& backend;
+    std::array<void*, 2> handles{};
+    void reset() { for (auto& h : handles) if (h) { backend.DestroyGraph(h); h = nullptr; } }
+    ~Graphs() { try { reset(); } catch (...) {} }
+  } graphs{backend};  // Destroy graphs before any baked buffer address dies.
+  struct RestoreMode {
+    std::string old; bool had;
+    ~RestoreMode() {
+      if (had) setenv("VT_XPU_ATTENTION", old.c_str(), 1);
+      else unsetenv("VT_XPU_ATTENTION");
+    }
+  } restore{std::getenv("VT_XPU_ATTENTION") ? std::getenv("VT_XPU_ATTENTION") : "",
+            std::getenv("VT_XPU_ATTENTION") != nullptr};
+  REQUIRE(setenv("VT_XPU_ATTENTION", "verify", 1) == 0);
+  vt::PagedAttentionArgs args;
+  args.kv_cache_dtype = vt::Fp8KVCacheDataType::kFp8E4M3;
+  args.scale = 0.0625f; args.causal = true;
+  args.max_seq_len = 32768;  // Fixed upper bound; active device lengths change.
+  auto run = [&](vt::Queue& q, int slot, vt::Tensor& destination) {
+    vt::PagedAttention(q, destination, queries[slot]->tensor, key, value,
+                       table.tensor, lengths[slot]->tensor, offsets[slot]->tensor, args);
+  };
+  for (int slot = 0; slot < 2; ++slot) {
+    const int qrows = slot == 0 ? 4 : 3;
+    const auto& qref = fixture.Get(record("q" + std::to_string(qrows) + "-l4100-interleaved").at("prefix").get<std::string>() + "_query");
+    for (auto* buffers : {&queries, &output, &reference})
+      (*buffers)[slot] = std::make_unique<Buffer>(*queues[slot], DType::kF16,
+                                                 std::initializer_list<int64_t>{qrows, 24, 256});
+    lengths[slot] = std::make_unique<Buffer>(*queues[slot], DType::kI32, std::initializer_list<int64_t>{1});
+    offsets[slot] = std::make_unique<Buffer>(*queues[slot], DType::kI32, std::initializer_list<int64_t>{2});
+    const int32_t active[] = {4100}, qsl[] = {0, qrows};
+    queries[slot]->upload(qref.data); lengths[slot]->upload(active); offsets[slot]->upload(qsl);
+    run(*queues[slot], slot, output[slot]->tensor); backend.Synchronize(*queues[slot]);
+    REQUIRE(vt::xpu::GetMemoryInfo().attention_workspace_bytes == 16 * 1024 * 1024);
+    backend.Memset(*queues[slot], output[slot]->tensor.data, 0xcd, output[slot]->bytes);
+    backend.Synchronize(*queues[slot]);
+    const auto untouched = output[slot]->download();
+    backend.BeginCapture(*queues[slot]); run(*queues[slot], slot, output[slot]->tensor);
+    graphs.handles[slot] = backend.EndCaptureGraph(*queues[slot]);
+    xpu_test::SameBytes(output[slot]->download(), untouched);
+  }
+  const auto stable = vt::xpu::GetMemoryInfo();
+  REQUIRE(stable.graph_count == before.graph_count + 2);
+  for (const int length : {4100, 1599, 1600, 1601, 4799, 4800, 4801, 32768, 4096}) {
+    CAPTURE(length);
+    populate(std::max(length, 4100));  // Two C1 graphs read the same isolated KV fixture.
+    const int32_t current[] = {length}; lengths[0]->upload(current);
+    const auto& q3 = fixture.Get(record("q3-l4100-interleaved").at("prefix").get<std::string>() + "_query");
+    if (length & 1) backend.Memset(second.q, queries[1]->tensor.data, 0, queries[1]->bytes);
+    else queries[1]->upload(q3.data);
+    backend.Synchronize(second.q);  // Publish the changed query to the eager queue.
+    for (int slot = 0; slot < 2; ++slot) run(eager.q, slot, reference[slot]->tensor);
+    backend.Synchronize(eager.q);
+    backend.ReplayGraph(first.q, graphs.handles[0]);
+    backend.ReplayGraph(second.q, graphs.handles[1]);
+    // Interleave an eager use of the same private packed scratch while graph
+    // consumers may still be in flight on other queues.
+    run(eager.q, 0, reference[0]->tensor);
+    for (int slot = 0; slot < 2; ++slot)
+      xpu_test::SameBytes(output[slot]->download(), reference[slot]->download());
+    const auto& expected = fixture.Get(record("q4-l" + std::to_string(length) + "-interleaved").at("prefix").get<std::string>() + "_output");
+    xpu_test::SameBytes(output[0]->download(),
+        std::vector<unsigned char>(expected.data, expected.data + expected.nbytes));
+    CHECK(vt::xpu::GetMemoryInfo().allocated_bytes == stable.allocated_bytes);
+    CHECK(vt::xpu::GetMemoryInfo().graph_device_bytes == stable.graph_device_bytes);
+    CHECK(backend.GraphsCaptured() == captures + 2);
+  }
+  const auto previous = output[0]->download();
+  const int32_t invalid[] = {3}; lengths[0]->upload(invalid);
+  CHECK_THROWS_AS(backend.ReplayGraph(first.q, graphs.handles[0]), std::runtime_error);
+  xpu_test::SameBytes(output[0]->download(), previous);
+  xpu_test::SameBytes(cache.download(), state);
+  const int32_t good[] = {4096}; lengths[0]->upload(good);
+  backend.ReplayGraph(second.q, graphs.handles[0]);
+  backend.ReplayGraph(first.q, graphs.handles[1]);
+  graphs.reset();  // Retire last submissions before releasing baked addresses.
+  xpu_test::SameBytes(output[0]->download(), previous);
+  CHECK(vt::xpu::GetMemoryInfo().graph_count == before.graph_count);
+  CHECK(vt::xpu::GetMemoryInfo().graph_device_bytes == before.graph_device_bytes);
+  CHECK(vt::xpu::GetMemoryInfo().allocated_bytes == stable.allocated_bytes);
+  CHECK(backend.GraphReplays() == replays + 20);
+  const auto retired = vt::xpu::GetMemoryInfo();
+  std::cout << nlohmann::json{{"event", "p1_C1_graph_ownership"},
+      {"captures", backend.GraphsCaptured() - captures},
+      {"successful_replays", backend.GraphReplays() - replays},
+      {"shared_attention_bytes", retired.attention_workspace_bytes},
+      {"live_device_bytes", retired.allocated_bytes},
+      {"peak_device_bytes", retired.peak_allocated_bytes},
+      {"graph_device_bytes_after_retirement", retired.graph_device_bytes}}.dump() << '\n';
 }
 
 TEST_CASE("XPU FP8 attention: captured Python M04 Q5 operator replay"
