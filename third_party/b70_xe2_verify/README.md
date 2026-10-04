@@ -20,14 +20,23 @@ contains the Torch dispatcher. `src/vt/xpu/xpu_attention_verify_xe2.cpp`
 adapts VT's head-contiguous FP8 K/V pages and Q layout to the donor's
 packed Q layout. No Python or Torch code is loaded for C++ inference.
 
+The explicit verifier now admits page1600/1664 and planar or head-interleaved
+rows. C1/Q4 at active length4100 is byte-exact against the executed pinned
+page1600 original fixture, including NaN page-tail poison and output aliasing.
+Packed metadata is private `{0,1}`, while the public logical `{0,4}` remains
+unchanged. Inactive V tail operands are zeroed before DPAS for causal
+verification too. The original icpx math model is scoped to the verifier
+translation unit. Q2/Q3/Q5, other lengths/layouts, C4 and graph qualification
+remain pending; this proof does not enable automatic verification by default.
+
 `src/vt/xpu/xpu_attention_decode_xe2.cpp` uses a separate short C1 policy:
 FP16 Q/output, Hq24/Hkv4/D256, unit E4M3 scales, page1600/1664 and
 max sequence length1–960. The automatic B70 route preserves FP16
 unnormalized probabilities before XMX P*V and uses one split. It consumes
 the caller's Q/output directly and masks invalid V tail operands before
 DPAS; no Q packing, scale upload or host readback is needed. The original
-icpx math model is scoped to this translation unit; verification keeps its
-existing compiler options.
+icpx math model is scoped to this translation unit, as it is for the packed
+verifier after its independent same-input proof.
 
 The `flash_attention_v2/collective/{fmha_fusion,copy_block_slm}.hpp` and
 `cutlass/util/packed_stride.hpp` helpers are unmodified copies from the

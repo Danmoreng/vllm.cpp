@@ -1877,8 +1877,10 @@ if(VLLM_CPP_XPU)
     # it does not require the experimental long-prefill route.
     add_library(vllm_xpu_xe2_verify OBJECT src/vt/xpu/xpu_attention_verify_xe2.cpp
       src/vt/xpu/xpu_attention_decode_xe2.cpp)
-    # Match the original icpx default math model only for the C1 producer.
-    set_source_files_properties(src/vt/xpu/xpu_attention_decode_xe2.cpp PROPERTIES
+    # Match the pinned original icpx math model for these C1 XMX producers.
+    # Packed verification preserves its FP16 probabilities and F32 reductions.
+    set_source_files_properties(src/vt/xpu/xpu_attention_decode_xe2.cpp
+      src/vt/xpu/xpu_attention_verify_xe2.cpp PROPERTIES
       COMPILE_OPTIONS "-fp-model=fast")
     set_target_properties(vllm_xpu_xe2_verify PROPERTIES POSITION_INDEPENDENT_CODE ON)
     target_include_directories(vllm_xpu_xe2_verify PRIVATE include src)
