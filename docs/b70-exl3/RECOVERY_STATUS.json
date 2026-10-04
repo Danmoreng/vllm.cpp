@@ -39,7 +39,7 @@
       "target_qualified": false,
       "serving_qualified": false,
       "complete": true,
-      "next_code_change": "Bound earlier P128 outer boundaries through layer21; incoming P128 norm already differs59 halves, so isolate upstream history before changing GDN21 arithmetic.",
+      "next_code_change": "Observe original layer20 P128 gate/up, SwiGLU and down projection boundaries; run isolated native consumer on identical original operands/real layer20 weights. Input and post-attention norm already exact; no GDN21 arithmetic repair is justified.",
       "same_input_core_final_state_pass": true,
       "actual_VT_BA_repeatability": "P128 varying 3/6/7 halves; D1 exact in three repeats",
       "result_receipt": {
@@ -362,6 +362,40 @@
         "p128_SSM_relativeL2": 9.912469552303826e-05,
         "d1_SSM_relativeL2": 6.930553747933543e-05,
         "next": "Bound earlier P128 outer boundaries through layer21; incoming P128 norm already differs59 halves, so isolate upstream history before changing GDN21 arithmetic.",
+        "target_qualified": false,
+        "serving_qualified": false
+      },
+      "P128_first_divergent_block20_MLP": {
+        "receipt": {
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r02-D29-head-v1/receipt-prefill-boundaries-v80.json",
+          "bytes": 457643,
+          "sha256": "efb433c75b3f9bfc57d9a8b2acaf73ed5d69edc74964a580c60da2d9d846a45a"
+        },
+        "CPU_cases": 1,
+        "CPU_exit": 0,
+        "focused_build_exit": 0,
+        "original_exit": 0,
+        "native_cases": 1,
+        "native_assertions": 199,
+        "native_passed": 199,
+        "native_exit": 0,
+        "original_parent_tensors_bit_exact": 496,
+        "original_GDN21_history_tensors_bit_exact": 46,
+        "parent_logits_bit_exact": 2,
+        "observed_boundaries": 66,
+        "first_nonzero": {
+          "layer": 20,
+          "stage": "mlp_out",
+          "bit_exact": false,
+          "bit_mismatches": 320,
+          "first_bit_mismatch": 245760,
+          "elements": 655360,
+          "finite": true,
+          "relative_norm": 4.989159804099004e-06,
+          "max_abs": 0.000244140625,
+          "first_token": 48
+        },
+        "next": "Observe original layer20 P128 gate/up, SwiGLU and down projection boundaries; run isolated native consumer on identical original operands/real layer20 weights. Input and post-attention norm already exact; no GDN21 arithmetic repair is justified.",
         "target_qualified": false,
         "serving_qualified": false
       }

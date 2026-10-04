@@ -1733,6 +1733,13 @@ TEST_CASE("XPU EXL3 real target diagnostic: P128 D1 GDN21 history") {
   RunRealEagerTarget(64, 1, false, 21, true);
 }
 
+TEST_CASE("XPU EXL3 real target diagnostic: P128 D1 earlier block boundaries") {
+  REQUIRE(std::getenv("VT_DUMP_ACT_SUB") != nullptr);
+  // All native outer stages are observed for two forwards only. The original
+  // comparison stops at GDN21; no full D64 qualification is shortened.
+  RunRealEagerTarget(64, 1);
+}
+
 TEST_CASE("XPU EXL3 real target diagnostic: D29 GDN21 boundaries") {
   REQUIRE(std::getenv("VT_DUMP_ACT_SUB") != nullptr);
   REQUIRE(std::getenv("VT_B70_EXL3_STATE_OUTPUT") != nullptr);

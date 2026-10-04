@@ -62,6 +62,14 @@ def validate_gdn_history(block_step, detail_layer, enabled):
                     "early GDN history is bounded to the selected D29 GDN21 capture")
 
 
+def selected_boundary_phase(step, index, block_step, gdn_history):
+    if step == block_step:
+        return "d29"
+    if gdn_history and step == 0 and 0 <= index <= 21:
+        return "p128"
+    return None
+
+
 def selected_block_layers(modules, first_layer):
     prefix = first_layer.rsplit(".", 1)[0] + "."
     layers = [(int(name[len(prefix):]), module) for name, module in modules.items()
@@ -170,38 +178,44 @@ class TargetCapture(BlockCapture):
         self._selected_block_hooks = []
         self._selected_block_counts = {}
         if block_step >= 0:
-            def save_boundary(key, value):
+            def save_boundary(key, value, rows):
                 headers.require(key not in self._block_tensors and
-                                value.dtype == torch.float16 and value.shape == (1, 5120),
-                                "duplicate or unbounded D29 block boundary: " + key)
+                                value.dtype == torch.float16 and value.shape == (rows, 5120),
+                                "duplicate or unbounded selected block boundary: " + key)
                 host = value.detach().cpu().contiguous()
-                headers.require(torch.isfinite(host).all().item(), "nonfinite D29 block boundary")
-                self._block_tensors[key] = ("F16", [1, 5120], host.numpy().tobytes())
+                headers.require(torch.isfinite(host).all().item(), "nonfinite selected block boundary")
+                self._block_tensors[key] = ("F16", [rows, 5120], host.numpy().tobytes())
             for index, block in selected_block_layers(modules, installed["layer"]):
                 def before(module, args, kwargs, index=index):
-                    if len(self._target_phases) != block_step:
+                    phase = selected_boundary_phase(len(self._target_phases), index, block_step, gdn_history)
+                    if phase is None:
                         return
+                    rows = 128 if phase == "p128" else 1
                     values = dict(zip(("positions", "hidden_states", "residual"), args)) | kwargs
-                    save_boundary(f"d29_l{index}_hidden_in", values["hidden_states"])
+                    save_boundary(f"{phase}_l{index}_hidden_in", values["hidden_states"], rows)
                     residual = values.get("residual")
                     if residual is not None:
-                        save_boundary(f"d29_l{index}_residual_in", residual)
+                        save_boundary(f"{phase}_l{index}_residual_in", residual, rows)
                 def after(module, args, kwargs, output, index=index):
-                    if len(self._target_phases) != block_step:
+                    phase = selected_boundary_phase(len(self._target_phases), index, block_step, gdn_history)
+                    if phase is None:
                         return
+                    rows = 128 if phase == "p128" else 1
                     headers.require(isinstance(output, tuple) and len(output) == 2,
                                     "unexpected target block result")
-                    save_boundary(f"d29_l{index}_hidden_out", output[0])
-                    save_boundary(f"d29_l{index}_residual_out", output[1])
-                    self._selected_block_counts[index] = self._selected_block_counts.get(index, 0) + 1
+                    save_boundary(f"{phase}_l{index}_hidden_out", output[0], rows)
+                    save_boundary(f"{phase}_l{index}_residual_out", output[1], rows)
+                    if phase == "d29":
+                        self._selected_block_counts[index] = self._selected_block_counts.get(index, 0) + 1
                 self._selected_block_hooks.append(block.register_forward_pre_hook(before, with_kwargs=True))
                 self._selected_block_hooks.append(block.register_forward_hook(after, with_kwargs=True))
                 for label, norm in (("post_input_norm", block.input_layernorm),
                                     ("post_attn_norm", block.post_attention_layernorm)):
                     def norm_after(module, args, kwargs, output, index=index, label=label):
-                        if len(self._target_phases) == block_step:
+                        phase = selected_boundary_phase(len(self._target_phases), index, block_step, gdn_history)
+                        if phase is not None:
                             value = output[0] if isinstance(output, tuple) else output
-                            save_boundary(f"d29_l{index}_{label}", value)
+                            save_boundary(f"{phase}_l{index}_{label}", value, 128 if phase == "p128" else 1)
                     self._selected_block_hooks.append(norm.register_forward_hook(norm_after, with_kwargs=True))
         self._selected_block_step = block_step
         self._selected_detail_record = None

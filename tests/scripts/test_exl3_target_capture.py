@@ -15,10 +15,20 @@ from extract_projection import write_safetensors
 from compare_target import compare_row, write_comparison_report, parse_args
 from capture_block import select_gdn_layer
 from capture_gdn import block_layer_index
-from capture_target import validate_gdn_history
+from capture_target import validate_gdn_history, selected_boundary_phase
 
 
 class TargetCaptureTest(unittest.TestCase):
+    def test_early_boundaries_stop_at_gdn21_and_preserve_d29_selection(self):
+        for index in range(64):
+            self.assertEqual(selected_boundary_phase(29, index, 29, False), "d29")
+            self.assertEqual(selected_boundary_phase(29, index, 29, True), "d29")
+            self.assertEqual(selected_boundary_phase(0, index, 29, True),
+                             "p128" if index <= 21 else None)
+            self.assertIsNone(selected_boundary_phase(0, index, 29, False))
+            for step in (1, 2, 28, 30):
+                self.assertIsNone(selected_boundary_phase(step, index, 29, True))
+
     def test_gdn_history_requires_selected_d29_gdn21(self):
         validate_gdn_history(-1, -1, False)
         validate_gdn_history(29, 21, True)
