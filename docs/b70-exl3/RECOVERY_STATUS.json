@@ -1931,8 +1931,28 @@
     },
     {
       "task": "P4",
-      "status": "pending",
-      "complete": false
+      "status": "validator_geometry_variant_rejected_private_transform_reuse_next",
+      "complete": false,
+      "geometry_variant_attempts": 1,
+      "geometry_candidate_local": 64,
+      "retained_validator_local": 8,
+      "geometry_candidate_runtime_change_retained": false,
+      "receipt": {
+        "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p4-validator-geometry-v1/receipt-v1.json",
+        "bytes": 18554,
+        "sha256": "32326744ef42afb83703460ddee6047bf8439135e2b696b623832e857eba33d2"
+      },
+      "real_M1600_operator_assertions_each": 38,
+      "actual_exits_each": 0,
+      "geometry_selected1024_complete_operator_ms": {
+        "local8": 4.213179,
+        "local64": 4.650631
+      },
+      "geometry_selected1024_validator_profile_warm_median_ms": {
+        "local8": 0.77448,
+        "local64": 0.846146
+      },
+      "remaining": "No reliable completeoperator gain; restore product source exactly. Only test-side separate validator device timing retained. Second bounded variant must reuse validated F16 transforms in private completion-owned bounded scratch, preserve65520/both boundaries/nonfinite/error priority/no-partial-result and prove M129/M1600 before adoption. No M129/failure/full-model gain claim from rejected geometry experiment."
     },
     {
       "task": "P5",
@@ -1951,5 +1971,5 @@
     }
   ],
   "performance_baseline": "7536aededc049b2157f12eadb0f4cc6bbf29b7b7",
-  "performance_next": "P4 focused real M1600 W8A8 row-validator profile and one geometry variant, then at most one bounded private transform reuse variant if needed. Preserve overflow midpoint65520, both FP16 boundaries, nonfinite guards/error priority/no-partial-result contracts. P3 typed bounded package complete with exact native C1 tokens/cycles and measured TTFT reduction; optional table deferred. P1 default/original/full-state admission remains open, P2 complete; P5/P6 and final P7 matrix pending."
+  "performance_next": "P4 second bounded variant: completion-owned private validated FP16 Hadamard transform reuse before safe INT8 quantization. Geometry64 rejected, original local8 restored; at most one reuse variant, focused M129/M1600 boundary/error/alias guards then completeoperator/request gain. If unsuccessful stop this P4 package and proceed to independent P5 speculative GDN. P3 typed boundedcomplete; P1 auto/default/original/full-state qualification and final P7 remainopen."
 }
