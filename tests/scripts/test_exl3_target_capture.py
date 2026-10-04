@@ -22,7 +22,9 @@ class TargetCaptureTest(unittest.TestCase):
         self.assertEqual(selected_detail_kind(-1, -1), "none")
         self.assertEqual(selected_detail_kind(29, 1), "gdn")
         self.assertEqual(selected_detail_kind(29, 3), "attention")
-        for step, layer in [(-1, 1), (-1, 3), (1, 3), (29, 2), (29, True), (29, "3")]:
+        self.assertEqual(selected_detail_kind(29, 21), "gdn")
+        for step, layer in [(-1, 1), (-1, 3), (-1, 21), (1, 3), (1, 21),
+                            (29, 2), (29, True), (29, "3")]:
             with self.assertRaises(ValueError): selected_detail_kind(step, layer)
 
     def test_deterministic_ba_scope_delegates_and_restores_success_and_failure(self):

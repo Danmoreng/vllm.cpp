@@ -188,7 +188,7 @@ struct RealLayer0 {
     const auto has = [&](const std::string& name) {
       return std::find(shard->Names().begin(), shard->Names().end(), name) != shard->Names().end();
     };
-    REQUIRE((layer_index == 0 || layer_index == 1));
+    REQUIRE((layer_index == 0 || layer_index == 1 || layer_index == 21));
     layer = vllm::LoadQwen3_5DenseLayer(get, has, "linear_attention", layer_index, "model.language_model.");
     oracle = vllm::SafetensorsFile::Open((std::filesystem::path(captures) / oracle_name).string());
     REQUIRE(config.hidden_size == 5120);
@@ -1065,18 +1065,20 @@ TEST_CASE("XPU EXL3 real gated norm: identical P128 D1 operands and strided alia
   CHECK(vt::GetReferenceTierHits() == 0);
 }
 
-TEST_CASE("XPU EXL3 real GDN layer1: D29 identical original input and active states") {
+static void RunRealGdnD29Detail(int layer_index) {
   // Isolated consumer attribution. Original states are confined to this test;
   // product inference and the failing own-state trajectory remain untouched.
-  RealLayer0 real(1, "repeat-0.safetensors");
+  RealLayer0 real(layer_index, "repeat-0.safetensors");
+  const std::string key = "d29_l" + std::to_string(layer_index);
+  const std::string label = "matched-D29-layer" + std::to_string(layer_index);
   xpu_test::Queue gpu(vt::DeviceType::kXPU);
   vllm::dense_attn::Dev d{vt::GetBackend(gpu.q.device.type), gpu.q, DType::kF16};
   constexpr int slots = 5, active = 4, channels = 10240, heads = 48, dim = 128, history = 3;
-  const auto& original_input = real.oracle->Get("d29_l1_post_input_norm");
+  const auto& original_input = real.oracle->Get(key + "_post_input_norm");
   REQUIRE(original_input.dtype == "F16");
   REQUIRE(original_input.shape == std::vector<int64_t>{1, 5120});
-  const auto& original_conv = real.oracle->Get("d29_l1_detail_conv_before");
-  const auto& original_ssm = real.oracle->Get("d29_l1_detail_ssm_before");
+  const auto& original_conv = real.oracle->Get(key + "_detail_conv_before");
+  const auto& original_ssm = real.oracle->Get(key + "_detail_ssm_before");
   REQUIRE(original_conv.dtype == "F16");
   REQUIRE(original_conv.shape == std::vector<int64_t>{history, channels});
   REQUIRE(original_ssm.dtype == "F32");
@@ -1091,7 +1093,7 @@ TEST_CASE("XPU EXL3 real GDN layer1: D29 identical original input and active sta
   xpu_test::Buffer conv(gpu.q, DType::kF16, {slots, channels, history});
   xpu_test::Buffer ssm(gpu.q, DType::kF32, {slots, heads, dim, dim});
   conv.put(conv_seed); ssm.put(ssm_seed);
-  ExportGdnState("matched-D29-layer1-initial", conv, ssm);
+  ExportGdnState(label + "-initial", conv, ssm);
   vllm::GdnStateCache state; state.conv_state = conv.tensor; state.ssm_state = ssm.tensor;
   vllm::dense_attn::DBuf input(d, DType::kF16, {1, 5120}, original_input.data);
   vllm::v1::CommonAttentionMetadata am;
@@ -1105,26 +1107,37 @@ TEST_CASE("XPU EXL3 real GDN layer1: D29 identical original input and active sta
   gm.non_spec_state_indices_tensor = std::vector<int32_t>{active};
   gm.non_spec_query_start_loc = std::vector<int32_t>{0, 1};
   auto step = vllm::BuildGdnStepInputs(gpu.q, {156}, am, gm, slots);
-  const vllm::actdump::LayerScope dump_scope(29, 1);
+  const vllm::actdump::LayerScope dump_scope(29, layer_index);
   auto out = vllm::RunGdnBlockPaged(gpu.q, real.layer.gdn, real.config,
                                   input.t(), step, gm, state, 1, nullptr, DType::kF16);
   REQUIRE(out.tensor.dtype == DType::kF16);
   xpu_test::Buffer copy(gpu.q, DType::kF16, {1, 5120});
   vt::Copy(gpu.q, copy.tensor, out.tensor);
-  ExportGdnState("matched-D29-layer1-final", conv, ssm);
-  CapturedClose("matched_D29_layer1.mixer", copy.floats(),
-                real.oracle->Get("d29_l1_detail_mixer_output"), 0.01f, 0.003f);
+  ExportGdnState(label + "-final", conv, ssm);
+  CapturedClose(label + ".mixer", copy.floats(),
+                real.oracle->Get(key + "_detail_mixer_output"), 0.01f, 0.003f);
+  const auto& expected_mixer = real.oracle->Get(key + "_detail_mixer_output");
+  CHECK(copy.download() == std::vector<unsigned char>(expected_mixer.data,
+      expected_mixer.data + expected_mixer.nbytes));
   const auto cv = conv.floats(), ss = ssm.floats();
   CHECK(std::equal(cv.begin(), cv.begin() + active * channels * history, conv_seed.begin()));
   CHECK(std::equal(ss.begin(), ss.begin() + active * heads * dim * dim, ssm_seed.begin()));
   std::vector<float> active_conv(channels * history);
   for (int c = 0; c < channels; ++c) for (int h = 0; h < history; ++h)
     active_conv[h * channels + c] = cv[(active * channels + c) * history + h];
-  CHECK(active_conv == CapturedFloats(real.oracle->Get("d29_l1_detail_conv_after")));
+  CHECK(active_conv == CapturedFloats(real.oracle->Get(key + "_detail_conv_after")));
   const std::vector<float> active_ssm(ss.begin() + active * heads * dim * dim, ss.end());
-  CapturedClose("matched_D29_layer1.ssm", active_ssm,
-                real.oracle->Get("d29_l1_detail_ssm_after"), 1e-4f, 1e-5f);
+  CapturedClose(label + ".ssm", active_ssm,
+                real.oracle->Get(key + "_detail_ssm_after"), 1e-4f, 1e-5f);
   CHECK(vt::GetReferenceTierHits() == 0);
+}
+
+TEST_CASE("XPU EXL3 real GDN layer1: D29 identical original input and active states") {
+  RunRealGdnD29Detail(1);
+}
+
+TEST_CASE("XPU EXL3 real GDN layer21: D29 identical original input and active states") {
+  RunRealGdnD29Detail(21);
 }
 
 static void RunRealBaRepeats(int layer_index) {
@@ -1467,7 +1480,7 @@ static void ExportAttention3Kv(const std::string& phase, vt::Queue& q,
 }
 
 static void RunRealEagerTarget(int decode_steps, int diagnostic_stop = -1,
-                               bool attention3_detail = false) {
+                               bool attention3_detail = false, int gdn_detail_layer = 1) {
   const char* model = std::getenv("VT_B70_EXL3_MODEL");
   const char* fixtures = std::getenv("VT_B70_EXL3_S1_FIXTURES");
   if (!model || !fixtures) std::exit(77);
@@ -1568,18 +1581,25 @@ static void RunRealEagerTarget(int decode_steps, int diagnostic_stop = -1,
     std::cout << "REAL_TARGET_FORWARD_START " << phase << '\n' << std::flush;
     const bool capture_hidden = diagnostic &&
         (step == 0 || step == 1 || step == 11 || step == 27 || step == 29);
-    const bool capture_layer1_state = diagnostic && step == 29 && !attention3_detail &&
+    const bool capture_gdn_state = diagnostic && step == 29 && !attention3_detail &&
         std::getenv("VT_B70_EXL3_STATE_OUTPUT") != nullptr;
     if (attention3_detail && step == 29) {
       REQUIRE(owners[6]->tensor.data == caches[0].data);
       ExportAttention3Kv("own-D29-attention3-before", gpu.q, caches[0], 156);
     }
-    if (capture_layer1_state) {
-      REQUIRE(weights.layers[0].is_linear_attention);
-      REQUIRE(weights.layers[1].is_linear_attention);
-      REQUIRE(owners[2]->tensor.data == states[1].conv_state.data);
-      REQUIRE(owners[3]->tensor.data == states[1].ssm_state.data);
-      ExportGdnState("own-D29-layer1-before", *owners[2], *owners[3]);
+    if (capture_gdn_state) {
+      REQUIRE(gdn_detail_layer >= 0);
+      REQUIRE(gdn_detail_layer < int(weights.layers.size()));
+      REQUIRE(weights.layers[gdn_detail_layer].is_linear_attention);
+      size_t gdn_index = 0, owner_index = 0;
+      for (int i = 0; i < gdn_detail_layer; ++i) {
+        gdn_index += weights.layers[i].is_linear_attention;
+        owner_index += weights.layers[i].is_linear_attention ? 2 : 1;
+      }
+      REQUIRE(owners[owner_index]->tensor.data == states[gdn_index].conv_state.data);
+      REQUIRE(owners[owner_index + 1]->tensor.data == states[gdn_index].ssm_state.data);
+      ExportGdnState("own-D29-layer" + std::to_string(gdn_detail_layer) + "-before",
+                     *owners[owner_index], *owners[owner_index + 1]);
     }
     vllm::Qwen3_5MTPHiddenStates actual_hidden;
     const auto out = vllm::Qwen3_5DenseModel::ForwardDeviceTap(
@@ -1590,8 +1610,13 @@ static void RunRealEagerTarget(int decode_steps, int diagnostic_stop = -1,
     auto& backend = vt::GetBackend(gpu.q.device.type);
     backend.Copy(gpu.q, logits.data(), out.device_tensor.data, logits.size() * sizeof(float));
     backend.Synchronize(gpu.q);
-    if (capture_layer1_state)
-      ExportGdnState("own-D29-layer1-after", *owners[2], *owners[3]);
+    if (capture_gdn_state) {
+      size_t owner_index = 0;
+      for (int i = 0; i < gdn_detail_layer; ++i)
+        owner_index += weights.layers[i].is_linear_attention ? 2 : 1;
+      ExportGdnState("own-D29-layer" + std::to_string(gdn_detail_layer) + "-after",
+                     *owners[owner_index], *owners[owner_index + 1]);
+    }
     if (attention3_detail && step == 29)
       ExportAttention3Kv("own-D29-attention3-after", gpu.q, caches[0], 157);
     REQUIRE(std::all_of(logits.begin(), logits.end(), [](float x) { return std::isfinite(x); }));
@@ -1690,6 +1715,13 @@ TEST_CASE("XPU EXL3 real target diagnostic: D29 attention3 boundaries") {
   REQUIRE(std::getenv("VT_B70_EXL3_STATE_OUTPUT") != nullptr);
   const vllm::actdump::StageLayerSelectionScope only_attention3(3);
   RunRealEagerTarget(64, 29, true);
+}
+
+TEST_CASE("XPU EXL3 real target diagnostic: D29 GDN21 boundaries") {
+  REQUIRE(std::getenv("VT_DUMP_ACT_SUB") != nullptr);
+  REQUIRE(std::getenv("VT_B70_EXL3_STATE_OUTPUT") != nullptr);
+  const vllm::actdump::StageLayerSelectionScope only_gdn21(21);
+  RunRealEagerTarget(64, 29, false, 21);
 }
 
 TEST_CASE("XPU EXL3 real target head: identical original P128 D1 D29 operands") {

@@ -39,7 +39,7 @@
       "target_qualified": false,
       "serving_qualified": false,
       "complete": true,
-      "next_code_change": "Bound first remaining divergent block/state after repaired attention3 using current P128/D1 and identical original inputs; retain strict target/state/draft gates. Qualify graph policy thresholds before current-source serving/performance transfer.",
+      "next_code_change": "Bound GDN21 P128/D1 initial/final SSM and actual operands with the same original capture protocol, then identical-input producer/history attribution without state substitution or reference promotion.",
       "same_input_core_final_state_pass": true,
       "actual_VT_BA_repeatability": "P128 varying 3/6/7 halves; D1 exact in three repeats",
       "result_receipt": {
@@ -310,6 +310,36 @@
         "target_qualified": false,
         "serving_qualified": false,
         "next_code_change": "Bound first remaining divergent block/state after repaired attention3 using current P128/D1 and identical original inputs; retain strict target/state/draft gates. Qualify graph policy thresholds before current-source serving/performance transfer."
+      },
+      "D29_GDN21_state_attribution": {
+        "receipt": {
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r02-D29-head-v1/receipt-gdn21-attribution-v72.json",
+          "bytes": 287006,
+          "sha256": "a0449cf8d2614d54fe173ac123030d45121e62cc66934f107a1e2624fe47b189"
+        },
+        "full_stage_boundaries_compared": 192,
+        "first_observed_different_layer": 21,
+        "first_observed_different_boundary": "post_attn_norm",
+        "preceding_0_through_20_observed_D29_boundaries_bit_exact": true,
+        "all30_logits_observer_invariant": true,
+        "all487_original_parent_tensors_observer_invariant": true,
+        "CPU_detail_selection_tests": "1/1 exit0",
+        "isolated_GDN21": "44/44 exit0",
+        "legacy_GDN1_control": "44/44 exit0",
+        "isolated_mixer_and_active_Conv_SSM_byte_exact": true,
+        "all_four_inactive_slots_unchanged": true,
+        "own_model": "522/527 exit1; same five original numerical failures",
+        "own_GDN21_input_norm_BA_Conv_exact": true,
+        "own_initial_SSM_different_values": 424403,
+        "own_initial_SSM_values": 786432,
+        "own_initial_SSM_relativeL2": 4.391231970759927e-05,
+        "own_initial_SSM_max_abs": 5.741417407989502e-05,
+        "own_gated_halves_different": 103,
+        "own_mixer_halves_different": 1612,
+        "product_arithmetic_changed": false,
+        "target_qualified": false,
+        "serving_qualified": false,
+        "next_code_change": "Bound GDN21 P128/D1 initial/final SSM and actual operands with the same original capture protocol, then identical-input producer/history attribution without state substitution or reference promotion."
       }
     },
     {
