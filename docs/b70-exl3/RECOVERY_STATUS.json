@@ -2003,8 +2003,41 @@
     },
     {
       "task": "P5",
-      "status": "pending",
-      "complete": false
+      "status": "register_package_stopped_after_two_rejected_runnable_variants",
+      "complete": false,
+      "accepted_product_optimization": false,
+      "runnable_register_variants": 2,
+      "initial_SIMD8_device_refusal": true,
+      "restored_product_exact_commit": "5460e680c96878fb417c0fb79597beab7d9a935e",
+      "baseline_generated_resources": {
+        "simd": 32,
+        "grf": 128,
+        "private_memory_bytes_per_hardware_thread": 16384
+      },
+      "typed_generated_resources": {
+        "simd": 16,
+        "grf128_spill_bytes_F16_output": 8704,
+        "grf128_spill_bytes_F32_output": 12736,
+        "grf256_recorded_spills": false
+      },
+      "full_state_output_native_AB_assertions_each": 1077,
+      "paired_F32_native_AB_assertions": 1125,
+      "paired_C1_complete_operator_median_ms": {
+        "old": 0.236599,
+        "typed256": 0.356899
+      },
+      "paired_ragged_C4_complete_operator_median_ms": {
+        "old": 0.586259,
+        "typed256": 0.514649
+      },
+      "final_restored_C1_assertions": 24611,
+      "final_restored_C4_assertions": 98339,
+      "receipt": {
+        "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p5-gdn-inspection-v1/receipt-v1.json",
+        "bytes": 297766,
+        "sha256": "8578b04003dbc8432700d9fe0cdc49371a3df07968aff20b1f2c7b9e8974f3b9"
+      },
+      "remaining": "No accepted GDN performance change. Both synthetic same-input variants preserve every FP32 snapshot/output; C1 slower and uniform C4 second variant slower. Graph/MTP/model admission not attempted for rejected operators. Original/all-layer state, current Python and lifecycle qualification remain open. Stop geometry package, proceed with independent P6."
     },
     {
       "task": "P6",
@@ -2018,5 +2051,5 @@
     }
   ],
   "performance_baseline": "7536aededc049b2157f12eadb0f4cc6bbf29b7b7",
-  "performance_next": "P5 actual Q4/C1 and Q4/C4 speculative GDN register/scratch inspection, then at most two justified independent-value-row/register variants preserving ascendingK order, FP32 every snapshot, accepted selectors/inactive/state/alias contracts. Operator checks/gain then actual MTP cycle and graph/eager transition. P4 private checked preparation boundedcomplete, P3/P2 complete; P1 original/full-state/default admission, P6 donor SmallM and P7 refreshed final quality/lifecycle/matrix remainopen."
+  "performance_next": "P6 actual donor/native SmallM comparison on weighted real different projections at M4/C1 and M16/C4 verification plus M1/M4 draft/head. Verify packed/scales/map/partition/launch/compiler/mutable tuning identities; direct GPU and complete operator with Hadamard/reduction before changing kernel. P5 two runnable register variants rejected and product restored exactly; no further geometry sweep. P1 original/full-state/default admission and P7 refreshed final quality/lifecycle/matrix remain open."
 }
