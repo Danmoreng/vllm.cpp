@@ -1656,16 +1656,16 @@
     },
     {
       "task": "P2",
-      "status": "wider_M256_operator_and_completion_owned_shared_model_scratch_tested_actual_prefill_pending",
+      "status": "wider_operator_M256_M1600_M896_original_bitexact_shared_model_pool_integrated_prefill_pending",
       "complete": false,
       "panel_geometry_implemented": true,
       "wider_GPU_kernel_implemented": true,
       "shared_model_scratch_implemented": true,
-      "real_M256_M1600_M896_tested": false,
+      "real_M256_M1600_M896_tested": true,
       "receipt": {
-        "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p2-shared-scratch-v1/receipt-v1.json",
-        "bytes": 15843,
-        "sha256": "c4f306914be0025483689ba39262574789b378752964d88c3e6a1d095796e602"
+        "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p2-prefill-rows-v1/receipt-v1.json",
+        "bytes": 25219,
+        "sha256": "ce1660481bcee3e20471cabbbd5bc3b67271eccec7703b6f74efc5befe00e083"
       },
       "focused_cases": 3,
       "focused_assertions": 825,
@@ -1702,7 +1702,26 @@
       "selected6bpw_single_model_graph_assertions": 34,
       "shared_tests_exit_each": 0,
       "isolated_M256_max_shared_scratch_bytes": 30935104,
-      "shared_scope": "Two sequential queues, growth/reuse/error/recovery/capture refusal. Model128; selected6bpw first128 head block and existingSmallM graph exact. Budget-pressure injection, actualM1600/M896 and completeprefill pending."
+      "shared_scope": "Two sequential queues, growth/reuse/error/recovery/capture refusal. Model128; selected6bpw first128 head block and existingSmallM graph exact. Budget-pressure injection, actualM1600/M896 and completeprefill pending.",
+      "shared_scratch_receipt": {
+        "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p2-shared-scratch-v1/receipt-v1.json",
+        "bytes": 15843,
+        "sha256": "c4f306914be0025483689ba39262574789b378752964d88c3e6a1d095796e602"
+      },
+      "actual_chunk_geometry_assertions_each": 38,
+      "actual_chunk_geometry_exit_each": 0,
+      "actual_chunk_geometry_scope": "Original operator executes real gate/up weights on cyclic frozenP128norm operands, M1600/M896 padded1792/1024. Direct originalXq/scales/FP16Y/final bytes exact, paddedXq/Y zero/scales1. Not a new full worker trajectory.",
+      "M1600_warm_operator_median_ms_v2": {
+        "128": 9.429691,
+        "1024": 4.727801,
+        "2048": 3.810613
+      },
+      "M896_warm_operator_median_ms_v2": {
+        "128": 7.130406,
+        "1024": 3.000283,
+        "2048": 2.235775
+      },
+      "timing_limit": "Ordered three-call warmed operator samples. Bothv1/v2 retained; control medians vary. No model gain or serving parity."
     },
     {
       "task": "P3",
@@ -1731,5 +1750,5 @@
     }
   ],
   "performance_baseline": "7536aededc049b2157f12eadb0f4cc6bbf29b7b7",
-  "performance_next": "P2 actualM1600/M896 original producer/operator fixtures, wider functional non-monotonic128-tail and reachable larger6bpw checks, then model A/B selection and complete unprofiled P4096 prefill with actual submissions/combined memory. Shared pool now integrated in grouped/single wrappers with completion fence, model128 retained until promotion. Focused pool budget-growth refusal proof still pending. P1 native verifier qualification follows."
+  "performance_next": "P2 wider functional non-monotonic128-tail and reachable larger6bpw proof, shared-pool budget-growth refusal, then model widthA/B selection and complete unprofiledP4096prefill with actual perchunk submissions/combined memory. M256/M1600/M896 original operator and shared pool pass; model still128. P1 native verifier qualification follows."
 }
