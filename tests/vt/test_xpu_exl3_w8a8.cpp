@@ -125,9 +125,17 @@ TEST_CASE("XPU EXL3 W8A8 P2: real rows wider panels preserve rounded intermediat
     const std::vector<double> warm{execute(), execute(), execute()};
     // Separate device cost, cold then three warm samples; empty without profiling.
     std::vector<double> validation_device_ms;
-    for (const auto& event : vt::xpu::DrainProfileEvents())
+    std::vector<double> preparation_device_ms, quantize_device_ms, prepared_commit_device_ms;
+    for (const auto& event : vt::xpu::DrainProfileEvents()) {
       if (event.stage == "exl3_w8a8_validate_rows")
         validation_device_ms.push_back((event.end_ns - event.start_ns) / 1e6);
+      if (event.stage == "exl3_w8a8_prepare_checked")
+        preparation_device_ms.push_back((event.end_ns - event.start_ns) / 1e6);
+      if (event.stage == "exl3_w8a8_input_quantize")
+        quantize_device_ms.push_back((event.end_ns - event.start_ns) / 1e6);
+      if (event.stage == "exl3_w8a8_prepared_commit")
+        prepared_commit_device_ms.push_back((event.end_ns - event.start_ns) / 1e6);
+    }
     const auto result = out.download(), scratch = workspace.download(), weights = panel_storage.download();
     const auto parts = vt::PlanExl3W8A8Panels(source_map, groups, width);
     // Check the last128 columns of the actual reconstructed tail in its compact
@@ -190,6 +198,9 @@ TEST_CASE("XPU EXL3 W8A8 P2: real rows wider panels preserve rounded intermediat
         {"panel_bytes", p.weight_panel_bytes}, {"workspace_bytes", p.workspace_bytes},
         {"cold_operator_ms", cold}, {"warm_operator_ms", warm},
         {"validation_device_ms", validation_device_ms},
+        {"preparation_device_ms", preparation_device_ms}, {"quantize_device_ms", quantize_device_ms},
+        {"prepared_commit_device_ms", prepared_commit_device_ms},
+        {"private_preparation_bytes", vt::xpu::GetMemoryInfo().w8a8_preparation_bytes},
         {"preparation_exact", preparation_exact}, {"Y_exact", y_exact},
         {"output_exact", output_exact}, {"reconstructed_tail_exact", reconstructed_tail_exact}});
     std::cout << "P2_PANEL_OPERATOR " << reports.back().dump() << '\n';
@@ -421,6 +432,203 @@ TEST_CASE("XPU EXL3 W8A8 P2: shared scratch completes growth reuse and cross-que
       CHECK(memory_after.graph_device_bytes == memory_before.graph_device_bytes);
     }
   }
+  CHECK(vt::GetReferenceTierHits() == 0);
+}
+
+
+namespace {
+struct P4PrepareEnv {
+  bool present = std::getenv("VT_XPU_W8A8_PREPARE") != nullptr;
+  std::string value = present ? std::getenv("VT_XPU_W8A8_PREPARE") : "";
+  ~P4PrepareEnv() {
+    if (present) setenv("VT_XPU_W8A8_PREPARE", value.c_str(), 1);
+    else unsetenv("VT_XPU_W8A8_PREPARE");
+  }
+  void Select(bool prepared) { REQUIRE(setenv("VT_XPU_W8A8_PREPARE", prepared ? "1" : "0", 1) == 0); }
+};
+}
+
+TEST_CASE("XPU EXL3 W8A8 P4: private preparation preserves failure boundaries and zero rows") {
+  const char* fixture = std::getenv("VT_B70_EXL3_W8A8_FIXTURE");
+  if (!fixture) std::exit(77);
+  const auto f = vllm::SafetensorsFile::Open(fixture);
+  int m = 129;
+  if (const char* rows = std::getenv("VT_B70_EXL3_PANEL_ROWS")) {
+    REQUIRE((std::string_view(rows) == "129" || std::string_view(rows) == "1600"));
+    m = std::atoi(rows);
+  }
+  const auto& tr = f.Get("merged_trellis"); const auto& su = f.Get("stacked_suh");
+  const auto& sv = f.Get("merged_svh"); const auto& map = f.Get("source_map");
+  const auto& x = f.Get("input_m" + std::to_string(m));
+  const int k = int(su.shape[1]), n = int(sv.shape[0]);
+  const int bits = int(tr.shape[2] / 16), groups = int(su.shape[0]);
+  REQUIRE(groups >= 1);
+  Queue gpu(vt::DeviceType::kXPU); P4PrepareEnv route;
+  const auto plan = vt::PlanExl3W8A8(m, k, n, groups, bits, 1024);
+  Buffer trellis(gpu.q, DType::kI8, {k / 16, n / 16, 32 * bits});
+  Buffer suh(gpu.q, DType::kF16, {groups, k}), svh(gpu.q, DType::kF16, {n});
+  Buffer mapping(gpu.q, DType::kI32, {n / 128}), input(gpu.q, DType::kF16, {m, k});
+  Buffer out(gpu.q, DType::kF16, {m, n});
+  Buffer scratch(gpu.q, DType::kI8, {int64_t(plan.workspace_bytes)});
+  Buffer panel(gpu.q, DType::kI8, {k, plan.weight_panel_columns});
+  trellis.upload(tr.data); suh.upload(su.data); svh.upload(sv.data); mapping.upload(map.data); input.upload(x.data);
+  const auto original_input = input.download(), original_suh = suh.download();
+  const auto original_svh = svh.download(), original_map = mapping.download();
+  const vt::Exl3GroupedLinearArgs args{bits, 2, "P4_BOUNDARY", 1024};
+  auto execute = [&] { vt::Exl3GroupedW8A8(gpu.q, out.tensor, input.tensor, trellis.tensor,
+      suh.tensor, svh.tensor, mapping.tensor, scratch.tensor, panel.tensor, args); };
+  const std::vector<unsigned char> scratch_poison(scratch.bytes, 0xa5), panel_poison(panel.bytes, 0xcd),
+                                   out_poison(out.bytes, 0x5a);
+  auto poison = [&] { scratch.upload(scratch_poison.data()); panel.upload(panel_poison.data()); out.upload(out_poison.data()); };
+  auto reject = [&](const char* message) {
+    poison(); const auto before_input = input.download(), before_suh = suh.download();
+    const auto before_svh = svh.download(), before_map = mapping.download();
+    CHECK_THROWS_WITH_AS(execute(), doctest::Contains(message), std::runtime_error);
+    xpu_test::SameBytes(out.download(), out_poison); xpu_test::SameBytes(panel.download(), panel_poison);
+    auto actual = scratch.download();
+    // The existing API writes only its two reserved status words on failure.
+    // Every activation, scale, intermediate and other public byte stays poisoned.
+    std::copy_n(scratch_poison.begin() + plan.weight_scale_offset + 4, 8,
+                actual.begin() + plan.weight_scale_offset + 4);
+    xpu_test::SameBytes(actual, scratch_poison);
+    xpu_test::SameBytes(input.download(), before_input); xpu_test::SameBytes(suh.download(), before_suh);
+    xpu_test::SameBytes(svh.download(), before_svh); xpu_test::SameBytes(mapping.download(), before_map);
+  };
+  auto replace_half = [](std::vector<unsigned char>& bytes, size_t offset, uint16_t bits) {
+    std::memcpy(bytes.data() + offset, &bits, 2);
+  };
+  std::vector<unsigned char> real_control;
+  std::vector<unsigned char> prefix_control;
+  std::vector<std::vector<unsigned char>> safe_controls;
+  for (bool prepared : {false, true}) {
+    CAPTURE(m);
+    CAPTURE(prepared);
+    route.Select(prepared);
+    input.upload(original_input.data()); suh.upload(original_suh.data()); svh.upload(original_svh.data()); mapping.upload(original_map.data());
+    if (m == 1600) {
+      // Warm the private owner at129, then grow on the same queue at1600.
+      auto prefix_in = input.tensor.Slice(0, 0, 129);
+      auto prefix_out = out.tensor.Slice(0, 0, 129);
+      vt::Exl3GroupedW8A8(gpu.q, prefix_out, prefix_in, trellis.tensor, suh.tensor,
+          svh.tensor, mapping.tensor, scratch.tensor, panel.tensor, args);
+      auto raw = out.download(); raw.resize(size_t(129) * n * 2);
+      if (!prepared) prefix_control = raw;
+      else {
+        xpu_test::SameBytes(raw, prefix_control);
+        const auto small = vt::PlanExl3W8A8(129, k, n, groups, bits, 1024);
+        CHECK(vt::xpu::GetMemoryInfo().w8a8_preparation_bytes ==
+              size_t(groups) * small.padded_rows * (k + sizeof(float)));
+      }
+    }
+    execute();
+    if (!prepared) real_control = out.download(); else xpu_test::SameBytes(out.download(), real_control);
+    for (uint16_t bad : {uint16_t{0x7e00}, uint16_t{0x7c00}, uint16_t{0xfc00}}) {
+      CAPTURE(bad);
+      auto bad_input = original_input; replace_half(bad_input, bad_input.size() - 2, bad);
+      input.upload(bad_input.data()); reject("finite inputs");
+      auto bad_svh = original_svh; replace_half(bad_svh, bad_svh.size() - 2, bad);
+      svh.upload(bad_svh.data()); reject("finite svh"); // Both fail: preserve SV error priority.
+      input.upload(original_input.data()); reject("finite svh"); svh.upload(original_svh.data());
+      auto bad_suh = original_suh; replace_half(bad_suh, bad_suh.size() - 2, bad);
+      suh.upload(bad_suh.data()); reject("finite inputs"); suh.upload(original_suh.data());
+    }
+    auto bad_map = original_map; const int32_t invalid = groups;
+    std::memcpy(bad_map.data() + bad_map.size() - 4, &invalid, 4);
+    mapping.upload(bad_map.data()); reject("group out of range"); mapping.upload(original_map.data());
+    std::vector<uint16_t> zero(size_t(m) * k, 0), ones(size_t(groups) * k, 0x3c00);
+    // Valid zero, a finite product below65520, and a finite transform just below
+    // overflow. Compare all public bytes against the existing native expression.
+    for (int safe = 0; safe < 3; ++safe) {
+      auto values = zero, scales = ones;
+      if (safe == 1) { values[0] = vt::F32ToF16(21824.f); std::fill(scales.begin(), scales.end(), vt::F32ToF16(3.f)); }
+      if (safe == 2) std::fill_n(values.begin(), 128, vt::F32ToF16(5788.f));
+      input.upload(values.data()); suh.upload(scales.data()); poison(); execute();
+      auto result = out.download(), workspace = scratch.download();
+      if (!prepared) { safe_controls.push_back(result); safe_controls.push_back(workspace); }
+      else { xpu_test::SameBytes(result, safe_controls[safe * 2]); xpu_test::SameBytes(workspace, safe_controls[safe * 2 + 1]); }
+      if (safe == 0) {
+        CHECK(std::all_of(workspace.begin() + plan.activation_offset,
+            workspace.begin() + plan.row_scale_offset, [](unsigned char v) { return v == 0; }));
+        for (size_t offset = plan.row_scale_offset; offset < plan.intermediate_offset; offset += 4)
+          CHECK(vt::LoadUnaligned<float>(workspace.data() + offset) == 1.f);
+        bool all_zero = true;
+        for (size_t i = 0; i < result.size(); i += 2) all_zero &= (vt::LoadUnaligned<uint16_t>(result.data() + i) & 0x7fff) == 0;
+        CHECK(all_zero);
+      }
+    }
+    auto values = zero, scales = ones;
+    // Exact F32 product65520 at the round-to-nearest half overflow midpoint.
+    values[0] = vt::F32ToF16(21840.f); std::fill(scales.begin(), scales.end(), vt::F32ToF16(3.f));
+    input.upload(values.data()); suh.upload(scales.data()); reject("finite inputs");
+    // Every product is finite, but this block's FP16 Hadamard boundary overflows.
+    std::fill_n(values.begin(), 128, vt::F32ToF16(5792.f));
+    suh.upload(ones.data()); input.upload(values.data()); reject("finite inputs");
+    values = zero; values[0] = 0x7bff; scales = ones; scales[0] = 0x7bff;
+    input.upload(values.data()); suh.upload(scales.data()); reject("finite inputs");
+    poison(); const auto before_alias = input.download(); auto alias = out.tensor; alias.data = input.tensor.data;
+    CHECK_THROWS_WITH_AS(vt::Exl3GroupedW8A8(gpu.q, alias, input.tensor, trellis.tensor,
+        suh.tensor, svh.tensor, mapping.tensor, scratch.tensor, panel.tensor, args),
+        doctest::Contains("overlap"), std::runtime_error);
+    xpu_test::SameBytes(input.download(), before_alias); xpu_test::SameBytes(out.download(), out_poison);
+    xpu_test::SameBytes(scratch.download(), scratch_poison); xpu_test::SameBytes(panel.download(), panel_poison);
+    input.upload(original_input.data()); suh.upload(original_suh.data()); execute();
+    xpu_test::SameBytes(out.download(), real_control); // Failed private rows cannot poison a later valid lease.
+    if (prepared) {
+      const auto memory = vt::xpu::GetMemoryInfo();
+      CHECK(memory.w8a8_preparation_bytes >= size_t(groups) * plan.padded_rows * (k + sizeof(float)));
+      CHECK(memory.w8a8_preparation_bytes <= 64 * 1024 * 1024);
+      CHECK(memory.allocated_bytes >= memory.w8a8_preparation_bytes);
+    }
+  }
+  CHECK(vt::GetReferenceTierHits() == 0);
+  std::cout << "P4_PREPARE_BOUNDARY m=" << m << " k=" << k << " groups=" << groups
+            << " original_native_exact=1 safe_rows=3 failure_contracts=1 private_bytes="
+            << vt::xpu::GetMemoryInfo().w8a8_preparation_bytes << std::endl;
+}
+
+TEST_CASE("XPU EXL3 W8A8 P4: private budget refusal retains checked public preparation") {
+  const char* fixture = std::getenv("VT_B70_EXL3_W8A8_FIXTURE");
+  if (!fixture || !std::getenv("VT_XPU_MEMORY_BUDGET_BYTES")) std::exit(77);
+  const auto f = vllm::SafetensorsFile::Open(fixture);
+  const auto& tr = f.Get("merged_trellis"); const auto& su = f.Get("stacked_suh");
+  const auto& sv = f.Get("merged_svh"); const auto& map = f.Get("source_map");
+  const int m = 256, k = int(su.shape[1]), n = int(sv.shape[0]);
+  const int groups = int(su.shape[0]), bits = int(tr.shape[2] / 16);
+  Queue gpu(vt::DeviceType::kXPU); P4PrepareEnv route;
+  const auto plan = vt::PlanExl3W8A8(m, k, n, groups, bits, 1024);
+  Buffer trellis(gpu.q, DType::kI8, {k / 16, n / 16, 32 * bits});
+  Buffer suh(gpu.q, DType::kF16, {groups, k}), svh(gpu.q, DType::kF16, {n});
+  Buffer mapping(gpu.q, DType::kI32, {n / 128}), input(gpu.q, DType::kF16, {m, k});
+  Buffer out(gpu.q, DType::kF16, {m, n}), scratch(gpu.q, DType::kI8, {int64_t(plan.workspace_bytes)});
+  Buffer panel(gpu.q, DType::kI8, {k, plan.weight_panel_columns});
+  trellis.upload(tr.data); suh.upload(su.data); svh.upload(sv.data); mapping.upload(map.data);
+  input.upload(f.Get("input_m256").data);
+  const vt::Exl3GroupedLinearArgs args{bits, 2, "P4_PRIVATE_BUDGET", 1024};
+  auto execute = [&] { vt::Exl3GroupedW8A8(gpu.q, out.tensor, input.tensor, trellis.tensor,
+      suh.tensor, svh.tensor, mapping.tensor, scratch.tensor, panel.tensor, args); };
+  route.Select(false); execute(); const auto expected = out.download();
+  const auto before = vt::xpu::GetMemoryInfo();
+  REQUIRE(before.budget_bytes <= 256 * 1024 * 1024);
+  REQUIRE(before.w8a8_preparation_bytes == 0); // This case runs alone in a fresh worker.
+  const size_t needed = size_t(groups) * plan.padded_rows * (k + sizeof(float));
+  const size_t remaining = before.budget_bytes - before.allocated_bytes - before.graph_device_bytes;
+  REQUIRE(remaining > needed);
+  route.Select(true);
+  {
+    Buffer pressure(gpu.q, DType::kI8, {int64_t(remaining - needed / 2)});
+    const auto pressured = vt::xpu::GetMemoryInfo();
+    REQUIRE(pressured.budget_bytes - pressured.allocated_bytes - pressured.graph_device_bytes < needed);
+    execute(); xpu_test::SameBytes(out.download(), expected);
+    const auto refused = vt::xpu::GetMemoryInfo();
+    CHECK(refused.w8a8_preparation_bytes == 0);
+    CHECK(refused.allocated_bytes == pressured.allocated_bytes);
+  }
+  execute(); xpu_test::SameBytes(out.download(), expected);
+  const auto acquired = vt::xpu::GetMemoryInfo();
+  CHECK(acquired.w8a8_preparation_bytes == needed);
+  CHECK(acquired.peak_allocated_bytes <= acquired.budget_bytes);
+  std::cout << "P4_PRIVATE_BUDGET fallback_exact=1 acquired_bytes=" << needed
+            << " peak_bytes=" << acquired.peak_allocated_bytes << std::endl;
   CHECK(vt::GetReferenceTierHits() == 0);
 }
 

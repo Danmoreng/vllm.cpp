@@ -1931,16 +1931,16 @@
     },
     {
       "task": "P4",
-      "status": "validator_geometry_variant_rejected_private_transform_reuse_next",
-      "complete": false,
+      "status": "complete_bounded_private_checked_preparation_package",
+      "complete": true,
       "geometry_variant_attempts": 1,
       "geometry_candidate_local": 64,
       "retained_validator_local": 8,
       "geometry_candidate_runtime_change_retained": false,
       "receipt": {
-        "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p4-validator-geometry-v1/receipt-v1.json",
-        "bytes": 18554,
-        "sha256": "32326744ef42afb83703460ddee6047bf8439135e2b696b623832e857eba33d2"
+        "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p4-private-prepare-v1/receipt-v1.json",
+        "bytes": 61408,
+        "sha256": "64a22163eb8bf11d25b0f9883fcbbf5fdd543b168898c413d5550f5992b5b84b"
       },
       "real_M1600_operator_assertions_each": 38,
       "actual_exits_each": 0,
@@ -1952,7 +1952,54 @@
         "local8": 0.77448,
         "local64": 0.846146
       },
-      "remaining": "No reliable completeoperator gain; restore product source exactly. Only test-side separate validator device timing retained. Second bounded variant must reuse validated F16 transforms in private completion-owned bounded scratch, preserve65520/both boundaries/nonfinite/error priority/no-partial-result and prove M129/M1600 before adoption. No M129/failure/full-model gain claim from rejected geometry experiment."
+      "remaining": "P4 bounded package complete with operator/prefill gain, protected failure/owner contracts and exact native C1 trajectory. Single unprofiled trial each, no decode improvement/current Python/full-all-layer/default D64/P7 promotion. Immutable metadata host caching not implemented; existing map readback retained.",
+      "geometry_receipt": {
+        "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p4-validator-geometry-v1/receipt-v1.json",
+        "bytes": 18554,
+        "sha256": "32326744ef42afb83703460ddee6047bf8439135e2b696b623832e857eba33d2"
+      },
+      "reuse_variant_attempts": 1,
+      "checked_private_preparation_default": true,
+      "diagnostic_old_route": "VT_XPU_W8A8_PREPARE=0",
+      "private_cap_bytes": 67108864,
+      "budget_or_unsupported_K_fallback": true,
+      "public_workspace_layout_unchanged": true,
+      "safe_placeholders_before_int8_conversion": true,
+      "original_error_priority_preserved": true,
+      "checks": {
+        "real_initial_boundary_assertions": 156,
+        "M129_group2_K5120_assertions": 1552,
+        "M1600_group2_growth_assertions": 7699,
+        "down_M129_group1_K17408_assertions": 1040,
+        "private_budget_fallback_assertions": 15,
+        "crossqueue_and_capture_refusal_assertions": 38,
+        "final_source_boundary_assertions": 1552,
+        "default_full_C1_O8_assertions": 75,
+        "full_C1_O1024_assertions_each": 1895,
+        "actual_exits_each": 0
+      },
+      "M1600_selected1024_complete_operator_ms": {
+        "old": 4.781317,
+        "prepared": 3.744277
+      },
+      "M1600_complete_operator_elapsed_reduction_percent": 21.68942155477246,
+      "full_C1_all_1024_ids_and_371_non_timing_cycles_exact": true,
+      "full_C1_ttft_ms": {
+        "old": 3303.74085,
+        "prepared": 2870.571872
+      },
+      "full_C1_ttft_elapsed_reduction_percent": 13.111469623896198,
+      "full_C1_decode_tps": {
+        "old": 45.904872385223214,
+        "prepared": 45.54419602121673
+      },
+      "full_C1_end_to_end_wall_s": {
+        "old": 25.588985115,
+        "prepared": 25.332298994
+      },
+      "full_C1_private_preparation_bytes": 31202304,
+      "full_C1_backend_peak_bytes": 30325756227,
+      "retired_graph_bytes": 0
     },
     {
       "task": "P5",
@@ -1971,5 +2018,5 @@
     }
   ],
   "performance_baseline": "7536aededc049b2157f12eadb0f4cc6bbf29b7b7",
-  "performance_next": "P4 second bounded variant: completion-owned private validated FP16 Hadamard transform reuse before safe INT8 quantization. Geometry64 rejected, original local8 restored; at most one reuse variant, focused M129/M1600 boundary/error/alias guards then completeoperator/request gain. If unsuccessful stop this P4 package and proceed to independent P5 speculative GDN. P3 typed boundedcomplete; P1 auto/default/original/full-state qualification and final P7 remainopen."
+  "performance_next": "P5 actual Q4/C1 and Q4/C4 speculative GDN register/scratch inspection, then at most two justified independent-value-row/register variants preserving ascendingK order, FP32 every snapshot, accepted selectors/inactive/state/alias contracts. Operator checks/gain then actual MTP cycle and graph/eager transition. P4 private checked preparation boundedcomplete, P3/P2 complete; P1 original/full-state/default admission, P6 donor SmallM and P7 refreshed final quality/lifecycle/matrix remainopen."
 }
