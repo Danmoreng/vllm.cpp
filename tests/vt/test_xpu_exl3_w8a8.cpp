@@ -11,6 +11,7 @@
 #include <iostream>
 #include <chrono>
 #include <fstream>
+#include <string_view>
 #include <nlohmann/json.hpp>
 
 namespace {
@@ -82,8 +83,8 @@ TEST_CASE("XPU EXL3 W8A8 P2: real rows wider panels preserve rounded intermediat
   }
   const int k = int(su.shape[1]), n = int(sv.shape[0]);
   const int bits = int(tr.shape[2] / 16), groups = int(su.shape[0]);
-  REQUIRE(groups >= 2);
-  REQUIRE(std::memcmp(su.data, su.data + k * 2, k * 2) != 0);
+  REQUIRE(groups >= 1);
+  if (groups > 1) REQUIRE(std::memcmp(su.data, su.data + k * 2, k * 2) != 0);
   REQUIRE(map.nbytes == size_t(n / 128) * sizeof(int32_t));
   const auto suffix = "_m" + std::to_string(m);
   const auto& x = f.Get("input" + suffix);
@@ -191,6 +192,148 @@ TEST_CASE("XPU EXL3 W8A8 P2: real rows wider panels preserve rounded intermediat
     std::ofstream file(output); file << reports.dump(2) << '\n';
     REQUIRE(file.good());
   }
+  CHECK(vt::GetReferenceTierHits() == 0);
+}
+
+TEST_CASE("XPU EXL3 W8A8 P2: non-monotonic source runs and128 tails preserve original columns") {
+  const char* env = std::getenv("VT_B70_EXL3_W8A8_FIXTURE");
+  if (!env) std::exit(77);
+  const auto f = vllm::SafetensorsFile::Open(env);
+  const auto& tr = f.Get("merged_trellis");
+  const auto& su = f.Get("stacked_suh");
+  const auto& sv = f.Get("merged_svh");
+  const auto& map = f.Get("source_map");
+  const int m = 256, k = int(su.shape[1]), n = int(sv.shape[0]);
+  const int bits = int(tr.shape[2] / 16), groups = int(su.shape[0]);
+  REQUIRE(groups >= 2);
+  REQUIRE(map.nbytes == size_t(n / 128) * sizeof(int32_t));
+  std::vector<int32_t> source_map(n / 128);
+  std::memcpy(source_map.data(), map.data, map.nbytes);
+  REQUIRE(source_map.front() != source_map.back());
+  // H128 is block-local: exchanging whole trellis/SV/source blocks must
+  // exchange exactly the corresponding original Y and output columns.
+  std::vector<unsigned char> packed(tr.data, tr.data + tr.nbytes);
+  std::vector<unsigned char> scales(sv.data, sv.data + sv.nbytes);
+  const size_t block_bytes = size_t(8) * 32 * bits;
+  for (int tile = 0; tile < k / 16; ++tile) {
+    const size_t first = size_t(tile) * (n / 16) * 32 * bits;
+    const size_t last = first + size_t(n / 128 - 1) * block_bytes;
+    std::swap_ranges(packed.begin() + first, packed.begin() + first + block_bytes,
+                     packed.begin() + last);
+  }
+  std::swap_ranges(scales.begin(), scales.begin() + 256, scales.end() - 256);
+  std::swap(source_map.front(), source_map.back());
+  auto permute = [&](const vllm::StTensor& t) {
+    REQUIRE(t.nbytes == size_t(m) * n * 2);
+    std::vector<unsigned char> raw(t.data, t.data + t.nbytes);
+    for (int row = 0; row < m; ++row) {
+      const size_t first = size_t(row) * n * 2, last = first + size_t(n - 128) * 2;
+      std::swap_ranges(raw.begin() + first, raw.begin() + first + 256, raw.begin() + last);
+    }
+    return raw;
+  };
+  const auto original_output = permute(f.Get("output_m256"));
+  const auto original_y = permute(f.Get("y_m256"));
+  Queue gpu(vt::DeviceType::kXPU);
+  Buffer trellis(gpu.q, DType::kI8, {k / 16, n / 16, 32 * bits});
+  Buffer suh(gpu.q, DType::kF16, {groups, k}), svh(gpu.q, DType::kF16, {n});
+  Buffer mapping(gpu.q, DType::kI32, {n / 128}), input(gpu.q, DType::kF16, {m, k});
+  trellis.upload(packed.data()); suh.upload(su.data); svh.upload(scales.data());
+  mapping.upload(source_map.data()); input.upload(f.Get("input_m256").data);
+  std::vector<unsigned char> control_preparation, control_tail;
+  for (const int width : {128, 1024, 2048}) {
+    CAPTURE(width);
+    const auto parts = vt::PlanExl3W8A8Panels(source_map, groups, width);
+    REQUIRE(parts.back().columns == 128);
+    REQUIRE(parts.front().columns == 128);
+    const auto p = vt::PlanExl3W8A8(m, k, n, groups, bits, width);
+    Buffer out(gpu.q, DType::kF16, {m, n});
+    Buffer scratch(gpu.q, DType::kI8, {int64_t(p.workspace_bytes)});
+    Buffer weights(gpu.q, DType::kI8, {int64_t(p.weight_panel_bytes + 64)});
+    auto panel = vt::Tensor::Contiguous(weights.tensor.data, DType::kI8, gpu.q.device,
+                                      {k, p.weight_panel_columns});
+    std::vector<unsigned char> poison(weights.bytes, 0xcd); weights.upload(poison.data());
+    const vt::Exl3GroupedLinearArgs args{bits, 2, "P2_NON_MONOTONIC", width};
+    auto execute = [&] { vt::Exl3GroupedW8A8(gpu.q, out.tensor, input.tensor, trellis.tensor,
+        suh.tensor, svh.tensor, mapping.tensor, scratch.tensor, panel, args); };
+    execute();
+    const auto result = out.download(), raw = scratch.download(), reconstructed = weights.download();
+    xpu_test::SameBytes(result, original_output);
+    xpu_test::SameBytes(std::vector<unsigned char>(raw.begin() + p.intermediate_offset,
+        raw.begin() + p.weight_scale_offset), original_y);
+    CHECK(std::all_of(reconstructed.begin() + p.weight_panel_bytes, reconstructed.end(),
+                      [](unsigned char v) { return v == 0xcd; }));
+    const std::vector<unsigned char> preparation(raw.begin(), raw.begin() + p.intermediate_offset);
+    const std::vector<unsigned char> tail(reconstructed.begin(), reconstructed.begin() + size_t(k) * 128);
+    if (width == 128) { control_preparation = preparation; control_tail = tail; }
+    else { xpu_test::SameBytes(preparation, control_preparation); xpu_test::SameBytes(tail, control_tail); }
+    auto unchanged = [&] {
+      xpu_test::SameBytes(out.download(), result);
+      xpu_test::SameBytes(scratch.download(), raw);
+      xpu_test::SameBytes(weights.download(), reconstructed);
+    };
+    auto short_scratch = scratch.tensor; --short_scratch.shape[0];
+    CHECK_THROWS(vt::Exl3GroupedW8A8(gpu.q, out.tensor, input.tensor, trellis.tensor,
+        suh.tensor, svh.tensor, mapping.tensor, short_scratch, panel, args)); unchanged();
+    auto alias = panel; alias.data = out.tensor.data;
+    CHECK_THROWS(vt::Exl3GroupedW8A8(gpu.q, out.tensor, input.tensor, trellis.tensor,
+        suh.tensor, svh.tensor, mapping.tensor, scratch.tensor, alias, args)); unchanged();
+    auto invalid_map = source_map; invalid_map.back() = groups; mapping.upload(invalid_map.data());
+    CHECK_THROWS_WITH_AS(execute(), doctest::Contains("group out of range"), std::runtime_error);
+    unchanged(); mapping.upload(source_map.data());
+    execute(); xpu_test::SameBytes(out.download(), original_output);
+    std::cout << "P2_NON_MONOTONIC width=" << width << " panels=" << parts.size()
+              << " first_tail=128 last_tail=128 exact_original_Y_output=1\n";
+  }
+  CHECK(vt::GetReferenceTierHits() == 0);
+}
+
+TEST_CASE("XPU EXL3 W8A8 P2: budget refusal preserves completed shared scratch and output") {
+  const char* env = std::getenv("VT_B70_EXL3_W8A8_FIXTURE");
+  if (!env || !std::getenv("VT_XPU_MEMORY_BUDGET_BYTES")) std::exit(77);
+  const auto f = vllm::SafetensorsFile::Open(env);
+  const auto& tr = f.Get("merged_trellis"); const auto& su = f.Get("stacked_suh");
+  const int k = int(su.shape[1]), n = int(f.Get("merged_svh").shape[0]);
+  const int bits = int(tr.shape[2] / 16), groups = int(su.shape[0]);
+  Queue gpu(vt::DeviceType::kXPU);
+  REQUIRE(vt::xpu::GetMemoryInfo().budget_bytes <= 256 * 1024 * 1024);
+  Buffer trellis(gpu.q, DType::kI8, {k / 16, n / 16, 32 * bits});
+  Buffer suh(gpu.q, DType::kF16, {groups, k}), svh(gpu.q, DType::kF16, {n});
+  Buffer map(gpu.q, DType::kI32, {n / 128}), input(gpu.q, DType::kF16, {256, k});
+  Buffer out(gpu.q, DType::kF16, {256, n});
+  trellis.upload(tr.data); suh.upload(su.data); svh.upload(f.Get("merged_svh").data);
+  map.upload(f.Get("source_map").data); input.upload(f.Get("input_m256").data);
+  auto execute = [&](int width) { vt::Exl3GroupedW8A8(gpu.q, out.tensor, input.tensor,
+      trellis.tensor, suh.tensor, svh.tensor, map.tensor, {bits, 2, "P2_BUDGET", width}); };
+  execute(128);
+  const auto before = out.download();
+  xpu_test::SameBytes(before, std::vector<unsigned char>(f.Get("output_m256").data,
+      f.Get("output_m256").data + f.Get("output_m256").nbytes));
+  const auto narrow = vt::xpu::GetMemoryInfo();
+  const auto wide = vt::PlanExl3W8A8(256, k, n, groups, bits, 2048);
+  const size_t capacity = wide.workspace_bytes + wide.weight_panel_bytes;
+  REQUIRE(capacity > narrow.w8a8_workspace_bytes);
+  const size_t growth = capacity - narrow.w8a8_workspace_bytes;
+  const size_t remaining = narrow.budget_bytes - narrow.allocated_bytes - narrow.graph_device_bytes;
+  REQUIRE(remaining > growth);
+  {
+    // Exhaust only the deliberately small test budget, never the real card.
+    Buffer pressure(gpu.q, DType::kI8, {int64_t(remaining - growth / 2)});
+    const auto pressured = vt::xpu::GetMemoryInfo();
+    CHECK_THROWS_WITH_AS(execute(2048), doctest::Contains("exceeds device memory budget"), std::runtime_error);
+    const auto rejected = vt::xpu::GetMemoryInfo();
+    CHECK(rejected.w8a8_workspace_bytes == narrow.w8a8_workspace_bytes);
+    CHECK(rejected.allocated_bytes == pressured.allocated_bytes);
+    xpu_test::SameBytes(out.download(), before);
+    execute(128); xpu_test::SameBytes(out.download(), before);
+  }
+  execute(2048); xpu_test::SameBytes(out.download(), before);
+  const auto grown = vt::xpu::GetMemoryInfo();
+  CHECK(grown.w8a8_workspace_bytes == capacity);
+  CHECK(grown.peak_allocated_bytes <= grown.budget_bytes);
+  execute(128); xpu_test::SameBytes(out.download(), before);
+  std::cout << "P2_BUDGET budget=" << grown.budget_bytes << " narrow=" << narrow.w8a8_workspace_bytes
+            << " grown=" << capacity << " peak=" << grown.peak_allocated_bytes << '\n';
   CHECK(vt::GetReferenceTierHits() == 0);
 }
 

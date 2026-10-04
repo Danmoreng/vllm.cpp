@@ -1656,16 +1656,16 @@
     },
     {
       "task": "P2",
-      "status": "wider_operator_M256_M1600_M896_original_bitexact_shared_model_pool_integrated_prefill_pending",
+      "status": "operator_and_shared_pool_qualified_ready_for_full_prefill_AB",
       "complete": false,
       "panel_geometry_implemented": true,
       "wider_GPU_kernel_implemented": true,
       "shared_model_scratch_implemented": true,
       "real_M256_M1600_M896_tested": true,
       "receipt": {
-        "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p2-prefill-rows-v1/receipt-v1.json",
-        "bytes": 25219,
-        "sha256": "ce1660481bcee3e20471cabbbd5bc3b67271eccec7703b6f74efc5befe00e083"
+        "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p2-tails-budget-v1/receipt-v1.json",
+        "bytes": 17161,
+        "sha256": "e5a2f9720b634225a482c06a262616c042a1cca6337f1c1592c86f2933a549e3"
       },
       "focused_cases": 3,
       "focused_assertions": 825,
@@ -1702,7 +1702,7 @@
       "selected6bpw_single_model_graph_assertions": 34,
       "shared_tests_exit_each": 0,
       "isolated_M256_max_shared_scratch_bytes": 30935104,
-      "shared_scope": "Two sequential queues, growth/reuse/error/recovery/capture refusal. Model128; selected6bpw first128 head block and existingSmallM graph exact. Budget-pressure injection, actualM1600/M896 and completeprefill pending.",
+      "shared_scope": "Sequential cross-queue, growth/reuse/error/recovery/capture refusal and budget-pressure growth refusal pass. M256/M1600/M896 operator geometry qualified; selected2176-column6bpw original exact. Model128 until fullprefill A/B.",
       "shared_scratch_receipt": {
         "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p2-shared-scratch-v1/receipt-v1.json",
         "bytes": 15843,
@@ -1721,7 +1721,16 @@
         "1024": 3.000283,
         "2048": 2.235775
       },
-      "timing_limit": "Ordered three-call warmed operator samples. Bothv1/v2 retained; control medians vary. No model gain or serving parity."
+      "timing_limit": "Ordered three-call warmed operator samples. Bothv1/v2 retained; control medians vary. No model gain or serving parity.",
+      "prefill_rows_receipt": {
+        "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p2-prefill-rows-v1/receipt-v1.json",
+        "bytes": 25219,
+        "sha256": "ce1660481bcee3e20471cabbbd5bc3b67271eccec7703b6f74efc5befe00e083"
+      },
+      "wider_non_monotonic_128_tail_assertions": 104,
+      "pool_budget_refusal_assertions": 19,
+      "wider_selected6bpw_assertions": 36,
+      "qualification_exit_each": 0
     },
     {
       "task": "P3",
@@ -1750,5 +1759,5 @@
     }
   ],
   "performance_baseline": "7536aededc049b2157f12eadb0f4cc6bbf29b7b7",
-  "performance_next": "P2 wider functional non-monotonic128-tail and reachable larger6bpw proof, shared-pool budget-growth refusal, then model widthA/B selection and complete unprofiledP4096prefill with actual perchunk submissions/combined memory. M256/M1600/M896 original operator and shared pool pass; model still128. P1 native verifier qualification follows."
+  "performance_next": "P2 internal model128/1024/2048 A/B selection and complete unprofiledP4096prefill, then separate measured submission/device/host/combined-memory profile. Keep model128 until full-path gain and exact native outputs are demonstrated. P1 native verifier qualification follows."
 }
