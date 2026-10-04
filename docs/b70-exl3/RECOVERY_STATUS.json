@@ -1640,14 +1640,14 @@
     },
     {
       "task": "P1",
-      "status": "native_C1_C4_operators_ragged_fallback_qualified_C4_graph_model_pending",
+      "status": "native_C1_C4_operator_rawgraph_qualified_model_policy_emittedcycle_pending",
       "complete": false,
       "original_capture_exit": 0,
       "host_test_cases_passed": 2,
       "receipt": {
-        "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p1-C4-native-v1/receipt-v1.json",
-        "bytes": 80133,
-        "sha256": "c76f1d06858e00662aa65c2569cca6d7f1346e7405b3af1f469160c9f2579dfd"
+        "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p1-C4-graph-v1/receipt-v1.json",
+        "bytes": 18790,
+        "sha256": "86eac32415532f666fb80407828765f5802613dbb37fbacd1005f6c413fa6921"
       },
       "original_active_length": 4100,
       "original_splits": 16,
@@ -1718,7 +1718,17 @@
         "verify": 0.23134
       },
       "native_C4_operator_elapsed_reduction_percent": 92.01518681508327,
-      "native_C4_scope": "True singlebatched C4Q4 donor, hostuniform offsets proved against fresh device metadata in existing check, private offsets0/1/2/3/4.9originalderived cases x zero/NaN, distinct lengths/pages,permutation/tailmutation; direct/alias/stridedcopy exact with guards/noKVwrites. Ragged2/4/4/4 and missinghint use current generic route exactly; mismatched uniformGPUoffsets/too-small hostbound reject beforewrites. No C4 rawgraph/modeltrajectory/automatic promotion yet."
+      "native_C4_scope": "True singlebatched C4Q4 donor, hostuniform offsets proved against fresh device metadata in existing check, private offsets0/1/2/3/4.9originalderived cases x zero/NaN, distinct lengths/pages,permutation/tailmutation; direct/alias/stridedcopy exact with guards/noKVwrites. Ragged2/4/4/4 and missinghint use current generic route exactly; mismatched uniformGPUoffsets/too-small hostbound reject beforewrites. C4+C1 rawoperator graph sharedpool/metadata/replay/retirement qualified220/220 separately; no modeltrajectory/policy/automatic promotion yet.",
+      "native_C4_operator_receipt": {
+        "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p1-C4-native-v1/receipt-v1.json",
+        "bytes": 80133,
+        "sha256": "c76f1d06858e00662aa65c2569cca6d7f1346e7405b3af1f469160c9f2579dfd"
+      },
+      "native_C4_C1_graph_assertions": 220,
+      "native_C4_C1_graph_exit": 0,
+      "native_C4_C1_graph_captures": 2,
+      "native_C4_C1_graph_successful_replays": 12,
+      "native_C4_C1_graph_retired_device_bytes": 0
     },
     {
       "task": "P2",
@@ -1857,5 +1867,5 @@
     }
   ],
   "performance_baseline": "7536aededc049b2157f12eadb0f4cc6bbf29b7b7",
-  "performance_next": "P1 C4 rawgraph mutation/freshmetadata/sharedC1C4 scratch/retirement; model route/layout/activepage/partition policy identity and current emittedcycle C1P4096/O1024 plusC4 sentinel before automatic promotion. C1/C4 boundedoperator/raggedfallback and P2 complete; laterP3/P4 material. DefaultD64/reference/fullstate gates open."
+  "performance_next": "P1 model graph policy identity for route/physicalKVlayout/activepages/partition, actual retirement proof and current emittedcycle C1P4096/O1024 plusC4 sentinel before promotion. C1/C4 operator/rawgraph/raggedfallback packages and P2 complete in stated scopes. LaterP3/P4 material; defaultD64/reference/fullstate gates open."
 }
