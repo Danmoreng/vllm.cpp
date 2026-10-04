@@ -28,6 +28,9 @@ void RecordProfileSpan(Queue& q, const char* stage, const sycl::event& begin,
 // GPU work is completed before another queue can reuse it. False means budget
 // was insufficient; callers can retain their native non-panel path.
 bool WithExl3Workspace(Queue& q, size_t bytes, const std::function<void(void*)>& launch);
+// Eager-only growable W8A8 workspace plus panel, accounted once per device.
+// Completes every consumer before reuse/growth or another queue's lease.
+bool WithExl3W8A8Workspace(Queue& q, size_t bytes, const std::function<void(void*)>& launch);
 bool WithGdnWorkspace(Queue& q, size_t bytes, const std::function<void(void*)>& launch);
 bool WithGdnNativeWorkspace(Queue& q, size_t bytes, const std::function<void(void*)>& launch);
 bool WithAttentionWorkspace(Queue& q, size_t bytes, const std::function<void(void*)>& launch);

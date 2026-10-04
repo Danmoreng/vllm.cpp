@@ -371,12 +371,9 @@ inline DBuf Exl3GroupedMatmulD(Dev d, const vt::Tensor& x,
   }
   DBuf out(d, vt::DType::kF16, {M, N});
   if (M > 128) {
-    const auto plan = vt::PlanExl3W8A8(M, K, N, w.suh.shape[0], bits);
-    DBuf workspace(d, vt::DType::kI8, {static_cast<int64_t>(plan.workspace_bytes)});
-    DBuf panel(d, vt::DType::kI8, {K, 128});
     vt::Exl3GroupedW8A8(d.q, out.t(), x, trellis, suh, svh, map,
-                       workspace.t(), panel.t(), {bits, w.codebook, w.name.c_str()});
-    // DBuf retirement completes these eager consumers before scratch reuse.
+                       {bits, w.codebook, w.name.c_str()});
+    // One backend-owned completion lease replaces per-projection DBuf scratch.
     return out;
   }
   const auto plan = vt::PlanExl3SmallM(M, K, N, bits);
@@ -422,11 +419,8 @@ inline DBuf Exl3MatmulD(Dev d, const vt::Tensor& x, const Exl3Weight& w,
     });
     DBuf out(d, vt::DType::kF16, {M, N});
     if (M > 128) {
-      const auto plan = vt::PlanExl3W8A8(M, K, N, 1, w.Bits());
-      DBuf workspace(d, vt::DType::kI8, {static_cast<int64_t>(plan.workspace_bytes)});
-      DBuf panel(d, vt::DType::kI8, {K, 128});
       vt::Exl3GroupedW8A8(d.q, out.t(), x, trellis, suh, svh, shard,
-                         workspace.t(), panel.t(), {w.Bits(), w.codebook, w.name.c_str()});
+                         {w.Bits(), w.codebook, w.name.c_str()});
       return out;
     }
     const auto plan = vt::PlanExl3SmallM(M, K, N, w.Bits());

@@ -2,6 +2,7 @@
 #include "vt/exl3_grouped.h"
 #include "vt/exl3_w8a8_panel_plan.h"
 #include "vt/breakable_graph.h"
+#include "vt/xpu.h"
 #include "vt/unaligned.h"
 #include "vllm/model_executor/model_loader/safetensors_reader.h"
 #include "vllm/model_executor/models/dense_attn_block.h"
@@ -149,6 +150,86 @@ TEST_CASE("XPU EXL3 W8A8 P2: real M256 wider panels preserve rounded intermediat
     REQUIRE_FALSE(std::filesystem::exists(output));
     std::ofstream file(output); file << reports.dump(2) << '\n';
     REQUIRE(file.good());
+  }
+  CHECK(vt::GetReferenceTierHits() == 0);
+}
+
+TEST_CASE("XPU EXL3 W8A8 P2: shared scratch completes growth reuse and cross-queue consumers") {
+  const char* env = std::getenv("VT_B70_EXL3_W8A8_FIXTURE");
+  if (!env) std::exit(77);
+  const auto f = vllm::SafetensorsFile::Open(env);
+  const auto& tr = f.Get("merged_trellis");
+  const auto& su = f.Get("stacked_suh");
+  const int k = int(su.shape[1]), n = int(f.Get("merged_svh").shape[0]);
+  const int bits = int(tr.shape[2] / 16), groups = int(su.shape[0]);
+  Queue first(vt::DeviceType::kXPU), second(vt::DeviceType::kXPU);
+  Buffer trellis(first.q, DType::kI8, {k / 16, n / 16, 32 * bits});
+  Buffer suh(first.q, DType::kF16, {groups, k}), svh(first.q, DType::kF16, {n});
+  Buffer map(first.q, DType::kI32, {n / 128});
+  trellis.upload(tr.data); suh.upload(su.data); svh.upload(f.Get("merged_svh").data);
+  map.upload(f.Get("source_map").data);
+  std::vector<unsigned char> baseline;
+  size_t capacity = vt::xpu::GetMemoryInfo().w8a8_workspace_bytes;
+  std::cout << "P2_SHARED_INITIAL retained_bytes=" << capacity << '\n';
+  for (const int width : {128, 1024, 2048, 1024, 128}) {
+    CAPTURE(width);
+    Buffer input(first.q, DType::kF16, {256, k}), out(first.q, DType::kF16, {256, n});
+    input.upload(f.Get("input_m256").data);
+    const auto p = vt::PlanExl3W8A8(256, k, n, groups, bits, width);
+    const vt::Exl3GroupedLinearArgs args{bits, 2, "P2_SHARED", width};
+    const auto start = std::chrono::steady_clock::now();
+    vt::Exl3GroupedW8A8(first.q, out.tensor, input.tensor, trellis.tensor, suh.tensor,
+                        svh.tensor, map.tensor, args);
+    const double elapsed = std::chrono::duration<double, std::milli>(
+        std::chrono::steady_clock::now() - start).count();
+    // The owned call itself has completed all consumers. A download or a
+    // second queue may now reuse the one pool, with no caller retirement fence.
+    const auto raw = out.download();
+    if (baseline.empty()) { baseline = raw; Accuracy(raw, f.Get("output_m256"), "shared128"); }
+    else xpu_test::SameBytes(raw, baseline);
+    capacity = std::max(capacity, p.workspace_bytes + p.weight_panel_bytes);
+    const auto info = vt::xpu::GetMemoryInfo();
+    CHECK(info.w8a8_workspace_bytes == capacity);
+    CHECK(info.allocated_bytes >= capacity);
+    std::cout << "P2_SHARED_OPERATOR width=" << width << " cold_or_reuse_ms=" << elapsed
+              << " retained_bytes=" << capacity << " device_peak_bytes="
+              << info.peak_allocated_bytes << '\n';
+  }
+  {
+    Buffer input(second.q, DType::kF16, {129, k}), out(second.q, DType::kF16, {129, n});
+    input.upload(f.Get("input_m129").data);
+    const vt::Exl3GroupedLinearArgs args{bits, 2, "P2_SECOND_QUEUE", 2048};
+    vt::Exl3GroupedW8A8(second.q, out.tensor, input.tensor, trellis.tensor, suh.tensor,
+                        svh.tensor, map.tensor, args);
+    const auto before = out.download();
+    Accuracy(before, f.Get("output_m129"), "shared_second_queue");
+    CHECK(vt::xpu::GetMemoryInfo().w8a8_workspace_bytes == capacity);
+    auto invalid = map.download(); const int32_t bad = groups;
+    std::memcpy(invalid.data(), &bad, sizeof(bad)); map.upload(invalid.data());
+    CHECK_THROWS_WITH_AS(vt::Exl3GroupedW8A8(second.q, out.tensor, input.tensor, trellis.tensor,
+        suh.tensor, svh.tensor, map.tensor, args), doctest::Contains("group out of range"),
+        std::runtime_error);
+    xpu_test::SameBytes(out.download(), before);
+    map.upload(f.Get("source_map").data);
+    // A rejected lease must leave the pool safe for a later valid consumer.
+    vt::Exl3GroupedW8A8(second.q, out.tensor, input.tensor, trellis.tensor, suh.tensor,
+                        svh.tensor, map.tensor, args);
+    xpu_test::SameBytes(out.download(), before);
+    auto& backend = vt::GetBackend(second.q.device);
+    if (backend.SupportsGraphCapture()) {
+      Buffer witness(second.q, DType::kI8, {64});
+      const auto memory_before = vt::xpu::GetMemoryInfo();
+      backend.BeginCapture(second.q);
+      backend.Memset(second.q, witness.tensor.data, 0, witness.bytes);
+      CHECK_THROWS_WITH_AS(vt::Exl3GroupedW8A8(second.q, out.tensor, input.tensor, trellis.tensor,
+          suh.tensor, svh.tensor, map.tensor, args), doctest::Contains("eager-only"), std::runtime_error);
+      void* graph = backend.EndCaptureGraph(second.q);
+      backend.DestroyGraph(graph);
+      xpu_test::SameBytes(out.download(), before);
+      const auto memory_after = vt::xpu::GetMemoryInfo();
+      CHECK(memory_after.w8a8_workspace_bytes == capacity);
+      CHECK(memory_after.graph_device_bytes == memory_before.graph_device_bytes);
+    }
   }
   CHECK(vt::GetReferenceTierHits() == 0);
 }
@@ -343,6 +424,10 @@ TEST_CASE("XPU EXL3 W8A8 model seam: grouped and single projection own scratch r
     d.b.Copy(d.q, raw.data(), out.t().data, raw.size()); d.b.Synchronize(d.q);
     Accuracy(raw, f.Get("output_m" + std::to_string(m)), "grouped_model_seam");
     CHECK(w.trellis.bytes.empty()); CHECK(w.suh.bytes.empty());
+    if (m > 128) {
+      const auto p = vt::PlanExl3W8A8(m, k, n, groups, bits);
+      CHECK(vt::xpu::GetMemoryInfo().w8a8_workspace_bytes >= p.workspace_bytes + p.weight_panel_bytes);
+    }
   }
   if (groups == 1) {
     vllm::Exl3Weight single; single.name = "model_seam_single"; single.codebook = 2;
@@ -354,6 +439,8 @@ TEST_CASE("XPU EXL3 W8A8 model seam: grouped and single projection own scratch r
     std::vector<unsigned char> raw(129 * n * 2);
     d.b.Copy(d.q, raw.data(), out.t().data, raw.size()); d.b.Synchronize(d.q);
     Accuracy(raw, f.Get("output_m129"), "single_model_seam");
+    const auto p = vt::PlanExl3W8A8(129, k, n, 1, bits);
+    CHECK(vt::xpu::GetMemoryInfo().w8a8_workspace_bytes >= p.workspace_bytes + p.weight_panel_bytes);
     // Exercise the projection's generated routing metadata under real XPU
     // capture. A per-call zero-filled map must fail backend preflight.
     Buffer decode_input(gpu.q, DType::kF16, {128, k});
@@ -389,5 +476,8 @@ TEST_CASE("XPU EXL3 W8A8 model seam: grouped and single projection own scratch r
     CHECK(all_zero);
     graph.Reset();
   }
+  const auto info = vt::xpu::GetMemoryInfo();
+  std::cout << "P2_MODEL_POOL retained_bytes=" << info.w8a8_workspace_bytes
+            << " device_peak_bytes=" << info.peak_allocated_bytes << '\n';
   CHECK(vt::GetReferenceTierHits() == 0);
 }

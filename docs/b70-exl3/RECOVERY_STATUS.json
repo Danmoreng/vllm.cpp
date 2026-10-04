@@ -1656,16 +1656,16 @@
     },
     {
       "task": "P2",
-      "status": "wider_GPU_operator_M256_bitexact_and_faster_model_integration_pending",
+      "status": "wider_M256_operator_and_completion_owned_shared_model_scratch_tested_actual_prefill_pending",
       "complete": false,
       "panel_geometry_implemented": true,
       "wider_GPU_kernel_implemented": true,
-      "shared_model_scratch_implemented": false,
+      "shared_model_scratch_implemented": true,
       "real_M256_M1600_M896_tested": false,
       "receipt": {
-        "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p2-wide-operator-v1/receipt-v1.json",
-        "bytes": 11746,
-        "sha256": "ecefea6e9febc241efdecade5e4a8c4a1d7ff775d2489016c0dc29bc6a8dc573"
+        "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p2-shared-scratch-v1/receipt-v1.json",
+        "bytes": 15843,
+        "sha256": "c4f306914be0025483689ba39262574789b378752964d88c3e6a1d095796e602"
       },
       "focused_cases": 3,
       "focused_assertions": 825,
@@ -1691,7 +1691,18 @@
         "2048": 18
       },
       "M256_rounded_intermediates_and_output_exact": true,
-      "model_gain_measured": false
+      "model_gain_measured": false,
+      "operator_receipt": {
+        "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p2-wide-operator-v1/receipt-v1.json",
+        "bytes": 11746,
+        "sha256": "ecefea6e9febc241efdecade5e4a8c4a1d7ff775d2489016c0dc29bc6a8dc573"
+      },
+      "shared_pool_assertions": 38,
+      "grouped_model_assertions": 21,
+      "selected6bpw_single_model_graph_assertions": 34,
+      "shared_tests_exit_each": 0,
+      "isolated_M256_max_shared_scratch_bytes": 30935104,
+      "shared_scope": "Two sequential queues, growth/reuse/error/recovery/capture refusal. Model128; selected6bpw first128 head block and existingSmallM graph exact. Budget-pressure injection, actualM1600/M896 and completeprefill pending."
     },
     {
       "task": "P3",
@@ -1720,5 +1731,5 @@
     }
   ],
   "performance_baseline": "7536aededc049b2157f12eadb0f4cc6bbf29b7b7",
-  "performance_next": "P2 completion-owned shared model scratch for grouped/single wrappers, actualM1600/M896 original fixtures and intermediate/tail/non-monotonic/6bpw proof, then complete unprofiled P4096 prefill and measured model submissions/combined memory. Wider operator retained as internal128/1024/2048 A/B; model remains128. P1 verifier qualification follows."
+  "performance_next": "P2 actualM1600/M896 original producer/operator fixtures, wider functional non-monotonic128-tail and reachable larger6bpw checks, then model A/B selection and complete unprofiled P4096 prefill with actual submissions/combined memory. Shared pool now integrated in grouped/single wrappers with completion fence, model128 retained until promotion. Focused pool budget-growth refusal proof still pending. P1 native verifier qualification follows."
 }
