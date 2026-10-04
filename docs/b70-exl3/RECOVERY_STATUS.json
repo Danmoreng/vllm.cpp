@@ -2041,8 +2041,34 @@
     },
     {
       "task": "P6",
-      "status": "pending",
-      "complete": false
+      "status": "complete_bounded_actual_donor_comparison",
+      "complete": true,
+      "accepted_product_optimization": false,
+      "real_weight_families": 13,
+      "actual_shapes": 27,
+      "final_assertions_each": 1074,
+      "actual_exit_each": 0,
+      "packed_scales_maps_and_whole_FP32_parts_exact": true,
+      "comparison_band_percent": 10,
+      "weighted_core_ms": {
+        "C1": {
+          "original": 29.331391,
+          "native": 30.036958
+        },
+        "C4": {
+          "original": 29.129163,
+          "native": 29.121912
+        }
+      },
+      "generated_kernel_variants": 8,
+      "normalized_instruction_sequences_equal": 7,
+      "actual_GRF": 128,
+      "receipt": {
+        "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p6-smallm-donor-v1/receipt-v1.json",
+        "bytes": 184672,
+        "sha256": "c6fc43f836f4350f1b7312c9fd10ce48f62c533b41f200691bf4285e68d02544"
+      },
+      "remaining": "Operator proofs on synthetic same inputs/real representative weights, not model state/serving parity. FA-outM4 core+20.62% isolated gap with identical DPAS ISA, cause not proved; overall weighted package within band. Original whole-worker CPU throttle and profile noise retained. No justified product variant; proceed P7."
     },
     {
       "task": "P7",
@@ -2051,5 +2077,5 @@
     }
   ],
   "performance_baseline": "7536aededc049b2157f12eadb0f4cc6bbf29b7b7",
-  "performance_next": "P6 actual donor/native SmallM comparison on weighted real different projections at M4/C1 and M16/C4 verification plus M1/M4 draft/head. Verify packed/scales/map/partition/launch/compiler/mutable tuning identities; direct GPU and complete operator with Hadamard/reduction before changing kernel. P5 two runnable register variants rejected and product restored exactly; no further geometry sweep. P1 original/full-state/default admission and P7 refreshed final quality/lifecycle/matrix remain open."
+  "performance_next": "P7 refresh current primary C1/C4 P4096/O1024 MTP3 original/native three unprofiled repeats each, timeline separately, then bounded practical/default/controlled/draft/lifecycle and remaining matrix. P6 weighted actual SmallM within10% band, no donor kernel rewrite. P1 full-state/default admission and default D64 four failures remain open; P5 geometry package rejected."
 }
