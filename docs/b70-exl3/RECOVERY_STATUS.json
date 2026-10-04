@@ -1875,8 +1875,59 @@
     },
     {
       "task": "P3",
-      "status": "pending",
-      "complete": false
+      "status": "complete_bounded_typed_FP16_SiLU_package",
+      "complete": true,
+      "variant": "Typed contiguous F16 input/output, M>=64/local256; old small-row route retained. VT_XPU_SILU_FP16_TYPED=0 selects prior generic expression. Optional finite-domain table not implemented.",
+      "receipt": {
+        "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p3-silu-typed-v1/receipt-v1.json",
+        "bytes": 57445,
+        "sha256": "84bf7cc1dbb718b5b333780c9670d7ba516d5bce9f88ea215695891ea6545f05"
+      },
+      "exhaustive_assertions": 5792,
+      "gate_patterns": 65536,
+      "up_patterns": 10,
+      "finite_inf_signed_zero_exact": true,
+      "nan_classification_exact": true,
+      "nan_payload_differences": 2047,
+      "actual_graph_captures": 1,
+      "fresh_input_graph_replays": 3,
+      "retired_graph_bytes": 0,
+      "real_MLP20_assertions": 42,
+      "real_MLP20_five_original_stages_exact": true,
+      "real_GDN21_assertions_each": 230,
+      "real_GDN21_observed_original_stages_exact": 15,
+      "real_GDN21_original_state_spans_exact": 6,
+      "real_GDN21_missing_original_stage": "D1 core output not exported; no invented observation",
+      "complete_operator_median_ms": {
+        "4": {
+          "generic": 0.0418,
+          "typed": 0.04177
+        },
+        "128": {
+          "generic": 0.605799,
+          "typed": 0.475109
+        },
+        "896": {
+          "generic": 1.822686,
+          "typed": 1.440017
+        },
+        "1600": {
+          "generic": 3.247753,
+          "typed": 2.556635
+        }
+      },
+      "full_C1_assertions_each": 1895,
+      "full_C1_all_1024_ids_and_371_non_timing_cycles_exact": true,
+      "full_C1_ttft_ms": {
+        "generic": 3432.387579,
+        "typed": 3308.578233
+      },
+      "full_C1_decode_tps": {
+        "generic": 45.898166566428834,
+        "typed": 45.56900289441536
+      },
+      "full_C1_backend_peak_bytes": 30294553923,
+      "remaining_qualification": "Three warm isolated operator samples and one full C1 trial per arm: TTFT -3.607%; no decode/E2E gain claim. NaN payloads are not bit-exact when both operands are NaN; finite/Inf/signed-zero bits and NaN classification exact. Selected controlled original MLP/GDN21 proof, not full-all-layer/current-Python/D64/P7 promotion."
     },
     {
       "task": "P4",
@@ -1900,5 +1951,5 @@
     }
   ],
   "performance_baseline": "7536aededc049b2157f12eadb0f4cc6bbf29b7b7",
-  "performance_next": "Independent P3 typed contiguous exact FP16 SiLU (then optional owned finite-domain table only if needed), smallest exhaustive arithmetic/alias/stride and real MLP/GDN21 checks plus operator/model gain. P1 bounded implementation and C1/C4 actual serving gain measured; auto/default promotion/original fullstate gates remainopen. P2 boundedcomplete, P4/P5/P6 afterrefreshed costs, P7 finalmatrix pending."
+  "performance_next": "P4 focused real M1600 W8A8 row-validator profile and one geometry variant, then at most one bounded private transform reuse variant if needed. Preserve overflow midpoint65520, both FP16 boundaries, nonfinite guards/error priority/no-partial-result contracts. P3 typed bounded package complete with exact native C1 tokens/cycles and measured TTFT reduction; optional table deferred. P1 default/original/full-state admission remains open, P2 complete; P5/P6 and final P7 matrix pending."
 }

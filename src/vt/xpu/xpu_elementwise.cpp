@@ -1,6 +1,8 @@
 #include "xpu_common.h"
 #include "xpu_kernels.h"
 #include <sycl/ext/intel/math.hpp>
+#include <cstdlib>
+#include <string_view>
 
 namespace vt::xpu {
 void TraceXpuOp(OpId op, Queue& q, std::initializer_list<const Tensor*> tensors) {
@@ -76,6 +78,30 @@ void SiluAndMulKernel(Queue& q, Tensor& out, const Tensor& in) {
   WithOutput(q, out, {&in}, [&](Tensor& target) {
     const View dst(target), src(in);
     const auto width = out.shape[1];
+    const char* typed = std::getenv("VT_XPU_SILU_FP16_TYPED");
+    if (target.dtype == DType::kF16 && in.dtype == DType::kF16 &&
+        target.IsContiguous() && in.IsContiguous() && out.shape[0] >= 64 &&
+        width > 0 && (typed == nullptr || std::string_view(typed) != "0")) {
+      const auto* input = static_cast<const sycl::half*>(in.data);
+      auto* output = static_cast<sycl::half*>(target.data);
+      constexpr size_t local = 256;
+      const size_t columns = (size_t(width) + local - 1) / local * local;
+      const auto event = NativeQueue(q).parallel_for(
+          sycl::nd_range<2>(sycl::range<2>(size_t(out.shape[0]), columns),
+                            sycl::range<2>(1, local)),
+          [=](sycl::nd_item<2> item) {
+        const int64_t row = item.get_global_id(0), col = item.get_global_id(1);
+        if (col >= width) return;
+        const int64_t offset = row * (2 * width) + col;
+        const float gate = static_cast<float>(input[offset]);
+        const float denominator = 1.0f + sycl::exp(-gate);
+        const float silu = sycl::ext::intel::math::fdiv_rn(gate, denominator);
+        const float rounded = static_cast<float>(sycl::half(silu));
+        output[row * width + col] = sycl::half(rounded * static_cast<float>(input[offset + width]));
+      });
+      RecordProfileEvent(q, "silu_and_mul_fp16_typed", event);
+      return;
+    }
     const auto event = NativeQueue(q).parallel_for(sycl::range<1>(out.Numel()), [=](sycl::id<1> item) {
       const auto i = item[0]; const auto off = (i / width) * src.stride[0] + i % width;
       const float gate = Load(src, off);
