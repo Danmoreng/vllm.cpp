@@ -1,5 +1,6 @@
 // vllm.cpp original (vt runtime, inventory deviation §9.1); no upstream mirror.
 #include "vt/ops.h"
+#include "vt/gdn_fp16_plan.h"
 #include "vt/recipes.h"
 #include "vt/paged_attn_route.h"  // W10 repair (#1865): the uniform-spec shape guard
 
@@ -9,6 +10,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <memory>
 #include <vector>
 
 // CheckConvCommon asks the BACKEND whether it can address a compressed
@@ -2612,7 +2614,7 @@ void GdnPrefillRawGate(Queue& q, Tensor& out, const Tensor& qi, const Tensor& k,
                a_log.rank == 1 && dt_bias.rank == 1,
            "gdn_prefill_raw_gate: invalid tensor ranks");
   const int64_t t = qi.shape[0], hk = qi.shape[1], d = qi.shape[2], hv = v.shape[1];
-  VT_CHECK(t == 128 && hk == 16 && hv == 48 && d == 128 &&
+  VT_CHECK(t >= 1 && t <= kGdnFp16MaxTokens && hk == 16 && hv == 48 && d == 128 &&
                k.shape[0] == t && k.shape[1] == hk && k.shape[2] == d &&
                v.shape[0] == t && v.shape[2] == d &&
                out.shape[0] == t && out.shape[1] == hv && out.shape[2] == d &&
@@ -2621,7 +2623,7 @@ void GdnPrefillRawGate(Queue& q, Tensor& out, const Tensor& qi, const Tensor& k,
                a_log.shape[0] == hv && dt_bias.shape[0] == hv &&
                state.shape[0] == 1 && state.shape[1] == hv &&
                state.shape[2] == d && state.shape[3] == d,
-           "gdn_prefill_raw_gate: qualified geometry is P128/Hk16/Hv48/D128, one sequence");
+           "gdn_prefill_raw_gate: requires T1-4096/Hk16/Hv48/D128, one sequence");
   VT_CHECK(args.scale == 1.0f,
            "gdn_prefill_raw_gate: q must already include the normalization scale");
   for (const Tensor* tensor : std::initializer_list<const Tensor*>{&qi, &k, &v, &out, &raw_a}) {
@@ -5390,11 +5392,16 @@ void PagedAttention(Queue& q, Tensor& out, const Tensor& query, const Tensor& k_
   VT_CHECK(query_start_loc.rank == 1 && query_start_loc.shape[0] == num_reqs + 1 &&
                query_start_loc.dtype == DType::kI32,
            "paged_attention: query_start_loc must be i32 [num_reqs+1]");
-  // query/out contiguous; seq_lens/query_start_loc contiguous. The cache and
+  // Query and metadata are contiguous. XPU may materialize a nonoverlapping
+  // row/head-strided destination below, followed by an explicit native copy.
+  // The cache and
   // block_table are read via strides (the cache is the strided NHD unbind slice),
   // but the per-token page must be head-contiguous (elem stride 1, head stride
   // head_size) — same guarantee reshape_and_cache relies on.
-  VT_CHECK(query.IsContiguous() && out.IsContiguous() && seq_lens.IsContiguous() &&
+  const bool strided_xpu_out = q.device.type == DeviceType::kXPU &&
+      out.stride[2] == 1 && out.stride[1] >= head_size_v &&
+      out.stride[0] >= hq * out.stride[1];
+  VT_CHECK(query.IsContiguous() && (out.IsContiguous() || strided_xpu_out) && seq_lens.IsContiguous() &&
                query_start_loc.IsContiguous(),
            "paged_attention: query/out/seq_lens/query_start_loc must be contiguous");
   VT_CHECK(k_cache.stride[3] == 1 && v_cache.stride[3] == 1,
@@ -5420,8 +5427,20 @@ void PagedAttention(Queue& q, Tensor& out, const Tensor& query, const Tensor& k_
   // behind, so the runner→model→args threading is observable on a CPU box.
   if (PagedAttnUniformSpecShape(num_tokens, num_reqs, args.uniform_spec_query_len))
     detail::PagedAttnSpecClassified().fetch_add(1, std::memory_order_relaxed);
-  reinterpret_cast<PagedAttentionFn>(GetOp(OpId::kPagedAttention, q.device.type))(
-      q, out, query, k_cache, v_cache, block_table, seq_lens, query_start_loc, args);
+  const auto execute = reinterpret_cast<PagedAttentionFn>(GetOp(OpId::kPagedAttention, q.device.type));
+  if (!out.IsContiguous()) {
+    auto temp = Tensor::Contiguous(nullptr, out.dtype, out.device, {num_tokens, hq, head_size_v});
+    const auto retire = [device = q.device](void* p) {
+      try { vt::Free(device, p); } catch (...) { /* backend retains failed-wait allocation */ }
+    };
+    std::unique_ptr<void, decltype(retire)> storage(vt::Alloc(q.device, temp.Bytes()), retire);
+    temp.data = storage.get();
+    execute(q, temp, query, k_cache, v_cache, block_table, seq_lens, query_start_loc, args);
+    vt::Copy(q, out, temp);
+    GetBackend(q.device).Synchronize(q);
+  } else {
+    execute(q, out, query, k_cache, v_cache, block_table, seq_lens, query_start_loc, args);
+  }
 }
 
 uint64_t PagedAttnSpecClassifiedCount() {
@@ -5459,6 +5478,21 @@ void GreedyArgmax(Queue& q, Tensor& token_ids, const Tensor& logits) {
            "greedy_argmax: token_ids must be i64 [num_reqs] contiguous on the queue device");
   reinterpret_cast<GreedyArgmaxFn>(GetOp(OpId::kGreedyArgmax, q.device.type))(q, token_ids,
                                                                               logits);
+}
+
+void MappedGreedyArgmax(Queue& q, Tensor& token_ids, const Tensor& logits,
+                        const Tensor& global_ids, int64_t target_vocab) {
+  const int64_t rows = CheckSamplingLogits(q, logits, "mapped_greedy_argmax");
+  VT_CHECK(target_vocab > 0 && target_vocab <= INT32_MAX &&
+               global_ids.rank == 1 && global_ids.shape[0] == logits.shape[1] &&
+               global_ids.dtype == DType::kI32 && global_ids.IsContiguous() &&
+               global_ids.device == q.device &&
+               token_ids.rank == 1 && token_ids.shape[0] == rows &&
+               token_ids.dtype == DType::kI32 && token_ids.IsContiguous() &&
+               token_ids.device == q.device,
+           "mapped_greedy_argmax: expected I32 output rows, I32 column map and valid target vocabulary");
+  reinterpret_cast<MappedGreedyArgmaxFn>(GetOp(OpId::kMappedGreedyArgmax, q.device.type))(
+      q, token_ids, logits, global_ids, target_vocab);
 }
 
 void ApplyTopKTopP(Queue& q, Tensor& logits, const Tensor* k, const Tensor* p) {

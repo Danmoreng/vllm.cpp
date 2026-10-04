@@ -469,6 +469,53 @@ void GreedyArgmaxKernel(Queue& q, Tensor& token_ids, const Tensor& logits) {
   });
   RecordProfileEvent(q, "greedy_argmax", event);
 }
+void MappedGreedyArgmaxKernel(Queue& q, Tensor& token_ids, const Tensor& logits,
+                              const Tensor& global_ids, int64_t target_vocab) {
+  TraceXpuOp(OpId::kMappedGreedyArgmax, q, {&token_ids, &logits, &global_ids});
+  const auto rows = static_cast<size_t>(logits.shape[0]);
+  if (rows == 0) return;
+  const int64_t columns = logits.shape[1];
+  const auto* values = static_cast<const float*>(logits.data);
+  const auto* mapping = static_cast<const int32_t*>(global_ids.data);
+  auto* output = static_cast<int32_t*>(token_ids.data);
+  constexpr size_t lanes = 128;
+  const auto event = NativeQueue(q).submit([&](sycl::handler& h) {
+    sycl::local_accessor<float> best_values(lanes, h);
+    sycl::local_accessor<int32_t> best_ids(lanes, h);
+    sycl::local_accessor<int> invalid(lanes, h);
+    h.parallel_for(sycl::nd_range<1>(rows * lanes, lanes), [=](sycl::nd_item<1> item) {
+      const auto row = item.get_group(0), lane = item.get_local_id(0);
+      float value = -std::numeric_limits<float>::infinity();
+      int32_t id = std::numeric_limits<int32_t>::max();
+      int bad = 0;
+      for (int64_t column = lane; column < columns; column += lanes) {
+        const float candidate = values[row * columns + column];
+        const int32_t global = mapping[column];
+        bad |= !sycl::isfinite(candidate) || global < 0 || global >= target_vocab;
+        if (candidate > value || (candidate == value && global < id)) {
+          value = candidate; id = global;
+        }
+      }
+      best_values[lane] = value; best_ids[lane] = id; invalid[lane] = bad;
+      item.barrier(sycl::access::fence_space::local_space);
+      for (size_t step = lanes / 2; step; step /= 2) {
+        if (lane < step) {
+          const float candidate = best_values[lane + step];
+          const int32_t global = best_ids[lane + step];
+          if (candidate > best_values[lane] ||
+              (candidate == best_values[lane] && global < best_ids[lane])) {
+            best_values[lane] = candidate; best_ids[lane] = global;
+          }
+          invalid[lane] |= invalid[lane + step];
+        }
+        item.barrier(sycl::access::fence_space::local_space);
+      }
+      if (lane == 0) output[row] = invalid[0] ? -1 : best_ids[0];
+    });
+  });
+  RecordProfileEvent(q, "mapped_greedy_argmax", event);
+}
+
 void GreedyRejectionSampleKernel(Queue& q, Tensor& sampled,
                                  Tensor& num_sampled, Tensor& target_argmax,
                                  const Tensor& logits,

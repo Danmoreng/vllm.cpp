@@ -19,6 +19,7 @@ struct Registrar {
     XPU_OP(kMatmulBT, MatmulFn, MatmulBTKernel);
     XPU_OP(kRmsNorm, RmsNormFn, RmsNormKernel);
     XPU_OP(kGreedyArgmax, GreedyArgmaxFn, GreedyArgmaxKernel);
+    XPU_OP(kMappedGreedyArgmax, MappedGreedyArgmaxFn, MappedGreedyArgmaxKernel);
     XPU_OP(kGreedyRejectionSample, GreedyRejectionSampleFn,
            GreedyRejectionSampleKernel);
     XPU_OP(kApplyTopKTopP, ApplyTopKTopPFn, ApplyTopKTopPKernel);
@@ -34,6 +35,7 @@ struct Registrar {
     XPU_OP(kExl3HadR128, Exl3HadR128Fn, Exl3HadR128Kernel);
     XPU_OP(kExl3Gemm, Exl3GemmFn, Exl3GemmKernel);
     XPU_OP(kExl3GroupedLinear, Exl3GroupedLinearFn, Exl3GroupedLinearKernel);
+    XPU_OP(kExl3GroupedW8A8, Exl3GroupedLinearFn, Exl3GroupedW8A8Kernel);
     XPU_OP(kCausalConv1dFwd, CausalConv1dFwdFn, CausalConv1dFwdKernel);
     XPU_OP(kCausalConv1dUpdate, CausalConv1dUpdateFn, CausalConv1dUpdateKernel);
     XPU_OP(kCausalConv1dSpecUpdate, CausalConv1dSpecUpdateFn, CausalConv1dSpecUpdateKernel);

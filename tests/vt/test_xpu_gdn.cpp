@@ -213,6 +213,87 @@ TEST_CASE("XPU speculative conv supports GPTQ FP16 persistent state") {
   CHECK(vt::xpu::GetMemoryInfo().allocated_bytes == 0);
 }
 
+TEST_CASE("XPU speculative conv R07 shortened verification retires rejected history") {
+  Queue gpu(vt::DeviceType::kXPU);
+  constexpr int channels = 10240, width = 3, slot = 1;
+  for (int k : {1, 3}) for (int committed = 1; committed <= k + 1; ++committed) {
+    CAPTURE(k);
+    CAPTURE(committed);  // anchor plus accepted draft count 0..k
+    const int count = k + 1, state_len = width + k, rows = count + 2;
+    Buffer input(gpu.q, DType::kF16, {rows, channels});
+    Buffer weights(gpu.q, DType::kF16, {channels, width + 1});
+    Buffer cache(gpu.q, DType::kF16, {3, channels, state_len});
+    Buffer serial(gpu.q, DType::kF16, {1, channels, width});
+    Buffer verify(gpu.q, DType::kF16, {count, channels});
+    Buffer next(gpu.q, DType::kF16, {1, channels});
+    Buffer expected(gpu.q, DType::kF16, {1, channels});
+    Buffer qsl(gpu.q, DType::kI32, {2}), index(gpu.q, DType::kI32, {1});
+    Buffer accepted(gpu.q, DType::kI32, {1});
+    input.put(Values(rows * channels, 73, .01f));
+    weights.put(Values(channels * (width + 1), 74, .02f));
+    const auto history = Values(channels * width, 75, .01f);
+    std::vector<float> initial(3 * channels * state_len, .125f);
+    for (int c = 0; c < channels; ++c) for (int j = 0; j < width; ++j)
+      initial[(slot * channels + c) * state_len + j] = history[c * width + j];
+    cache.put(initial); serial.put(history);
+    const auto initial_bytes = cache.download();
+    int32_t offsets[] = {0, count}, nat = 1, idx = slot;
+    qsl.upload(offsets); accepted.upload(&nat); index.upload(&idx);
+    auto provisional = Rows(input.tensor, 0, count);
+    vt::CausalConv1dSpecUpdate(gpu.q, verify.tensor, provisional, weights.tensor,
+        nullptr, cache.tensor, index.tensor, accepted.tensor, qsl.tensor, {true});
+    // Independent one-token recurrence consumes only the valid prefix.
+    for (int row = 0; row < committed; ++row) {
+      auto token = Rows(input.tensor, row, 1);
+      vt::CausalConv1dUpdate(gpu.q, expected.tensor, token, weights.tensor,
+                            nullptr, serial.tensor, {true});
+    }
+    const auto before_short = cache.download();
+    // A shortened provisional step must append its anchor after the two valid
+    // history elements, even though the physical cache retains k spare taps.
+    offsets[1] = 1; nat = committed;
+    qsl.upload(offsets); accepted.upload(&nat);
+    auto anchor = Rows(input.tensor, count, 1);
+    vt::CausalConv1dSpecUpdate(gpu.q, next.tensor, anchor, weights.tensor,
+        nullptr, cache.tensor, index.tensor, accepted.tensor, qsl.tensor, {true});
+    vt::CausalConv1dUpdate(gpu.q, expected.tensor, anchor, weights.tensor,
+                          nullptr, serial.tensor, {true});
+    SameBytes(next.download(), expected.download());
+    const auto state = cache.download(), serial_state = serial.download();
+    bool spare_unchanged = true;
+    for (int c = 0; c < channels; ++c) {
+      const size_t base = static_cast<size_t>((slot * channels + c) * state_len) * 2;
+      const size_t serial_base = static_cast<size_t>(c * width) * 2;
+      spare_unchanged &= std::memcmp(state.data() + base + width * 2,
+                                    before_short.data() + base + width * 2,
+                                    (state_len - width) * 2) == 0;
+      if (std::memcmp(state.data() + base, serial_state.data() + serial_base, width * 2)) {
+        CAPTURE(c);
+        FAIL_CHECK("shortened step left a rejected token in valid Conv history");
+        break;
+      }
+    }
+    CHECK(spare_unchanged);
+    // Read again after the shortened step, which exposes latent stale history.
+    nat = 1; accepted.upload(&nat);
+    auto following = Rows(input.tensor, count + 1, 1);
+    vt::CausalConv1dSpecUpdate(gpu.q, next.tensor, following, weights.tensor,
+        nullptr, cache.tensor, index.tensor, accepted.tensor, qsl.tensor, {true});
+    vt::CausalConv1dUpdate(gpu.q, expected.tensor, following, weights.tensor,
+                          nullptr, serial.tensor, {true});
+    SameBytes(next.download(), expected.download());
+    const auto final_bytes = cache.download();
+    const size_t page_bytes = channels * state_len * 2;
+    for (int inactive : {0, 2})
+      SameBytes(std::vector<unsigned char>(final_bytes.begin() + inactive * page_bytes,
+                                         final_bytes.begin() + (inactive + 1) * page_bytes),
+                std::vector<unsigned char>(initial_bytes.begin() + inactive * page_bytes,
+                                         initial_bytes.begin() + (inactive + 1) * page_bytes));
+  }
+  CHECK(vt::GetReferenceTierHits() == 0);
+  CHECK(vt::xpu::GetMemoryInfo().allocated_bytes == 0);
+}
+
 TEST_CASE("XPU speculative GDN snapshots match CPU for every accepted prefix") {
   Queue cpu(vt::DeviceType::kCPU), gpu(vt::DeviceType::kXPU);
   constexpr int tokens = 5, hk = 2, hv = 4, dk = 8, dv = 8;
@@ -330,9 +411,9 @@ TEST_CASE("XPU speculative GDN MTP1 uses 27B FP16 activations and FP32 snapshots
   }
 }
 
-TEST_CASE("XPU speculative GDN MTP4 restores every accepted 27B snapshot") {
+static void CheckSpecSnapshotRollback(int first_rows) {
   Queue cpu(vt::DeviceType::kCPU), gpu(vt::DeviceType::kXPU);
-  constexpr int rows = 6, first_rows = 5;
+  const int rows = first_rows + 1;
   constexpr int hk = 16, hv = 48, dk = 128, dv = 128;
   constexpr float scale = 0.0883883476f;
   const auto q_values = Values(rows * hk * dk, 21, 0.01f);
@@ -343,7 +424,7 @@ TEST_CASE("XPU speculative GDN MTP4 restores every accepted 27B snapshot") {
   for (auto& x : g_values) x -= 0.2f;
   for (auto& x : b_values) x += 0.5f;
   const auto initial_row = Values(hv * dv * dk, 26, 0.002f);
-  std::vector<float> initial(first_rows * hv * dv * dk, 0.0f);
+  std::vector<float> initial((first_rows + 1) * hv * dv * dk, 0.125f);
   std::copy(initial_row.begin(), initial_row.end(), initial.begin());
   const int32_t slots[] = {0, 1, 2, 3, 4};
 
@@ -357,13 +438,14 @@ TEST_CASE("XPU speculative GDN MTP4 restores every accepted 27B snapshot") {
     Buffer bg(gpu.q, DType::kF32, {rows, hv});
     Buffer og(gpu.q, DType::kF16, {first_rows, hv, dv});
     Buffer last_gpu(gpu.q, DType::kF16, {1, hv, dv});
-    Buffer sg(gpu.q, DType::kF32, {first_rows, hv, dv, dk});
+    Buffer sg(gpu.q, DType::kF32, {first_rows + 1, hv, dv, dk});
     Buffer cu(gpu.q, DType::kI32, {2});
     Buffer idx(gpu.q, DType::kI32, {1, first_rows});
     Buffer nat(gpu.q, DType::kI32, {1});
     qg.put(q_values); kg.put(k_values); vg.put(v_values);
     gg.put(g_values); bg.put(b_values); sg.put(initial);
     idx.upload(slots);
+    const auto initial_bytes = sg.download();
     int32_t offsets[] = {0, first_rows};
     int32_t accepted = 1;
     cu.upload(offsets); nat.upload(&accepted);
@@ -413,9 +495,24 @@ TEST_CASE("XPU speculative GDN MTP4 restores every accepted 27B snapshot") {
     Close(std::vector<float>(gpu_state.begin(),
                              gpu_state.begin() + hv * dv * dk),
           sc.floats(), 1e-4f, 1e-5f);
+    const auto final_bytes = sg.download();
+    const size_t inactive = static_cast<size_t>(first_rows) * hv * dv * dk * sizeof(float);
+    SameBytes(std::vector<unsigned char>(final_bytes.begin() + inactive, final_bytes.end()),
+              std::vector<unsigned char>(initial_bytes.begin() + inactive, initial_bytes.end()));
   }
   CHECK(vt::GetReferenceTierHits() == 0);
   CHECK(vt::xpu::GetMemoryInfo().allocated_bytes == 0);
+}
+
+TEST_CASE("XPU speculative GDN MTP4 restores every accepted 27B snapshot") {
+  CheckSpecSnapshotRollback(5);
+}
+
+TEST_CASE("XPU speculative GDN R07 fixed MTP1/MTP3 commits every prefix") {
+  for (int rows : {2, 4}) {
+    CAPTURE(rows);
+    CheckSpecSnapshotRollback(rows);
+  }
 }
 
 TEST_CASE("XPU conv full prefill and in-place prefill equal split prefill plus decode") {
@@ -461,7 +558,7 @@ TEST_CASE("XPU GDN post-conv and gated RMSNorm: actual heads, strided gates, one
       conv.put(Values(t * channels)); a.put(Values(t * (hv + 3), 7, 2)); b.put(Values(t * (hv + 3), 3));
       al.put(Values(hv, 3)); dt.put(Values(hv, 9)); a.tensor.shape[1] = b.tensor.shape[1] = hv;
       vt::GdnPostConv(*q, qo.tensor, ko.tensor, vo.tensor, go.tensor, bo.tensor, conv.tensor,
-                      a.tensor, b.tensor, al.tensor, dt.tensor, {1e-6f});
+                      a.tensor, b.tensor, al.tensor, dt.tensor, {1e-6f, false});
       std::vector<std::vector<float>> actual{qo.floats(), ko.floats(), vo.floats(), go.floats(), bo.floats()};
       Buffer gate(*q, dtype, {t, hv + 1, dv}), weight(*q, dtype, {dv});
       Buffer out(*q, dtype, {t, hv, dv}); gate.put(Values(t * (hv + 1) * dv, 3)); weight.put(Values(dv, 5));
@@ -499,7 +596,7 @@ TEST_CASE("XPU GDN post-conv subgroup: FP16 matches native scalar") {
     const auto run = [&] {
       vt::GdnPostConv(gpu.q, qo.tensor, ko.tensor, vo.tensor, go.tensor,
                       bo.tensor, conv.tensor, a.tensor, b.tensor, al.tensor,
-                      dt.tensor, {1e-6f});
+                      dt.tensor, {1e-6f, false});
       vt::GetBackend(gpu.q.device).Synchronize(gpu.q);
     };
     setenv("VT_XPU_GDN_POSTCONV_SUBGROUP", "0", 1);

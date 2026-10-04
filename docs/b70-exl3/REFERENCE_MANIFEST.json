@@ -17924,10 +17924,11 @@
           "current_identity_status": "Changed by model FP16 RoPE/normalization wiring; original hash and preserved snapshots retained."
         },
         {
-          "status": "verified",
+          "status": "historical_observation",
           "path": "/home/sebastian/LocalLLM/vllm.cpp/tests/vllm/models/test_xpu_qwen_exl3_fp16.cpp",
           "bytes": 71066,
-          "sha256": "14c957a702f9b23ac2b8fb7d5a27638668e10cffe5d20fb5ebd892338363c6bc"
+          "sha256": "14c957a702f9b23ac2b8fb7d5a27638668e10cffe5d20fb5ebd892338363c6bc",
+          "current_identity_status": "Changed by scoped D5120 Gemma reduction/root and alias qualification. Original recorded identity retained; frozen references and preserved snapshots unchanged."
         },
         {
           "status": "historical_observation",
@@ -18182,10 +18183,11 @@
           "current_identity_status": "Changed by the source-matched mean/observer checkpoint; historical identity retained. Preserved snapshots and receipts remain unchanged."
         },
         {
-          "status": "verified",
+          "status": "historical_observation",
           "path": "/home/sebastian/LocalLLM/vllm.cpp/tests/vllm/models/test_xpu_qwen_exl3_fp16.cpp",
           "bytes": 71066,
-          "sha256": "14c957a702f9b23ac2b8fb7d5a27638668e10cffe5d20fb5ebd892338363c6bc"
+          "sha256": "14c957a702f9b23ac2b8fb7d5a27638668e10cffe5d20fb5ebd892338363c6bc",
+          "current_identity_status": "Changed by scoped D5120 Gemma reduction/root and alias qualification. Original recorded identity retained; frozen references and preserved snapshots unchanged."
         },
         {
           "status": "historical_observation",
@@ -19063,10 +19065,11 @@
           "current_identity_status": "Changed by scoped standalone Q/K norm/shared helper wiring; historical identity retained. Preserved snapshots and reference receipts remain unchanged."
         },
         {
-          "status": "verified",
+          "status": "historical_observation",
           "path": "/home/sebastian/LocalLLM/vllm.cpp/tests/vllm/models/test_xpu_qwen_exl3_fp16.cpp",
           "bytes": 71066,
-          "sha256": "14c957a702f9b23ac2b8fb7d5a27638668e10cffe5d20fb5ebd892338363c6bc"
+          "sha256": "14c957a702f9b23ac2b8fb7d5a27638668e10cffe5d20fb5ebd892338363c6bc",
+          "current_identity_status": "Changed by scoped D5120 Gemma reduction/root and alias qualification. Original recorded identity retained; frozen references and preserved snapshots unchanged."
         },
         {
           "status": "historical_observation",
@@ -21423,10 +21426,11 @@
           "sha256": "da17bac91f88ae02695d839640e01d705beb24ba38fd13c796f0412d77bd3fa9"
         },
         {
-          "status": "verified",
+          "status": "historical_observation",
           "path": "/home/sebastian/LocalLLM/vllm.cpp/src/vt/xpu/xpu_norm.cpp",
           "bytes": 6373,
-          "sha256": "a101c3deb7a5d31171bab60c957f89172122b99755b8fed3b180aed490e4ecc1"
+          "sha256": "a101c3deb7a5d31171bab60c957f89172122b99755b8fed3b180aed490e4ecc1",
+          "current_identity_status": "Changed by scoped D5120 Gemma reduction/root and alias qualification. Original recorded identity retained; frozen references and preserved snapshots unchanged."
         },
         {
           "status": "verified",
@@ -21441,16 +21445,18 @@
           "sha256": "e8d9a6e6ec91a03caf3ef590f55d924e6c00d0bfae33aa5cbd54e8341c93857d"
         },
         {
-          "status": "verified",
+          "status": "historical_observation",
           "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/engine-build/tests/test_xpu_qwen_exl3_fp16",
           "bytes": 32551440,
-          "sha256": "efd6928c2f43383032ac9c2a03f725c755321abc0f4b76fe690545a6938b36b8"
+          "sha256": "efd6928c2f43383032ac9c2a03f725c755321abc0f4b76fe690545a6938b36b8",
+          "current_identity_status": "Changed by scoped D5120 Gemma reduction/root and alias qualification. Original recorded identity retained; frozen references and preserved snapshots unchanged."
         },
         {
-          "status": "verified",
+          "status": "historical_observation",
           "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/engine-build/tests/test_xpu_ops",
           "bytes": 32326000,
-          "sha256": "a7374ef53659b0e9caa3b8908c228133910cff3e6f86b74dc13939dca591b81d"
+          "sha256": "a7374ef53659b0e9caa3b8908c228133910cff3e6f86b74dc13939dca591b81d",
+          "current_identity_status": "Changed by scoped D5120 Gemma reduction/root and alias qualification. Original recorded identity retained; frozen references and preserved snapshots unchanged."
         }
       ],
       "preserved_source_snapshots": [
@@ -22189,10 +22195,11 @@
           "sha256": "da17bac91f88ae02695d839640e01d705beb24ba38fd13c796f0412d77bd3fa9"
         },
         {
-          "status": "verified",
+          "status": "historical_observation",
           "path": "/home/sebastian/LocalLLM/vllm.cpp/src/vt/xpu/xpu_norm.cpp",
           "bytes": 6373,
-          "sha256": "a101c3deb7a5d31171bab60c957f89172122b99755b8fed3b180aed490e4ecc1"
+          "sha256": "a101c3deb7a5d31171bab60c957f89172122b99755b8fed3b180aed490e4ecc1",
+          "current_identity_status": "Changed by scoped D5120 Gemma reduction/root and alias qualification. Original recorded identity retained; frozen references and preserved snapshots unchanged."
         },
         {
           "status": "verified",
@@ -22207,16 +22214,18 @@
           "sha256": "e8d9a6e6ec91a03caf3ef590f55d924e6c00d0bfae33aa5cbd54e8341c93857d"
         },
         {
-          "status": "verified",
+          "status": "historical_observation",
           "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/engine-build/tests/test_xpu_qwen_exl3_fp16",
           "bytes": 32551440,
-          "sha256": "efd6928c2f43383032ac9c2a03f725c755321abc0f4b76fe690545a6938b36b8"
+          "sha256": "efd6928c2f43383032ac9c2a03f725c755321abc0f4b76fe690545a6938b36b8",
+          "current_identity_status": "Changed by scoped D5120 Gemma reduction/root and alias qualification. Original recorded identity retained; frozen references and preserved snapshots unchanged."
         },
         {
-          "status": "verified",
+          "status": "historical_observation",
           "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/engine-build/tests/test_xpu_ops",
           "bytes": 32326000,
-          "sha256": "a7374ef53659b0e9caa3b8908c228133910cff3e6f86b74dc13939dca591b81d"
+          "sha256": "a7374ef53659b0e9caa3b8908c228133910cff3e6f86b74dc13939dca591b81d",
+          "current_identity_status": "Changed by scoped D5120 Gemma reduction/root and alias qualification. Original recorded identity retained; frozen references and preserved snapshots unchanged."
         }
       ],
       "preserved_source_snapshots": [
@@ -23556,6 +23565,4022 @@
         "S1/S2-S6 remain incomplete."
       ],
       "next_step": "Replay full-width Gemma norm and BA/state boundaries on identical frozen operands; localize remaining mean/root/block differences and repair source-backed arithmetic, then rerun unchanged block/state/D64 gates."
+    },
+    "S1_Gemma5120_source_matched_norm_and_remaining_BA_state": {
+      "observed_date": "2026-10-03",
+      "parent_commit": "bfb3df773c3e2f301f07ed662a377e8237864d15",
+      "status": "verified_bounded_Gemma_norm_target_and_state_still_failing",
+      "scope": "Source-backed XPU F16 Gemma D5120 normalization on unchanged original layer0 P128/D1 operands, including residual/output aliases. Complete64-layer target and identical-input GDN state remain unqualified.",
+      "current_source_and_build_artifacts": [
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/vllm.cpp/src/vt/xpu/xpu_norm.cpp",
+          "bytes": 10124,
+          "sha256": "312fb8dd871617131db145deea5ee0af7ec5fc24fb77cd4dcf72f1a05976a8f2"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/vllm.cpp/tests/vllm/models/test_xpu_qwen_exl3_fp16.cpp",
+          "bytes": 72135,
+          "sha256": "bcdf9b0f98c00494ae882648b2a602f9c51145f7bfaba42d2c7b6bd12f02a024"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/engine-build/tests/test_xpu_qwen_exl3_fp16",
+          "bytes": 32581224,
+          "sha256": "7814c17373f6be8b5f9c3a80aa7f11289be9e678a6130410bc5ad759932d0856"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/engine-build/tests/test_xpu_ops",
+          "bytes": 32355160,
+          "sha256": "1769c9c0976ad22a1d6134693600d87f61a28562f44c4d00ef82737d6cbd5adf"
+        }
+      ],
+      "preserved_source_snapshots": [
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/gemma5120-native-v2-source-xpu_norm.cpp",
+          "bytes": 10046,
+          "sha256": "53a952298b6435c240f7d851b79792dec4bccee4b57ae219753f8fee87453198"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/gemma5120-native-v2-source-test_xpu_qwen_exl3_fp16.cpp",
+          "bytes": 72135,
+          "sha256": "bcdf9b0f98c00494ae882648b2a602f9c51145f7bfaba42d2c7b6bd12f02a024"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/gemma5120-native-v3-source-xpu_norm.cpp",
+          "bytes": 10124,
+          "sha256": "312fb8dd871617131db145deea5ee0af7ec5fc24fb77cd4dcf72f1a05976a8f2"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/gemma5120-native-v3-source-test_xpu_qwen_exl3_fp16.cpp",
+          "bytes": 72135,
+          "sha256": "bcdf9b0f98c00494ae882648b2a602f9c51145f7bfaba42d2c7b6bd12f02a024"
+        }
+      ],
+      "unchanged_fixtures": [
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/real_block_oracle.safetensors",
+          "bytes": 46640192,
+          "sha256": "195d9ee81287406b4e0d6e05dc1611627bd7b3ad3fbd10377c58f793f03d79fc"
+        }
+      ],
+      "preserved_receipts": [
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/gemma5120-original-rms-replay-v1.py",
+          "bytes": 2452,
+          "sha256": "ddd32b0bb425d79a2e09e3f8c52cf9ae8b8cf4554793669f0f47dcb0167fb175"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/gemma5120-original-rms-replay-v1.json",
+          "bytes": 24603,
+          "sha256": "6ebb7040a82b4993a976b3c408475d8b487f5bdc2281b096c83c8ac7ea574169"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/gemma5120-original-rms-replay-v1.log",
+          "bytes": 1655,
+          "sha256": "c7061b61138cef4aa0500d255ece59db1233883d8f174feab1047b8b30850d23"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/gemma5120-host-mean-compare-v1.py",
+          "bytes": 2149,
+          "sha256": "020699a8b71f4dcc3a5f980169991c7f605acc2ea8877d937eced40e1a9eeed9"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/gemma5120-host-mean-compare-v1.json",
+          "bytes": 2964,
+          "sha256": "642540238753098778224091b5b64657e7b32f32bf76ea6f6e3bbdafefb7fce5"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/gemma5120-host-mean-compare-v1.log",
+          "bytes": 2964,
+          "sha256": "642540238753098778224091b5b64657e7b32f32bf76ea6f6e3bbdafefb7fce5"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/gemma5120-torch-meanops-source-v1.txt",
+          "bytes": 1168,
+          "sha256": "44cce9918664107c749f4af75f6e2f8030044d7ce8f99e9ed8dfca5ce3b9c1b0"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/gemma5120-rms-regression-v1.log",
+          "bytes": 306,
+          "sha256": "49ed3e7618022459c61895dd23ee778c08f1a21277952e34cff9bcbfae66c6b8"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/gemma5120-step-summary-v1.json",
+          "bytes": 73690,
+          "sha256": "0fe9491f9bdc965edf28795064af0cb8d8017ad028ef1b03cc452ed960be83bf"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/gemma5120-block-state-test-v1.log",
+          "bytes": 903,
+          "sha256": "58d9f0d10087c0302813b95f1b443aa0f84633da9882517924f16dac0fa7f40c"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/gemma5120-block-state-trace-v1.jsonl",
+          "bytes": 6720,
+          "sha256": "dc4234026cf757636a1f7231c26acf0950c99446c7a5cb13e9e00ee34a3ab4ba"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/gemma5120-block-ba-compare-v1.json",
+          "bytes": 1510,
+          "sha256": "119551d95632787a3544295b5bc80094e99fe80401924cf31d5c76336df469fb"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/gemma5120-native-build-v1.log",
+          "bytes": 226,
+          "sha256": "339a1add1892ef61e626a63ef37165a6cd6e2f516f11df76e71b3d90d4d2a0e7"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/gemma5120-native-test-v1.log",
+          "bytes": 615,
+          "sha256": "42c303c1fecfdd3f69bf9498db6c3be0985fff3713d7e5e0bfabae60be6dc9a4"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/gemma5120-native-build-v2.log",
+          "bytes": 172,
+          "sha256": "f24f3c41f51b0ae2cb8c6d384e9523334eabed6095b267200703fda703753d27"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/gemma5120-native-test-v2.log",
+          "bytes": 619,
+          "sha256": "3b219646cd593ab117aabe5198aa949b9229373262237ded2821ab6b0988ec24"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/gemma5120-native-build-v3.log",
+          "bytes": 226,
+          "sha256": "339a1add1892ef61e626a63ef37165a6cd6e2f516f11df76e71b3d90d4d2a0e7"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/gemma5120-native-test-v3.log",
+          "bytes": 619,
+          "sha256": "3b219646cd593ab117aabe5198aa949b9229373262237ded2821ab6b0988ec24"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/gemma5120-native-trace-v3.jsonl",
+          "bytes": 11288,
+          "sha256": "895e55990478a3bb5cb43f30d03f7b7cb2b03a383339c6eace1a220cbad5d8b0"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-gemma5120-test-v1.log",
+          "bytes": 1022,
+          "sha256": "b4f1f35d87c380f8f6affb31da2c8408d87d6989043178c4bf6a5863f0e3a641"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-gemma5120-trace-v1.jsonl",
+          "bytes": 967760,
+          "sha256": "ea8d2c49d5ad18cfbf61a61285445bde7e9088d35602bf47177cd44de6c366da"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-gemma5120-test-v1.log",
+          "bytes": 9891,
+          "sha256": "4189f7524b1eba9eeb8f6240f82403b934684475f315e606f134af4ce6a3d042"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-gemma5120-trace-v1.jsonl",
+          "bytes": 27038118,
+          "sha256": "5b53da3a3628822445f483696608a31ba48321c01cec248d4d5384904d5f9242"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-gemma5120-witness-comparison-v1.json",
+          "bytes": 58651,
+          "sha256": "9e9c933e10f420569068c294110c7fed876bd7c0831d48dbda6ac32b3d17f1ae"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-gemma5120-test-v2.log",
+          "bytes": 1021,
+          "sha256": "6f1972af0ef767b7234fe78f35546cb9d1cc6a4649f09349b5af43f89026fd60"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-gemma5120-trace-v2.jsonl",
+          "bytes": 967760,
+          "sha256": "ea8d2c49d5ad18cfbf61a61285445bde7e9088d35602bf47177cd44de6c366da"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-gemma5120-test-v2.log",
+          "bytes": 10027,
+          "sha256": "9ad4dcb7da17d4bf23d7ea623040c527aac5a2b1d5be94ceaeb152ac5c34d399"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-gemma5120-trace-v2.jsonl",
+          "bytes": 27038118,
+          "sha256": "5b53da3a3628822445f483696608a31ba48321c01cec248d4d5384904d5f9242"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-gemma5120-witness-comparison-v2.json",
+          "bytes": 58435,
+          "sha256": "cd0918743126b069650bf6ce2b7d2957a6ace729de7ab27132fe02844771284c"
+        }
+      ],
+      "preserved_block_stage_dumps": [
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/gemma5120-block-state-native-v1/manifest.tsv",
+          "bytes": 576,
+          "sha256": "bd92ab2ae26d272ed605bcda9b63dff563f1af752bb234179443768f9f869603"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/gemma5120-block-state-native-v1/s0_l0_gdn_ba_a.bin",
+          "bytes": 12288,
+          "sha256": "19852b48d1c0d15b727821b80a68a7e2d62fda88f48b25cf2303b84a287d5f12"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/gemma5120-block-state-native-v1/s0_l0_gdn_ba_b.bin",
+          "bytes": 12288,
+          "sha256": "b97fed9f4dbba450bf114e2ac2811a47fa86e1098e456bd5fe90a6e5527d7af7"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/gemma5120-block-state-native-v1/s0_l0_gdn_conv.bin",
+          "bytes": 5242880,
+          "sha256": "a05c49ae96359da68976b535530f093a55439c0949813a72fb509e490ff3244d"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/gemma5120-block-state-native-v1/s0_l0_gdn_core.bin",
+          "bytes": 1572864,
+          "sha256": "7ebe5cf7cc828fe3a0f80e01ca7b201e5d820df7f30c329419101d1657af40eb"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/gemma5120-block-state-native-v1/s0_l0_gdn_gated.bin",
+          "bytes": 1572864,
+          "sha256": "ad8f9073317095acf771305231329c82d2ccec3a1aeccf831b5bef75122a6ea8"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/gemma5120-block-state-native-v1/s0_l0_gdn_mixed.bin",
+          "bytes": 2621440,
+          "sha256": "594a8f227600a52ea449ed63d27926f8492f7ca25b943fa474e543977a644f98"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/gemma5120-block-state-native-v1/s0_l0_gdn_postconv_beta.bin",
+          "bytes": 24576,
+          "sha256": "a63c6cfd36c9b891fa2acb38fb9ffe893a15ff032df7364e022b5909b2fde06c"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/gemma5120-block-state-native-v1/s0_l0_gdn_postconv_k.bin",
+          "bytes": 524288,
+          "sha256": "d446fe8daf490ef0caad8054d0b535f35dd789e5dfe928d430fd9eb508d4799f"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/gemma5120-block-state-native-v1/s0_l0_gdn_postconv_q.bin",
+          "bytes": 524288,
+          "sha256": "9979b091bfadcb8403bcb441fe26fa3ee89ab9d58a098b20ba8582bfb025b23e"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/gemma5120-block-state-native-v1/s0_l0_gdn_postconv_v.bin",
+          "bytes": 1572864,
+          "sha256": "bd8ec528c351a684861098a9df2322ee86aa4d4e78177df7cdf4dd14d2741e10"
+        }
+      ],
+      "selection": {
+        "width": 5120,
+        "input_output_weight_dtype": "F16",
+        "Gemma": true,
+        "optional_residual_dtype": "F16",
+        "device_max_work_group_size": 1024,
+        "device_min_max_subgroup_size": [
+          16,
+          32
+        ],
+        "other_geometries": "existing generic RMS path retained, not qualified by this step"
+      },
+      "source_backed_arithmetic": {
+        "original_literal_replay": "All4 frozen norm outputs and both residual outputs bit-exact; BF16 checkpoint norm weight converted to F16 before F32 Gemma weight addition.",
+        "reduction": "Contiguous vec4 register accumulation; virtual width1024 / largest_power_of_two(min(rows,32)). Descending group-x halves down to32 then ascending logical SG32 tree, emulated by physical SG16.",
+        "mean": "F32 sum multiplied by F32(1/5120), matching MeanOps::project; division differs18/24 original P128 input/post means.",
+        "root_and_weight": "Separate producer rsqrt body; explicit F32 residual sum, squares, Gemma weight addition and two multiplications before F16 narrowing.",
+        "host_P128_mean_comparison": "Virtual width32/F32 factor matches all256 frozen replay means exactly; width64 does not.",
+        "D1_mean_comparison": "Widths256/512/1024 all coincide for these2 operands; geometry1024 comes from pinned source/device configuration, not uniquely from those2 means."
+      },
+      "focused_checks": {
+        "build_v1_v2_v3_exit": 0,
+        "native_norm_v1": {
+          "cases": 1,
+          "assertions": 40,
+          "exit": 0,
+          "half_differences_each_stage": 0
+        },
+        "final_norm_v3": {
+          "cases": 2,
+          "assertions": 113,
+          "exit": 0,
+          "half_differences_each_stage": 0,
+          "residual_aliases": "Output separate/from input/from residual; both captured residual outputs exact when still visible."
+        },
+        "generic_RMS_regression_v1": {
+          "cases": 1,
+          "assertions": 63928,
+          "exit": 0,
+          "scope": "Existing generic F32-output/BF16-residual and narrow BF16 alias regression; new F16 path exercised by separate captured/sum witnesses."
+        },
+        "norm_trace_v3": {
+          "selections": {
+            "RmsNorm": 16,
+            "Copy": 10
+          },
+          "BF16_arguments": 0,
+          "cpu_reference_selections": 0
+        }
+      },
+      "whole_target_checks": {
+        "P128_D1_v1": {
+          "exit_code": 0,
+          "assertions": 197,
+          "passed": 197,
+          "failed": 0,
+          "comparisons": [
+            {
+              "phase": "p128",
+              "repeat": 0,
+              "TV": 0.00228574,
+              "KL": 1.72375e-05,
+              "top10": 10,
+              "greedy": 13,
+              "reference_greedy": 13
+            },
+            {
+              "phase": "p128",
+              "repeat": 1,
+              "TV": 0.00207273,
+              "KL": 1.42504e-05,
+              "top10": 10,
+              "greedy": 13,
+              "reference_greedy": 13
+            },
+            {
+              "phase": "p128",
+              "repeat": 2,
+              "TV": 0.00218782,
+              "KL": 1.52094e-05,
+              "top10": 10,
+              "greedy": 13,
+              "reference_greedy": 13
+            },
+            {
+              "phase": "d1",
+              "repeat": 0,
+              "TV": 0.00311897,
+              "KL": 3.18017e-05,
+              "top10": 10,
+              "greedy": 198,
+              "reference_greedy": 198
+            },
+            {
+              "phase": "d1",
+              "repeat": 1,
+              "TV": 0.0029517,
+              "KL": 2.98166e-05,
+              "top10": 10,
+              "greedy": 198,
+              "reference_greedy": 198
+            },
+            {
+              "phase": "d1",
+              "repeat": 2,
+              "TV": 0.00307259,
+              "KL": 3.23448e-05,
+              "top10": 10,
+              "greedy": 198,
+              "reference_greedy": 198
+            }
+          ],
+          "investigation_triggers": [],
+          "max_TV": 0.00311897,
+          "max_KL": 3.23448e-05,
+          "min_top10": 10,
+          "greedy_mismatches": [],
+          "selections": {
+            "Embedding": 2,
+            "RopeCosSinCache": 2,
+            "RmsNorm": 258,
+            "Exl3GroupedLinear": 514,
+            "MatmulDenseF16": 96,
+            "GdnStateGather": 96,
+            "CausalConv1dFwd": 48,
+            "GdnStateScatter": 96,
+            "GdnPostConv": 48,
+            "GdnPrefillRawGate": 48,
+            "RmsNormGated": 96,
+            "SiluAndMul": 128,
+            "AttnQkNormRopeGate": 32,
+            "ReshapeAndCacheFp8": 32,
+            "PagedAttention": 32,
+            "SigmoidGateBf16": 32,
+            "CastF32": 2,
+            "CausalConv1dUpdate": 48,
+            "GdnPackedDecode": 48
+          },
+          "bf16_arguments": 0,
+          "cpu_reference_selections": 0,
+          "old_scalar_packed_selections": 0,
+          "full_head_tensor_calls": 2,
+          "logits": [
+            {
+              "status": "verified",
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-gemma5120-v1-p128-logits.f32",
+              "bytes": 993280,
+              "sha256": "c806c001648b28111b55d87654da7b3644930c8e4690b7210359626b297b7204"
+            },
+            {
+              "status": "verified",
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-gemma5120-v1-d1-logits.f32",
+              "bytes": 993280,
+              "sha256": "d7c26582a60169a25016903a656f59a884e3d3c96b8b7da182eb196cdeab1637"
+            }
+          ]
+        },
+        "P128_D1_final_v2": {
+          "exit_code": 0,
+          "assertions": 197,
+          "passed": 197,
+          "failed": 0,
+          "comparisons": [
+            {
+              "phase": "p128",
+              "repeat": 0,
+              "TV": 0.00206823,
+              "KL": 1.39684e-05,
+              "top10": 10,
+              "greedy": 13,
+              "reference_greedy": 13
+            },
+            {
+              "phase": "p128",
+              "repeat": 1,
+              "TV": 0.00220001,
+              "KL": 1.53485e-05,
+              "top10": 10,
+              "greedy": 13,
+              "reference_greedy": 13
+            },
+            {
+              "phase": "p128",
+              "repeat": 2,
+              "TV": 0.0022555,
+              "KL": 1.63734e-05,
+              "top10": 10,
+              "greedy": 13,
+              "reference_greedy": 13
+            },
+            {
+              "phase": "d1",
+              "repeat": 0,
+              "TV": 0.0039302,
+              "KL": 4.85418e-05,
+              "top10": 10,
+              "greedy": 198,
+              "reference_greedy": 198
+            },
+            {
+              "phase": "d1",
+              "repeat": 1,
+              "TV": 0.00355419,
+              "KL": 4.05824e-05,
+              "top10": 10,
+              "greedy": 198,
+              "reference_greedy": 198
+            },
+            {
+              "phase": "d1",
+              "repeat": 2,
+              "TV": 0.00340776,
+              "KL": 3.89044e-05,
+              "top10": 10,
+              "greedy": 198,
+              "reference_greedy": 198
+            }
+          ],
+          "investigation_triggers": [],
+          "max_TV": 0.0039302,
+          "max_KL": 4.85418e-05,
+          "min_top10": 10,
+          "greedy_mismatches": [],
+          "selections": {
+            "Embedding": 2,
+            "RopeCosSinCache": 2,
+            "RmsNorm": 258,
+            "Exl3GroupedLinear": 514,
+            "MatmulDenseF16": 96,
+            "GdnStateGather": 96,
+            "CausalConv1dFwd": 48,
+            "GdnStateScatter": 96,
+            "GdnPostConv": 48,
+            "GdnPrefillRawGate": 48,
+            "RmsNormGated": 96,
+            "SiluAndMul": 128,
+            "AttnQkNormRopeGate": 32,
+            "ReshapeAndCacheFp8": 32,
+            "PagedAttention": 32,
+            "SigmoidGateBf16": 32,
+            "CastF32": 2,
+            "CausalConv1dUpdate": 48,
+            "GdnPackedDecode": 48
+          },
+          "bf16_arguments": 0,
+          "cpu_reference_selections": 0,
+          "old_scalar_packed_selections": 0,
+          "full_head_tensor_calls": 2,
+          "logits": [
+            {
+              "status": "verified",
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-gemma5120-v2-p128-logits.f32",
+              "bytes": 993280,
+              "sha256": "3116be0ced57bb814a5935f4d27ef26d83d7d00588fbe5185dba6e64d5ab0664"
+            },
+            {
+              "status": "verified",
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-gemma5120-v2-d1-logits.f32",
+              "bytes": 993280,
+              "sha256": "31ea4d7a3ff4fed5ba589bedc0ea780ab2d97086d887afef46823b5cbe0b9c68"
+            }
+          ]
+        },
+        "P128_D64_v1": {
+          "exit_code": 1,
+          "assertions": 807,
+          "passed": 803,
+          "failed": 4,
+          "comparisons": [
+            {
+              "phase": "p128",
+              "repeat": 0,
+              "TV": 0.00214169,
+              "KL": 1.54571e-05,
+              "top10": 10,
+              "greedy": 13,
+              "reference_greedy": 13
+            },
+            {
+              "phase": "d1",
+              "repeat": 0,
+              "TV": 0.0027995,
+              "KL": 2.75973e-05,
+              "top10": 10,
+              "greedy": 198,
+              "reference_greedy": 198
+            },
+            {
+              "phase": "d2",
+              "repeat": 0,
+              "TV": 0.00295993,
+              "KL": 3.13335e-05,
+              "top10": 10,
+              "greedy": 248044,
+              "reference_greedy": 248044
+            },
+            {
+              "phase": "d3",
+              "repeat": 0,
+              "TV": 0.00538186,
+              "KL": 9.50081e-05,
+              "top10": 10,
+              "greedy": 248044,
+              "reference_greedy": 248044
+            },
+            {
+              "phase": "d4",
+              "repeat": 0,
+              "TV": 0.00462685,
+              "KL": 6.84365e-05,
+              "top10": 10,
+              "greedy": 248044,
+              "reference_greedy": 248044
+            },
+            {
+              "phase": "d5",
+              "repeat": 0,
+              "TV": 0.00670567,
+              "KL": 0.000142578,
+              "top10": 10,
+              "greedy": 248044,
+              "reference_greedy": 248044
+            },
+            {
+              "phase": "d6",
+              "repeat": 0,
+              "TV": 0.00993714,
+              "KL": 0.000301477,
+              "top10": 10,
+              "greedy": 248044,
+              "reference_greedy": 248044
+            },
+            {
+              "phase": "d7",
+              "repeat": 0,
+              "TV": 0.00923947,
+              "KL": 0.000284275,
+              "top10": 10,
+              "greedy": 248044,
+              "reference_greedy": 248044
+            },
+            {
+              "phase": "d8",
+              "repeat": 0,
+              "TV": 0.0155496,
+              "KL": 0.000817961,
+              "top10": 10,
+              "greedy": 248046,
+              "reference_greedy": 248046
+            },
+            {
+              "phase": "d9",
+              "repeat": 0,
+              "TV": 8.46267e-07,
+              "KL": 3.45723e-08,
+              "top10": 10,
+              "greedy": 198,
+              "reference_greedy": 198
+            },
+            {
+              "phase": "d10",
+              "repeat": 0,
+              "TV": 0.00348779,
+              "KL": 2.7237e-05,
+              "top10": 10,
+              "greedy": 248045,
+              "reference_greedy": 248045
+            },
+            {
+              "phase": "d11",
+              "repeat": 0,
+              "TV": 0.00861641,
+              "KL": 0.000256571,
+              "top10": 10,
+              "greedy": 248046,
+              "reference_greedy": 248046
+            },
+            {
+              "phase": "d12",
+              "repeat": 0,
+              "TV": 2.33177e-07,
+              "KL": 1.74268e-08,
+              "top10": 9,
+              "greedy": 198,
+              "reference_greedy": 198
+            },
+            {
+              "phase": "d13",
+              "repeat": 0,
+              "TV": 0.000314794,
+              "KL": 9.73683e-06,
+              "top10": 10,
+              "greedy": 248045,
+              "reference_greedy": 248045
+            },
+            {
+              "phase": "d14",
+              "repeat": 0,
+              "TV": 0.00297458,
+              "KL": 0.000220719,
+              "top10": 10,
+              "greedy": 846,
+              "reference_greedy": 846
+            },
+            {
+              "phase": "d15",
+              "repeat": 0,
+              "TV": 1.12901e-07,
+              "KL": 4.82817e-09,
+              "top10": 10,
+              "greedy": 198,
+              "reference_greedy": 198
+            },
+            {
+              "phase": "d16",
+              "repeat": 0,
+              "TV": 0.00662046,
+              "KL": 0.000134837,
+              "top10": 10,
+              "greedy": 2523,
+              "reference_greedy": 2523
+            },
+            {
+              "phase": "d17",
+              "repeat": 0,
+              "TV": 0.00203027,
+              "KL": 1.85516e-05,
+              "top10": 10,
+              "greedy": 513,
+              "reference_greedy": 513
+            },
+            {
+              "phase": "d18",
+              "repeat": 0,
+              "TV": 0.00416231,
+              "KL": 4.91639e-05,
+              "top10": 10,
+              "greedy": 264,
+              "reference_greedy": 264
+            },
+            {
+              "phase": "d19",
+              "repeat": 0,
+              "TV": 0.0117326,
+              "KL": 0.000424084,
+              "top10": 10,
+              "greedy": 47739,
+              "reference_greedy": 47739
+            },
+            {
+              "phase": "d20",
+              "repeat": 0,
+              "TV": 0.00366495,
+              "KL": 4.58567e-05,
+              "top10": 10,
+              "greedy": 248046,
+              "reference_greedy": 248046
+            },
+            {
+              "phase": "d21",
+              "repeat": 0,
+              "TV": 1.15949e-09,
+              "KL": 1.63252e-11,
+              "top10": 10,
+              "greedy": 198,
+              "reference_greedy": 198
+            },
+            {
+              "phase": "d22",
+              "repeat": 0,
+              "TV": 3.90934e-08,
+              "KL": 3.0513e-10,
+              "top10": 9,
+              "greedy": 248045,
+              "reference_greedy": 248045
+            },
+            {
+              "phase": "d23",
+              "repeat": 0,
+              "TV": 0.00733958,
+              "KL": 0.000302362,
+              "top10": 10,
+              "greedy": 248045,
+              "reference_greedy": 248045
+            },
+            {
+              "phase": "d24",
+              "repeat": 0,
+              "TV": 0.00933622,
+              "KL": 0.00025164,
+              "top10": 9,
+              "greedy": 248046,
+              "reference_greedy": 248046
+            },
+            {
+              "phase": "d25",
+              "repeat": 0,
+              "TV": 1.04636e-09,
+              "KL": 6.50914e-11,
+              "top10": 10,
+              "greedy": 198,
+              "reference_greedy": 198
+            },
+            {
+              "phase": "d26",
+              "repeat": 0,
+              "TV": 8.56439e-07,
+              "KL": 1.37571e-08,
+              "top10": 10,
+              "greedy": 248045,
+              "reference_greedy": 248045
+            },
+            {
+              "phase": "d27",
+              "repeat": 0,
+              "TV": 0.0294933,
+              "KL": 0.00196467,
+              "top10": 10,
+              "greedy": 74455,
+              "reference_greedy": 248045
+            },
+            {
+              "phase": "d28",
+              "repeat": 0,
+              "TV": 0.00211165,
+              "KL": 0.000122254,
+              "top10": 10,
+              "greedy": 198,
+              "reference_greedy": 198
+            },
+            {
+              "phase": "d29",
+              "repeat": 0,
+              "TV": 0.247458,
+              "KL": 0.180265,
+              "top10": 8,
+              "greedy": 248068,
+              "reference_greedy": 248068
+            },
+            {
+              "phase": "d30",
+              "repeat": 0,
+              "TV": 0.000120898,
+              "KL": 1.00177e-06,
+              "top10": 10,
+              "greedy": 198,
+              "reference_greedy": 198
+            },
+            {
+              "phase": "d31",
+              "repeat": 0,
+              "TV": 1.36694e-05,
+              "KL": 7.26575e-07,
+              "top10": 10,
+              "greedy": 760,
+              "reference_greedy": 760
+            },
+            {
+              "phase": "d32",
+              "repeat": 0,
+              "TV": 4.25611e-07,
+              "KL": 3.81379e-09,
+              "top10": 10,
+              "greedy": 1156,
+              "reference_greedy": 1156
+            },
+            {
+              "phase": "d33",
+              "repeat": 0,
+              "TV": 0.00606857,
+              "KL": 9.98538e-05,
+              "top10": 10,
+              "greedy": 579,
+              "reference_greedy": 579
+            },
+            {
+              "phase": "d34",
+              "repeat": 0,
+              "TV": 0.000184597,
+              "KL": 4.36067e-06,
+              "top10": 10,
+              "greedy": 1876,
+              "reference_greedy": 1876
+            },
+            {
+              "phase": "d35",
+              "repeat": 0,
+              "TV": 0.000470217,
+              "KL": 1.31159e-05,
+              "top10": 10,
+              "greedy": 7701,
+              "reference_greedy": 7701
+            },
+            {
+              "phase": "d36",
+              "repeat": 0,
+              "TV": 6.26551e-06,
+              "KL": 7.40381e-08,
+              "top10": 10,
+              "greedy": 310,
+              "reference_greedy": 310
+            },
+            {
+              "phase": "d37",
+              "repeat": 0,
+              "TV": 3.46653e-05,
+              "KL": 6.92197e-07,
+              "top10": 10,
+              "greedy": 381,
+              "reference_greedy": 381
+            },
+            {
+              "phase": "d38",
+              "repeat": 0,
+              "TV": 0.00901783,
+              "KL": 0.000220125,
+              "top10": 10,
+              "greedy": 3799,
+              "reference_greedy": 3799
+            },
+            {
+              "phase": "d39",
+              "repeat": 0,
+              "TV": 3.76684e-08,
+              "KL": 7.45277e-10,
+              "top10": 10,
+              "greedy": 974,
+              "reference_greedy": 974
+            },
+            {
+              "phase": "d40",
+              "repeat": 0,
+              "TV": 0.000953048,
+              "KL": 2.18977e-05,
+              "top10": 10,
+              "greedy": 466,
+              "reference_greedy": 466
+            },
+            {
+              "phase": "d41",
+              "repeat": 0,
+              "TV": 0.00657459,
+              "KL": 0.000168049,
+              "top10": 10,
+              "greedy": 47739,
+              "reference_greedy": 47739
+            },
+            {
+              "phase": "d42",
+              "repeat": 0,
+              "TV": 0.00391975,
+              "KL": 9.70655e-05,
+              "top10": 10,
+              "greedy": 13,
+              "reference_greedy": 13
+            },
+            {
+              "phase": "d43",
+              "repeat": 0,
+              "TV": 0.00313026,
+              "KL": 3.20078e-05,
+              "top10": 10,
+              "greedy": 2302,
+              "reference_greedy": 2302
+            },
+            {
+              "phase": "d44",
+              "repeat": 0,
+              "TV": 0.00791795,
+              "KL": 0.000176246,
+              "top10": 10,
+              "greedy": 5947,
+              "reference_greedy": 5947
+            },
+            {
+              "phase": "d45",
+              "repeat": 0,
+              "TV": 1.79748e-06,
+              "KL": 3.1571e-08,
+              "top10": 10,
+              "greedy": 328,
+              "reference_greedy": 328
+            },
+            {
+              "phase": "d46",
+              "repeat": 0,
+              "TV": 6.40682e-06,
+              "KL": 2.74517e-07,
+              "top10": 10,
+              "greedy": 2523,
+              "reference_greedy": 2523
+            },
+            {
+              "phase": "d47",
+              "repeat": 0,
+              "TV": 4.24104e-07,
+              "KL": 1.77405e-08,
+              "top10": 10,
+              "greedy": 513,
+              "reference_greedy": 513
+            },
+            {
+              "phase": "d48",
+              "repeat": 0,
+              "TV": 6.84625e-07,
+              "KL": 1.56095e-08,
+              "top10": 10,
+              "greedy": 264,
+              "reference_greedy": 264
+            },
+            {
+              "phase": "d49",
+              "repeat": 0,
+              "TV": 6.69373e-06,
+              "KL": 1.46605e-07,
+              "top10": 10,
+              "greedy": 47739,
+              "reference_greedy": 47739
+            },
+            {
+              "phase": "d50",
+              "repeat": 0,
+              "TV": 5.09314e-07,
+              "KL": 7.65202e-09,
+              "top10": 10,
+              "greedy": 1,
+              "reference_greedy": 1
+            },
+            {
+              "phase": "d51",
+              "repeat": 0,
+              "TV": 0.00360684,
+              "KL": 4.3976e-05,
+              "top10": 10,
+              "greedy": 864,
+              "reference_greedy": 864
+            },
+            {
+              "phase": "d52",
+              "repeat": 0,
+              "TV": 0.00307292,
+              "KL": 3.04604e-05,
+              "top10": 10,
+              "greedy": 4816,
+              "reference_greedy": 4816
+            },
+            {
+              "phase": "d53",
+              "repeat": 0,
+              "TV": 0.00406937,
+              "KL": 3.59051e-05,
+              "top10": 10,
+              "greedy": 31084,
+              "reference_greedy": 31084
+            },
+            {
+              "phase": "d54",
+              "repeat": 0,
+              "TV": 0.000991693,
+              "KL": 3.75748e-05,
+              "top10": 10,
+              "greedy": 13,
+              "reference_greedy": 13
+            },
+            {
+              "phase": "d55",
+              "repeat": 0,
+              "TV": 0.00462421,
+              "KL": 9.01215e-05,
+              "top10": 10,
+              "greedy": 6558,
+              "reference_greedy": 6558
+            },
+            {
+              "phase": "d56",
+              "repeat": 0,
+              "TV": 3.08228e-09,
+              "KL": 6.93885e-11,
+              "top10": 10,
+              "greedy": 728,
+              "reference_greedy": 728
+            },
+            {
+              "phase": "d57",
+              "repeat": 0,
+              "TV": 0.000811755,
+              "KL": 3.36804e-05,
+              "top10": 10,
+              "greedy": 2814,
+              "reference_greedy": 2814
+            },
+            {
+              "phase": "d58",
+              "repeat": 0,
+              "TV": 3.1019e-06,
+              "KL": 6.1385e-08,
+              "top10": 10,
+              "greedy": 1092,
+              "reference_greedy": 1092
+            },
+            {
+              "phase": "d59",
+              "repeat": 0,
+              "TV": 7.11746e-06,
+              "KL": 6.00136e-08,
+              "top10": 10,
+              "greedy": 781,
+              "reference_greedy": 781
+            },
+            {
+              "phase": "d60",
+              "repeat": 0,
+              "TV": 5.57433e-08,
+              "KL": 1.21987e-09,
+              "top10": 10,
+              "greedy": 2493,
+              "reference_greedy": 2493
+            },
+            {
+              "phase": "d61",
+              "repeat": 0,
+              "TV": 0.000322411,
+              "KL": 2.51451e-06,
+              "top10": 10,
+              "greedy": 381,
+              "reference_greedy": 381
+            },
+            {
+              "phase": "d62",
+              "repeat": 0,
+              "TV": 0.00157765,
+              "KL": 1.23906e-05,
+              "top10": 10,
+              "greedy": 4313,
+              "reference_greedy": 4313
+            },
+            {
+              "phase": "d63",
+              "repeat": 0,
+              "TV": 6.8606e-10,
+              "KL": 7.74612e-12,
+              "top10": 10,
+              "greedy": 310,
+              "reference_greedy": 310
+            },
+            {
+              "phase": "d64",
+              "repeat": 0,
+              "TV": 2.60958e-05,
+              "KL": 2.16763e-07,
+              "top10": 10,
+              "greedy": 1910,
+              "reference_greedy": 1910
+            }
+          ],
+          "investigation_triggers": [
+            {
+              "phase": "d27",
+              "repeat": 0,
+              "TV": 0.0294933,
+              "KL": 0.00196467,
+              "top10": 10,
+              "greedy": 74455,
+              "reference_greedy": 248045
+            },
+            {
+              "phase": "d29",
+              "repeat": 0,
+              "TV": 0.247458,
+              "KL": 0.180265,
+              "top10": 8,
+              "greedy": 248068,
+              "reference_greedy": 248068
+            }
+          ],
+          "max_TV": 0.247458,
+          "max_KL": 0.180265,
+          "min_top10": 8,
+          "greedy_mismatches": [
+            {
+              "phase": "d27",
+              "repeat": 0,
+              "TV": 0.0294933,
+              "KL": 0.00196467,
+              "top10": 10,
+              "greedy": 74455,
+              "reference_greedy": 248045
+            }
+          ],
+          "selections": {
+            "Embedding": 65,
+            "RopeCosSinCache": 65,
+            "RmsNorm": 8385,
+            "Exl3GroupedLinear": 16705,
+            "MatmulDenseF16": 3120,
+            "GdnStateGather": 96,
+            "CausalConv1dFwd": 48,
+            "GdnStateScatter": 96,
+            "GdnPostConv": 48,
+            "GdnPrefillRawGate": 48,
+            "RmsNormGated": 3120,
+            "SiluAndMul": 4160,
+            "AttnQkNormRopeGate": 1040,
+            "ReshapeAndCacheFp8": 1040,
+            "PagedAttention": 1040,
+            "SigmoidGateBf16": 1040,
+            "CastF32": 65,
+            "CausalConv1dUpdate": 3072,
+            "GdnPackedDecode": 3072
+          },
+          "bf16_arguments": 0,
+          "cpu_reference_selections": 0,
+          "old_scalar_packed_selections": 0,
+          "full_head_tensor_calls": 65,
+          "logits": [
+            {
+              "status": "verified",
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-gemma5120-v1-p128-logits.f32",
+              "bytes": 993280,
+              "sha256": "efc4ef0e72f8eac4694c05729154ee2bfa524bd13f85648fdb4f5bc8f6d470a0"
+            },
+            {
+              "status": "verified",
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-gemma5120-v1-d1-logits.f32",
+              "bytes": 993280,
+              "sha256": "a77a77058854cc7322489faa9ced4a134b457aa5c22704df86008e018a0c69b7"
+            },
+            {
+              "status": "verified",
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-gemma5120-v1-d2-logits.f32",
+              "bytes": 993280,
+              "sha256": "b15d70c396c40b86fc6433161a7c29c412c19d7d2ac4b8347b29393d3e72c91f"
+            },
+            {
+              "status": "verified",
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-gemma5120-v1-d3-logits.f32",
+              "bytes": 993280,
+              "sha256": "902230ce6bb720cfc0135700e8189439cbf413bce0dfa4f369c829d169c0705e"
+            },
+            {
+              "status": "verified",
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-gemma5120-v1-d4-logits.f32",
+              "bytes": 993280,
+              "sha256": "43d45d7fb2ead81acc9f043a6c62065d6d3960f631efb2c5512e34bbf9fe5227"
+            },
+            {
+              "status": "verified",
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-gemma5120-v1-d5-logits.f32",
+              "bytes": 993280,
+              "sha256": "5aada5cfb4a0fae6dd194789b85ffd1cb9187d3090c512406c18a2b845c2d52a"
+            },
+            {
+              "status": "verified",
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-gemma5120-v1-d6-logits.f32",
+              "bytes": 993280,
+              "sha256": "2ac2d0395977cf33572017403d92cd11dfd21961ddd5b7872342ef9ff02bcdbb"
+            },
+            {
+              "status": "verified",
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-gemma5120-v1-d7-logits.f32",
+              "bytes": 993280,
+              "sha256": "bc318936df4107fa868cb040ccb62664b1b899aeaeb7ddbff8bafa5404a117f6"
+            },
+            {
+              "status": "verified",
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-gemma5120-v1-d8-logits.f32",
+              "bytes": 993280,
+              "sha256": "c1be905b925b2f3537afa18577fa96ee1a8d0c89a10b899fa75e9e5b075bb64e"
+            },
+            {
+              "status": "verified",
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-gemma5120-v1-d9-logits.f32",
+              "bytes": 993280,
+              "sha256": "a3891c7c88cee9ed533f4e54efeda8090e4503d90e69f3f6532851895c0b9536"
+            },
+            {
+              "status": "verified",
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-gemma5120-v1-d10-logits.f32",
+              "bytes": 993280,
+              "sha256": "3fe9f61839c8971b86826e9097e69a059ed09057f2e8551fee99f33a6b28b7a5"
+            },
+            {
+              "status": "verified",
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-gemma5120-v1-d11-logits.f32",
+              "bytes": 993280,
+              "sha256": "94d8e774ba8aa9fe0ee9cb8fe45143720bc8770c4f9f1a65db62e353f517b9d5"
+            },
+            {
+              "status": "verified",
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-gemma5120-v1-d12-logits.f32",
+              "bytes": 993280,
+              "sha256": "49a9a66b17d6e803b75456105cd9c247f1aaf2838bd0371b3d7ce5e0c114888d"
+            },
+            {
+              "status": "verified",
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-gemma5120-v1-d13-logits.f32",
+              "bytes": 993280,
+              "sha256": "088c8accde5cd0ff123d41c1169e9ea0f8a0aa22897440f44a15e10606c25bd0"
+            },
+            {
+              "status": "verified",
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-gemma5120-v1-d14-logits.f32",
+              "bytes": 993280,
+              "sha256": "c2c1c2a4cee3b165258430fd53646207f6e4977eea30c799ac065395175978e5"
+            },
+            {
+              "status": "verified",
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-gemma5120-v1-d15-logits.f32",
+              "bytes": 993280,
+              "sha256": "f027cca0f690415f9720efb1df36e9366b48419789e9a9bd1c7faf0ae5f33029"
+            },
+            {
+              "status": "verified",
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-gemma5120-v1-d16-logits.f32",
+              "bytes": 993280,
+              "sha256": "534e6b323411c834b1e4e9850c8630b1a9268039706d31731587a5ef8cb4b8c1"
+            },
+            {
+              "status": "verified",
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-gemma5120-v1-d17-logits.f32",
+              "bytes": 993280,
+              "sha256": "d71762a61a41bb986d82306c58e89f5ef2665b72d4e69563f9412b134ba23276"
+            },
+            {
+              "status": "verified",
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-gemma5120-v1-d18-logits.f32",
+              "bytes": 993280,
+              "sha256": "e78bca0074635068658458d81b5b70c039284a9b6ad6243a51bb8a1cc0809fb0"
+            },
+            {
+              "status": "verified",
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-gemma5120-v1-d19-logits.f32",
+              "bytes": 993280,
+              "sha256": "469b6ae8c30934eb9b691f1a74e4387cc9f03b5355e79e9f99e851314774099b"
+            },
+            {
+              "status": "verified",
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-gemma5120-v1-d20-logits.f32",
+              "bytes": 993280,
+              "sha256": "da38cc7b55a124f27b800c9e407f344bfda369258d3e9b1e2d9eb0887d7c29f2"
+            },
+            {
+              "status": "verified",
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-gemma5120-v1-d21-logits.f32",
+              "bytes": 993280,
+              "sha256": "04e34cab8a7e3654d13b51dfde91fca0538b93b487e88890c8213f2aee446a9f"
+            },
+            {
+              "status": "verified",
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-gemma5120-v1-d22-logits.f32",
+              "bytes": 993280,
+              "sha256": "41daa6a1dc7061b961b85ce4e5159d7d0c37e8dc39018e9f88713edec4213263"
+            },
+            {
+              "status": "verified",
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-gemma5120-v1-d23-logits.f32",
+              "bytes": 993280,
+              "sha256": "268333b397338d455e7542eb211e3669c4bc737066c1d08dbae279a2f69c985f"
+            },
+            {
+              "status": "verified",
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-gemma5120-v1-d24-logits.f32",
+              "bytes": 993280,
+              "sha256": "9c9547c7f734a5c7f24496e4b17a1c00f854cc7efc7b776bcaa967c725e05abd"
+            },
+            {
+              "status": "verified",
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-gemma5120-v1-d25-logits.f32",
+              "bytes": 993280,
+              "sha256": "8632878934cfbfe55ae08ca283fa465b1af7f3a88abdd3a2ebd9484be4adbb35"
+            },
+            {
+              "status": "verified",
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-gemma5120-v1-d26-logits.f32",
+              "bytes": 993280,
+              "sha256": "605a30700be999ea521c1fdf308742be71bad6cb8f4fa085ea634f6b25dad784"
+            },
+            {
+              "status": "verified",
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-gemma5120-v1-d27-logits.f32",
+              "bytes": 993280,
+              "sha256": "02f037d940c7c9d4a24d27df3a3b5b4ed6e99ab6ff7d14fbba8883b43e128d4b"
+            },
+            {
+              "status": "verified",
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-gemma5120-v1-d28-logits.f32",
+              "bytes": 993280,
+              "sha256": "d3be1042db8231129a759c79c2f1a7504bd6c4eb7de54b5fa879301011089e4b"
+            },
+            {
+              "status": "verified",
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-gemma5120-v1-d29-logits.f32",
+              "bytes": 993280,
+              "sha256": "2d093e49e468a50ae88cc7bf1ccc0bd8b3bf86b95def86c58ccad2d7b5fd7536"
+            },
+            {
+              "status": "verified",
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-gemma5120-v1-d30-logits.f32",
+              "bytes": 993280,
+              "sha256": "3b25269913f1e58c50fd11bc6197498c0f86e2b6873e114d84004136de4cad0c"
+            },
+            {
+              "status": "verified",
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-gemma5120-v1-d31-logits.f32",
+              "bytes": 993280,
+              "sha256": "eb656a03a891b9569965fcb73fda075b7d4e7bfddf19b2d50d458c94cf584e6b"
+            },
+            {
+              "status": "verified",
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-gemma5120-v1-d32-logits.f32",
+              "bytes": 993280,
+              "sha256": "78faca5e8b4e280f5c0c8615f56e9075806b039273074e50917300480e78b993"
+            },
+            {
+              "status": "verified",
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-gemma5120-v1-d33-logits.f32",
+              "bytes": 993280,
+              "sha256": "4563e622bf11e1b3a78ae95b4dc49ed83608d88505bc83f2a7c9edba77bb6493"
+            },
+            {
+              "status": "verified",
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-gemma5120-v1-d34-logits.f32",
+              "bytes": 993280,
+              "sha256": "c44b1274e2627f6925ec113708115ea672929aa88bb87f77d82e4f6fcd32b4e2"
+            },
+            {
+              "status": "verified",
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-gemma5120-v1-d35-logits.f32",
+              "bytes": 993280,
+              "sha256": "82946e9e01111873bded455834b7ceba7462a02b9abf7bcc3cf5414c62b1de3a"
+            },
+            {
+              "status": "verified",
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-gemma5120-v1-d36-logits.f32",
+              "bytes": 993280,
+              "sha256": "5ab98fd4905335bdbb8995f863408a0fc6d8fb318eed662e6ed2526508e142b4"
+            },
+            {
+              "status": "verified",
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-gemma5120-v1-d37-logits.f32",
+              "bytes": 993280,
+              "sha256": "3d6f62a04c9e0ed52bbdfe25b44557236b130515bb10d2b7e69edc8ce987bca8"
+            },
+            {
+              "status": "verified",
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-gemma5120-v1-d38-logits.f32",
+              "bytes": 993280,
+              "sha256": "0d758b0ec2d495b265ba6ff670d3115fef02bb9f59a10497dbc05f6c287c38d6"
+            },
+            {
+              "status": "verified",
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-gemma5120-v1-d39-logits.f32",
+              "bytes": 993280,
+              "sha256": "8f19a1f73ca9d07047227df1c341cb34fd99ab9db8623392f688476749ec1622"
+            },
+            {
+              "status": "verified",
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-gemma5120-v1-d40-logits.f32",
+              "bytes": 993280,
+              "sha256": "29df5de76b10262b661e0ffb291147027621364202e207deb6399f5ec09112e6"
+            },
+            {
+              "status": "verified",
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-gemma5120-v1-d41-logits.f32",
+              "bytes": 993280,
+              "sha256": "f245a6318a79e77756a7f185c0c768826be2a627a1a4fddf26cb15d55eaccea4"
+            },
+            {
+              "status": "verified",
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-gemma5120-v1-d42-logits.f32",
+              "bytes": 993280,
+              "sha256": "8d0e10985293d99a6fc672a81a91bfd04b0f2a67f1a132fd5169787724bded92"
+            },
+            {
+              "status": "verified",
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-gemma5120-v1-d43-logits.f32",
+              "bytes": 993280,
+              "sha256": "1f0d32eb304660f96b96525c9932372a0bc1eb23baa80cc6e4d83ebe823965c1"
+            },
+            {
+              "status": "verified",
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-gemma5120-v1-d44-logits.f32",
+              "bytes": 993280,
+              "sha256": "b097d6bcf71d56e9681fc077f746f7f254ebc2bc5826bed15edaaaf370d3c922"
+            },
+            {
+              "status": "verified",
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-gemma5120-v1-d45-logits.f32",
+              "bytes": 993280,
+              "sha256": "50ff99152a0a31322abc277eef414b711100bb8cc62243df615fa308bcc34603"
+            },
+            {
+              "status": "verified",
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-gemma5120-v1-d46-logits.f32",
+              "bytes": 993280,
+              "sha256": "569b017b7aafce238b4a377e01bafada2eda0c220684bcf4a1746e1cda8bff53"
+            },
+            {
+              "status": "verified",
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-gemma5120-v1-d47-logits.f32",
+              "bytes": 993280,
+              "sha256": "7313886a225bc6da231ae8787915f9df23d986ad26a309b6ae23fea18fbac7b2"
+            },
+            {
+              "status": "verified",
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-gemma5120-v1-d48-logits.f32",
+              "bytes": 993280,
+              "sha256": "23fa1f3c73c3483d2227a028f805d1dd64554520fd4a4fc1a1466191ced79e47"
+            },
+            {
+              "status": "verified",
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-gemma5120-v1-d49-logits.f32",
+              "bytes": 993280,
+              "sha256": "1184672bb406cf06c38caea5d8c78c2c896203cf146abf42b2155a3bb93e64e8"
+            },
+            {
+              "status": "verified",
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-gemma5120-v1-d50-logits.f32",
+              "bytes": 993280,
+              "sha256": "8bd2ceeafd146dcb60f52c9ceddb1070e6c43fe310bf1ce07c5ee9633a3ec9ca"
+            },
+            {
+              "status": "verified",
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-gemma5120-v1-d51-logits.f32",
+              "bytes": 993280,
+              "sha256": "c421de5bb709df2b6f37b92d8d34792045abc15e80c5cb14a2fac2b008f39872"
+            },
+            {
+              "status": "verified",
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-gemma5120-v1-d52-logits.f32",
+              "bytes": 993280,
+              "sha256": "5b00a4399c9983d9bd99385d5ba4838187e42dc4dad96b3158e2cfd9a33812af"
+            },
+            {
+              "status": "verified",
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-gemma5120-v1-d53-logits.f32",
+              "bytes": 993280,
+              "sha256": "215d41eaf582feb1b3a547020ad3c75b6ef73ceca45b0c23850a767137806b67"
+            },
+            {
+              "status": "verified",
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-gemma5120-v1-d54-logits.f32",
+              "bytes": 993280,
+              "sha256": "380680ca3124c00c40cc814e9f44d1395d62b6bd631de86b3e3756d1351612c8"
+            },
+            {
+              "status": "verified",
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-gemma5120-v1-d55-logits.f32",
+              "bytes": 993280,
+              "sha256": "eef18f9748d6c312007d122d1c3f53b9370bceb0f517f1bbf4ec052aa827bdc2"
+            },
+            {
+              "status": "verified",
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-gemma5120-v1-d56-logits.f32",
+              "bytes": 993280,
+              "sha256": "9473d11d953bd13fec5a68df55ec73cdf6a7e5e22543a7231bb544f4d930f7c8"
+            },
+            {
+              "status": "verified",
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-gemma5120-v1-d57-logits.f32",
+              "bytes": 993280,
+              "sha256": "e2e4f9ace3611d02b2505230682d67326e758bb9de11ec9fc2a8943f805d1254"
+            },
+            {
+              "status": "verified",
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-gemma5120-v1-d58-logits.f32",
+              "bytes": 993280,
+              "sha256": "a801d02682098bc74b2c06c245149f9ac8ec8022bb54f0518b1a4e380cd52ff6"
+            },
+            {
+              "status": "verified",
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-gemma5120-v1-d59-logits.f32",
+              "bytes": 993280,
+              "sha256": "663ec1e8b72ba6f6006b55d8718d9e3f0d36e7d65b375bb1411eb6c695a43940"
+            },
+            {
+              "status": "verified",
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-gemma5120-v1-d60-logits.f32",
+              "bytes": 993280,
+              "sha256": "caebf7e55a05b2a7a7e07a6551b9c3339eea8110433b842f754dd95ae0c6c90d"
+            },
+            {
+              "status": "verified",
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-gemma5120-v1-d61-logits.f32",
+              "bytes": 993280,
+              "sha256": "cdcb75aa32638d86cf823e8ab3a65bc09efd1197295aa9c9320f7f88812576d3"
+            },
+            {
+              "status": "verified",
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-gemma5120-v1-d62-logits.f32",
+              "bytes": 993280,
+              "sha256": "7af741e80eaa6d59f6c495cf4bd37d42720f5578d5f0ef0471332e5fc31efab3"
+            },
+            {
+              "status": "verified",
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-gemma5120-v1-d63-logits.f32",
+              "bytes": 993280,
+              "sha256": "92cd2d25154f869f9d70398b5af526c1bb69187f87688cf740ca0fe3ea00831f"
+            },
+            {
+              "status": "verified",
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-gemma5120-v1-d64-logits.f32",
+              "bytes": 993280,
+              "sha256": "3f42cf2815aece27f5759fdef06e125c2dbfd935eb2640de0b667f5bb84a20e4"
+            }
+          ]
+        },
+        "P128_D64_final_v2": {
+          "exit_code": 1,
+          "assertions": 807,
+          "passed": 802,
+          "failed": 5,
+          "comparisons": [
+            {
+              "phase": "p128",
+              "repeat": 0,
+              "TV": 0.00245298,
+              "KL": 1.97034e-05,
+              "top10": 10,
+              "greedy": 13,
+              "reference_greedy": 13
+            },
+            {
+              "phase": "d1",
+              "repeat": 0,
+              "TV": 0.00367047,
+              "KL": 5.04096e-05,
+              "top10": 10,
+              "greedy": 198,
+              "reference_greedy": 198
+            },
+            {
+              "phase": "d2",
+              "repeat": 0,
+              "TV": 0.00449169,
+              "KL": 6.13317e-05,
+              "top10": 10,
+              "greedy": 248044,
+              "reference_greedy": 248044
+            },
+            {
+              "phase": "d3",
+              "repeat": 0,
+              "TV": 0.00500362,
+              "KL": 7.63123e-05,
+              "top10": 10,
+              "greedy": 248044,
+              "reference_greedy": 248044
+            },
+            {
+              "phase": "d4",
+              "repeat": 0,
+              "TV": 0.00393019,
+              "KL": 5.15174e-05,
+              "top10": 10,
+              "greedy": 248044,
+              "reference_greedy": 248044
+            },
+            {
+              "phase": "d5",
+              "repeat": 0,
+              "TV": 0.00550369,
+              "KL": 0.000109733,
+              "top10": 10,
+              "greedy": 248044,
+              "reference_greedy": 248044
+            },
+            {
+              "phase": "d6",
+              "repeat": 0,
+              "TV": 0.00993028,
+              "KL": 0.000297419,
+              "top10": 10,
+              "greedy": 248044,
+              "reference_greedy": 248044
+            },
+            {
+              "phase": "d7",
+              "repeat": 0,
+              "TV": 0.00962862,
+              "KL": 0.000282665,
+              "top10": 10,
+              "greedy": 248046,
+              "reference_greedy": 248044
+            },
+            {
+              "phase": "d8",
+              "repeat": 0,
+              "TV": 0.0127604,
+              "KL": 0.000611437,
+              "top10": 10,
+              "greedy": 248046,
+              "reference_greedy": 248046
+            },
+            {
+              "phase": "d9",
+              "repeat": 0,
+              "TV": 6.917e-07,
+              "KL": 2.37704e-08,
+              "top10": 10,
+              "greedy": 198,
+              "reference_greedy": 198
+            },
+            {
+              "phase": "d10",
+              "repeat": 0,
+              "TV": 0.00348788,
+              "KL": 2.72328e-05,
+              "top10": 10,
+              "greedy": 248045,
+              "reference_greedy": 248045
+            },
+            {
+              "phase": "d11",
+              "repeat": 0,
+              "TV": 0.023854,
+              "KL": 0.00201852,
+              "top10": 10,
+              "greedy": 248046,
+              "reference_greedy": 248046
+            },
+            {
+              "phase": "d12",
+              "repeat": 0,
+              "TV": 2.35888e-07,
+              "KL": 1.91359e-08,
+              "top10": 9,
+              "greedy": 198,
+              "reference_greedy": 198
+            },
+            {
+              "phase": "d13",
+              "repeat": 0,
+              "TV": 3.92514e-08,
+              "KL": 1.45078e-09,
+              "top10": 10,
+              "greedy": 248045,
+              "reference_greedy": 248045
+            },
+            {
+              "phase": "d14",
+              "repeat": 0,
+              "TV": 0.00370519,
+              "KL": 0.000356071,
+              "top10": 10,
+              "greedy": 846,
+              "reference_greedy": 846
+            },
+            {
+              "phase": "d15",
+              "repeat": 0,
+              "TV": 6.73587e-07,
+              "KL": 4.66805e-08,
+              "top10": 10,
+              "greedy": 198,
+              "reference_greedy": 198
+            },
+            {
+              "phase": "d16",
+              "repeat": 0,
+              "TV": 0.00608709,
+              "KL": 0.000123536,
+              "top10": 10,
+              "greedy": 2523,
+              "reference_greedy": 2523
+            },
+            {
+              "phase": "d17",
+              "repeat": 0,
+              "TV": 0.00122287,
+              "KL": 1.43932e-05,
+              "top10": 10,
+              "greedy": 513,
+              "reference_greedy": 513
+            },
+            {
+              "phase": "d18",
+              "repeat": 0,
+              "TV": 0.00591512,
+              "KL": 8.94258e-05,
+              "top10": 10,
+              "greedy": 264,
+              "reference_greedy": 264
+            },
+            {
+              "phase": "d19",
+              "repeat": 0,
+              "TV": 0.00935777,
+              "KL": 0.000267243,
+              "top10": 10,
+              "greedy": 47739,
+              "reference_greedy": 47739
+            },
+            {
+              "phase": "d20",
+              "repeat": 0,
+              "TV": 0.00661821,
+              "KL": 0.000121958,
+              "top10": 10,
+              "greedy": 248046,
+              "reference_greedy": 248046
+            },
+            {
+              "phase": "d21",
+              "repeat": 0,
+              "TV": 3.28761e-09,
+              "KL": 1.21697e-10,
+              "top10": 10,
+              "greedy": 198,
+              "reference_greedy": 198
+            },
+            {
+              "phase": "d22",
+              "repeat": 0,
+              "TV": 7.88022e-08,
+              "KL": 1.22507e-09,
+              "top10": 9,
+              "greedy": 248045,
+              "reference_greedy": 248045
+            },
+            {
+              "phase": "d23",
+              "repeat": 0,
+              "TV": 0.00352436,
+              "KL": 7.39984e-05,
+              "top10": 10,
+              "greedy": 248045,
+              "reference_greedy": 248045
+            },
+            {
+              "phase": "d24",
+              "repeat": 0,
+              "TV": 0.00323055,
+              "KL": 6.94699e-05,
+              "top10": 10,
+              "greedy": 248046,
+              "reference_greedy": 248046
+            },
+            {
+              "phase": "d25",
+              "repeat": 0,
+              "TV": 8.34483e-10,
+              "KL": 4.02747e-11,
+              "top10": 10,
+              "greedy": 198,
+              "reference_greedy": 198
+            },
+            {
+              "phase": "d26",
+              "repeat": 0,
+              "TV": 4.42771e-06,
+              "KL": 3.94808e-07,
+              "top10": 10,
+              "greedy": 248045,
+              "reference_greedy": 248045
+            },
+            {
+              "phase": "d27",
+              "repeat": 0,
+              "TV": 0.0172622,
+              "KL": 0.000886847,
+              "top10": 10,
+              "greedy": 248045,
+              "reference_greedy": 248045
+            },
+            {
+              "phase": "d28",
+              "repeat": 0,
+              "TV": 0.00535261,
+              "KL": 0.000227577,
+              "top10": 10,
+              "greedy": 198,
+              "reference_greedy": 198
+            },
+            {
+              "phase": "d29",
+              "repeat": 0,
+              "TV": 0.281446,
+              "KL": 0.217539,
+              "top10": 8,
+              "greedy": 248068,
+              "reference_greedy": 248068
+            },
+            {
+              "phase": "d30",
+              "repeat": 0,
+              "TV": 0.00142799,
+              "KL": 0.000149849,
+              "top10": 10,
+              "greedy": 198,
+              "reference_greedy": 198
+            },
+            {
+              "phase": "d31",
+              "repeat": 0,
+              "TV": 6.7021e-06,
+              "KL": 2.44112e-07,
+              "top10": 9,
+              "greedy": 760,
+              "reference_greedy": 760
+            },
+            {
+              "phase": "d32",
+              "repeat": 0,
+              "TV": 8.2784e-07,
+              "KL": 1.35821e-08,
+              "top10": 10,
+              "greedy": 1156,
+              "reference_greedy": 1156
+            },
+            {
+              "phase": "d33",
+              "repeat": 0,
+              "TV": 0.00466358,
+              "KL": 8.98796e-05,
+              "top10": 10,
+              "greedy": 579,
+              "reference_greedy": 579
+            },
+            {
+              "phase": "d34",
+              "repeat": 0,
+              "TV": 0.000490717,
+              "KL": 3.00675e-05,
+              "top10": 10,
+              "greedy": 1876,
+              "reference_greedy": 1876
+            },
+            {
+              "phase": "d35",
+              "repeat": 0,
+              "TV": 0.00151048,
+              "KL": 1.45708e-05,
+              "top10": 10,
+              "greedy": 7701,
+              "reference_greedy": 7701
+            },
+            {
+              "phase": "d36",
+              "repeat": 0,
+              "TV": 5.81331e-06,
+              "KL": 5.28153e-08,
+              "top10": 10,
+              "greedy": 310,
+              "reference_greedy": 310
+            },
+            {
+              "phase": "d37",
+              "repeat": 0,
+              "TV": 1.04618e-05,
+              "KL": 2.26423e-07,
+              "top10": 10,
+              "greedy": 381,
+              "reference_greedy": 381
+            },
+            {
+              "phase": "d38",
+              "repeat": 0,
+              "TV": 0.00238538,
+              "KL": 3.00907e-05,
+              "top10": 10,
+              "greedy": 3799,
+              "reference_greedy": 3799
+            },
+            {
+              "phase": "d39",
+              "repeat": 0,
+              "TV": 5.71989e-08,
+              "KL": 1.06606e-09,
+              "top10": 10,
+              "greedy": 974,
+              "reference_greedy": 974
+            },
+            {
+              "phase": "d40",
+              "repeat": 0,
+              "TV": 0.00124431,
+              "KL": 3.61046e-05,
+              "top10": 10,
+              "greedy": 466,
+              "reference_greedy": 466
+            },
+            {
+              "phase": "d41",
+              "repeat": 0,
+              "TV": 0.00850798,
+              "KL": 0.00026976,
+              "top10": 10,
+              "greedy": 47739,
+              "reference_greedy": 47739
+            },
+            {
+              "phase": "d42",
+              "repeat": 0,
+              "TV": 0.00535149,
+              "KL": 0.000141898,
+              "top10": 10,
+              "greedy": 13,
+              "reference_greedy": 13
+            },
+            {
+              "phase": "d43",
+              "repeat": 0,
+              "TV": 0.0058813,
+              "KL": 9.14848e-05,
+              "top10": 10,
+              "greedy": 2302,
+              "reference_greedy": 2302
+            },
+            {
+              "phase": "d44",
+              "repeat": 0,
+              "TV": 0.00702272,
+              "KL": 0.000158105,
+              "top10": 10,
+              "greedy": 5947,
+              "reference_greedy": 5947
+            },
+            {
+              "phase": "d45",
+              "repeat": 0,
+              "TV": 3.08899e-06,
+              "KL": 9.52191e-08,
+              "top10": 10,
+              "greedy": 328,
+              "reference_greedy": 328
+            },
+            {
+              "phase": "d46",
+              "repeat": 0,
+              "TV": 1.00746e-05,
+              "KL": 4.57845e-07,
+              "top10": 10,
+              "greedy": 2523,
+              "reference_greedy": 2523
+            },
+            {
+              "phase": "d47",
+              "repeat": 0,
+              "TV": 6.31444e-07,
+              "KL": 1.81638e-08,
+              "top10": 10,
+              "greedy": 513,
+              "reference_greedy": 513
+            },
+            {
+              "phase": "d48",
+              "repeat": 0,
+              "TV": 3.50963e-07,
+              "KL": 1.74145e-08,
+              "top10": 10,
+              "greedy": 264,
+              "reference_greedy": 264
+            },
+            {
+              "phase": "d49",
+              "repeat": 0,
+              "TV": 5.27433e-07,
+              "KL": 9.93824e-09,
+              "top10": 10,
+              "greedy": 47739,
+              "reference_greedy": 47739
+            },
+            {
+              "phase": "d50",
+              "repeat": 0,
+              "TV": 0.000173738,
+              "KL": 1.36383e-06,
+              "top10": 10,
+              "greedy": 1,
+              "reference_greedy": 1
+            },
+            {
+              "phase": "d51",
+              "repeat": 0,
+              "TV": 8.41911e-05,
+              "KL": 6.76493e-07,
+              "top10": 10,
+              "greedy": 864,
+              "reference_greedy": 864
+            },
+            {
+              "phase": "d52",
+              "repeat": 0,
+              "TV": 0.00077695,
+              "KL": 9.63185e-06,
+              "top10": 10,
+              "greedy": 4816,
+              "reference_greedy": 4816
+            },
+            {
+              "phase": "d53",
+              "repeat": 0,
+              "TV": 0.00406944,
+              "KL": 3.59065e-05,
+              "top10": 10,
+              "greedy": 31084,
+              "reference_greedy": 31084
+            },
+            {
+              "phase": "d54",
+              "repeat": 0,
+              "TV": 0.00066581,
+              "KL": 1.83446e-05,
+              "top10": 10,
+              "greedy": 13,
+              "reference_greedy": 13
+            },
+            {
+              "phase": "d55",
+              "repeat": 0,
+              "TV": 0.00484423,
+              "KL": 9.78612e-05,
+              "top10": 10,
+              "greedy": 6558,
+              "reference_greedy": 6558
+            },
+            {
+              "phase": "d56",
+              "repeat": 0,
+              "TV": 3.43659e-09,
+              "KL": 6.89785e-11,
+              "top10": 10,
+              "greedy": 728,
+              "reference_greedy": 728
+            },
+            {
+              "phase": "d57",
+              "repeat": 0,
+              "TV": 0.00762954,
+              "KL": 0.00012287,
+              "top10": 10,
+              "greedy": 2814,
+              "reference_greedy": 2814
+            },
+            {
+              "phase": "d58",
+              "repeat": 0,
+              "TV": 4.95384e-06,
+              "KL": 1.15307e-07,
+              "top10": 10,
+              "greedy": 1092,
+              "reference_greedy": 1092
+            },
+            {
+              "phase": "d59",
+              "repeat": 0,
+              "TV": 6.69781e-05,
+              "KL": 2.81325e-06,
+              "top10": 10,
+              "greedy": 781,
+              "reference_greedy": 781
+            },
+            {
+              "phase": "d60",
+              "repeat": 0,
+              "TV": 1.10727e-07,
+              "KL": 4.3021e-09,
+              "top10": 10,
+              "greedy": 2493,
+              "reference_greedy": 2493
+            },
+            {
+              "phase": "d61",
+              "repeat": 0,
+              "TV": 0.000295843,
+              "KL": 3.07355e-06,
+              "top10": 10,
+              "greedy": 381,
+              "reference_greedy": 381
+            },
+            {
+              "phase": "d62",
+              "repeat": 0,
+              "TV": 0.00131249,
+              "KL": 1.33075e-05,
+              "top10": 10,
+              "greedy": 4313,
+              "reference_greedy": 4313
+            },
+            {
+              "phase": "d63",
+              "repeat": 0,
+              "TV": 1.67394e-08,
+              "KL": 2.605e-10,
+              "top10": 10,
+              "greedy": 310,
+              "reference_greedy": 310
+            },
+            {
+              "phase": "d64",
+              "repeat": 0,
+              "TV": 2.52715e-05,
+              "KL": 2.01075e-07,
+              "top10": 10,
+              "greedy": 1910,
+              "reference_greedy": 1910
+            }
+          ],
+          "investigation_triggers": [
+            {
+              "phase": "d11",
+              "repeat": 0,
+              "TV": 0.023854,
+              "KL": 0.00201852,
+              "top10": 10,
+              "greedy": 248046,
+              "reference_greedy": 248046
+            },
+            {
+              "phase": "d29",
+              "repeat": 0,
+              "TV": 0.281446,
+              "KL": 0.217539,
+              "top10": 8,
+              "greedy": 248068,
+              "reference_greedy": 248068
+            }
+          ],
+          "max_TV": 0.281446,
+          "max_KL": 0.217539,
+          "min_top10": 8,
+          "greedy_mismatches": [
+            {
+              "phase": "d7",
+              "repeat": 0,
+              "TV": 0.00962862,
+              "KL": 0.000282665,
+              "top10": 10,
+              "greedy": 248046,
+              "reference_greedy": 248044
+            }
+          ],
+          "selections": {
+            "Embedding": 65,
+            "RopeCosSinCache": 65,
+            "RmsNorm": 8385,
+            "Exl3GroupedLinear": 16705,
+            "MatmulDenseF16": 3120,
+            "GdnStateGather": 96,
+            "CausalConv1dFwd": 48,
+            "GdnStateScatter": 96,
+            "GdnPostConv": 48,
+            "GdnPrefillRawGate": 48,
+            "RmsNormGated": 3120,
+            "SiluAndMul": 4160,
+            "AttnQkNormRopeGate": 1040,
+            "ReshapeAndCacheFp8": 1040,
+            "PagedAttention": 1040,
+            "SigmoidGateBf16": 1040,
+            "CastF32": 65,
+            "CausalConv1dUpdate": 3072,
+            "GdnPackedDecode": 3072
+          },
+          "bf16_arguments": 0,
+          "cpu_reference_selections": 0,
+          "old_scalar_packed_selections": 0,
+          "full_head_tensor_calls": 65,
+          "logits": [
+            {
+              "status": "verified",
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-gemma5120-v2-p128-logits.f32",
+              "bytes": 993280,
+              "sha256": "66cda6bc8c8ceefc30b8ba489ff800f2b6d44984057954ff91900b3dc6ab7f45"
+            },
+            {
+              "status": "verified",
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-gemma5120-v2-d1-logits.f32",
+              "bytes": 993280,
+              "sha256": "78da23cc2b4401222837d96b06c07696250fc1a24c8cf9bca97beaf5b1304933"
+            },
+            {
+              "status": "verified",
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-gemma5120-v2-d2-logits.f32",
+              "bytes": 993280,
+              "sha256": "22659b38aeea0d2aab5a7fce2710891f6c39c740b92e5338b488d075eae98d00"
+            },
+            {
+              "status": "verified",
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-gemma5120-v2-d3-logits.f32",
+              "bytes": 993280,
+              "sha256": "3254c31e96e70b7f56bc10d5b2bcf986cec4d91a6a16cb8b9d9090c31482f0ea"
+            },
+            {
+              "status": "verified",
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-gemma5120-v2-d4-logits.f32",
+              "bytes": 993280,
+              "sha256": "ff504889f2278ac7357815e7d7f165ff798efb343bcfd83eacb907956fe71b7f"
+            },
+            {
+              "status": "verified",
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-gemma5120-v2-d5-logits.f32",
+              "bytes": 993280,
+              "sha256": "30228170b9c9155f16d421dd02323b31f10dcf3710b993d32197ad8f948348a7"
+            },
+            {
+              "status": "verified",
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-gemma5120-v2-d6-logits.f32",
+              "bytes": 993280,
+              "sha256": "6b1d9ef74e92e4dd5454f60a269ccf0d88496bed220a9227145970d5a3ba33d9"
+            },
+            {
+              "status": "verified",
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-gemma5120-v2-d7-logits.f32",
+              "bytes": 993280,
+              "sha256": "9fe1bd854fc10c63d187ae268775aa049898ef195aea6ebd796196219b939dcb"
+            },
+            {
+              "status": "verified",
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-gemma5120-v2-d8-logits.f32",
+              "bytes": 993280,
+              "sha256": "9b2cef9ffa31a5e4c5e6e37c3add91178c81b04f6a9cd3dd886ef32582cbe99e"
+            },
+            {
+              "status": "verified",
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-gemma5120-v2-d9-logits.f32",
+              "bytes": 993280,
+              "sha256": "1ce6a2c3fd11a4bbee44e5d8848111e972877a4bdfbcbd33da8752bf2e9ce22e"
+            },
+            {
+              "status": "verified",
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-gemma5120-v2-d10-logits.f32",
+              "bytes": 993280,
+              "sha256": "8bb4b4728dcd5e105aa2098281b31a1e925519a99c270705f8a12eef5aa4e9c2"
+            },
+            {
+              "status": "verified",
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-gemma5120-v2-d11-logits.f32",
+              "bytes": 993280,
+              "sha256": "1bed34f709e0394e075e4ca8c806b509cb7912b26c34808abb6e8429faccd6fe"
+            },
+            {
+              "status": "verified",
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-gemma5120-v2-d12-logits.f32",
+              "bytes": 993280,
+              "sha256": "d72c8d97556bd6d228f51a5a1aa4f10a1a9f036cbcc2f016fa87c2cef75342c7"
+            },
+            {
+              "status": "verified",
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-gemma5120-v2-d13-logits.f32",
+              "bytes": 993280,
+              "sha256": "a746cad61c7683f42d1a21e4a0658d56b9d0f32221617d2af2e53e214a7e25ef"
+            },
+            {
+              "status": "verified",
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-gemma5120-v2-d14-logits.f32",
+              "bytes": 993280,
+              "sha256": "f1bc24385a304603197a64d5604fc916281479481339e6dc52630a3e64e7b542"
+            },
+            {
+              "status": "verified",
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-gemma5120-v2-d15-logits.f32",
+              "bytes": 993280,
+              "sha256": "a2aa80072308a45b3b6ef5871290cfdfe4d7db419224cbc14404f47d6804da02"
+            },
+            {
+              "status": "verified",
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-gemma5120-v2-d16-logits.f32",
+              "bytes": 993280,
+              "sha256": "042213ec129abe4318a39dbd9282c45800a27f00593f5777d0da48eef1ddf93b"
+            },
+            {
+              "status": "verified",
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-gemma5120-v2-d17-logits.f32",
+              "bytes": 993280,
+              "sha256": "71c79ac9a304859d00832a3096a774629caceae6f03bd87a455f6b6b858769a1"
+            },
+            {
+              "status": "verified",
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-gemma5120-v2-d18-logits.f32",
+              "bytes": 993280,
+              "sha256": "033beb0087917d265b01ac3e90f5e5ceb218f5f8ac37399de99f1e76e8043d5a"
+            },
+            {
+              "status": "verified",
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-gemma5120-v2-d19-logits.f32",
+              "bytes": 993280,
+              "sha256": "f99d572b6c0c192fb95cc49f1e52a91056cc6474bc68afc72a49a586bab5a56c"
+            },
+            {
+              "status": "verified",
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-gemma5120-v2-d20-logits.f32",
+              "bytes": 993280,
+              "sha256": "cb20b8cccb4fd95e446f58641d8dfe7ad7fe11d95c6ec030ef385cc46083a331"
+            },
+            {
+              "status": "verified",
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-gemma5120-v2-d21-logits.f32",
+              "bytes": 993280,
+              "sha256": "610c8df02f2ec81115fdd471d65897ec8829e0a46ae3b3cc7eee99d251d50d54"
+            },
+            {
+              "status": "verified",
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-gemma5120-v2-d22-logits.f32",
+              "bytes": 993280,
+              "sha256": "e9ad7c268cfa69e2cfb0a82a32c45babb6e83d9c2f505f50fcf65f2f333b69d1"
+            },
+            {
+              "status": "verified",
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-gemma5120-v2-d23-logits.f32",
+              "bytes": 993280,
+              "sha256": "df18eef4a610f24440a6e633a4dc8f38e93620fe6c0e3ffc4a29f6c30baf4c68"
+            },
+            {
+              "status": "verified",
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-gemma5120-v2-d24-logits.f32",
+              "bytes": 993280,
+              "sha256": "3080c7db715210290b27fc7417b7f3f9281a6b0cf6b01a573fe10467ef0e2437"
+            },
+            {
+              "status": "verified",
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-gemma5120-v2-d25-logits.f32",
+              "bytes": 993280,
+              "sha256": "733b4a968d1f6da38b9552d6bade0649c8c3b89597ee5330a8102ac6e1761c8d"
+            },
+            {
+              "status": "verified",
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-gemma5120-v2-d26-logits.f32",
+              "bytes": 993280,
+              "sha256": "992dfd207053813993f171985c3b5fb17eb6b3313a6bb2f620422550ca25b89a"
+            },
+            {
+              "status": "verified",
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-gemma5120-v2-d27-logits.f32",
+              "bytes": 993280,
+              "sha256": "5e89f70ca4738ab360b298d0cb06d587ca06173664f89c11acba417eaa304779"
+            },
+            {
+              "status": "verified",
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-gemma5120-v2-d28-logits.f32",
+              "bytes": 993280,
+              "sha256": "0690a27383183050b6ef379ed1465bde9c6384f60ed3d4dfa98dbb9282a1ac32"
+            },
+            {
+              "status": "verified",
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-gemma5120-v2-d29-logits.f32",
+              "bytes": 993280,
+              "sha256": "6490390e38c86609cd9dc74cccf1592c0d889ca842360d92b89b06b190e0d0a4"
+            },
+            {
+              "status": "verified",
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-gemma5120-v2-d30-logits.f32",
+              "bytes": 993280,
+              "sha256": "5ccdb9a39ed192ffad9f9001536ab016a9da897903200b25603d7a5096a974c3"
+            },
+            {
+              "status": "verified",
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-gemma5120-v2-d31-logits.f32",
+              "bytes": 993280,
+              "sha256": "97537607ee55546b2be56ffce07ceacbf9bb2fe7d94bbac9f00d8fd3a1ff7e48"
+            },
+            {
+              "status": "verified",
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-gemma5120-v2-d32-logits.f32",
+              "bytes": 993280,
+              "sha256": "803c9f1867e4c1f9508554904bcb8096fa5411050edceb5ce11e8950930a7629"
+            },
+            {
+              "status": "verified",
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-gemma5120-v2-d33-logits.f32",
+              "bytes": 993280,
+              "sha256": "6121c780a7efae5234eaf1f009aa118b3e2b16a9eb22713c9b4137f9a50ab8a5"
+            },
+            {
+              "status": "verified",
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-gemma5120-v2-d34-logits.f32",
+              "bytes": 993280,
+              "sha256": "fb03673cdc1036bc7b1b4917619b0bc9d2d66c251c7e9e62a5b0c3cd9c8989c2"
+            },
+            {
+              "status": "verified",
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-gemma5120-v2-d35-logits.f32",
+              "bytes": 993280,
+              "sha256": "4fdb2eddd4c99d925889f59b5a3a5fbe3a0b113fc5bac67544b998b1a5f6e1c9"
+            },
+            {
+              "status": "verified",
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-gemma5120-v2-d36-logits.f32",
+              "bytes": 993280,
+              "sha256": "3e53eead62adb8dd739fefba6104f3111377565110c33ddcdd5e3958c820f68e"
+            },
+            {
+              "status": "verified",
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-gemma5120-v2-d37-logits.f32",
+              "bytes": 993280,
+              "sha256": "6d09631c42a3ca237532de3cecce1794c9df026472619a39dd2ce17fe72c438e"
+            },
+            {
+              "status": "verified",
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-gemma5120-v2-d38-logits.f32",
+              "bytes": 993280,
+              "sha256": "828101f4d6da61be5761b5e8936cf52a9223754f0eaa3337c56f1aa4f9ad1b66"
+            },
+            {
+              "status": "verified",
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-gemma5120-v2-d39-logits.f32",
+              "bytes": 993280,
+              "sha256": "e8c03bb274725d13ec0d94a055a475488440c84475dd64948bff922526613a6a"
+            },
+            {
+              "status": "verified",
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-gemma5120-v2-d40-logits.f32",
+              "bytes": 993280,
+              "sha256": "06067ee57d789519792d533d24710f229329bc1e4963013a269c9089b28b5855"
+            },
+            {
+              "status": "verified",
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-gemma5120-v2-d41-logits.f32",
+              "bytes": 993280,
+              "sha256": "fcd412843969b8164c76427872ec3e7d11ff05064152be27ebb0a1724c58c399"
+            },
+            {
+              "status": "verified",
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-gemma5120-v2-d42-logits.f32",
+              "bytes": 993280,
+              "sha256": "ef79424e1cc2eb5e8b7b94f6731718b0f10236daa897502a8411ae96c788cf3f"
+            },
+            {
+              "status": "verified",
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-gemma5120-v2-d43-logits.f32",
+              "bytes": 993280,
+              "sha256": "2a46964505e0b4ee4eeecd6e894263b55a43743a20771f919cd28eb1c3e83b21"
+            },
+            {
+              "status": "verified",
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-gemma5120-v2-d44-logits.f32",
+              "bytes": 993280,
+              "sha256": "cccb2e70174915a117136d0e5f0908cd0881f76e6e8cfdfe2a248742fa5bada6"
+            },
+            {
+              "status": "verified",
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-gemma5120-v2-d45-logits.f32",
+              "bytes": 993280,
+              "sha256": "05f1f7a518cb30ee549a440c1ecdc8bdec7606a39b154ca3b50eb713f36df6c3"
+            },
+            {
+              "status": "verified",
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-gemma5120-v2-d46-logits.f32",
+              "bytes": 993280,
+              "sha256": "1a04f10bd20ef8c8ef9eeccf3f01a9f16fd06fca85c357fa166acfcd3cd1a150"
+            },
+            {
+              "status": "verified",
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-gemma5120-v2-d47-logits.f32",
+              "bytes": 993280,
+              "sha256": "9905cd3c3c629d2aa21612b7d06e60529e8567104f1b80d2f643cff5caf15ee0"
+            },
+            {
+              "status": "verified",
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-gemma5120-v2-d48-logits.f32",
+              "bytes": 993280,
+              "sha256": "d155e9584cc7f0bb3c5b1ec711e6f8fa3581e9fb4d0722c82320e1bffaf0d999"
+            },
+            {
+              "status": "verified",
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-gemma5120-v2-d49-logits.f32",
+              "bytes": 993280,
+              "sha256": "6fd6d0fa795073d1a3f5e1945bf6b007f84799714e991ff89fd77b19467be469"
+            },
+            {
+              "status": "verified",
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-gemma5120-v2-d50-logits.f32",
+              "bytes": 993280,
+              "sha256": "31153929d031f3b5f77f62eb9e18d30be49e8029416d9cc2c1cc551fe7a760f1"
+            },
+            {
+              "status": "verified",
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-gemma5120-v2-d51-logits.f32",
+              "bytes": 993280,
+              "sha256": "5d9482d10ef3fdbfd85eb79a1e76df2bab4e59b694b9dc8c3b623a3fcad77cdf"
+            },
+            {
+              "status": "verified",
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-gemma5120-v2-d52-logits.f32",
+              "bytes": 993280,
+              "sha256": "1111158b37e7a191a187e42f763e5b4594b733c5f2ceea81a599b2d5f3d1057e"
+            },
+            {
+              "status": "verified",
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-gemma5120-v2-d53-logits.f32",
+              "bytes": 993280,
+              "sha256": "6279157f5f7c61012569dc1f2ddf371e612873df671f655514c8344745231e71"
+            },
+            {
+              "status": "verified",
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-gemma5120-v2-d54-logits.f32",
+              "bytes": 993280,
+              "sha256": "e75a8951cad744723fae102924a72404ad643a6300a308bbf556fcab20dccb3d"
+            },
+            {
+              "status": "verified",
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-gemma5120-v2-d55-logits.f32",
+              "bytes": 993280,
+              "sha256": "3d2052ec4900e8bb8ea7318caf976da019da1193486886005ada26a8a8b166ae"
+            },
+            {
+              "status": "verified",
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-gemma5120-v2-d56-logits.f32",
+              "bytes": 993280,
+              "sha256": "6d0270e044f3ed547f6c563b529c441bbc3ad73a3f6616b14370fe40a645bf5a"
+            },
+            {
+              "status": "verified",
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-gemma5120-v2-d57-logits.f32",
+              "bytes": 993280,
+              "sha256": "ba856b1fcf6eb79b1294a43926541c505035981b69719007e3ffdd0325446184"
+            },
+            {
+              "status": "verified",
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-gemma5120-v2-d58-logits.f32",
+              "bytes": 993280,
+              "sha256": "bf5f040dde5e0ca29da5dc818fe18ff82f72f6afa9b7a77d2bcc1fa72f693ba1"
+            },
+            {
+              "status": "verified",
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-gemma5120-v2-d59-logits.f32",
+              "bytes": 993280,
+              "sha256": "7cfc8a4664c7a00f3ce7bc7f686eafe128e6a56df1e6fc0e2c728490c61158b1"
+            },
+            {
+              "status": "verified",
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-gemma5120-v2-d60-logits.f32",
+              "bytes": 993280,
+              "sha256": "8de5e6af796b93b601c4ac80acfbe8ab15066446daa32f81a55cc5f2ae9ffa5e"
+            },
+            {
+              "status": "verified",
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-gemma5120-v2-d61-logits.f32",
+              "bytes": 993280,
+              "sha256": "4da000dd77e1287a9e9dff7421fba31b1f694aed47761f415fd5a0f159858045"
+            },
+            {
+              "status": "verified",
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-gemma5120-v2-d62-logits.f32",
+              "bytes": 993280,
+              "sha256": "0f19629fc7fad373a187c32d4aed935e2b498faa084f0ed895ab5b7f3b2c6f3b"
+            },
+            {
+              "status": "verified",
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-gemma5120-v2-d63-logits.f32",
+              "bytes": 993280,
+              "sha256": "137d46ed3fab076fe66b51d6caadef3d3876372940399d24af05f531b74541a3"
+            },
+            {
+              "status": "verified",
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/target-native-D64-gemma5120-v2-d64-logits.f32",
+              "bytes": 993280,
+              "sha256": "54cb0ada48a6587d780ea13922a2bc82b1677d6359ae797d02cedf6d0f4de18b"
+            }
+          ]
+        },
+        "direct_prefix_witness_comparison_v1": {
+          "host_report_exit": 0,
+          "comparisons": 195,
+          "investigation_trigger_count": 11,
+          "investigation_triggers": [
+            {
+              "phase": "d11",
+              "reference_repeat": 0,
+              "TV": 0.02029307317565237,
+              "KL_reference_to_actual": 0.001184133216167692,
+              "top10_overlap": 10,
+              "investigation_trigger": true
+            },
+            {
+              "phase": "d11",
+              "reference_repeat": 1,
+              "TV": 0.029856603665559027,
+              "KL_reference_to_actual": 0.0026383899097527476,
+              "top10_overlap": 10,
+              "investigation_trigger": true
+            },
+            {
+              "phase": "d14",
+              "reference_repeat": 2,
+              "TV": 0.014793035596297334,
+              "KL_reference_to_actual": 0.0035333236907627383,
+              "top10_overlap": 10,
+              "investigation_trigger": true
+            },
+            {
+              "phase": "d24",
+              "reference_repeat": 2,
+              "TV": 0.04669165914120519,
+              "KL_reference_to_actual": 0.006264388463406119,
+              "top10_overlap": 9,
+              "investigation_trigger": true
+            },
+            {
+              "phase": "d27",
+              "reference_repeat": 0,
+              "TV": 0.04148027973077502,
+              "KL_reference_to_actual": 0.004079652724505959,
+              "top10_overlap": 10,
+              "investigation_trigger": true
+            },
+            {
+              "phase": "d27",
+              "reference_repeat": 1,
+              "TV": 0.02754856558938163,
+              "KL_reference_to_actual": 0.0019303716260371,
+              "top10_overlap": 10,
+              "investigation_trigger": true
+            },
+            {
+              "phase": "d27",
+              "reference_repeat": 2,
+              "TV": 0.06888244271912584,
+              "KL_reference_to_actual": 0.010280497794731853,
+              "top10_overlap": 10,
+              "investigation_trigger": true
+            },
+            {
+              "phase": "d28",
+              "reference_repeat": 2,
+              "TV": 0.024303326088086604,
+              "KL_reference_to_actual": 0.003265039659988642,
+              "top10_overlap": 10,
+              "investigation_trigger": true
+            },
+            {
+              "phase": "d29",
+              "reference_repeat": 0,
+              "TV": 0.09745103515304229,
+              "KL_reference_to_actual": 0.023467182864698295,
+              "top10_overlap": 9,
+              "investigation_trigger": true
+            },
+            {
+              "phase": "d29",
+              "reference_repeat": 1,
+              "TV": 0.12051951155466537,
+              "KL_reference_to_actual": 0.03468686243826439,
+              "top10_overlap": 9,
+              "investigation_trigger": true
+            },
+            {
+              "phase": "d29",
+              "reference_repeat": 2,
+              "TV": 0.22940029485515293,
+              "KL_reference_to_actual": 0.169182652645895,
+              "top10_overlap": 8,
+              "investigation_trigger": true
+            }
+          ],
+          "max_TV": 0.22940029485515293,
+          "max_KL": 0.169182652645895
+        },
+        "direct_prefix_witness_comparison_v2": {
+          "host_report_exit": 0,
+          "comparisons": 195,
+          "investigation_trigger_count": 10,
+          "investigation_triggers": [
+            {
+              "phase": "d14",
+              "reference_repeat": 2,
+              "TV": 0.01579164821811589,
+              "KL_reference_to_actual": 0.0030574853037809674,
+              "top10_overlap": 10,
+              "investigation_trigger": true
+            },
+            {
+              "phase": "d19",
+              "reference_repeat": 2,
+              "TV": 0.02130055727019148,
+              "KL_reference_to_actual": 0.0014886157882687033,
+              "top10_overlap": 9,
+              "investigation_trigger": true
+            },
+            {
+              "phase": "d24",
+              "reference_repeat": 2,
+              "TV": 0.03448207724573653,
+              "KL_reference_to_actual": 0.0034929138717116454,
+              "top10_overlap": 10,
+              "investigation_trigger": true
+            },
+            {
+              "phase": "d27",
+              "reference_repeat": 0,
+              "TV": 0.02922871980427803,
+              "KL_reference_to_actual": 0.0017918773835231625,
+              "top10_overlap": 10,
+              "investigation_trigger": true
+            },
+            {
+              "phase": "d27",
+              "reference_repeat": 2,
+              "TV": 0.056644169057355996,
+              "KL_reference_to_actual": 0.007687393227912032,
+              "top10_overlap": 10,
+              "investigation_trigger": true
+            },
+            {
+              "phase": "d28",
+              "reference_repeat": 1,
+              "TV": 0.021600264584240234,
+              "KL_reference_to_actual": 0.0026421203310545704,
+              "top10_overlap": 10,
+              "investigation_trigger": true
+            },
+            {
+              "phase": "d28",
+              "reference_repeat": 2,
+              "TV": 0.029674809057933182,
+              "KL_reference_to_actual": 0.004785529442236778,
+              "top10_overlap": 10,
+              "investigation_trigger": true
+            },
+            {
+              "phase": "d29",
+              "reference_repeat": 0,
+              "TV": 0.13109801312827987,
+              "KL_reference_to_actual": 0.03735307106576948,
+              "top10_overlap": 9,
+              "investigation_trigger": true
+            },
+            {
+              "phase": "d29",
+              "reference_repeat": 1,
+              "TV": 0.15416773320268223,
+              "KL_reference_to_actual": 0.05179584982903391,
+              "top10_overlap": 9,
+              "investigation_trigger": true
+            },
+            {
+              "phase": "d29",
+              "reference_repeat": 2,
+              "TV": 0.26338971930040467,
+              "KL_reference_to_actual": 0.20416013013214662,
+              "top10_overlap": 8,
+              "investigation_trigger": true
+            }
+          ],
+          "max_TV": 0.26338971930040467,
+          "max_KL": 0.20416013013214662
+        }
+      },
+      "strict_state_rerun": {
+        "exit": 1,
+        "cases": 1,
+        "assertions": 414,
+        "passed": 413,
+        "failed": 1,
+        "scope": "Own-state GDN P128 from frozen original input_norm_output; this seam bypasses full-width input norm.",
+        "P128_mixer_relative": 4.97236e-05,
+        "P128_state_relative": 1.74616e-05,
+        "P128_state_max_error": 0.00263786,
+        "P128_state_different_values": 16379,
+        "first_failing_state_index": 360512,
+        "first_failing_head": 22,
+        "D1_executed": false,
+        "reason": "Strict elementwise P128 state REQUIRE stops before D1; relative norm being below1e-4 does not waive rtol1e-4/atol1e-5 failure."
+      },
+      "same_input_BA": {
+        "scope": "Current native P128 BA from identical frozen input_norm_output versus original packed BA; original first48 B, last48 A. D1 did not execute because strict P128 state REQUIRE stopped the test.",
+        "capture_sha256": "195d9ee81287406b4e0d6e05dc1611627bd7b3ad3fbd10377c58f793f03d79fc",
+        "parts": {
+          "b": {
+            "bit_exact": false,
+            "bit_mismatches": 3,
+            "first_bit_mismatch": 2242,
+            "elements": 6144,
+            "differences": [
+              {
+                "row": 46,
+                "head": 34,
+                "native": -0.00042366981506347656,
+                "original": -0.000423431396484375
+              },
+              {
+                "row": 70,
+                "head": 39,
+                "native": 0.00010859966278076172,
+                "original": 0.00010865926742553711
+              },
+              {
+                "row": 74,
+                "head": 22,
+                "native": -0.33056640625,
+                "original": -0.330810546875
+              }
+            ]
+          },
+          "a": {
+            "bit_exact": false,
+            "bit_mismatches": 3,
+            "first_bit_mismatch": 58,
+            "elements": 6144,
+            "differences": [
+              {
+                "row": 1,
+                "head": 10,
+                "native": -6.54458999633789e-05,
+                "original": -6.538629531860352e-05
+              },
+              {
+                "row": 39,
+                "head": 17,
+                "native": 0.0006794929504394531,
+                "original": 0.0006799697875976562
+              },
+              {
+                "row": 97,
+                "head": 45,
+                "native": 0.169921875,
+                "original": 0.1700439453125
+              }
+            ]
+          }
+        }
+      },
+      "limitations": [
+        "Native internal D5120 means/inverses not instrumented by output/alias checks; Torch/host mean replay is bounded evidence.",
+        "Norm qualification covers original M1/M128, not yet all M4/12/16 or other layer operands.",
+        "No norm performance, graph or multi-queue qualification.",
+        "Whole target uses captured-prefix inputs with native-owned cache/state, not autonomous native-greedy continuation. v1 differs greedily atD27, finalv2 atD7.",
+        "Both failing D64 runs retained; source/device eligibility guard does not prove a cause for their differing distributions.",
+        "Initial MeanOps source command exits1 because second grep found no MeanOps in ReduceOps.h; actual SharedReduceOps MeanOps fragment retained.",
+        "Initial nativev1 trace variable was unsupported, so no trace was produced; finalv3 uses VT_OP_PROVIDER_TRACE.",
+        "S1 and S2-S6 remain incomplete."
+      ],
+      "next_step": "Investigate same-input original/native oneDNN BA rounding, especially B head22,row74, then replay affected raw gates/state without threshold changes. Qualify other Gemma row counts and remaining S1 before S2-S6."
+    },
+    "S1_BA_same_input_reproducibility_and_state_causality": {
+      "observed_date": "2026-10-03",
+      "status": "verified_bounded_BA_state_causality_product_parity_still_open",
+      "scope": "Unchanged frozen layer0 operands/weight. Literal original Torch3.12 oneDNN BA, standalone native3.13 oneDNN recipe, exact-dyadic diagnostics and original GDN with BA-only interventions. This does not change product selection, references or tolerances.",
+      "preserved_receipts": [
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/ba-original-same-input-replay-v1.py",
+          "bytes": 3258,
+          "sha256": "f1f6418312ed334480d8c5f052011523a245ef48f7f31f5bbc9b07a759b8ca5b"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/ba-original-same-input-replay-v1.json",
+          "bytes": 5249,
+          "sha256": "9b78e173bdeb90804c725e64153ded7b21594d51ade038ee23e9e9a17f2e17ab"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/ba-original-same-input-replay-v1.log",
+          "bytes": 8148,
+          "sha256": "2c8c0ba007a8914e801beb259b952c1895b59f36ee61a791cc68ea86309dce68"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/ba-exact-dyadic-points-v1.py",
+          "bytes": 2244,
+          "sha256": "ac8bba35f32ef550cf6f61d183edcf6de77e4fe95e431c6cca83991e5ae442d2"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/ba-exact-dyadic-points-v1.json",
+          "bytes": 3329,
+          "sha256": "77b734ef44ff2cb5e51d27d7cd8a2dc2158d30affd5030139b2415b01d0797c4"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/ba-exact-dyadic-points-v1.log",
+          "bytes": 3329,
+          "sha256": "77b734ef44ff2cb5e51d27d7cd8a2dc2158d30affd5030139b2415b01d0797c4"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/ba-state-causality-original-v1.py",
+          "bytes": 4475,
+          "sha256": "f66efaedf88adf0350fbe1c3b5457bc3dcb296bf8e17e21427307707519e79fa"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/ba-state-causality-original-v1.json",
+          "bytes": 2620,
+          "sha256": "de1b61429f76a9f35a522fe066a2eb2a727963951c7a846ab596bb772f1b7c8e"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/ba-state-causality-original-v1.log",
+          "bytes": 2620,
+          "sha256": "de1b61429f76a9f35a522fe066a2eb2a727963951c7a846ab596bb772f1b7c8e"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/ba-original-same-input-replay-v1.safetensors",
+          "bytes": 124592,
+          "sha256": "d9c3b2344b7fef8f53850e08b17e7b771d5f93c86d6afea99ccd26346ebc7940"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/ba-state-causality-original-v1.safetensors",
+          "bytes": 23593936,
+          "sha256": "7599db9315561d38f71e982630578a67c489f2e1d25689e5bd251d459f1e53b6"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/ba-state-causality-core-native-v1.json",
+          "bytes": 489,
+          "sha256": "7410a315d96628f58ad337da5c365ef51e7c1c5d11e772046c67b0b3e252e19d"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/ba-onednn-replay-v1/build.log",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/ba-onednn-replay-v1/comparison.json",
+          "bytes": 11335,
+          "sha256": "de36a4e956c29801604cfa3bfbe8d9655fa21cbc2372c02a4067221428953f7a"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/ba-onednn-replay-v1/d1-det0-repeat0.f16",
+          "bytes": 192,
+          "sha256": "9141c353caf851d8cad5c978229b96502909c7b10d9e969c04bdf83e7fc4e612"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/ba-onednn-replay-v1/d1-det0-repeat1.f16",
+          "bytes": 192,
+          "sha256": "9141c353caf851d8cad5c978229b96502909c7b10d9e969c04bdf83e7fc4e612"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/ba-onednn-replay-v1/d1-det0-repeat2.f16",
+          "bytes": 192,
+          "sha256": "9141c353caf851d8cad5c978229b96502909c7b10d9e969c04bdf83e7fc4e612"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/ba-onednn-replay-v1/d1-det1-repeat0.f16",
+          "bytes": 192,
+          "sha256": "9141c353caf851d8cad5c978229b96502909c7b10d9e969c04bdf83e7fc4e612"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/ba-onednn-replay-v1/d1-det1-repeat1.f16",
+          "bytes": 192,
+          "sha256": "9141c353caf851d8cad5c978229b96502909c7b10d9e969c04bdf83e7fc4e612"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/ba-onednn-replay-v1/d1-det1-repeat2.f16",
+          "bytes": 192,
+          "sha256": "9141c353caf851d8cad5c978229b96502909c7b10d9e969c04bdf83e7fc4e612"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/ba-onednn-replay-v1/d1-input.f16",
+          "bytes": 10240,
+          "sha256": "3f54191b7d7c673e509ca944ba55fc204cdbbe2ed182e0dd832932874ae5742a"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/ba-onednn-replay-v1/p128-det0-repeat0.f16",
+          "bytes": 24576,
+          "sha256": "8e37d96d5ff26a8be460f2be52b38b7859bacb8771f9625b69e0846e1e0094c7"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/ba-onednn-replay-v1/p128-det0-repeat1.f16",
+          "bytes": 24576,
+          "sha256": "88dcb02d490de63ca93998ce31bcd1fdabc512b532e5d7f8d76fa4c5d3acd685"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/ba-onednn-replay-v1/p128-det0-repeat2.f16",
+          "bytes": 24576,
+          "sha256": "831756a2f67dd2467109238c9274914f44a4c8949f8066a983f0a72f2e8551e1"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/ba-onednn-replay-v1/p128-det1-repeat0.f16",
+          "bytes": 24576,
+          "sha256": "299cbd49e6932aad0b9ad6bb5a46474ca9e0eb2a624eff5e391f674511077c1e"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/ba-onednn-replay-v1/p128-det1-repeat1.f16",
+          "bytes": 24576,
+          "sha256": "299cbd49e6932aad0b9ad6bb5a46474ca9e0eb2a624eff5e391f674511077c1e"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/ba-onednn-replay-v1/p128-det1-repeat2.f16",
+          "bytes": 24576,
+          "sha256": "299cbd49e6932aad0b9ad6bb5a46474ca9e0eb2a624eff5e391f674511077c1e"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/ba-onednn-replay-v1/p128-input.f16",
+          "bytes": 1310720,
+          "sha256": "957e90bbb70f2b14dbddd027caaa4118d2e022dd5a53b19c938684c7ae8d895a"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/ba-onednn-replay-v1/probe",
+          "bytes": 263104,
+          "sha256": "bfbd8ccad752c7cbdffa5720a8ae531f91822334ff59f6c9da6488514d3f5844"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/ba-onednn-replay-v1/probe.cpp",
+          "bytes": 3450,
+          "sha256": "d14ef674c7932ce5c42b5de56b58f2cf7d874fcae8c39ac5360d0af3630a593c"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/ba-onednn-replay-v1/run.log",
+          "bytes": 3467,
+          "sha256": "11d79e76756cda092efa993217d2fa6caa0e4d995e137d234e0157262ebda5b0"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/ba-onednn-replay-v1/weights.f16",
+          "bytes": 983040,
+          "sha256": "e5dbd32b6b1adb82dc5803a7239b9ae005ed621af21a89984512a111022760e9"
+        }
+      ],
+      "unchanged_references": [
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/real_block_oracle.safetensors",
+          "bytes": 46640192,
+          "sha256": "195d9ee81287406b4e0d6e05dc1611627bd7b3ad3fbd10377c58f793f03d79fc"
+        },
+        {
+          "status": "verified",
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/s1/gdn-ba-worker/actual_ba_worker.safetensors",
+          "bytes": 49977472,
+          "sha256": "ce52640bd4b203aab0fd31509eb3876aedde8e42051d9294342c9b13b1242342"
+        }
+      ],
+      "original_same_input_BA": {
+        "scope": "Pinned Torch F16 functional.linear on unchanged original layer0 input_norm_output and byte-identical actual worker BA weight. Three bounded ordinary repeats and split/F32 diagnostics, not a new original worker capture.",
+        "capture_sha256": "195d9ee81287406b4e0d6e05dc1611627bd7b3ad3fbd10377c58f793f03d79fc",
+        "weight_sha256": "e5dbd32b6b1adb82dc5803a7239b9ae005ed621af21a89984512a111022760e9",
+        "torch": "2.13.0+xpu",
+        "deterministic_algorithms": false,
+        "stages": {
+          "p128": {
+            "rows": 128,
+            "input_stride": [
+              5120,
+              1
+            ],
+            "weight_stride": [
+              5120,
+              1
+            ],
+            "ordinary_repeats": [
+              {
+                "repeat": 0,
+                "half_differences_vs_original": 8,
+                "max_error": 0.000244140625,
+                "different_points": [
+                  {
+                    "row": 39,
+                    "column": 65,
+                    "actual": 0.0006794929504394531,
+                    "original": 0.0006799697875976562
+                  },
+                  {
+                    "row": 46,
+                    "column": 34,
+                    "actual": -0.00042366981506347656,
+                    "original": -0.000423431396484375
+                  },
+                  {
+                    "row": 74,
+                    "column": 22,
+                    "actual": -0.33056640625,
+                    "original": -0.330810546875
+                  },
+                  {
+                    "row": 81,
+                    "column": 63,
+                    "actual": 0.08880615234375,
+                    "original": 0.0887451171875
+                  },
+                  {
+                    "row": 97,
+                    "column": 93,
+                    "actual": 0.169921875,
+                    "original": 0.1700439453125
+                  },
+                  {
+                    "row": 99,
+                    "column": 2,
+                    "actual": 0.4287109375,
+                    "original": 0.428466796875
+                  },
+                  {
+                    "row": 100,
+                    "column": 5,
+                    "actual": 0.406005859375,
+                    "original": 0.40625
+                  },
+                  {
+                    "row": 103,
+                    "column": 93,
+                    "actual": 0.1279296875,
+                    "original": 0.1278076171875
+                  }
+                ]
+              },
+              {
+                "repeat": 1,
+                "half_differences_vs_original": 7,
+                "max_error": 0.000244140625,
+                "different_points": [
+                  {
+                    "row": 1,
+                    "column": 58,
+                    "actual": -6.54458999633789e-05,
+                    "original": -6.538629531860352e-05
+                  },
+                  {
+                    "row": 46,
+                    "column": 34,
+                    "actual": -0.00042366981506347656,
+                    "original": -0.000423431396484375
+                  },
+                  {
+                    "row": 74,
+                    "column": 22,
+                    "actual": -0.33056640625,
+                    "original": -0.330810546875
+                  },
+                  {
+                    "row": 97,
+                    "column": 93,
+                    "actual": 0.169921875,
+                    "original": 0.1700439453125
+                  },
+                  {
+                    "row": 99,
+                    "column": 2,
+                    "actual": 0.4287109375,
+                    "original": 0.428466796875
+                  },
+                  {
+                    "row": 102,
+                    "column": 2,
+                    "actual": -0.213623046875,
+                    "original": -0.2137451171875
+                  },
+                  {
+                    "row": 103,
+                    "column": 93,
+                    "actual": 0.1279296875,
+                    "original": 0.1278076171875
+                  }
+                ]
+              },
+              {
+                "repeat": 2,
+                "half_differences_vs_original": 3,
+                "max_error": 0.000244140625,
+                "different_points": [
+                  {
+                    "row": 74,
+                    "column": 22,
+                    "actual": -0.33056640625,
+                    "original": -0.330810546875
+                  },
+                  {
+                    "row": 81,
+                    "column": 63,
+                    "actual": 0.08880615234375,
+                    "original": 0.0887451171875
+                  },
+                  {
+                    "row": 102,
+                    "column": 2,
+                    "actual": -0.213623046875,
+                    "original": -0.2137451171875
+                  }
+                ]
+              }
+            ],
+            "repeat_pair_differences": [
+              5,
+              7,
+              6
+            ],
+            "split_vs_original_differences": 10,
+            "F32_diagnostic_vs_original_differences": 14
+          },
+          "d1": {
+            "rows": 1,
+            "input_stride": [
+              5120,
+              1
+            ],
+            "weight_stride": [
+              5120,
+              1
+            ],
+            "ordinary_repeats": [
+              {
+                "repeat": 0,
+                "half_differences_vs_original": 0,
+                "max_error": 0.0,
+                "different_points": []
+              },
+              {
+                "repeat": 1,
+                "half_differences_vs_original": 0,
+                "max_error": 0.0,
+                "different_points": []
+              },
+              {
+                "repeat": 2,
+                "half_differences_vs_original": 0,
+                "max_error": 0.0,
+                "different_points": []
+              }
+            ],
+            "repeat_pair_differences": [
+              0,
+              0,
+              0
+            ],
+            "split_vs_original_differences": 0,
+            "F32_diagnostic_vs_original_differences": 0
+          }
+        },
+        "replay_sha256": "d9c3b2344b7fef8f53850e08b17e7b771d5f93c86d6afea99ccd26346ebc7940"
+      },
+      "native_recipe_diagnostic": {
+        "compile_exit": 0,
+        "GPU_run_exit": 0,
+        "oneDNN_source": "0e2a5bfeef1bfbffc3137464606540233086ce9b",
+        "native_source_relationship": "Same F16 descriptors, user scratchpad and default strict accumulation as VT MatmulDenseF16, but standalone queue/process, not instrumentation of the registered VT call.",
+        "comparison": {
+          "p128_det0": {
+            "runs": [
+              {
+                "repeat": 0,
+                "differences_vs_original": 6,
+                "first32_points": [
+                  {
+                    "row": 1,
+                    "column": 58,
+                    "actual": -6.54458999633789e-05,
+                    "original": -6.538629531860352e-05
+                  },
+                  {
+                    "row": 46,
+                    "column": 34,
+                    "actual": -0.00042366981506347656,
+                    "original": -0.000423431396484375
+                  },
+                  {
+                    "row": 90,
+                    "column": 90,
+                    "actual": -4.69921875,
+                    "original": -4.703125
+                  },
+                  {
+                    "row": 100,
+                    "column": 5,
+                    "actual": 0.406005859375,
+                    "original": 0.40625
+                  },
+                  {
+                    "row": 102,
+                    "column": 2,
+                    "actual": -0.213623046875,
+                    "original": -0.2137451171875
+                  },
+                  {
+                    "row": 103,
+                    "column": 93,
+                    "actual": 0.1279296875,
+                    "original": 0.1278076171875
+                  }
+                ]
+              },
+              {
+                "repeat": 1,
+                "differences_vs_original": 5,
+                "first32_points": [
+                  {
+                    "row": 1,
+                    "column": 58,
+                    "actual": -6.54458999633789e-05,
+                    "original": -6.538629531860352e-05
+                  },
+                  {
+                    "row": 39,
+                    "column": 65,
+                    "actual": 0.0006794929504394531,
+                    "original": 0.0006799697875976562
+                  },
+                  {
+                    "row": 74,
+                    "column": 22,
+                    "actual": -0.33056640625,
+                    "original": -0.330810546875
+                  },
+                  {
+                    "row": 96,
+                    "column": 89,
+                    "actual": -2.71875,
+                    "original": -2.720703125
+                  },
+                  {
+                    "row": 99,
+                    "column": 2,
+                    "actual": 0.4287109375,
+                    "original": 0.428466796875
+                  }
+                ]
+              },
+              {
+                "repeat": 2,
+                "differences_vs_original": 12,
+                "first32_points": [
+                  {
+                    "row": 1,
+                    "column": 58,
+                    "actual": -6.532669067382812e-05,
+                    "original": -6.538629531860352e-05
+                  },
+                  {
+                    "row": 32,
+                    "column": 79,
+                    "actual": -0.0003440380096435547,
+                    "original": -0.0003437995910644531
+                  },
+                  {
+                    "row": 39,
+                    "column": 65,
+                    "actual": 0.0006794929504394531,
+                    "original": 0.0006799697875976562
+                  },
+                  {
+                    "row": 46,
+                    "column": 34,
+                    "actual": -0.00042366981506347656,
+                    "original": -0.000423431396484375
+                  },
+                  {
+                    "row": 70,
+                    "column": 39,
+                    "actual": 0.00010859966278076172,
+                    "original": 0.00010865926742553711
+                  },
+                  {
+                    "row": 74,
+                    "column": 22,
+                    "actual": -0.33056640625,
+                    "original": -0.330810546875
+                  },
+                  {
+                    "row": 81,
+                    "column": 63,
+                    "actual": 0.08880615234375,
+                    "original": 0.0887451171875
+                  },
+                  {
+                    "row": 90,
+                    "column": 90,
+                    "actual": -4.69921875,
+                    "original": -4.703125
+                  },
+                  {
+                    "row": 97,
+                    "column": 93,
+                    "actual": 0.169921875,
+                    "original": 0.1700439453125
+                  },
+                  {
+                    "row": 99,
+                    "column": 2,
+                    "actual": 0.4287109375,
+                    "original": 0.428466796875
+                  },
+                  {
+                    "row": 102,
+                    "column": 2,
+                    "actual": -0.213623046875,
+                    "original": -0.2137451171875
+                  },
+                  {
+                    "row": 103,
+                    "column": 93,
+                    "actual": 0.1279296875,
+                    "original": 0.1278076171875
+                  }
+                ]
+              }
+            ],
+            "repeat_pair_differences": [
+              9,
+              9,
+              10
+            ]
+          },
+          "p128_det1": {
+            "runs": [
+              {
+                "repeat": 0,
+                "differences_vs_original": 13,
+                "first32_points": [
+                  {
+                    "row": 1,
+                    "column": 58,
+                    "actual": -6.556510925292969e-05,
+                    "original": -6.538629531860352e-05
+                  },
+                  {
+                    "row": 6,
+                    "column": 27,
+                    "actual": -0.10638427734375,
+                    "original": -0.1064453125
+                  },
+                  {
+                    "row": 39,
+                    "column": 65,
+                    "actual": 0.0006794929504394531,
+                    "original": 0.0006799697875976562
+                  },
+                  {
+                    "row": 46,
+                    "column": 34,
+                    "actual": -0.00042366981506347656,
+                    "original": -0.000423431396484375
+                  },
+                  {
+                    "row": 49,
+                    "column": 40,
+                    "actual": -0.0303955078125,
+                    "original": -0.0304107666015625
+                  },
+                  {
+                    "row": 49,
+                    "column": 51,
+                    "actual": -0.37158203125,
+                    "original": -0.371337890625
+                  },
+                  {
+                    "row": 71,
+                    "column": 58,
+                    "actual": 0.060699462890625,
+                    "original": 0.0606689453125
+                  },
+                  {
+                    "row": 74,
+                    "column": 22,
+                    "actual": -0.33056640625,
+                    "original": -0.330810546875
+                  },
+                  {
+                    "row": 96,
+                    "column": 89,
+                    "actual": -2.71875,
+                    "original": -2.720703125
+                  },
+                  {
+                    "row": 97,
+                    "column": 93,
+                    "actual": 0.169921875,
+                    "original": 0.1700439453125
+                  },
+                  {
+                    "row": 99,
+                    "column": 2,
+                    "actual": 0.4287109375,
+                    "original": 0.428466796875
+                  },
+                  {
+                    "row": 103,
+                    "column": 86,
+                    "actual": -3.263671875,
+                    "original": -3.26171875
+                  },
+                  {
+                    "row": 103,
+                    "column": 93,
+                    "actual": 0.1279296875,
+                    "original": 0.1278076171875
+                  }
+                ]
+              },
+              {
+                "repeat": 1,
+                "differences_vs_original": 13,
+                "first32_points": [
+                  {
+                    "row": 1,
+                    "column": 58,
+                    "actual": -6.556510925292969e-05,
+                    "original": -6.538629531860352e-05
+                  },
+                  {
+                    "row": 6,
+                    "column": 27,
+                    "actual": -0.10638427734375,
+                    "original": -0.1064453125
+                  },
+                  {
+                    "row": 39,
+                    "column": 65,
+                    "actual": 0.0006794929504394531,
+                    "original": 0.0006799697875976562
+                  },
+                  {
+                    "row": 46,
+                    "column": 34,
+                    "actual": -0.00042366981506347656,
+                    "original": -0.000423431396484375
+                  },
+                  {
+                    "row": 49,
+                    "column": 40,
+                    "actual": -0.0303955078125,
+                    "original": -0.0304107666015625
+                  },
+                  {
+                    "row": 49,
+                    "column": 51,
+                    "actual": -0.37158203125,
+                    "original": -0.371337890625
+                  },
+                  {
+                    "row": 71,
+                    "column": 58,
+                    "actual": 0.060699462890625,
+                    "original": 0.0606689453125
+                  },
+                  {
+                    "row": 74,
+                    "column": 22,
+                    "actual": -0.33056640625,
+                    "original": -0.330810546875
+                  },
+                  {
+                    "row": 96,
+                    "column": 89,
+                    "actual": -2.71875,
+                    "original": -2.720703125
+                  },
+                  {
+                    "row": 97,
+                    "column": 93,
+                    "actual": 0.169921875,
+                    "original": 0.1700439453125
+                  },
+                  {
+                    "row": 99,
+                    "column": 2,
+                    "actual": 0.4287109375,
+                    "original": 0.428466796875
+                  },
+                  {
+                    "row": 103,
+                    "column": 86,
+                    "actual": -3.263671875,
+                    "original": -3.26171875
+                  },
+                  {
+                    "row": 103,
+                    "column": 93,
+                    "actual": 0.1279296875,
+                    "original": 0.1278076171875
+                  }
+                ]
+              },
+              {
+                "repeat": 2,
+                "differences_vs_original": 13,
+                "first32_points": [
+                  {
+                    "row": 1,
+                    "column": 58,
+                    "actual": -6.556510925292969e-05,
+                    "original": -6.538629531860352e-05
+                  },
+                  {
+                    "row": 6,
+                    "column": 27,
+                    "actual": -0.10638427734375,
+                    "original": -0.1064453125
+                  },
+                  {
+                    "row": 39,
+                    "column": 65,
+                    "actual": 0.0006794929504394531,
+                    "original": 0.0006799697875976562
+                  },
+                  {
+                    "row": 46,
+                    "column": 34,
+                    "actual": -0.00042366981506347656,
+                    "original": -0.000423431396484375
+                  },
+                  {
+                    "row": 49,
+                    "column": 40,
+                    "actual": -0.0303955078125,
+                    "original": -0.0304107666015625
+                  },
+                  {
+                    "row": 49,
+                    "column": 51,
+                    "actual": -0.37158203125,
+                    "original": -0.371337890625
+                  },
+                  {
+                    "row": 71,
+                    "column": 58,
+                    "actual": 0.060699462890625,
+                    "original": 0.0606689453125
+                  },
+                  {
+                    "row": 74,
+                    "column": 22,
+                    "actual": -0.33056640625,
+                    "original": -0.330810546875
+                  },
+                  {
+                    "row": 96,
+                    "column": 89,
+                    "actual": -2.71875,
+                    "original": -2.720703125
+                  },
+                  {
+                    "row": 97,
+                    "column": 93,
+                    "actual": 0.169921875,
+                    "original": 0.1700439453125
+                  },
+                  {
+                    "row": 99,
+                    "column": 2,
+                    "actual": 0.4287109375,
+                    "original": 0.428466796875
+                  },
+                  {
+                    "row": 103,
+                    "column": 86,
+                    "actual": -3.263671875,
+                    "original": -3.26171875
+                  },
+                  {
+                    "row": 103,
+                    "column": 93,
+                    "actual": 0.1279296875,
+                    "original": 0.1278076171875
+                  }
+                ]
+              }
+            ],
+            "repeat_pair_differences": [
+              0,
+              0,
+              0
+            ]
+          },
+          "d1_det0": {
+            "runs": [
+              {
+                "repeat": 0,
+                "differences_vs_original": 0,
+                "first32_points": []
+              },
+              {
+                "repeat": 1,
+                "differences_vs_original": 0,
+                "first32_points": []
+              },
+              {
+                "repeat": 2,
+                "differences_vs_original": 0,
+                "first32_points": []
+              }
+            ],
+            "repeat_pair_differences": [
+              0,
+              0,
+              0
+            ]
+          },
+          "d1_det1": {
+            "runs": [
+              {
+                "repeat": 0,
+                "differences_vs_original": 0,
+                "first32_points": []
+              },
+              {
+                "repeat": 1,
+                "differences_vs_original": 0,
+                "first32_points": []
+              },
+              {
+                "repeat": 2,
+                "differences_vs_original": 0,
+                "first32_points": []
+              }
+            ],
+            "repeat_pair_differences": [
+              0,
+              0,
+              0
+            ]
+          }
+        },
+        "deterministic_source": "oneDNN3.13 selector evaluateW rejects catalogue entries with driverInfo.kParallel when deterministic is set; physical selected subkernel not separately instrumented.",
+        "profiling": "SYCL queue has no profiling; verbose exec_time0 values are not timing measurements."
+      },
+      "exact_dyadic_diagnostic": {
+        "scope": "Exact rational dot products of original FP16 input and original FP16 checkpoint BA weight at6 native/original differing points; mathematical diagnostic, not producer arithmetic.",
+        "weight_sha256": "e5dbd32b6b1adb82dc5803a7239b9ae005ed621af21a89984512a111022760e9",
+        "points": [
+          {
+            "row": 46,
+            "head": 34,
+            "native": -0.00042366981506347656,
+            "original": -0.000423431396484375,
+            "part": "b",
+            "exact_numerator": -232873355,
+            "exact_denominator": 549755813888,
+            "exact_as_F64": -0.0004235941651131725,
+            "native_original_midpoint": -0.0004235506057739258,
+            "exact_minus_midpoint": -4.3559339246712625e-08,
+            "correctly_rounded_F16": -0.00042366981506347656,
+            "rounded_matches_native": true,
+            "rounded_matches_original": false
+          },
+          {
+            "row": 70,
+            "head": 39,
+            "native": 0.00010859966278076172,
+            "original": 0.00010865926742553711,
+            "part": "b",
+            "exact_numerator": 477674445,
+            "exact_denominator": 4398046511104,
+            "exact_as_F64": 0.000108610594224956,
+            "native_original_midpoint": 0.00010862946510314941,
+            "exact_minus_midpoint": -1.8870878193411045e-08,
+            "correctly_rounded_F16": 0.00010859966278076172,
+            "rounded_matches_native": true,
+            "rounded_matches_original": false
+          },
+          {
+            "row": 74,
+            "head": 22,
+            "native": -0.33056640625,
+            "original": -0.330810546875,
+            "part": "b",
+            "exact_numerator": -5681185505,
+            "exact_denominator": 17179869184,
+            "exact_as_F64": -0.3306885194615461,
+            "native_original_midpoint": -0.3306884765625,
+            "exact_minus_midpoint": -4.289904609322548e-08,
+            "correctly_rounded_F16": -0.330810546875,
+            "rounded_matches_native": false,
+            "rounded_matches_original": true
+          },
+          {
+            "row": 1,
+            "head": 10,
+            "native": -6.54458999633789e-05,
+            "original": -6.538629531860352e-05,
+            "part": "a",
+            "exact_numerator": -17992321,
+            "exact_denominator": 274877906944,
+            "exact_as_F64": -6.545568248839118e-05,
+            "native_original_midpoint": -6.541609764099121e-05,
+            "exact_minus_midpoint": -3.958484739996493e-08,
+            "correctly_rounded_F16": -6.54458999633789e-05,
+            "rounded_matches_native": true,
+            "rounded_matches_original": false
+          },
+          {
+            "row": 39,
+            "head": 17,
+            "native": 0.0006794929504394531,
+            "original": 0.0006799697875976562,
+            "part": "a",
+            "exact_numerator": 186827793,
+            "exact_denominator": 274877906944,
+            "exact_as_F64": 0.0006796755515097175,
+            "native_original_midpoint": 0.0006797313690185547,
+            "exact_minus_midpoint": -5.581750883720815e-08,
+            "correctly_rounded_F16": 0.0006794929504394531,
+            "rounded_matches_native": true,
+            "rounded_matches_original": false
+          },
+          {
+            "row": 97,
+            "head": 45,
+            "native": 0.169921875,
+            "original": 0.1700439453125,
+            "part": "a",
+            "exact_numerator": 5840567111,
+            "exact_denominator": 34359738368,
+            "exact_as_F64": 0.16998287496971898,
+            "native_original_midpoint": 0.16998291015625,
+            "exact_minus_midpoint": -3.518653102219105e-08,
+            "correctly_rounded_F16": 0.169921875,
+            "rounded_matches_native": true,
+            "rounded_matches_original": false
+          }
+        ]
+      },
+      "original_GDN_BA_only_causality": {
+        "scope": "Original fused GDN on unchanged original QKVZ and weights; only BA varied. Causal same-input diagnostic, not a modified product route or a waived state gate.",
+        "capture_sha256": "195d9ee81287406b4e0d6e05dc1611627bd7b3ad3fbd10377c58f793f03d79fc",
+        "cases": {
+          "original": {
+            "BA_half_differences": 0,
+            "core_half_differences": 0,
+            "state_F32_differences": 0,
+            "state_relative": 0.0,
+            "state_max_error": 0.0,
+            "strict_state_band_failures": 0,
+            "failing_heads": [],
+            "first_failing_index": null,
+            "state_value_at360512": -0.011011045426130295,
+            "original_state_value_at360512": -0.011011045426130295
+          },
+          "captured_native": {
+            "BA_half_differences": 6,
+            "core_half_differences": 1934,
+            "state_F32_differences": 16379,
+            "state_relative": 1.746155685513628e-05,
+            "state_max_error": 0.0026378631591796875,
+            "strict_state_band_failures": 122,
+            "failing_heads": [
+              22
+            ],
+            "first_failing_index": 360512,
+            "state_value_at360512": -0.01099583599716425,
+            "original_state_value_at360512": -0.011011045426130295
+          },
+          "native_with_original_B22": {
+            "BA_half_differences": 5,
+            "core_half_differences": 0,
+            "state_F32_differences": 0,
+            "state_relative": 0.0,
+            "state_max_error": 0.0,
+            "strict_state_band_failures": 0,
+            "failing_heads": [],
+            "first_failing_index": null,
+            "state_value_at360512": -0.011011045426130295,
+            "original_state_value_at360512": -0.011011045426130295
+          },
+          "original_with_native_B22": {
+            "BA_half_differences": 1,
+            "core_half_differences": 1934,
+            "state_F32_differences": 16379,
+            "state_relative": 1.746155685513628e-05,
+            "state_max_error": 0.0026378631591796875,
+            "strict_state_band_failures": 122,
+            "failing_heads": [
+              22
+            ],
+            "first_failing_index": 360512,
+            "state_value_at360512": -0.01099583599716425,
+            "original_state_value_at360512": -0.011011045426130295
+          },
+          "Torch_repeat0": {
+            "BA_half_differences": 8,
+            "core_half_differences": 2661,
+            "state_F32_differences": 54443,
+            "state_relative": 2.2940637332751293e-05,
+            "state_max_error": 0.0026378631591796875,
+            "strict_state_band_failures": 220,
+            "failing_heads": [
+              2,
+              5,
+              22
+            ],
+            "first_failing_index": 34008,
+            "state_value_at360512": -0.01099583599716425,
+            "original_state_value_at360512": -0.011011045426130295
+          }
+        },
+        "replay_sha256": "7599db9315561d38f71e982630578a67c489f2e1d25689e5bd251d459f1e53b6"
+      },
+      "actual_native_core_same_BA": {
+        "scope": "Actual native own-state GDN core versus original fused GDN using the same actual native BA and unchanged original QKVZ. Bounded P128 attribution only, not whole-target/state parity.",
+        "native_core_sha256": "7ebe5cf7cc828fe3a0f80e01ca7b201e5d820df7f30c329419101d1657af40eb",
+        "original_same_BA_core_sha256": "7ebe5cf7cc828fe3a0f80e01ca7b201e5d820df7f30c329419101d1657af40eb",
+        "bit_exact": true,
+        "bit_mismatches": 0,
+        "first_bit_mismatch": null,
+        "elements": 786432
+      },
+      "limitations": [
+        "Same-input original BA already varies; none of these diagnostics demonstrates a product bug fix or establishes a different acceptable envelope.",
+        "Original GDN BA-only interventions are diagnostics; original B22 is never injected into product inference.",
+        "Actual native core matches original recurrence with its own actual BA; actual native state was not separately dumped for bytewise comparison in this step.",
+        "Deterministic oneDNN is stable across3 observed repeats but differs13 P128 halves from frozen original and still misses B22; not adopted.",
+        "Host initially could not read newly root-owned mode600 safetensors; only new receipt file read permissions changed to644, bytes unchanged.",
+        "S1/D64/full block qualification and S2-S6 remain incomplete."
+      ],
+      "next_step": "Keep first difference attributed to BA rounding and strict gates open. Qualify remaining Gemma M4/12/16 geometries, then continue remaining same-input block/D64 localization and the full plan without treating diagnostic B22 replacement as a product repair."
     }
   },
   "native_build_environment": {
@@ -24285,13 +28310,13 @@
   "S1_result": {
     "status": "in_progress",
     "complete": false,
-    "completed_scope": "Native mapped loader checks cover all409 pinned EXL3 modules including8MTP, verbatim packed/scaling bytes and ownership. Explicit FP16 parameter/activation/Conv/BA/head policy and FP32 recurrent state are wired into the native model. Producer grouped SmallM4/6 and actual resident QKVZ/QKV, GateUp and full6bpw head are qualified on real M1/4/12/16/128 inputs with exact active Hadamards/F32 parts/F16 outputs. Real same-input SwiGLU/MLP and selected original-input GDN prep/raw-prefill/P128-to-D1 state-chain gates pass; these do not qualify the complete native P128 block/state. Current bounded layer3 attention qualifies fused SG16, scalar and scoped standalone RMS/RoPE paths: Q/K and active FP8 K/V bytes/inactive capacity exact at P128/D1; fixed core/gated/mixer bands pass. Final unfused657/657 and fused auto695/695 pass; shared-helper scalar695/695 and generic RMS63928/63928 pass. Bounded coefficients at positions0-128 exact; native fused/unfused stage dumps match. Current complete64-layer eager target with full6bpw248320 head passes P128/D1 against3 unchanged original repeats (197/197, maxTV0.00370011/maxKL0.0000469401/top10all10/greedy13,198). D64 executes all65 own-state/cache steps with matching greedy IDs but fails6of807 assertions atD24/D27/D29 (maxTV0.223781/maxKL0.169353). Comparison to3 directly witnessed same-prefix original repeats retains10of195 investigation triggers. No BF16/CPU-reference/old scalar-packed production selections appear in current native target traces. Whole P128 block/state, D64, remaining S1 and S2-S6 are not qualified.",
+    "completed_scope": "Native mapped loader covers409 pinned modules including8MTP; target FP16 parameters/activations, FP32 GDN state, FP8 KV and full6bpw248320 head are wired. Real grouped QKVZ/QKV,GateUp/head M1/4/12/16/128 and same-input MLP/selected raw-GDN gates are qualified. Bounded P128/D1 layer3 fused SG16/scalar and standalone QK RMS/RoPE produce exact Q/K and KV bytes. Scoped F16 Gemma D5120 now produces all4 frozen layer0 norm outputs exactly and passes113/113 including residual/output aliases; generic RMS63928/63928 passes. Final full64-layer same-prefix P128/D1 passes197/197 against3 original repeats (maxTV0.0039302/maxKL0.0000485418). Final D64 executes65 native-owned-state/cache steps but fails5of807 assertions atD11/D29 (maxTV0.281446/maxKL0.217539/top10min8), with greedy mismatch atD7. Earlier D64 v1 fails4 assertions atD27/D29 and differs greedily atD27; both retained. Final directly witnessed same-prefix comparison retains10of195 investigation triggers. No BF16/CPU-reference/old scalar-packed selections appear in these target traces. Strict identical-input P128 state seam passes413of414,exit1 and stops beforeD1; BA differs3 A/3 B halves. Complete block/state, D64, remaining S1 and S2-S6 are not qualified. Bounded BA-only original GDN intervention now attributes all current P128 core/state differences to B head22,row74 rounding: same actual native BA reproduces native core bitwise; replacing only that BA diagnostic value recovers exact original core/state, never a product substitution.",
     "remaining": [
       "Complete native target/MTP loader mapping and GPU upload, real FP16 model/state/attention boundary qualification",
       "Qualify immutable-map validation/reuse without per-call readback; graph/multi-queue lifetime and performance remain later gates.",
       "Qualify remaining real SmallM families, independent nonlinear stages and one complete real block",
       "Eager complete target parity at P128 D1/D64, then remaining S2-S6 including W8A8, FP8, MTP, graphs and prefix/state lifecycle"
     ],
-    "next_step": "Replay full-width Gemma norm and BA/state boundaries on identical frozen operands; localize remaining mean/root/block differences and repair source-backed arithmetic, then rerun unchanged block/state/D64 gates. Finish remaining S1, then S2-S6."
+    "next_step": "Keep first difference attributed to BA rounding and strict gates open. Qualify remaining Gemma M4/12/16 geometries, then continue remaining same-input block/D64 localization and the full plan without treating diagnostic B22 replacement as a product repair."
   }
 }

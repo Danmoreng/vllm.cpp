@@ -927,6 +927,8 @@ enum class OpId : uint8_t {
   kMatmulDenseF16,
   kExl3GroupedLinear,
   kGdnPrefillRawGate,
+  kExl3GroupedW8A8,
+  kMappedGreedyArgmax,
   kCount
 };
 
@@ -2809,6 +2811,7 @@ using PagedAttentionFn = void (*)(Queue&, Tensor&, const Tensor&, const Tensor&,
 // --- V1 sampling ops (M1.7 Task 2). See the sampling-op section at the bottom.
 using ApplyTemperatureFn = void (*)(Queue&, Tensor&, const Tensor&, bool);
 using GreedyArgmaxFn = void (*)(Queue&, Tensor&, const Tensor&);
+using MappedGreedyArgmaxFn = void (*)(Queue&, Tensor&, const Tensor&, const Tensor&, int64_t);
 using ApplyTopKTopPFn = void (*)(Queue&, Tensor&, const Tensor*, const Tensor*);
 using ComputeProbsFn = void (*)(Queue&, Tensor&, const Tensor&);
 using ComputeLogprobsFn = void (*)(Queue&, Tensor&, const Tensor&);
@@ -5786,6 +5789,13 @@ void ApplyTemperature(Queue& q, Tensor& logits, const Tensor& temp, bool all_ran
 // This is the M0-exit parity gate primitive. token_ids [num_reqs] i64 (torch
 // argmax returns int64); logits [num_reqs, vocab] f32.
 void GreedyArgmax(Queue& q, Tensor& token_ids, const Tensor& logits);
+
+// Compact finite F32 logits [R,N], validated unique I32 global-ID map [N].
+// Select the maximum with LOWEST GLOBAL-ID ties, not compact-storage order.
+// I32 output [R]; -1 signals a nonfinite logit or out-of-range map value.
+// Currently implemented on XPU. Caller retains all storage through completion.
+void MappedGreedyArgmax(Queue& q, Tensor& token_ids, const Tensor& logits,
+                        const Tensor& global_ids, int64_t target_vocab);
 
 // apply_top_k_top_p (topk_topp_sampler.py::apply_top_k_top_p_pytorch, the CPU
 // allow_cpu_sync path). Masks non-top-k / non-top-p logits to -inf IN PLACE.

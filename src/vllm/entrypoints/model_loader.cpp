@@ -16,6 +16,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <iterator>
 #include <memory>
 #include <optional>
 #include <stdexcept>
@@ -1761,7 +1762,8 @@ vllm::v1::KVCacheConfig LoadedEngine::MakeKVCacheMaybeSpec(
     // the widened spec KV directly (extra GDN k+1 state slots + widened conv row
     // + the `fa_draft` full-attn group). MakeQwen3_5KVCacheSpec(num_spec>0).
     kv = vllm::MakeQwen3_5KVCacheSpec(config, block_size, num_blocks,
-                                      spec->ResolvedNumSpeculativeTokens());
+                                      spec->ResolvedNumSpeculativeTokens(),
+                                      /*share_mtp_pages=*/spec->method == "mtp");
   } else {
     kv = ModelRegistry::MakeKVCache(model, config, block_size, num_blocks);
   }
@@ -1885,7 +1887,8 @@ vllm::v1::KVCacheConfig LoadedEngine::MakeKVCacheResolved(
   auto with_recurrent_prefix = [&](vllm::v1::KVCacheConfig result) {
     if (model.registration().architecture == "Qwen3_5ForConditionalGeneration" &&
         ResolveEnablePrefixCaching(params, model.registration().info)) {
-      VT_CHECK(!spec.has_value(), "Qwen recurrent prefix snapshots with speculative decoding are not implemented yet");
+      VT_CHECK(!spec.has_value() || spec->method == "mtp",
+               "Qwen recurrent prefix speculation requires the native MTP state protocol");
       result.recurrent_prefix_snapshots = std::make_shared<vllm::v1::RecurrentPrefixSnapshotIndex>(4, block_size);
     }
     return result;
@@ -2369,9 +2372,14 @@ LoadedEngine::LoadedEngine(HfConfig config,
       // core.py:134). Wired into the scheduler + engine cores below so
       // response_format / C-ABI structured constraints gate decoding.
       structured_output_manager_(
-          max_num_seqs_,
-          vllm::v1::MakeNativeBackendFactory(
-              tokenizer_, static_cast<int>(config_.vocab_size))),
+          max_num_seqs_, [this] {
+            // The factory runs lazily, after input_processor_ is constructed.
+            // Use its resolved model EOS set, not only tokenizer.json's EOS:
+            // chat/generation EOS ids must be valid grammar stop tokens too.
+            return std::make_unique<vllm::v1::NativeStructuredOutputBackend>(
+                tokenizer_, static_cast<int>(config_.vocab_size),
+                input_processor_.eos_token_ids());
+          }),
       // AsyncScheduler when the flip resolved ON, else the synchronous Scheduler.
       scheduler_(MakeScheduler(
           async_scheduling_enabled_,
@@ -2400,7 +2408,9 @@ LoadedEngine::LoadedEngine(HfConfig config,
       // size while the pool pages smaller produces hashes no lookup can hit.
       block_hasher_(prefix_caching_enabled_
                         ? vllm::v1::get_request_block_hasher(
-                              hash_block_size_, vllm::v1::sha256_cbor)
+                              hash_block_size_, vllm::v1::sha256_cbor,
+                              resolved_spec_config_.has_value() &&
+                                  resolved_spec_config_->method == "mtp")
                         : nullptr),
       engine_(input_processor_, engine_core_, output_processor_, block_hasher_) {
   (void)hash_ready_;
@@ -3500,14 +3510,35 @@ std::unique_ptr<LoadedEngine> LoadedEngine::FromModelDir(
     const Qwen3_5MTPKind kind = registration.factory->is_dense_model
                                     ? Qwen3_5MTPKind::kDense
                                     : Qwen3_5MTPKind::kMoe;
-    Qwen3_5MTPWeights draft = vllm::LoadQwen3_5MTP(*shards, config, kind);
+    const vt::DeviceType draft_device =
+        ResolveModelDeviceType(registration.architecture, params.device);
+    Qwen3_5MTPWeights draft =
+        vllm::LoadQwen3_5MTP(*shards, config, kind, draft_device);
+    if (draft.IsExl3() && kind == Qwen3_5MTPKind::kDense &&
+        draft_device == vt::DeviceType::kXPU) {
+      const char* path = std::getenv("EXL3_DRAFT_VOCAB");
+      VT_CHECK(path != nullptr && path[0] != '\0',
+               "EXL3 MTP requires EXL3_DRAFT_VOCAB pointing to the pinned 65536-token subset");
+      std::ifstream input(path, std::ios::binary);
+      VT_CHECK(input.good(), "EXL3 MTP: cannot read draft vocabulary");
+      const std::string bytes((std::istreambuf_iterator<char>(input)),
+                               std::istreambuf_iterator<char>());
+      const std::string hash = v1::sha256_bytes(bytes);
+      constexpr uint8_t expected[] = {
+          0xb4,0xea,0xdc,0x08,0x80,0x59,0x19,0x09,0x83,0xfe,0x04,0x98,0xaf,0x11,0x86,0x4f,
+          0x5a,0xaa,0x2e,0xaf,0x2e,0xc5,0x8a,0xe9,0x86,0x4f,0x07,0x15,0x63,0x4d,0x31,0x3d};
+      VT_CHECK(hash.size() == sizeof(expected) &&
+                   std::memcmp(hash.data(), expected, sizeof(expected)) == 0,
+               "EXL3 MTP: draft subset differs from the pinned production artifact");
+      draft.draft_head_exl3 =
+          LoadExl3DraftHead(*shards, nlohmann::json::parse(bytes), config.vocab_size);
+    }
     const bool gptq4 = config.raw.contains("quantization_config") &&
         config.raw.at("quantization_config").is_object() &&
         config.raw.at("quantization_config").value("quant_method", std::string()) ==
             "gptq";
     if (gptq4 && kind == Qwen3_5MTPKind::kDense &&
-        ResolveModelDeviceType(registration.architecture, params.device) ==
-            vt::DeviceType::kXPU) {
+        draft_device == vt::DeviceType::kXPU) {
       const StTensor* head = nullptr;
       for (const SafetensorsFile& shard : *shards) {
         if (std::find(shard.Names().begin(), shard.Names().end(),

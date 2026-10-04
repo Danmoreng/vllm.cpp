@@ -1,10 +1,13 @@
 # AGENTS.md: local B70 development
 
 This checkout is a direct collaboration with the developer. Work on the current
-branch and follow `docs/B70-EXL3-Migration-and-Parity-Plan.md` in small,
-reviewable steps. The developer's current instructions take priority.
-Start with S0a in that plan; archived EXL3/GPTQ plans are historical references,
-not active task instructions. GPTQ remains a diagnostic reference only.
+branch and follow `docs/B70_CPP_EXL3_IMPLEMENTATION_FIRST_RECOVERY_PLAN_EN.md`
+in small, reviewable steps. The original
+`docs/B70-EXL3-Migration-and-Parity-Plan.md` remains scope/evidence. The developer's current instructions take priority.
+S0 is complete within its recorded scope. Continue with recovery R01, then
+dependency-ready R02–R11; retain the open S1 qualification failures without
+blocking independent implementation. Archived EXL3/GPTQ plans are historical
+references, not active task instructions. GPTQ remains diagnostic only.
 
 ## How we work
 

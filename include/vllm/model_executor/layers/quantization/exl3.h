@@ -103,7 +103,7 @@ class Exl3MlpGateUpMethod : public MlpGateUpMethodBase {
     // the legacy BF16 behavior.
     const vt::DType dtype = d.activation_dtype.value_or(vt::DType::kBF16);
     if (grouped_ && d.q.device.type == vt::DeviceType::kXPU &&
-        dtype == vt::DType::kF16 && x.dtype == vt::DType::kF16 && M <= 128) {
+        dtype == vt::DType::kF16 && x.dtype == vt::DType::kF16) {
       if (grouped_->Empty())
         *grouped_ = MergeExl3Weights({gate_, up_}, gate_->name + "+" + up_->name);
       DBuf gu = dense_attn::Exl3GroupedMatmulD(d, x, *grouped_);

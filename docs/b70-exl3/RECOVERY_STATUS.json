@@ -1,0 +1,700 @@
+{
+  "schema": 1,
+  "active_plan": "docs/B70_CPP_EXL3_IMPLEMENTATION_FIRST_RECOVERY_PLAN_EN.md",
+  "scope_reference": "docs/B70-EXL3-Migration-and-Parity-Plan.md",
+  "goal": "Complete R01\u2013R11 and milestones A\u2013E; preserve numerical failures while developing independent features.",
+  "completed_milestones": [
+    "A_short_P128_native_output",
+    "B_P4096_O64_and_chunked32K_native_output"
+  ],
+  "tasks": [
+    {
+      "task": "R01",
+      "capability": "autonomous C1 and outcome accounting",
+      "status": "complete_functional_delivery",
+      "implemented": true,
+      "operator_tested": true,
+      "target_qualified": false,
+      "serving_qualified": false,
+      "complete": true,
+      "result_receipt": {
+        "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r01-outcomes-v1/receipt.json",
+        "sha256": "986a766264cd9eb7ab39fff5c8063cf5dd3f568bcbcdeccbe09ecde67d7d0948",
+        "bytes": 7533
+      },
+      "autonomous_smoke_pass": true,
+      "tests": "Host feedback35/35, comparison12cases, GPU EOS366/366 and output-cap64 578/578; actual failed D64 gate exit1, metrics unchanged",
+      "next_code_change": "R02 actual final-state export, independent D1 and actual VT BA repeatability",
+      "integrated_release_blockers": [
+        "S1_D64",
+        "S1_strict_state"
+      ]
+    },
+    {
+      "task": "R02",
+      "capability": "same-input final state/D1 and norm geometries",
+      "status": "complete_bounded_local_delivery",
+      "implemented": true,
+      "operator_tested": true,
+      "target_qualified": false,
+      "serving_qualified": false,
+      "complete": true,
+      "next_code_change": "R03 typed grouped W8A8 and real M129/M256 GDN-QKVZ operator reference",
+      "same_input_core_final_state_pass": true,
+      "actual_VT_BA_repeatability": "P128 varying 3/6/7 halves; D1 exact in three repeats",
+      "result_receipt": {
+        "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r02-state-v1/receipt.json",
+        "sha256": "24bd28c3be25f686db252f20097d6a9748739c064ed74318027b877e4f63c45d",
+        "bytes": 17240
+      },
+      "tests": "Same-input P128 core/Conv/all FP32 slots exact; matched-state D1 exact. Native frozen gate remains exit1 (463/464); actual VT repeat diagnostic30/30. Gemma5120 real layer0/layer3 M3/4/12/16 and physical4/logical3: 20cases,821/821,exit0; contiguous aliases exact, strided rejection leaves all operands unchanged.",
+      "integrated_release_blockers": [
+        "S1_D64",
+        "S1_strict_frozen_state"
+      ],
+      "norm_receipt": {
+        "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r02-norm-rows-v1/receipt.json",
+        "sha256": "aae33db95339d15ce9ad0471678915be4cd4fc2f5dc1682a1a3a6b59e73430f9",
+        "bytes": 5372
+      },
+      "native_BA_determinism_receipt": {
+        "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r10-ba-deterministic-v1/receipt-v1.json",
+        "sha256": "22bec12d8824dd66107e4a0718b8bc2d185f8c1351fb252c573b249694fed35b",
+        "bytes": 4774
+      }
+    },
+    {
+      "task": "R03",
+      "capability": "grouped EXL3 W8A8",
+      "status": "complete_locally_tested_operator_delivery",
+      "implemented": true,
+      "operator_tested": true,
+      "target_qualified": false,
+      "serving_qualified": false,
+      "complete": true,
+      "result_receipt": {
+        "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r03-w8a8-gdn-v1/receipt.json",
+        "sha256": "411841d8521aaef03cf5e7b2e084b9b024f79d02b684013f579ac37ef2e38f21",
+        "bytes": 9910
+      },
+      "tests": "100/100 exit0; real GDN-QKVZ M128 unchanged SmallM and M129/M256 W8A8 intermediates/output bit-exact, reuse/zero/near-zero/padding/refusals M4096 one real-group call18/18,exit0, all stages bit-exact; 176193600byte workspace/655360byte panel. Attention/MLPgateup/down/headfirst58/58 each, headlast60/60, permuted source map66/66; all intermediate/output bits exact.",
+      "next_code_change": "R04 variable-length producer GDN and stable bounded workspace reservation",
+      "four_k_operator_receipt": {
+        "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r03-w8a8-4k-v1/receipt.json",
+        "sha256": "637ba1c5c2ee3516a2134662c577774d301b8b42ff189764691783e3e025114f",
+        "bytes": 5066
+      },
+      "family_receipt": {
+        "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r03-w8a8-families-v1/receipt.json",
+        "sha256": "e13199d8409d86d9547ff87fea86a33389f572855fd5a53d1c1468cdeb82e7ce",
+        "bytes": 11067
+      }
+    },
+    {
+      "task": "R04",
+      "capability": "variable GDN and bounded workspace",
+      "status": "complete_locally_tested_C1_delivery",
+      "implemented": true,
+      "operator_tested": true,
+      "target_qualified": false,
+      "serving_qualified": false,
+      "complete": true,
+      "result_receipt": {
+        "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r04-variable-gdn-v1/receipt.json",
+        "sha256": "db5b6e30f78204a3462cfbda3aa04048802fb7da57212d9391ee5fd35b44e9ae",
+        "bytes": 9655
+      },
+      "tests": "Host layout193/193; P128-D1 preserved19/19; variableP127/128/129/256/4096 each append3+D1 native-owned chain264/264, every stage bit-exact, inactive slots unchanged, decode-first stable220MiB reservation",
+      "next_code_change": "R05 integrate grouped W8A8 into dense-linear seam and native4K autonomous entry point; exact-K attention"
+    },
+    {
+      "task": "R05",
+      "capability": "4K eager/exact-K target",
+      "status": "complete_functional_eager_target_delivery",
+      "implemented": true,
+      "operator_tested": true,
+      "target_qualified": false,
+      "serving_qualified": false,
+      "complete": true,
+      "autonomous_4K_smoke_pass": true,
+      "user_facing_CLI_P129_pass": true,
+      "implemented_components": [
+        "grouped and single large-M model linear routing",
+        "native user-facing CLI prompt files and explicit budgets",
+        "real P129/P512/P4096 autonomous O64, two resets each",
+        "exact-K oneDNN attention with bounded partitions and C4 strided copy",
+        "public scheduler-owned chunked P32768/O256"
+      ],
+      "tests": "Model-groupM12979/79; seam19/19 and single+operator125/125; CLIargs6/6; realP129/P512/P4096 each579/579. Exact-K synthetic87/87, frozen original26/26, default/eviction84/84; intended-route4K579/579 and public CLI4K/O64+32K/O256 exit0.",
+      "eager_receipt": {
+        "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r05-target-v1/receipt-eager-v1.json",
+        "sha256": "ee85ac469969d72a2ea4b850d859c22263f892b6bea98b30281f03631748b35c",
+        "bytes": 6325
+      },
+      "next_code_change": "R06 scoped FP16 MTP norms, compact draft/head, selected-row dataflow and native global-ID selection",
+      "exact_K_operator_pass": true,
+      "exact_K_receipt": {
+        "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r05-attention-v1/receipt-v1.json",
+        "sha256": "000b190c00524834daeef41e77265df755a76c48be8fdc6c4c8e81f13ce57678",
+        "bytes": 6953
+      },
+      "result_receipt": {
+        "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r05-target-v1/receipt-complete-v1.json",
+        "sha256": "e2590ab7afb787f6e09ee4f9d35656231165c8b60f96123a7025f9638b3e21db",
+        "bytes": 6617
+      },
+      "user_facing_CLI_P4096_pass": true,
+      "user_facing_CLI_P32768_O256_pass": true
+    },
+    {
+      "task": "R06",
+      "capability": "compact EXL3 draft head",
+      "status": "functional_implementation_delivered_numerical_gate_open",
+      "implemented": true,
+      "operator_tested": true,
+      "target_qualified": false,
+      "serving_qualified": false,
+      "complete": false,
+      "implemented_components": [
+        "scoped XPU EXL3 seven-norm FP16 production loader",
+        "compact6bpw block builder with stable65536 global-ID map",
+        "exact SHA256 pinned subset in production loader",
+        "explicit FP16 compact head then F32 logits",
+        "selected hidden rows before head, full draft forward preserved",
+        "native mapped greedy choice and chosen-ID-only host download"
+      ],
+      "norm_receipt": {
+        "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r06-draft-norm-v1/receipt-v1.json",
+        "sha256": "e862e1d9776cb554a674af88a81410b7d49657bdca941d36eb90ac09979d9636",
+        "bytes": 3022
+      },
+      "tests": "Seven norms and existing CPU paged draft:2cases1104/1104,exit0; compact head builder3cases45/45,exit0; mapped XPU selection6/6; CPU proposer4/4 and depth3 20/20. Real isolated head65536 logits bit-exact/global-ID exact. Real forward gate exit1:34 hidden/77 logits pointwise failures; explicit oneDNN also exit1:29/45.",
+      "next_code_change": "R07 public native MTP1 smoke, transaction/rollback integration; retain R06 numerical gate",
+      "compact_builder_receipt": {
+        "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r06-compact-head-v1/receipt-builder-v1.json",
+        "sha256": "47aa7bd30ca637cae6ca06ff646a98ae763cf4f52dec1c85f5212e273bd512ca",
+        "bytes": 2871
+      },
+      "real_draft_forward_numerical_pass": false,
+      "functional_global_token_call": true,
+      "result_receipt": {
+        "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r06-compact-head-v1/receipt-dataflow-v1.json",
+        "sha256": "00f7aa2c9b6125055194d01e32e24fcaedc5b17718a93a4e12c346fede807b5d",
+        "bytes": 14136
+      }
+    },
+    {
+      "task": "R07",
+      "capability": "MTP1 then MTP3 C1",
+      "status": "functional_C1_MTP3_sampling_delivery_numerical_gate_open",
+      "implemented": true,
+      "operator_tested": true,
+      "target_qualified": false,
+      "serving_qualified": false,
+      "complete": false,
+      "result_receipt": {
+        "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r07-mtp1-v1/receipt-v1.json",
+        "sha256": "2e913cf02e8a6f2548d1f495533a566fcda2c286ca0a31d3e70a3cf2b21fc6ae",
+        "bytes": 27063
+      },
+      "autonomous_smoke_pass": true,
+      "tests": "Public CLI k0/k1/k3 exit0. Native engine k0:14/14,k1:21/21,k3:23/23; two64-token requests each exactly equal raw baseline IDs. MTP3 real accepted depths17/15/15 per request; 38 decode forwards for19 proposals. Conv short-query rollback red exit1, corrected native/CPU effective width green4cases453/453. Native limits1..5, stop string/token, abort-after-verify/reuse90/90,exit0. Greedy verifier mask/bias/min-tokens red17assertions4fail,exit1; fixed k0:15/15,k1/k3:17/17. Sampled temperature.7/topk20/topp.8/minp.05/seed931 k0:15/15,k3:17/17; actual EOS248044 after3 valid tokens, two requests/arm. All green exit0. Full history-aware processors41/41 against serial ordinary CPU Sampler; native greedy k1/k3 and sampled k3 advanced processors/EOS19/19 each, sampled off17/17. MTP3 distribution/RNG30489/30489; all exit0. Target/serving gates remain open.",
+      "next_code_change": "R08 public native simultaneous C2/C4 MTP3, unequal lengths, lifecycle/reorder/condense and state isolation.",
+      "sampling_filter_receipt": {
+        "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r07-sampling-v1/receipt-v1.json",
+        "sha256": "2d2a47af389444ca594b6c2fcf4fd723c78417a3d73599582f4c57ceb1b83020",
+        "bytes": 12079
+      },
+      "processors_receipt": {
+        "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r07-processors-v1/receipt-v1.json",
+        "sha256": "7ca4f44a0712e7ec7cfcd313d8f29109a13f94ab93e6614f3134c5c7251301c9",
+        "bytes": 10851
+      }
+    },
+    {
+      "task": "R08",
+      "capability": "C2/C4 eager lifecycle",
+      "status": "functional_C4_C2_lifecycle_and_pages_delivery_numerical_gate_open",
+      "implemented": true,
+      "operator_tested": true,
+      "target_qualified": false,
+      "serving_qualified": false,
+      "complete": false,
+      "result_receipt": {
+        "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r08-batch-v1/receipt-v1.json",
+        "bytes": 16882,
+        "sha256": "ff50d2b2b5f672ca856832bb497551326d3f19b92dfdf8f6351a80a46f05238a"
+      },
+      "tests": "Public eager native C4/C2 off127/127 and MTP3 84/84, exit0; all six raw-ID completions equal off baseline. C4 shrinks4->3->2->1; logical16-row C4 verification and exact compact/full vocabulary observed. Continuous turnover red MTP3 470/471 exit1 on stale one-token replacement. Admission reset green off894/894, MTP3 473/473, exit0; all four raw-ID sequences exact. Ordered1->4->2->1, mixed spec/prefill, stable owner slots, cancel/replacement, first/last-layer spare Conv/SSM sentinels and standalone replacement control pass. Page P1599/P1600/P1601 C2 O8: pool16 serialized MTP3,12907/12909 exit1 on batch witnesses only; pool32 off12898/12898, MTP3 12903/12903 exit0, exact four raw-ID controls and all physical active write slots unique.",
+      "next_code_change": "R09 compatible prefix hashes, joint target/recurrent/draft publication and restoration, then bounded cold/warm native prefix tests.",
+      "lifecycle_receipt": {
+        "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r08-lifecycle-v1/receipt-v1.json",
+        "bytes": 7287,
+        "sha256": "ef88baa6656e76a137c1ec3d8df8496d9cfaa983afde5575d0cee4c831dc83f5"
+      },
+      "page_receipt": {
+        "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r08-page-v1/receipt-v1.json",
+        "bytes": 6175,
+        "sha256": "fbe7122c138db48e844fdf9ee4d24c2b656ca7af651462193d61e14868bada24"
+      }
+    },
+    {
+      "task": "R09",
+      "capability": "prefix/speculation and long-context admission",
+      "status": "functional262144_MTP3_prefix_bounded_admission_numerical_qualification_open",
+      "implemented": true,
+      "operator_tested": true,
+      "target_qualified": false,
+      "serving_qualified": false,
+      "complete": false,
+      "hash_receipt": {
+        "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r09-prefix-hash-v1/receipt-v1.json",
+        "bytes": 2322,
+        "sha256": "3139e85b4da4ad58a7d3084c3bb6456a3c76a0aabc07406840a2b26a3430dc90"
+      },
+      "tests": "MTP boundary-key and unchanged ordinary byte-level hashing2cases30/30,exit0; guards retained pending joint state protocol. Native no-cache56/56 and prefix55/55 exit0; all five raw-ID outputs exact, actual3200-token restores, appendP3217, changed-next-token cold miss and original prefix reuse. Extended cold280/280, prefix257/257 exit0, all ten raw-ID controls exact, partial1600 hit, snapshot LRU miss, cancellation/reuse. Prefix backend GPU peak21973124196B, host RSS peak13581844480B, released backend live947295772B. P32768/P32784 nativeMTP3 cold303/303,prefix147/147 exit0; actual32000-token warm restores, all three O8 raw-ID controls exact. Prefix backendpeak22967503784B, hostRSSpeak13598646272B. P65536/P65552 nativeMTP3 cold914/914,prefix599/599 exit0; starts0/64000/64000/0/0, all five raw-ID controls exact, eviction then64000-hit cancel/reuse. Prefix backendpeak26213530872B, hostRSSpeak13592801280B. Shared native MTP page allocation: configuration2cases36/36 and native prefix261/261,exit0; all ten O8 raw-ID controls exact. Aligned recurrent metadata admission262144 positions: host3cases1524/1524,exit0,170-block pool, max5 live recurrent identities, rejection/free/readmission. Native prefix261/261 and C4/C2 84/84,exit0, all ten prefix and six batch raw-ID controls exact. NativeP131072/O8 MTP3 with prefix publication and four-slot allocation profile:786/786,exit0, backendGPUpeak30443559840B,hostRSS13586153472B,release945934504B. NativeP261120/O1024 MTP3 with prefix publication and four-slot allocation profile:4318/4318,exit0,420steps,767proposals,backendGPUpeak30608586304B,hostRSS13595750400B,release983960968B,pinned0,graph0.",
+      "next_code_change": "R10 persistent FP16 hidden-tap/logit graph outputs, ownership and supported eager/graph replay controls; thenR11 final screen. Preserve open S1/R06 numerical gates.",
+      "native_prefix_receipt": {
+        "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r09-prefix-native-v1/receipt-v1.json",
+        "bytes": 4222,
+        "sha256": "362d421d7951a071345516c01597a409212cf721097ab9ada6ad723b96a9474a"
+      },
+      "prefix_lifecycle_receipt": {
+        "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r09-prefix-lifecycle-v1/receipt-v1.json",
+        "bytes": 6487,
+        "sha256": "ef32f5a6ef8f1512be2782537dd26e198927b98677181a03ac664e9d52bb2eb8"
+      },
+      "prefix_32k_receipt": {
+        "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r09-prefix-32k-v1/receipt-v1.json",
+        "bytes": 4962,
+        "sha256": "4bbc94929fed08004ebdfad5f8f1a37b0ecc11407af46ad6a65474307443509e"
+      },
+      "prefix_64k_receipt": {
+        "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r09-prefix-64k-v1/receipt-v1.json",
+        "bytes": 4366,
+        "sha256": "32423fc1e53ff65783281146be63d35f286c669088e9549a875a6f50a8c0bb68"
+      },
+      "shared_pages_receipt": {
+        "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r09-shared-pages-v1/receipt-v1.json",
+        "bytes": 6253,
+        "sha256": "6d6cb74ab045e83668188e362c3438587cdf4b7f182cc153f9afde4e9c8e1b1a"
+      },
+      "recurrent_admission_receipt": {
+        "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r09-recurrent-admission-v1/receipt-v1.json",
+        "bytes": 9117,
+        "sha256": "5636123506de35e4c6adc2dfb6abf798c6e86a6cf8c146ea4914a093f4d24ded"
+      },
+      "capacity_128k_receipt": {
+        "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r09-capacity-128k-v1/receipt-v1.json",
+        "bytes": 4201,
+        "sha256": "276b40ce3169af994646c82b4cec995ba766e70ae259d88d32300d79b124dd80"
+      },
+      "capacity_262k_receipt": {
+        "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r09-capacity-262k-v1/receipt-v1.json",
+        "bytes": 3924,
+        "sha256": "84c2c136de9f855f56c3b29c33298392897af108c241bc9160c70638eee62298"
+      }
+    },
+    {
+      "task": "R10",
+      "capability": "graph output and ownership",
+      "status": "functional_supported_graph_integration_delivered_original_numerical_qualification_open",
+      "implemented": true,
+      "operator_tested": true,
+      "target_qualified": false,
+      "serving_qualified": false,
+      "complete": false,
+      "output_ownership_receipt": {
+        "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r10-graph-output-v1/receipt-v1.json",
+        "bytes": 6749,
+        "sha256": "62e73a9c6d568234f994951ed9bd4e47a5c70f33f076472f5a08920d09380c4f"
+      },
+      "tests": "CPU graph ownership/routing5cases89/89; real single projection capture/replay31/31, exact eager/reference bytes and changed inputs. Native same-build C1 MTP3 eager23/23, graph27/27,exit0; two64-token raw-ID outputs/counters exact,2captures/34replays. Full state/C2/C4/GPU lifetime cases pending; S1/R06 numerical gates unchanged. All48 GDN Conv/F32 SSM slots after two C1 requests: eager1180/1180 exit0, graph2656/3104 with448 exact-row failures,exit1. Same36 speculative transactions and raw IDs; first difference GDN2 SSM also occurs between identical eager requests. Qualification retained open. Native same-build C4/C2 controls eager112/112,graph119/119,exit0; all six raw-ID completions exact, actual full C4/C2 replays,6captures/13replays, graph batch limit4 unchanged. Dense FP16 deterministic oneDNN policy: actual fixed-input P128/D1 BA36/36 with all six repeat pairs exact. Re-linked native C1 eager1180/1180,graph3104/3104 exit0; all48 Conv/F32 SSM/all4slots exact, both eager requests bit-identical,2captures/34replays. Original failure retained. Reconfirmed same deterministic candidate C4/C2 eager112/112,graph119/119,exit0, all six outputs exact and full-concurrency replays witnessed. Real public native GPU paired output test341/341 exit0: hidden-only/logits-only leases preserve both output tensors byte-exact across further native-selected steps, retirement/re-capture and engine destruction; two independent consumer queues;2captures/16replays;64 IDs exact. Completed-step scope only, not pending cancellation. Actual split-runner pending cancellation76/76 exit0: producer event incomplete before/after scheduler abort; cancelled forward not sampled; native replacement16 IDs exact; second queue waits readiness and paired bytes survive replacement/runner/graph destruction. Public native lifecycle same candidate eager497/497,graph489/489 exit0: ordered1/4/2/1, mixed eager fallback, EOS5 tokens, cancellation/reused owner, exact sentinels and all IDs/finish reasons, explicit graph/eager/graph,4captures/16replays. v1 wrong single-token-eager assumption482/484 exit1 retained; Hello case preserved and real26-token prefill added. Native prefix graph lifecycle eager396/396,graph357/357 exit0: ten16-ID completions and cancelled16-ID continuation exact; warm/partial hit, LRU cold miss, every request genuine replays,4captures/51replays; released graph/pinned0. Full native C4/C2 state controls eager1270/1270,graph7805/7805 exit0:192 Conv/F32 SSM tensors,3072 rows/all48 layers/all16 slots bit-exact; six raw-ID completions/finish reasons/proposal counts exact; genuine full-concurrency replays,6captures/13replays. Functional R10 supported integration delivered; original numerical qualification stays false.",
+      "next_code_change": "R11 freeze one native candidate and implement held-out practical code/retrieval/structured-output screen, then like-for-like serving instrumentation/measurements. Retain and re-evaluate original S1/R06 gates on the frozen candidate without changing bands.",
+      "native_C1_graph_receipt": {
+        "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r10-native-c1-v1/receipt-v1.json",
+        "sha256": "c48eabe22cec5042ae3fc892991304f3736025c253ef48408623ac7139ba2ff8",
+        "bytes": 20374
+      },
+      "C1_full_state_receipt": {
+        "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r10-c1-state-deterministic-v1/receipt-v1.json",
+        "sha256": "f76dfee215eadfd7586e2019ab8d6157100ec6518ff7e07e1c357eb3bc9e5950",
+        "bytes": 103959
+      },
+      "C1_full_state_exact": true,
+      "native_C4_C2_graph_receipt": {
+        "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r10-batch-graph-deterministic-v1/receipt-v1.json",
+        "sha256": "1627e4e348681426ef4262a6f14323eb8dc1a2a76b4e1ad330492aca1800d7ae",
+        "bytes": 3285
+      },
+      "C1_full_state_failed_receipt": {
+        "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r10-c1-state-v1/receipt-v1.json",
+        "sha256": "7923544c456136e96fbe0e5a4d93ead830b4811cc136932f279a651d65a2789b",
+        "bytes": 97762
+      },
+      "BA_determinism_receipt": {
+        "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r10-ba-deterministic-v1/receipt-v1.json",
+        "sha256": "22bec12d8824dd66107e4a0718b8bc2d185f8c1351fb252c573b249694fed35b",
+        "bytes": 4774
+      },
+      "native_C4_C2_graph_before_determinism_receipt": {
+        "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r10-batch-graph-v1/receipt-v1.json",
+        "sha256": "f339ab6a706843675a8deead470db5738e2e0a35d0e1a47952f4ede71f5416cf",
+        "bytes": 6991
+      },
+      "GPU_output_lifetime_receipt": {
+        "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r10-gpu-output-lifetime-v1/receipt-v1.json",
+        "bytes": 3252,
+        "sha256": "63ce200bc3ef165d498806b47e0fea60e2b0f8d35717523bda656ddcf178826b"
+      },
+      "pending_cancel_consumer_receipt": {
+        "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r10-pending-cancel-v1/receipt-v1.json",
+        "bytes": 3860,
+        "sha256": "8465748e87e99e4e7a2b051aa463e8593ee8db08288072bb231b431f5bc5f7f1"
+      },
+      "public_batch_graph_lifecycle_receipt": {
+        "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r10-public-lifecycle-v1/receipt-v1.json",
+        "bytes": 6276,
+        "sha256": "d23e0d1f69c4eed6e2218e0bb39403a1183a10cb5c3b3f0f476e6ac287b73aa3"
+      },
+      "graph_prefix_lifecycle_receipt": {
+        "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r10-prefix-graph-v1/receipt-v1.json",
+        "bytes": 4680,
+        "sha256": "5051b8d26d5414649d54e93c668479133d9f583f25a80418c0e934a84e75e96e"
+      },
+      "full_C4_C2_state_receipt": {
+        "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r10-batch-state-v1/receipt-v1.json",
+        "bytes": 4252,
+        "sha256": "d617aeb68f7ad61247991dd1ff1cf64d62ce4e98805076680c529e6ed9c39d2f"
+      },
+      "functional_graph_integration_complete": true
+    },
+    {
+      "task": "R11",
+      "capability": "capability screen and measured optimization",
+      "status": "v17_W8A8_GPU_validation_and_overflow_guard390_of390_operator_tests_pass_current_serving_measurement_and_numerical_qualification_open",
+      "implemented": false,
+      "operator_tested": false,
+      "target_qualified": false,
+      "serving_qualified": false,
+      "complete": false,
+      "capability_driver_implemented": true,
+      "capability_driver_receipt": {
+        "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r11-capability-v1/receipt-first-code-v1.json",
+        "bytes": 6821,
+        "sha256": "6c1190bef1e683cc3208d4fa5e5d3a35d5363db6aefedac41b582cd2306e09b0"
+      },
+      "tests": "Structured/MTP unit controls55/55 plus mixed expanded masks144/144, all exit0. First corrected draft/mask native ticket33/33 exit0 still terminates error on chat EOS; retained semantic exit1. Resolved model/chat EOS control15/15 exit0. Frozen v2 public engine full8 suite391/391 exit0, semantic8/8 exit0: four functions/all20 held-out execution cases, two60872-token retrievals, both schema/tool records; all finish stop. All8 prompt IDs exact to prior suite, first6 raw completions unchanged. Selected single-task graders each1/8 pass but intentionally exit1/incomplete. Graph bytes0 after release. Original S1/R06 gates and performance remain open. Native optional profile controls68/68,71/71,81/81; shifted MTP cache boundary red SIGSEGV, repaired29/29. Native C1P4096/O1024 unprofiled2049/2049:6.482 emitted decode tokens/s,15.922s TTFT,173.740s E2E; separate profile2049/2049 exact1024 IDs,403 decode cycles target358.692ms/draft33.663ms. First identical-input C4 fails three cold-position assertions because3200-token cross-request prefix hits; distinct pinned natural first-page prompts then2353/2353, all starts0,951 tokens/common overlap19.7467 aggregate tokens/s,138.297s E2E. Profile host-cap failure retained; per-cycle diagnostic draining repairs it without raising caps. Two actual eager warmup target cycles attribute295.35/301.49ms to129 Gemma5120 norms each. No Python/three-repeat qualification; new candidate capability screen not yet rerun. Geometry-only norm specialization821/821 and native2049/2049 exact IDs yields6.4742 vs6.4822 tok/s; removed, result retained. Native FP32 Gemma boundaries with contract(off), unchanged tree:821/821 short/odd alias/padding controls and64/64 original P128/D1 controls with all four outputs/residuals byte-exact. Full target P128/D1 against all3 fixed original repeats197/197 exit0. Frozen v5 native C1P4096/O1024 unprofiled2049/2049 exit0, all1024 raw IDs and each MTP counter exact to baseline:27.9291 decode emitted tokens/s,14.7053s TTFT,35.8049ms TPOT,51.3338s E2E, observed single-trial decode ratio4.3086. Separate profile2049/2049 exit0, exact IDs, target83.3642ms/draft8.4195ms mean decode spans. No three-repeat/Python parity claim. Same v5 D64 validation804/807 exit1: D11 TV.0221232; D29 TV.287664/KL.227609, top10min9; ancillary greedy mismatchD27. Prior S1 failures preserved; state/R06 qualification not rerun. Initial default P128 export-path refusal159/160 exit1 retained; unique output prefix retry passes without overwriting original fixtures. Frozen v5 native32K633/633 and mixed1058/1058 exit0; mixed21 actual prefill/decode cycles, long-relative TTFT190.864s. Frozen harness v6 explicit O32 warmup then prefix reset: C1 2071/2071 and C4 7794/7794 exit0. Pinned producer config v2 and actual C1/C4 exit0; initial parent-import refusal and wrong physical FP8 dtype guard preserved. Actual policyfp8/storageuint8 verified. First matched C1 decode native27.7745/producer55.7487 tok/s, TTFT4.8890/1.9463s; one trial each, free IDs differ. C4 native133.6263/producer76.1672s E2E; producer has sequential decode phases/no common overlap; no matched simultaneous-C4 decode ratio. Current same frozen v6 capability391/391, semantic8/8 exit0, all8 raw ID sequences exact to historical8/8, graph bytes0 after release. No three-repeat or target qualification. Three unprofiled sequential C1 repeats/engine all pass: native27.6279/27.7745/27.8146 emitted decode tok/s (same1024 IDs every run); producer55.7487/63.9821/64.0197. First producer continuation differs from repeat2/3 at output index48, accepted612/1239 versus666/1074. Median comparison is descriptive across actual own continuations, not numerical or same-continuation parity. Remaining C4 repeats pending. Three unprofiled sequential C4 repeats/engine all pass: native7794/7794 each, E2E133.6263/133.7283/133.7723s; producer76.1672/76.2578/76.3888s. All4 own ID sequences exactly repeat per arm; cross-arm differ. Native overlap66.4272/66.4352/66.4483 tok/s; producer overlapnull in all3, no matched simultaneous-C4 decode ratio. Median E2E throughput ratio.57024. Configuration frozen at batch1600; not best-producer or quality-parity qualification. Separate v6 mixed profile1059/1059 exit0, both256-token IDs exact to unprofiled v5;21 actual mixed cycles. Host target190.789s includes161.590s staged D2H wait/33642 calls; waiting includes prior queued work and is not copy bandwidth or measured GDN arithmetic. Actual chunked GDN events are present. Profiling239.257s E2E is diagnostic only. Frozen v7 copy/caller controls off72/72, host92/92, device-host117/117 exit0; mixed1059/1059 exit0, both256 IDs exact to v5. Actual21 mixed target host spans189.955s; staged D2H160.879s/33642 calls. W8A8 shard mapping160B alone136.747s/2688 calls; this includes prior queued GPU work, not isolated transfer cost or demonstrated speedup. Current v7 full practical screen not rerun; v6 canonical8/8 remains under its own identity. Frozen v8 memcpy event controls off74/74,host94/94,device-host146/146 exit0; mixed1059/1059 exit0, both256 IDs exact to v5. Paired40594 D2H and10900 H2H records under independent clocks; W8A8 shard160B device copy4.593ms vs host136.627s over2688 calls. No copy bandwidth bottleneck established; preceding unrecorded work needs attribution. Frozen v9 existing elementwise event controls off5841/5841,host5861/5861,device-host5913/5913 exit0; mixed1059/1059 exit0, both256 IDs exact to v5. Actual IndexCopy2016 GPU events137.363s inside190.280s target spans. SiLU1.489s is not dominant. Source duplicate scanning repeats per-column; GPU row-group optimization is next. GPU row-group scatter v10 for more128 rows compiles exit0. Focused original plus wide/ragged/duplicates/alias/changed-index graph replay/refusal controls: off5895/5895,host5915/5915,device-host5967/5967 exit0. Test-only v11 actual1600x48x128 extension72/72 exit0. Native unprofiled mixed1059/1059 exit0, all512 IDs and all135 cycles positions/MTP/graph deltas exact to v5,224.04384->84.47434s E2E (single-trial ratio2.65221). Long-relative TTFT190.86383->51.30697s; common overlap27.59495 emitted tok/s. Device peak30467049480B unchanged; graph release0. Separate mixed profile1059/1059, exact IDs; old scatter137362.832696ms/2016 events versus new191.978433ms/1008 large-row group events plus12.687621ms/1008 unchanged small events. No new readback/scratch/host wait. Numerical and current full practical qualification remain open. Current v10 capability retry passes391/391 and semantic8/8 exit0; all8 prompt/output IDs exactly equal to canonical v6,all stop,graph release0. Initial reused old provider trace path aborted exit137; appended trace separately preserved and original v6 exact35,847,296-byte prefix restored with original SHA256. No numerical/performance qualification inferred. Current v10 O32/resetP32768/O256 native653/653 exit0: TTFT39.98335s,decode12.63421 emitted tok/s,E2E60.16680s;256 IDs exact to constructor-only v5. Pinned producer v2 actual matched32K exit0: TTFT18.57784s,decode49.44291,E2E23.73536s. Same original prompt/caps/cache/launch,0prefix hits,both finish length. Cross-arm IDs first differ at index0=56(46040 vs70269); no numerical/quality/same-continuation or three-repeat qualification. Warm mixed native1091/1091 exit0: all512 own IDs exact to un-warmed v10,21 actual mixed cycles,E2E70.79778s,short TTFT.20633s,long-relative TTFT48.71200s,common overlap27.36299 emitted tok/s. Pinned producer v2 mixed exit0: E2E27.68211s,short TTFT.17469s,long-relative TTFT22.19185s; short finishes4.09047s before long first output,common overlapnull. Both prompt/caps/reset0prefix/finished length exact acrossarms; output IDs differ short index0=0(26104 vs479),long index0=51(10345 vs7854). No matched simultaneous-decode, numerical/quality or three-repeat qualification.",
+      "next_code_change": "Complete planned small current-v10 C4 three-repeat remeasurement against source-identified pinned producer v2 trials; repaired scatter also affects overlapped C4 prefills. Then narrow remaining GPU-resident metadata/host-wait opportunity from current reduced cost split, retaining all index/finite/lifetime validation. Original S1/R06/D64 qualification remains open.",
+      "capability_suite_receipt": {
+        "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r11-structured-mtp-v1/receipt-v1.json",
+        "bytes": 11148,
+        "sha256": "979befa9ffb0f1661ca6e71462eb5593091733f403739b8759331bc911438758"
+      },
+      "capability_suite_failed_receipt": {
+        "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r11-capability-v1/receipt-suite-v1.json",
+        "bytes": 4935,
+        "sha256": "b37b11e981ec5cab63aac24d2bf92bcd8f7c0cfd39a5d855553c8af9a2c62268"
+      },
+      "capability_screen_complete": true,
+      "structured_mtp_integration_implemented": true,
+      "native_serving_timing_implemented": true,
+      "native_first_C1_C4_timing_complete": true,
+      "mtp_cache_boundary_fix_implemented": true,
+      "native_serving_timing_receipt": {
+        "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r11-serving-timing-v1/receipt-v1.json",
+        "bytes": 15059,
+        "sha256": "c3d9e2f4ac597e007bb641418f6d0e8fc15c3f1ee16cff8f85240a7bebac71ef"
+      },
+      "norm_math_optimization_implemented": true,
+      "norm_math_optimization_operator_tested": true,
+      "norm_math_optimization_receipt": {
+        "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r11-serving-timing-v1/receipt-norm-native-f32-v5.json",
+        "bytes": 34881,
+        "sha256": "cbb031aba3e3b24e77fbc46594b31c520bc0928e2dba379e59a90478af7d0707"
+      },
+      "current_candidate_capability_screen_complete": false,
+      "current_candidate_identity": {
+        "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r11-serving-timing-v1/test_xpu_exl3_mtp-w8a8-validation-overflow-v17",
+        "bytes": 33214696,
+        "sha256": "0f16d95dd15daa6ae3d3134f1cd02cb5b3fb7a61d48caae1594c4965f2a284e2"
+      },
+      "current_candidate_D64_qualification": {
+        "assertions_total": 807,
+        "assertions_passed": 804,
+        "exit": 1,
+        "max_TV": 0.287664,
+        "max_KL": 0.227609,
+        "min_top10": 9,
+        "failed_phases": [
+          "d11",
+          "d29"
+        ],
+        "greedy_mismatch": "d27",
+        "receipt": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r11-serving-timing-v1/target-d64-qualification-v5.json",
+        "original_failing_receipts_retained": true,
+        "scope": "Observed frozen v5 numerical failure retained. Later v10 byte-scatter and v17 large-M finite-guard changes do not rerun or qualify D64/state/R06."
+      },
+      "native_representative_serving_cases_complete": true,
+      "producer_serving_timing_implemented": true,
+      "warmup_matched_first_C1_C4_comparison_complete": true,
+      "small_three_repeat_comparison_complete": true,
+      "warmup_matched_serving_receipt": {
+        "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r11-serving-timing-v1/receipt-serving-matched-v6.json",
+        "bytes": 37666,
+        "sha256": "c4668407097f5ce22ca5e8ac657acba6f6468fe76bd9e50eea37ec64a9493cba"
+      },
+      "small_three_repeat_C1_comparison_complete": true,
+      "small_three_repeat_C1_receipt": {
+        "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r11-producer-serving-v1/comparison-c1-three-repeat-v1.json",
+        "bytes": 18930,
+        "sha256": "fb48a872ccf98de62f217eb17b8a0135ec9e2397723e0c5e8999f8edcbef91fb"
+      },
+      "small_three_repeat_C4_comparison_complete": true,
+      "small_three_repeat_C4_receipt": {
+        "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r11-producer-serving-v1/comparison-c4-three-repeat-v1.json",
+        "bytes": 28960,
+        "sha256": "8f31bb0b6634ec2f98b53b9492ee699f68ffa754100c3b4b9ef8bcce5db62ba7"
+      },
+      "warm_matched_32K_mixed_producer_comparison_complete": true,
+      "mixed_cost_capture_complete": true,
+      "mixed_cost_receipt": {
+        "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r11-serving-timing-v1/receipt-three-repeat-mixed-cost-v6.json",
+        "bytes": 11939,
+        "sha256": "7c6364945f73127e735947e540fa4016888a1d0f4ccc0cdb4cdcbc255493c5dd"
+      },
+      "mixed_host_cost_report": {
+        "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r11-serving-timing-v1/mixed-host-cost-report-v6.json",
+        "bytes": 20862,
+        "sha256": "2b9548fd2c3a3de54e02b72dfa88e52c97b0b357439153423ccb3e848b9e1d6b"
+      },
+      "mixed_profile_results": {
+        "assertions": 1059,
+        "exit": 0,
+        "both_256_ID_sequences_exact_to_unprofiled_v5": true,
+        "mixed_cycles": 21,
+        "target_device_span_s": 190.81499323,
+        "target_host_span_s": 190.789060574,
+        "staged_D2H_wait_s": 161.5896837540004,
+        "staged_D2H_wait_count": 33642,
+        "scope": "Diagnostic waits include prior queue work; no isolated copy-bandwidth or GDN-arithmetic claim. Nested spans are not additive."
+      },
+      "native_and_producer_cache_dtype_contract": {
+        "conv": "float16",
+        "ssm": "float32",
+        "KV_policy": "fp8",
+        "producer_KV_physical_storage": "torch.uint8",
+        "producer_actual_snapshot": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r11-producer-serving-v1/c1-producer-v2.initialized.json",
+        "producer_dtype_source": {
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r11-producer-serving-v1/cache-state-dtypes-source-v1.log",
+          "bytes": 14649,
+          "sha256": "f7c15b936dc3a412f8f9c160e0d85bb18a526085a84c37f409d9f8789e5c5e89"
+        },
+        "native_snapshot_dtype_check": "tests/vllm/models/test_xpu_exl3_mtp.cpp:110",
+        "scope": "Actual producer descriptors plus unchanged native all-state snapshot controls; not new cross-stack state qualification."
+      },
+      "canonical_performance_candidate_identity_v6": {
+        "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r11-serving-timing-v1/test_xpu_exl3_mtp-v6",
+        "bytes": 33208360,
+        "sha256": "e52d7a3b10facfa168b94a5f219863beccbe24763cd854c0550a38168b552792"
+      },
+      "canonical_performance_candidate_capability_screen_v6": {
+        "assertions": 391,
+        "harness_exit": 0,
+        "semantic_passed": 8,
+        "semantic_exit": 0,
+        "all_8_prompt_and_raw_output_IDs_equal_to_historical": true,
+        "after_release_graph_bytes": 0,
+        "receipt": {
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r11-serving-timing-v1/receipt-serving-matched-v6.json",
+          "bytes": 37666,
+          "sha256": "c4668407097f5ce22ca5e8ac657acba6f6468fe76bd9e50eea37ec64a9493cba"
+        }
+      },
+      "current_candidate_identity_scope": "Frozen v17 W8A8 finite-validation merge plus pre-narrow overflow guards. Original quantization/GEMM/output transform and SmallM unchanged. GDN4/head6 operator controls390/390 pass; current-source practical/timing/numerical qualification not yet measured. V10 practical and timing receipts retained separately.",
+      "copy_caller_attribution_complete": true,
+      "copy_caller_attribution_receipt": {
+        "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r11-serving-timing-v1/receipt-copy-attribution-v7.json",
+        "bytes": 8089,
+        "sha256": "17b41355b13203f8ccbfd95dc34d7be8d09555b16e62bf3c149b569e1ae15118"
+      },
+      "copy_caller_attribution_report": {
+        "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r11-serving-timing-v1/mixed-copy-caller-report-v7.json",
+        "bytes": 9418,
+        "sha256": "985dcc5331fe84a25fe7ab91bef225163198264d9ee483275e5808f9e72ef5c3"
+      },
+      "copy_event_attribution_complete": true,
+      "copy_event_attribution_receipt": {
+        "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r11-serving-timing-v1/receipt-copy-events-v8.json",
+        "bytes": 8706,
+        "sha256": "b0afe63dcf274717f952737dac6988a691b980c0295e6145c13d6830049f7922"
+      },
+      "copy_event_attribution_report": {
+        "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r11-serving-timing-v1/mixed-copy-event-report-v8.json",
+        "bytes": 18629,
+        "sha256": "0716e3f948061986ccbc252eb180999a0b5d117eeca327bb93c132058222e2dc"
+      },
+      "elementwise_event_attribution_complete": true,
+      "elementwise_event_attribution_receipt": {
+        "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r11-serving-timing-v1/receipt-elementwise-events-v9.json",
+        "bytes": 7666,
+        "sha256": "5d783a65510caad1e6f0f6138cd88f6b6ace19932ff9a45fe05f297638192b34"
+      },
+      "mixed_elementwise_cost_report": {
+        "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r11-serving-timing-v1/mixed-elementwise-cost-report-v9.json",
+        "bytes": 25258,
+        "sha256": "69510618a3d25feae61d173d13900fe4a8c182e19c5f253d97d41929584e024e"
+      },
+      "optimization_preference": "Keep data/intermediate state on GPU and avoid host wait loops where possible, per developer steering2026-10-04. Preserve required validation, ownership, last-write-wins and exact output/state semantics; do not merely move waits.",
+      "mixed_scatter_optimization_implemented": true,
+      "mixed_scatter_optimization_operator_tested": true,
+      "mixed_scatter_optimization_functional_serving_tested": true,
+      "mixed_scatter_optimization_target_qualified": false,
+      "mixed_scatter_optimization_receipt": {
+        "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r11-serving-timing-v1/receipt-index-copy-optimization-v10.json",
+        "bytes": 15885,
+        "sha256": "7ebec18fe80514fa91e4842cad4f1e69e520dd42c136dcb83a89436004b7e44b"
+      },
+      "mixed_scatter_optimization_results": {
+        "assertions": 1059,
+        "exit": 0,
+        "all512_raw_IDs_and135_cycles_counters_positions_graph_deltas_exact_to_v5": true,
+        "E2E_s": 84.474341158,
+        "baseline_E2E_s": 224.04383872,
+        "observed_single_trial_ratio": 2.6522117325656382,
+        "long_relative_TTFT_ms": 51306.973762,
+        "common_overlap_emitted_tokens_per_s": 27.59495349576738,
+        "backend_peak_device_bytes": 30467049480,
+        "host_peak_rss_bytes": 13549924352,
+        "after_release_graph_bytes": 0
+      },
+      "mixed_scatter_cost_results": {
+        "assertions": 1059,
+        "exit": 0,
+        "both256_IDs_exact_to_v5": true,
+        "mixed_cycles": 21,
+        "old_total_scatter_device_ms": 137362.83269600017,
+        "new_total_scatter_device_ms": 204.66605399999958,
+        "new_scatter_stages": [
+          {
+            "stage": "index_copy_row_group",
+            "total_ms": 191.9784329999996,
+            "mean_per_mixed_cycle_ms": 9.141830142857124,
+            "count": 1008
+          },
+          {
+            "stage": "index_copy",
+            "total_ms": 12.687620999999993,
+            "mean_per_mixed_cycle_ms": 0.6041724285714283,
+            "count": 1008
+          }
+        ],
+        "new_target_queue_span_ms": 51138.975524,
+        "new_target_host_span_ms": 51112.992671,
+        "new_staged_D2H_host_wait_ms": 29201.77676300002,
+        "new_staged_D2H_device_copy_ms": 50.61792199999978
+      },
+      "current_candidate_capability_screen": {
+        "candidate": "v17",
+        "measured": false,
+        "historical_v10_receipt_retained": true
+      },
+      "warm_matched_32K_producer_comparison_complete": true,
+      "warm_matched_32K_producer_comparison": {
+        "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r11-producer-serving-v1/comparison-32k-warm-v10-v2.json",
+        "bytes": 6663,
+        "sha256": "18c7e15591c2868e7613fd09a9f8e8c774dae3bf30b94d05e905c9aa87bb9dcc"
+      },
+      "current_candidate_matched_C4_three_repeat_comparison_complete": false,
+      "historical_small_three_repeat_comparison_source": "Native v6/pinned producer v2 preserved. Current native v10 C4 independently measured three times against the unchanged source/image/config/power-identified three producer v2 trials. C1 v6 retains original source identity.",
+      "warm_matched_32K_mixed_producer_comparison_receipt": {
+        "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r11-serving-timing-v1/receipt-warm-long-comparison-v10-v2.json",
+        "bytes": 13102,
+        "sha256": "eca10f9d3bea71f242efd813185239325c1368953fafe974465a5d5065d4b7dc"
+      },
+      "warm_matched_mixed_producer_comparison": {
+        "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r11-producer-serving-v1/comparison-mixed-warm-v10-v2.json",
+        "bytes": 7236,
+        "sha256": "bb7feb039bf44adeec68262f8e930b12fa81d01ac73df874ecc25ee9fe92d785"
+      },
+      "current_candidate_matched_C4_three_repeat_comparison": {
+        "candidate": "v17",
+        "measured": false,
+        "historical_v10_receipt_retained": true
+      },
+      "current_candidate_matched_C4_results": {
+        "candidate": "v17",
+        "measured": false
+      },
+      "index_copy_v10_candidate_identity": {
+        "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r11-serving-timing-v1/test_xpu_exl3_mtp-index-copy-v10",
+        "bytes": 33220592,
+        "sha256": "22bc1612f9f53631daa3a495bebf89dfc0a0e693291dc049ae004f80dc22f18f"
+      },
+      "index_copy_v10_capability_screen": {
+        "assertions": 391,
+        "harness_exit": 0,
+        "semantic_passed": 8,
+        "semantic_exit": 0,
+        "all_8_prompt_and_raw_output_IDs_equal_to_historical": true,
+        "after_release_graph_bytes": 0,
+        "receipt": {
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r11-serving-timing-v1/receipt-capability-index-copy-v10.json",
+          "bytes": 9119,
+          "sha256": "f9eaff7b5b392968c65fa81425aa70aa0f766320943e8a2d77edae61dc32ee6c"
+        }
+      },
+      "index_copy_v10_matched_C4_three_repeat_comparison": {
+        "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r11-producer-serving-v1/comparison-c4-three-repeat-v10-v2.json",
+        "bytes": 29686,
+        "sha256": "929253191934edaa4b1538bd018b0d621a3753f524966286913c04696b28e126"
+      },
+      "index_copy_v10_matched_C4_results": {
+        "candidate": "frozen product v10",
+        "native_E2E_s": {
+          "values": [
+            84.821714179,
+            84.706619327,
+            85.049605669
+          ],
+          "median": 84.821714179,
+          "minimum": 84.706619327,
+          "maximum": 85.049605669
+        },
+        "producer_E2E_s": {
+          "values": [
+            76.16721934601082,
+            76.25775296500069,
+            76.38875606100191
+          ],
+          "median": 76.25775296500069,
+          "minimum": 76.16721934601082,
+          "maximum": 76.38875606100191
+        },
+        "prior_native_over_current_median_E2E_time_ratio": 1.5765813813641156,
+        "native_over_producer_median_E2E_throughput_ratio": 0.8990357445980555,
+        "native_common_decode_emitted_tok_s": {
+          "values": [
+            66.65899442096337,
+            66.76875117922039,
+            66.48333554794158
+          ],
+          "median": 66.65899442096337,
+          "minimum": 66.48333554794158,
+          "maximum": 66.76875117922039
+        },
+        "producer_common_decode_overlap": null,
+        "all_current_native_outputs_and_405_cycle_counters_exact_to_v6": true
+      },
+      "W8A8_GPU_validation_merge_implemented": true,
+      "W8A8_GPU_validation_merge_operator_tested": true,
+      "W8A8_GPU_validation_merge_operator_receipt": {
+        "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r11-serving-timing-v1/receipt-w8a8-validation-operator-v17.json",
+        "bytes": 16571,
+        "sha256": "782db294d9817bf1e0042243d856c4a11ed4abd728ea6049b872d3b6fd5370d8"
+      },
+      "W8A8_GPU_validation_merge_functional_serving_tested": false,
+      "W8A8_GPU_validation_merge_performance_measured": false
+    }
+  ]
+}

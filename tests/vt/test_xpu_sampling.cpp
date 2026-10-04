@@ -54,6 +54,46 @@ TEST_CASE("XPU sampling: temperatures, probabilities, logprobs and min-p") {
   }
   CHECK(vt::GetReferenceTierHits() == 0);
 }
+
+TEST_CASE("XPU compact draft selection ties by global ID and downloads only IDs") {
+  Queue gpu(vt::DeviceType::kXPU);
+  constexpr int columns = 65536, rows = 4;
+  Buffer logits(gpu.q, DType::kF32, {rows, columns});
+  Buffer mapping(gpu.q, DType::kI32, {columns});
+  Buffer output(gpu.q, DType::kI32, {rows});
+  std::vector<int32_t> global_ids(columns);
+  for (int i = 0; i < columns; ++i) global_ids[i] = columns - 1 - i + 128;
+  std::vector<float> values(rows * columns, -5.0f);
+  values[columns] = values[2 * columns - 1] = 9.0f;
+  values[2 * columns] = 10.0f;
+  values[3 * columns + 32768] = 1.0f;
+  mapping.upload(global_ids.data());
+  logits.upload(values.data());
+  vt::MappedGreedyArgmax(gpu.q, output.tensor, logits.tensor, mapping.tensor, 248320);
+  auto raw = output.download();
+  std::array<int32_t, rows> ids;
+  std::memcpy(ids.data(), raw.data(), raw.size());
+  CHECK((ids == std::array<int32_t, rows>{128, 128, 65663, global_ids[32768]}));
+  CHECK(raw.size() == rows * sizeof(int32_t));
+
+  // Nonfinite arithmetic is an explicit refusal, never a plausible proposal.
+  values[123] = std::numeric_limits<float>::quiet_NaN();
+  logits.upload(values.data());
+  vt::MappedGreedyArgmax(gpu.q, output.tensor, logits.tensor, mapping.tensor, 248320);
+  raw = output.download();
+  std::memcpy(ids.data(), raw.data(), raw.size());
+  CHECK(ids[0] == -1);
+  CHECK(ids[1] == 128);
+
+  global_ids[0] = 248320;
+  mapping.upload(global_ids.data());
+  vt::MappedGreedyArgmax(gpu.q, output.tensor, logits.tensor, mapping.tensor, 248320);
+  raw = output.download();
+  std::memcpy(ids.data(), raw.data(), raw.size());
+  CHECK((ids == std::array<int32_t, rows>{-1, -1, -1, -1}));
+  CHECK_THROWS_AS(vt::MappedGreedyArgmax(gpu.q, output.tensor, logits.tensor,
+                                       mapping.tensor, 0), std::runtime_error);
+}
 TEST_CASE("XPU sampling: penalties, duplicate sparse biases, token and allowed masks") {
   Queue cpu(vt::DeviceType::kCPU), gpu(vt::DeviceType::kXPU);
   auto run = [](vt::Queue& q) {
@@ -180,6 +220,102 @@ TEST_CASE("XPU sampling: speculative allowed tokens and bias with min-token posi
   Compare(logits.floats(), values, 0);
   CHECK(vt::GetReferenceTierHits() == 0);
 }
+TEST_CASE("XPU sampling R07: verification processors match serial target histories") {
+  Queue cpu(vt::DeviceType::kCPU), gpu(vt::DeviceType::kXPU);
+  constexpr int rows = 6, vocab = 7;
+  struct Witness { std::vector<std::vector<int32_t>> history; std::vector<float> stage; };
+  const auto callback = +[](const int32_t* ids, int32_t count, float* logits,
+                             int32_t size, void* opaque) {
+    auto& witness = *static_cast<Witness*>(opaque);
+    witness.history.emplace_back(ids, ids + count);
+    witness.stage.insert(witness.stage.end(), logits, logits + size);
+    int sum = 0;
+    for (int i = 0; i < count; ++i) sum += ids[i];
+    logits[0] += float(sum) * .125f;
+    logits[3] += float(count) * .5f;
+  };
+  Witness actual, expected;
+  vllm::v1::SamplingMetadata metadata;
+  metadata.no_penalties = false;
+  metadata.output_token_ids = {{2, 2}, {5}};
+  metadata.prompt_token_ids = std::vector<std::vector<int32_t>>{{0, 6}, {1, 3, 6}};
+  metadata.output_token_positions = {2, 1};
+  metadata.presence_penalties = {.5f, -.25f};
+  metadata.frequency_penalties = {.125f, .5f};
+  metadata.repetition_penalties = {1.25f, .75f};
+  metadata.allowed_token_ids_mask = std::vector<std::vector<uint8_t>>(2, std::vector<uint8_t>(vocab, 0));
+  (*metadata.allowed_token_ids_mask)[0][6] = (*metadata.allowed_token_ids_mask)[1][6] = 1;
+  metadata.bad_words_token_ids[0] = {{3, 1}};
+  metadata.bad_words_token_ids[1] = {{4, 3}, {4, 1, 2}};
+  metadata.min_tokens[0] = {3, {5}};
+  metadata.min_tokens[1] = {3, {0}};
+  metadata.logit_bias[0] = {{3, 1.0f}, {5, 2.0f}};
+  metadata.logit_bias[1] = {{0, .5f}, {6, 3.0f}};
+  metadata.logits_processors[0] = metadata.logits_processors[1] = {callback, &actual};
+  const std::vector<int32_t> offsets{0, 2, 6}, draft_inputs{0, 3, 6, 4, 1, 3};
+  // Independent explicit histories: excludes both anchors and every future
+  // draft. Cases cover MTP1 and MTP3 rows with different request parameters.
+  const std::vector<std::vector<int32_t>> histories{
+      {2, 2}, {2, 2, 3}, {5}, {5, 4}, {5, 4, 1}, {5, 4, 1, 3}};
+  const std::vector<int> request_for_row{0, 0, 1, 1, 1, 1};
+  std::vector<float> values(rows * vocab);
+  const std::array<float, vocab> base{4, -2, 3, 5, 2, 1, -1};
+  for (int row = 0; row < rows; ++row) for (int token = 0; token < vocab; ++token)
+    values[row * vocab + token] = base[token] + row * .25f;
+  std::vector<float> serial;
+  const vllm::v1::Sampler sampler;
+  for (int row = 0; row < rows; ++row) {
+    const int req = request_for_row[row];
+    auto one = metadata;
+    one.output_token_ids = {histories[row]};
+    one.prompt_token_ids = std::vector<std::vector<int32_t>>{(*metadata.prompt_token_ids)[req]};
+    one.presence_penalties = {metadata.presence_penalties[req]};
+    one.frequency_penalties = {metadata.frequency_penalties[req]};
+    one.repetition_penalties = {metadata.repetition_penalties[req]};
+    one.allowed_token_ids_mask = std::vector<std::vector<uint8_t>>{(*metadata.allowed_token_ids_mask)[req]};
+    one.bad_words_token_ids = {{0, metadata.bad_words_token_ids.at(req)}};
+    one.min_tokens = {{0, metadata.min_tokens.at(req)}};
+    one.logit_bias = {{0, metadata.logit_bias.at(req)}};
+    one.logits_processors = {{0, {callback, &expected}}};
+    Buffer input(cpu.q, DType::kF32, {1, vocab});
+    input.put(std::vector<float>(values.begin() + row * vocab, values.begin() + (row + 1) * vocab));
+    const auto output = sampler.forward(cpu.q, input.tensor, one);
+    REQUIRE(output.sampled_token_ids.size() == 1);
+    const auto processed = input.floats();
+    serial.insert(serial.end(), processed.begin(), processed.end());
+  }
+  Buffer input(gpu.q, DType::kF32, {rows, vocab});
+  input.put(values);
+  vllm::v1::apply_speculative_logits_processors(gpu.q, input.tensor, metadata, offsets, draft_inputs);
+  Compare(input.floats(), serial);
+  CHECK(actual.history == histories);
+  CHECK(actual.history == expected.history);
+  Compare(actual.stage, expected.stage, 0);
+  for (int invalid = 0; invalid < 5; ++invalid) {
+    CAPTURE(invalid);
+    auto bad = metadata;
+    auto bad_offsets = offsets, bad_drafts = draft_inputs;
+    if (invalid == 0) bad_offsets[1] = -1;
+    if (invalid == 1) bad_drafts.pop_back();
+    if (invalid == 2) bad.output_token_ids.pop_back();
+    if (invalid == 3) bad.frequency_penalties.pop_back();
+    if (invalid == 4) bad.logit_bias[2] = {{0, 1}};
+    input.put(values);
+    const auto before = input.download();
+    CHECK_THROWS(vllm::v1::apply_speculative_logits_processors(
+        gpu.q, input.tensor, bad, bad_offsets, bad_drafts));
+    xpu_test::SameBytes(input.download(), before);
+  }
+  vllm::v1::SamplingMetadata overflow;
+  overflow.min_tokens[0] = {3, {6}};
+  overflow.output_token_positions = {UINT64_MAX};
+  auto two_rows = input.tensor; two_rows.shape[0] = 2;
+  input.put(values); const auto unchanged = input.download();
+  vllm::v1::apply_speculative_logits_processors(gpu.q, two_rows, overflow, {0, 2}, {});
+  xpu_test::SameBytes(input.download(), unchanged);
+  CHECK(vt::GetReferenceTierHits() == 0);
+}
+
 TEST_CASE("XPU sampling: five-row production top-20 timing"
           * doctest::skip(!std::getenv("VT_B70_SAMPLING_BENCH"))) {
   Queue gpu(vt::DeviceType::kXPU);
@@ -411,6 +547,107 @@ TEST_CASE("XPU sampled rejection preserves the target distribution for one-hot d
   CHECK(std::abs(double(frequencies[1]) / N - .3) < .035);
   CHECK(std::abs(double(frequencies[2]) / N - .5) < .035);
   CHECK(std::abs(double(accepted_drafts) / N - .5) < .035);
+  CHECK(vt::GetReferenceTierHits() == 0);
+}
+
+TEST_CASE("XPU sampled rejection R07: MTP3 distributions and request-position RNG") {
+  Queue gpu(vt::DeviceType::kXPU);
+  constexpr int requests = 2048, width = 4, vocab = 3;
+  const float probabilities[width][vocab] = {
+      {.2f, .3f, .5f}, {.1f, .2f, .7f}, {.25f, .15f, .6f}, {.4f, .35f, .25f}};
+  struct Result { std::vector<int32_t> tokens, counts; };
+  const auto read = [](const Buffer& buffer) {
+    const auto bytes = buffer.download();
+    std::vector<int32_t> result(bytes.size() / sizeof(int32_t));
+    std::memcpy(result.data(), bytes.data(), bytes.size());
+    return result;
+  };
+  const auto run = [&](const std::vector<int>& order) {
+    const int64_t n = static_cast<int64_t>(order.size()), rows = n * width;
+    Buffer probs(gpu.q, DType::kF32, {rows, vocab});
+    Buffer proposal(gpu.q, DType::kI32, {rows}), offsets(gpu.q, DType::kI32, {n + 1});
+    Buffer seeds(gpu.q, DType::kI64, {rows}), greedy(gpu.q, DType::kI8, {rows});
+    Buffer choices(gpu.q, DType::kI32, {rows}), accepted(gpu.q, DType::kI32, {rows});
+    Buffer sampled(gpu.q, DType::kI32, {n, width}), counts(gpu.q, DType::kI32, {n});
+    std::vector<float> p(rows * vocab);
+    std::vector<int32_t> d(rows), cu(n + 1);
+    std::vector<int64_t> keys(rows);
+    std::vector<int8_t> deterministic(rows, 0);
+    for (int64_t req = 0; req < n; ++req) {
+      const int id = order[req];
+      const uint64_t request_seed = 931 + uint64_t(id) * 19;
+      const uint64_t committed_position = id % 7;
+      cu[req] = static_cast<int32_t>(req * width);
+      for (int depth = 0; depth < width; ++depth) {
+        const auto row = req * width + depth;
+        for (int token = 0; token < vocab; ++token) p[row * vocab + token] = probabilities[depth][token];
+        d[row] = depth == width - 1 ? -1 : 2;
+        // Same request/accepted-position/depth identity as the runner, with no
+        // batch row in the key. Tokens0/1 are outside the deterministic proposal.
+        keys[row] = static_cast<int64_t>(vt::sample::SplitMix64(
+            request_seed + committed_position + uint64_t(depth)));
+      }
+    }
+    cu.back() = static_cast<int32_t>(rows);
+    probs.put(p); proposal.upload(d.data()); offsets.upload(cu.data());
+    seeds.upload(keys.data()); greedy.upload(deterministic.data());
+    vt::xpu::SampleOneHotRejection(gpu.q, sampled.tensor, counts.tensor, choices.tensor,
+        accepted.tensor, probs.tensor, proposal.tensor, offsets.tensor, seeds.tensor, greedy.tensor);
+    return Result{read(sampled), read(counts)};
+  };
+  std::vector<int> order(requests);
+  for (int i = 0; i < requests; ++i) order[i] = i;
+  const auto original = run(order);
+  std::array<int, width> length_histogram{};
+  int frequencies[width][vocab] = {};
+  for (int req = 0; req < requests; ++req) {
+    const int n = original.counts[req];
+    REQUIRE(n >= 1); REQUIRE(n <= width);
+    ++length_histogram[n - 1];
+    for (int depth = 0; depth < n; ++depth) {
+      const int token = original.tokens[req * width + depth];
+      REQUIRE(token >= 0); REQUIRE(token < vocab);
+      ++frequencies[depth][token];
+      if (depth < n - 1) CHECK(token == 2);
+      else if (n < width) CHECK(token != 2);
+    }
+    for (int depth = n; depth < width; ++depth) CHECK(original.tokens[req * width + depth] == -1);
+  }
+  for (int count : length_histogram) CHECK(count > 0);  // accepts0..3 all observed
+  for (int depth = 0; depth < width; ++depth) {
+    const int reached = frequencies[depth][0] + frequencies[depth][1] + frequencies[depth][2];
+    REQUIRE(reached > 0);
+    double chi_squared = 0;
+    for (int token = 0; token < vocab; ++token) {
+      const double expected = reached * double(probabilities[depth][token]);
+      chi_squared += std::pow(frequencies[depth][token] - expected, 2) / expected;
+    }
+    CAPTURE(depth);
+    CAPTURE(chi_squared);
+    CHECK(chi_squared < 24);  // same fixed-corpus threshold as native sampling tests
+    std::cout << "MTP3_DISTRIBUTION depth=" << depth << " reached=" << reached
+              << " counts=" << frequencies[depth][0] << ',' << frequencies[depth][1]
+              << ',' << frequencies[depth][2] << " chi2=" << chi_squared << '\n';
+  }
+  // Reorder and then condense while preserving request identity and accepted
+  // position. These prove the operator's RNG contract, not a full-model C4 run.
+  std::reverse(order.begin(), order.end());
+  const auto reverse = run(order);
+  for (int row = 0; row < requests; ++row) {
+    const int id = order[row];
+    CHECK(reverse.counts[row] == original.counts[id]);
+    for (int depth = 0; depth < width; ++depth)
+      CHECK(reverse.tokens[row * width + depth] == original.tokens[id * width + depth]);
+  }
+  const std::vector<int> condensed{13, 5, 7, 0};
+  const auto compact = run(condensed);
+  for (size_t row = 0; row < condensed.size(); ++row) {
+    CHECK(compact.counts[row] == original.counts[condensed[row]]);
+    for (int depth = 0; depth < width; ++depth)
+      CHECK(compact.tokens[row * width + depth] == original.tokens[condensed[row] * width + depth]);
+  }
+  std::cout << "MTP3_ACCEPTED histogram=" << length_histogram[0] << ',' << length_histogram[1]
+            << ',' << length_histogram[2] << ',' << length_histogram[3] << '\n';
   CHECK(vt::GetReferenceTierHits() == 0);
 }
 

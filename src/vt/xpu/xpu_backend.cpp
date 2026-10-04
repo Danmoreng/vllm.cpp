@@ -4,6 +4,8 @@
 #include "xpu_gptq4.h"
 #endif
 #include "vt/xpu.h"
+#include "vt/xpu_profile_span.h"
+#include "vt/gdn_fp16_plan.h"
 #include <sycl/ext/oneapi/matrix/matrix.hpp>
 #include <sycl/ext/oneapi/experimental/graph.hpp>
 #include <algorithm>
@@ -44,7 +46,7 @@ struct GraphChecks {
 struct Recording {
   RecordingGraph compute, validation;
   std::unique_ptr<GraphChecks> checks;
-  struct Span { uintptr_t start, end; };
+  struct Span { uintptr_t start, end; size_t check = 0; };
   std::vector<Span> writes, metadata;
   unsigned workspace_mask = 0;
   Recording(const sycl::context& c, const sycl::device& d)
@@ -178,11 +180,12 @@ uint64_t SteadyNs() {
       std::chrono::steady_clock::now().time_since_epoch()).count());
 }
 void AppendHostProfileRecord(Context& c, uint64_t queue_id, const char* stage,
-                             uint64_t start, uint64_t end) {
+                             uint64_t start, uint64_t end,
+                             uint64_t copy_bytes = 0, uint64_t caller = 0) {
   constexpr size_t kMaxHostProfileRecords = 100000;
   VT_CHECK(c.host_profile_records.size() < kMaxHostProfileRecords,
            "XPU host profile record limit exceeded; narrow or drain the diagnostic window");
-  c.host_profile_records.push_back({stage, queue_id, start, end});
+  c.host_profile_records.push_back({stage, queue_id, start, end, copy_bytes, caller});
 }
 Context& GetContext(int index) {
   // Stable per-device storage; construction is lazy and failures reach the caller.
@@ -299,6 +302,16 @@ class XpuBackend final : public Backend {
       std::memcpy(dst, src, bytes);
       return;
     }
+    const bool host_profile = HostProfileEnabled();
+    const auto caller = host_profile ? reinterpret_cast<uintptr_t>(
+        __builtin_extract_return_addr(__builtin_return_address(0))) : 0;
+    const auto record_wait = [&](const char* stage, uint64_t start,
+                                 uint64_t end, size_t count) {
+      if (!start) return;
+      auto& c = ctx();
+      std::lock_guard lock(c.mutex);
+      AppendHostProfileRecord(c, q.id, stage, start, end, count, caller);
+    };
     // Ordinary host pointers include read-only, unaligned safetensors mmaps.
     // Level Zero's direct import of those mappings can fault in the copy engine.
     // Only known USM pointers reach DMA; bound staging independently of weights.
@@ -309,15 +322,19 @@ class XpuBackend final : public Backend {
         const size_t count = std::min(chunk, bytes - offset);
         if (host_src) {
           std::memcpy(staging, static_cast<const char*>(src) + offset, count);
-          const auto wait_start = HostProfileEnabled() ? SteadyNs() : 0;
-          native.memcpy(static_cast<char*>(dst) + offset, staging, count).wait_and_throw();
+          const auto wait_start = host_profile ? SteadyNs() : 0;
+          auto copy = native.memcpy(static_cast<char*>(dst) + offset, staging, count);
+          copy.wait_and_throw();
           if (wait_start)
-            RecordHostProfileSpan(q, "staged_h2d_wait", wait_start, SteadyNs());
+            record_wait("staged_h2d_wait", wait_start, SteadyNs(), count);
+          RecordProfileEvent(q, "staged_h2d_copy", copy);
         } else {
-          const auto wait_start = HostProfileEnabled() ? SteadyNs() : 0;
-          native.memcpy(staging, static_cast<const char*>(src) + offset, count).wait_and_throw();
+          const auto wait_start = host_profile ? SteadyNs() : 0;
+          auto copy = native.memcpy(staging, static_cast<const char*>(src) + offset, count);
+          copy.wait_and_throw();
           if (wait_start)
-            RecordHostProfileSpan(q, "staged_d2h_wait", wait_start, SteadyNs());
+            record_wait("staged_d2h_wait", wait_start, SteadyNs(), count);
+          RecordProfileEvent(q, "staged_d2h_copy", copy);
           std::memcpy(static_cast<char*>(dst) + offset, staging, count);
         }
       }
@@ -402,7 +419,8 @@ class XpuBackend final : public Backend {
       for (const auto& metadata : recording->metadata)
         for (const auto& write : recording->writes)
           VT_CHECK(metadata.start >= write.end || write.start >= metadata.end,
-                   "XPU graph metadata must be staged outside capture and remain read-only during replay");
+                   std::string("XPU graph metadata must be staged outside capture and remain read-only during replay: ") +
+                   recording->checks->messages[metadata.check]);
       const size_t nodes = recording->compute.get_nodes().size() + recording->validation.get_nodes().size();
       VT_CHECK(nodes <= MaxGraphNodes - c.graph_nodes, "XPU graph node budget exceeded");
       const bool graph_profile = GraphProfileEnabled();
@@ -594,6 +612,37 @@ void RecordProfileEvent(Queue& q, const char* stage, const sycl::event& event) {
 bool ProfileQueueEventsEnabled() { return ProfileQueuesEnabled(); }
 bool HostProfileSpansEnabled() { return HostProfileEnabled(); }
 uint64_t HostProfileClockNs() { return SteadyNs(); }
+struct ProfileSpanState {
+  uint64_t queue_id = 0, host_start_ns = 0;
+  std::optional<sycl::event> begin;
+};
+ProfileSpan::ProfileSpan() = default;
+ProfileSpan::~ProfileSpan() = default;
+ProfileSpan::ProfileSpan(ProfileSpan&&) noexcept = default;
+ProfileSpan& ProfileSpan::operator=(ProfileSpan&&) noexcept = default;
+ProfileSpan BeginProfileSpan(Queue& q) {
+  ProfileSpan span;
+  if (q.device.type != DeviceType::kXPU ||
+      (!ProfileQueuesEnabled() && !HostProfileEnabled())) return span;
+  span.state = std::make_unique<ProfileSpanState>();
+  span.state->queue_id = q.id;
+  span.state->host_start_ns = SteadyNs();
+  if (ProfileQueuesEnabled()) {
+    span.state->begin = NativeQueue(q).single_task(ProfileAnchorKernel{});
+  }
+  return span;
+}
+void EndProfileSpan(Queue& q, const char* stage, ProfileSpan span) {
+  if (!span.state) return;
+  VT_CHECK(span.state->queue_id == q.id,
+           "XPU profile span must end on its original queue");
+  if (span.state->begin) {
+    const auto end = NativeQueue(q).single_task(ProfileAnchorKernel{});
+    RecordProfileSpan(q, stage, *span.state->begin, end,
+                      span.state->host_start_ns, {});
+  }
+  RecordHostProfileSpan(q, stage, span.state->host_start_ns, SteadyNs());
+}
 void RecordHostProfileSpan(Queue& q, const char* stage,
                            uint64_t start_ns, uint64_t end_ns) {
   if (!HostProfileEnabled()) return;
@@ -695,7 +744,7 @@ bool CaptureMetadataCheck(Queue& q, const std::function<void(sycl::handler&, int
   VT_CHECK(index < MaxGraphChecks, "XPU graph metadata validation budget exceeded");
   for (const auto* input : inputs) if (input && input->Numel()) {
     const auto start = reinterpret_cast<uintptr_t>(input->data);
-    recording.metadata.push_back({start, start + Span(*input)});
+    recording.metadata.push_back({start, start + Span(*input), index});
   }
   recording.validation.add([&](sycl::handler& h) { submit(h, recording.checks->device + index); });
   recording.checks->messages.emplace_back(message);
@@ -790,10 +839,10 @@ bool WithGdnWorkspace(Queue& q, size_t bytes, const std::function<void(void*)>& 
                        "workspace_wait_gdn", bytes, launch);
 }
 bool WithGdnNativeWorkspace(Queue& q, size_t bytes, const std::function<void(void*)>& launch) {
-  VT_CHECK(bytes > 0 && bytes <= 160 * 1024 * 1024,
-           "XPU native GDN workspace exceeds 160 MiB budget");
+  VT_CHECK(bytes > 0 && bytes <= kGdnFp16ReservationBytes,
+           "XPU native GDN workspace exceeds the stable 220 MiB reservation");
   return WithWorkspace(q, GetContext(q.device.index).native_gdn, 16,
-                       "workspace_wait_gdn_native", bytes, launch);
+                       "workspace_wait_gdn_native", kGdnFp16ReservationBytes, launch);
 }
 bool WithAttentionWorkspace(Queue& q, size_t bytes, const std::function<void(void*)>& launch) {
   VT_CHECK(bytes > 0 && bytes <= 16 * 1024 * 1024, "XPU attention workspace exceeds 16 MiB budget");

@@ -1,4 +1,5 @@
 #pragma once
+#include <cstddef>
 #include "vt/ops.h"
 
 namespace vt {
@@ -31,4 +32,27 @@ using Exl3GroupedLinearFn = void (*)(Queue&, Tensor&, const Tensor&, const Tenso
 void Exl3GroupedLinear(Queue&, Tensor& out, const Tensor& in, const Tensor& trellis,
     const Tensor& suh, const Tensor& svh, const Tensor& shard_of_nb,
     Tensor& in_had, Tensor& partials, const Exl3GroupedLinearArgs&);
+
+// Independent large-M arithmetic, with the producer's 256-row GEMM padding.
+// Offsets are bytes in one caller-owned I8 workspace. All regions start on a
+// 64-byte boundary: I8[S,Ms,K], F32[S,Ms], F16[Ms,N], F32[1]. No weight cache:
+// a separate I8[K,128] panel is overwritten on the same in-order queue.
+struct Exl3W8A8Plan {
+  int padded_rows;
+  size_t activation_offset, row_scale_offset, intermediate_offset;
+  size_t weight_scale_offset, workspace_bytes, weight_panel_bytes;
+};
+Exl3W8A8Plan PlanExl3W8A8(int64_t m, int64_t k, int64_t n,
+                         int64_t groups, int bits);
+
+// F16 input/output and packed/group metadata have the same layouts as SmallM.
+// M must be in [129,4096]; dispatch is explicit, never an FP16/GPTQ fallback.
+// Finite model operands are required. Zero rows use scale1 and signed INT8
+// zero, including padded rows. Workspace/panel/output must be disjoint from
+// all operands and each other, and live until queue completion. Initial route
+// is eager, without graph qualification. oneDNN user scratch is queue-owned
+// and accounted separately from these caller-owned buffers.
+void Exl3GroupedW8A8(Queue&, Tensor& out, const Tensor& in, const Tensor& trellis,
+    const Tensor& suh, const Tensor& svh, const Tensor& shard_of_nb,
+    Tensor& workspace, Tensor& weight_panel, const Exl3GroupedLinearArgs&);
 }  // namespace vt

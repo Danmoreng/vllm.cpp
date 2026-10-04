@@ -2,26 +2,22 @@
 #include "xpu_kernels.h"
 #include "chunk_gated_delta_rule_fp16_producer.hpp"
 #include "gated_delta_rule_fp16_decode.hpp"
+#include "vt/gdn_fp16_plan.h"
 
 #include <cmath>
 
 namespace vt::xpu {
 namespace {
-constexpr int Tokens = 128, Capacity = Tokens + 63, Hk = 16, Hv = 48, D = 128;
+constexpr int Hk = 16, Hv = 48, D = 128;
 using T = cutlass::half_t;
-constexpr size_t QBytes = size_t(Capacity) * Hk * D * sizeof(T);
-constexpr size_t VBytes = size_t(Capacity) * Hv * D * sizeof(T);
-constexpr size_t ABytes = size_t(Hv) * Capacity * 64 * sizeof(T);
-constexpr size_t WBytes = size_t(Hv) * Capacity * D * sizeof(T);
-constexpr size_t GateBytes = size_t(Hv) * Capacity * sizeof(float);
-constexpr size_t Bytes = 2 * QBytes + VBytes + ABytes + 2 * WBytes +
-    2 * GateBytes + 128 + 128;
 }  // namespace
 void GdnPrefillRawGateKernel(Queue& queue, Tensor& out, const Tensor& qi,
     const Tensor& ki, const Tensor& vi, const Tensor& raw_a, const Tensor& beta,
     const Tensor& a_log, const Tensor& dt_bias, Tensor& state, const Tensor& qsl,
     const GdnArgs&) {
   auto& native = NativeQueue(queue);
+  const auto plan = PlanGdnFp16C1(qi.shape[0]);
+  const int tokens = plan.tokens, capacity = plan.capacity;
   const auto device = native.get_device();
   VT_CHECK(device.has(sycl::aspect::ext_intel_device_id) &&
                device.get_info<sycl::ext::intel::info::device::device_id>() == 57891 &&
@@ -36,47 +32,44 @@ void GdnPrefillRawGateKernel(Queue& queue, Tensor& out, const Tensor& qi,
              {&out, &qi, &ki, &vi, &raw_a, &beta, &a_log, &dt_bias, &state, &qsl});
   RecordGraphWrite(queue, state.data, Span(state));
   const auto* offsets = static_cast<const int32_t*>(qsl.data);
-  CheckDeviceMetadata(queue, [=] { return offsets[0] == 0 && offsets[1] == Tokens; },
-                      "gdn_prefill_raw_gate: requires offsets [0,128]", {&qsl});
+  CheckDeviceMetadata(queue, [=] { return offsets[0] == 0 && offsets[1] == tokens; },
+                      "gdn_prefill_raw_gate: offsets must cover the exact logical C1 length", {&qsl});
 
-  const bool submitted = WithGdnNativeWorkspace(queue, Bytes, [&](void* storage) {
+  const bool submitted = WithGdnNativeWorkspace(queue, plan.bytes, [&](void* storage) {
     auto* cursor = static_cast<char*>(storage);
-    auto take = [&](size_t bytes) {
-      void* p = cursor;
-      cursor += (bytes + 63) & ~size_t(63);
-      return p;
-    };
-    auto* q = static_cast<T*>(take(QBytes));
-    auto* k = static_cast<T*>(take(QBytes));
-    auto* v = static_cast<T*>(take(VBytes));
-    auto* A = static_cast<T*>(take(ABytes));
-    auto* w = static_cast<T*>(take(WBytes));
-    auto* u = static_cast<T*>(take(WBytes));
-    auto* a = static_cast<float*>(take(GateBytes));
-    auto* b = static_cast<float*>(take(GateBytes));
-    auto* bias = static_cast<sycl::half*>(take(Hv * sizeof(T)));
-    auto* index = static_cast<int*>(take(sizeof(int)));
-    auto* initial = reinterpret_cast<bool*>(cursor);
+    auto* q = reinterpret_cast<T*>(cursor + plan.q_offset);
+    auto* k = reinterpret_cast<T*>(cursor + plan.k_offset);
+    auto* v = reinterpret_cast<T*>(cursor + plan.v_offset);
+    auto* A = reinterpret_cast<T*>(cursor + plan.a_matrix_offset);
+    auto* w = reinterpret_cast<T*>(cursor + plan.w_offset);
+    auto* u = reinterpret_cast<T*>(cursor + plan.u_offset);
+    auto* a = reinterpret_cast<float*>(cursor + plan.raw_a_offset);
+    auto* b = reinterpret_cast<float*>(cursor + plan.beta_offset);
+    auto* bias = reinterpret_cast<sycl::half*>(cursor + plan.bias_offset);
+    auto* index = reinterpret_cast<int*>(cursor + plan.index_offset);
+    auto* initial = reinterpret_cast<bool*>(cursor + plan.initial_offset);
     // The producer reads its zero-padded physical capacity at tile tails.
-    native.memset(storage, 0, Bytes);
-    native.memcpy(q, qi.data, size_t(Tokens) * Hk * D * sizeof(T));
-    native.memcpy(k, ki.data, size_t(Tokens) * Hk * D * sizeof(T));
-    native.memcpy(v, vi.data, size_t(Tokens) * Hv * D * sizeof(T));
+    native.memset(storage, 0, plan.bytes);
+    native.memcpy(q, qi.data, size_t(tokens) * Hk * D * sizeof(T));
+    native.memcpy(k, ki.data, size_t(tokens) * Hk * D * sizeof(T));
+    native.memcpy(v, vi.data, size_t(tokens) * Hv * D * sizeof(T));
     const View av(raw_a), bv(beta), dv(dt_bias);
-    native.parallel_for(sycl::range<1>(size_t(Hv) * Capacity), [=](sycl::id<1> id) {
-      const int h = id[0] / Capacity, t = id[0] % Capacity;
-      if (t < Tokens) {
+    native.parallel_for(sycl::range<1>(size_t(Hv) * capacity), [=](sycl::id<1> id) {
+      const int h = id[0] / capacity, t = id[0] % capacity;
+      if (t < tokens) {
         a[id] = Load(av, t * av.stride[0] + h);
         b[id] = Load(bv, t * bv.stride[0] + h);
       }
       if (t == 0) bias[h] = sycl::half(Load(dv, h));
     });
+    // The caller has prepared this working state: zero for a fresh request,
+    // or gathered persistent FP32 values for continuation. Always consume it.
     native.single_task([=] { index[0] = 0; initial[0] = true; });
     gdn::fp16_producer::kernel_launcher<T, float>(native,
         static_cast<T*>(out.data), q, k, v, A, w, u, b, a,
         static_cast<const float*>(a_log.data), reinterpret_cast<const T*>(bias),
         static_cast<float*>(state.data), Hv * D * D, offsets, index, initial,
-        nullptr, 1, Capacity, Hk, D, Hv, D);
+        nullptr, 1, capacity, Hk, D, Hv, D);
   });
   VT_CHECK(submitted, "gdn_prefill_raw_gate: native workspace unavailable");
 }
@@ -110,9 +103,9 @@ void GdnPackedDecodeKernel(Queue& queue, Tensor& out, const Tensor& mixed,
   const int64_t slots = state.shape[0];
   CheckDeviceMetadata(queue, [=] { return index[0] >= 0 && index[0] < slots; },
                       "gdn_packed_decode: invalid active state slot", {&indices});
-  // Reserve the same completion-owned capacity as P128, including when
-  // decode runs first. This workspace cannot grow after first allocation.
-  const bool submitted = WithGdnNativeWorkspace(queue, Bytes, [&](void* storage) {
+  // The backend reserves the maximum supported completion-owned capacity
+  // even when decode runs first. These small metadata offsets remain fixed.
+  const bool submitted = WithGdnNativeWorkspace(queue, 256, [&](void* storage) {
     auto* bias = static_cast<sycl::half*>(storage);
     auto* offsets = reinterpret_cast<int*>(static_cast<char*>(storage) + 128);
     const View bv(dt_bias);

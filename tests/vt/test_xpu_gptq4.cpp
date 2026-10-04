@@ -720,7 +720,7 @@ TEST_CASE("XPU GPTQ FP16 GDN post-convolution keeps gate state FP32") {
   dt_bias.Upload(bias_values.data(), bias_values.size() * 4);
   vt::GdnPostConv(queue, qout.tensor, kout.tensor, vout.tensor, gout.tensor,
                   beta.tensor, conv.tensor, araw.tensor, braw.tensor,
-                  alog.tensor, dt_bias.tensor, {1e-6f});
+                  alog.tensor, dt_bias.tensor, {1e-6f, false});
   const auto q_result = qout.Read();
   const auto k_result = kout.Read();
   const auto v_result = vout.Read();

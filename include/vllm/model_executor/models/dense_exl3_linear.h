@@ -39,7 +39,7 @@ dense_attn::DBuf Linear(dense_attn::Dev d, const vt::Tensor& x,
                         const OwnedTensor& bf16_w, const Exl3Weight& exl3_w,
                         vt::DType out_dtype);
 
-// Scoped XPU FP16 SmallM; model-owned cache is bound to these immutable
+// Scoped XPU FP16 SmallM/W8A8; model-owned cache is bound to these immutable
 // sources for its entire lifetime. Returns one [M,sum(N)] contiguous owner.
 dense_attn::DBuf GroupedLinear(dense_attn::Dev d, const vt::Tensor& x,
                                const std::vector<const Exl3Weight*>& sources,

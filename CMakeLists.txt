@@ -1832,11 +1832,13 @@ if(VLLM_CPP_XPU)
     src/vt/xpu/xpu_sampling.cpp src/vt/xpu/xpu_ops.cpp src/vt/xpu/xpu_exl3.cpp
     src/vt/xpu/xpu_gdn.cpp src/vt/xpu/xpu_attention.cpp src/vt/xpu/xpu_exl3_prefill.cpp
     src/vt/xpu/xpu_exl3_smallm.cpp
+    src/vt/xpu/xpu_exl3_w8a8.cpp
     src/vt/xpu/xpu_gdn_chunked.cpp src/vt/xpu/xpu_attention_split.cpp
     src/vt/xpu/xpu_attention_prefill.cpp)
   # The pinned producer builds these ESIMD kernels with -ffast-math. Scope it
   # to this port; unrelated native model/operators retain their own numerics.
-  set_source_files_properties(src/vt/xpu/xpu_exl3_smallm.cpp PROPERTIES
+  set_source_files_properties(src/vt/xpu/xpu_exl3_smallm.cpp
+    src/vt/xpu/xpu_exl3_w8a8.cpp PROPERTIES
     COMPILE_OPTIONS "-ffast-math")
   if(VLLM_CPP_XPU_XE2_PREFILL OR VLLM_CPP_XPU_XE2_GDN)
     if(NOT EXISTS "${VLLM_CPP_SYCL_TLA_DIR}/include/cutlass/cutlass.h")
@@ -1909,7 +1911,8 @@ if(VLLM_CPP_XPU)
   endif()
   if(VLLM_CPP_XPU_GPTQ4)
     find_package(dnnl 3.13.0 EXACT CONFIG REQUIRED)
-    target_sources(vllm_xpu PRIVATE src/vt/xpu/xpu_gptq4.cpp)
+    target_sources(vllm_xpu PRIVATE src/vt/xpu/xpu_gptq4.cpp
+      src/vt/xpu/xpu_exl3_attention.cpp)
     target_compile_definitions(vllm_xpu PRIVATE VLLM_CPP_XPU_GPTQ4)
     target_compile_definitions(vllm_xpu_backend PRIVATE VLLM_CPP_XPU_GPTQ4)
     target_link_libraries(vllm_xpu PRIVATE DNNL::dnnl)

@@ -190,7 +190,12 @@ void SingleTypeKVCacheManager::cache_blocks(
     std::optional<int> retention_interval) {
   auto it = num_cached_block.find(request.request_id);
   int num_cached_blocks = it != num_cached_block.end() ? it->second : 0;
-  int num_full_blocks = num_tokens / block_size;
+  // A shifted MTP boundary hash needs the following committed token. A full
+  // computed page can therefore precede its hash by one decode token. Defer
+  // publishing that page; do not index a missing hash or count it as cached.
+  const int hashed_tokens = static_cast<int>(request.block_hashes.size()) *
+                            block_pool.hash_block_size;
+  const int num_full_blocks = std::min(num_tokens, hashed_tokens) / block_size;
 
   if (num_cached_blocks >= num_full_blocks) {
     return;

@@ -31,7 +31,7 @@ void CopyKernel(Queue& q, Tensor& out, const Tensor& in) {
            "XPU copy: unsupported conversion");
   WithOutput(q, out, {&in}, [&](Tensor& target) {
     const View dst(target), src(in);
-    NativeQueue(q).parallel_for(sycl::range<1>(n), [=](sycl::id<1> item) {
+    const auto event = NativeQueue(q).parallel_for(sycl::range<1>(n), [=](sycl::id<1> item) {
       const auto i = item[0];
       const auto di = dst.offset(i), si = src.offset(i);
       if (dst.dtype == src.dtype) {
@@ -39,6 +39,7 @@ void CopyKernel(Queue& q, Tensor& out, const Tensor& in) {
           static_cast<char*>(dst.data)[di * bytes + b] = static_cast<const char*>(src.data)[si * bytes + b];
       } else Store(dst, di, Load(src, si));
     });
+    RecordProfileEvent(q, "copy_convert", event);
   });
 }
 void AddKernel(Queue& q, Tensor& out, const Tensor& a, const Tensor& b) {
@@ -48,10 +49,11 @@ void AddKernel(Queue& q, Tensor& out, const Tensor& a, const Tensor& b) {
     const View dst(target), av(a), bv(b);
     const bool broadcast = b.rank == 1 && a.rank != 1;
     const auto width = a.shape[a.rank - 1];
-    NativeQueue(q).parallel_for(sycl::range<1>(out.Numel()), [=](sycl::id<1> item) {
+    const auto event = NativeQueue(q).parallel_for(sycl::range<1>(out.Numel()), [=](sycl::id<1> item) {
       const auto i = item[0];
       Store(dst, dst.offset(i), Load(av, av.offset(i)) + Load(bv, bv.offset(broadcast ? i % width : i)));
     });
+    RecordProfileEvent(q, "add", event);
   });
 }
 void MoeSiluMulKernel(Queue& q, Tensor& out, const Tensor& gate, const Tensor& up) {
@@ -59,11 +61,12 @@ void MoeSiluMulKernel(Queue& q, Tensor& out, const Tensor& gate, const Tensor& u
   FloatTensor(out); FloatTensor(gate); FloatTensor(up);
   WithOutput(q, out, {&gate, &up}, [&](Tensor& target) {
     const View dst(target), gv(gate), uv(up);
-    NativeQueue(q).parallel_for(sycl::range<1>(out.Numel()), [=](sycl::id<1> item) {
+    const auto event = NativeQueue(q).parallel_for(sycl::range<1>(out.Numel()), [=](sycl::id<1> item) {
       const auto i = item[0]; const float g = Load(gv, gv.offset(i));
       const float act = Round(gv.dtype, g / (1.0f + sycl::exp(-g)));
       Store(dst, dst.offset(i), act * Load(uv, uv.offset(i)));
     });
+    RecordProfileEvent(q, "moe_silu_mul", event);
   });
 }
 void SiluAndMulKernel(Queue& q, Tensor& out, const Tensor& in) {
@@ -72,11 +75,12 @@ void SiluAndMulKernel(Queue& q, Tensor& out, const Tensor& in) {
   WithOutput(q, out, {&in}, [&](Tensor& target) {
     const View dst(target), src(in);
     const auto width = out.shape[1];
-    NativeQueue(q).parallel_for(sycl::range<1>(out.Numel()), [=](sycl::id<1> item) {
+    const auto event = NativeQueue(q).parallel_for(sycl::range<1>(out.Numel()), [=](sycl::id<1> item) {
       const auto i = item[0]; const auto off = (i / width) * src.stride[0] + i % width;
       const float gate = Load(src, off);
       Store(dst, dst.offset(i), Round(src.dtype, gate / (1.0f + sycl::exp(-gate))) * Load(src, off + width));
     });
+    RecordProfileEvent(q, "silu_and_mul", event);
   });
 }
 void SigmoidGateKernel(Queue& q, Tensor& out, const Tensor& attn, const Tensor& gate) {
@@ -84,10 +88,11 @@ void SigmoidGateKernel(Queue& q, Tensor& out, const Tensor& attn, const Tensor& 
   FloatTensor(out); FloatTensor(attn); FloatTensor(gate);
   WithOutput(q, out, {&attn, &gate}, [&](Tensor& target) {
     const View dst(target), av(attn), gv(gate);
-    NativeQueue(q).parallel_for(sycl::range<1>(out.Numel()), [=](sycl::id<1> item) {
+    const auto event = NativeQueue(q).parallel_for(sycl::range<1>(out.Numel()), [=](sycl::id<1> item) {
       const auto i = item[0];
       Store(dst, dst.offset(i), Load(av, av.offset(i)) * (1.0f / (1.0f + sycl::exp(-Load(gv, gv.offset(i))))));
     });
+    RecordProfileEvent(q, "sigmoid_gate", event);
   });
 }
 namespace {
@@ -113,11 +118,38 @@ void Rows(Queue& q, Tensor& out, const Tensor& in, const Tensor& idx, bool scatt
   const size_t bytes = SizeOf(out.dtype);
   WithOutput(q, out, {&in, &idx}, [&](Tensor& target) {
     const View dst(target), src(in), ids(idx);
-    NativeQueue(q).parallel_for(sycl::range<1>(rows * width), [=](sycl::id<1> item) {
+    if (scatter && rows > 128) {
+      // One group per source row: check last-write-wins once collectively,
+      // rather than scanning all later indices again for every column.
+      // No temporary allocation/readback; the same group then copies the row.
+      constexpr size_t local = 256;
+      const auto event = NativeQueue(q).parallel_for(
+          sycl::nd_range<1>(sycl::range<1>(size_t(rows) * local), sycl::range<1>(local)),
+          [=](sycl::nd_item<1> item) {
+        const int64_t row = item.get_group_linear_id();
+        const int64_t lane = item.get_local_linear_id();
+        const int64_t index = Index(ids, row);
+        bool later = false;
+        for (int64_t r = row + 1 + lane; r < rows; r += local) {
+          if (Index(ids, r) == index) { later = true; break; }
+        }
+        if (sycl::any_of_group(item.get_group(), later)) return;
+        for (int64_t col = lane; col < width; col += local) {
+          const int64_t di = index * dst.stride[0] + col;
+          const int64_t si = row * src.stride[0] + col;
+          for (size_t b = 0; b < bytes; ++b)
+            static_cast<char*>(dst.data)[di * bytes + b] =
+                static_cast<const char*>(src.data)[si * bytes + b];
+        }
+      });
+      RecordProfileEvent(q, "index_copy_row_group", event);
+      return;
+    }
+    const auto event = NativeQueue(q).parallel_for(sycl::range<1>(rows * width), [=](sycl::id<1> item) {
       const auto row = item[0] / width, col = item[0] % width;
       const int64_t index = Index(ids, row);
       if (scatter) {
-        // CPU index_copy scans in order: duplicate indices keep the last source.
+        // Keep the existing launch for small scatters/decode shapes.
         for (int64_t r = row + 1; r < rows; ++r) if (Index(ids, r) == index) return;
       }
       const int64_t di = (scatter ? index : row) * dst.stride[0] + col;
@@ -126,6 +158,7 @@ void Rows(Queue& q, Tensor& out, const Tensor& in, const Tensor& idx, bool scatt
       else for (size_t b = 0; b < bytes; ++b)
         static_cast<char*>(dst.data)[di * bytes + b] = static_cast<const char*>(src.data)[si * bytes + b];
     });
+    RecordProfileEvent(q, embedding ? "embedding" : scatter ? "index_copy" : "index_select", event);
   }, scatter);
 }
 void Matmul(Queue& q, Tensor& out, const Tensor& a, const Tensor& b, bool transpose) {

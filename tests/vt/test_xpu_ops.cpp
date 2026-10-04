@@ -1,14 +1,130 @@
 #include <doctest/doctest.h>
 #include "vt/backend.h"
+#include "vt/breakable_graph.h"
 #include "vt/ops.h"
 #include "vt/xpu.h"
+#include "vt/xpu_profile_span.h"
 #include "vllm/v1/sample/sampler.h"
 #include "vllm/platforms/interface.h"
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
 #include <limits>
+#include <string>
 #include <vector>
+
+TEST_CASE("XPU profile spans: optional queue brackets preserve bytes and nested intervals") {
+  const vt::Device gpu{vt::DeviceType::kXPU, 0};
+  auto& backend = vt::GetBackend(gpu);
+  auto q = vt::CreateQueue(gpu), other = vt::CreateQueue(gpu);
+  auto* data = static_cast<unsigned char*>(vt::Alloc(gpu, 64));
+  (void)vt::xpu::DrainProfileEvents();
+  (void)vt::xpu::DrainHostProfileRecords();
+  const bool device_profile = std::getenv("VT_XPU_PROFILE") &&
+      std::string(std::getenv("VT_XPU_PROFILE")) == "1";
+  const bool host_profile = std::getenv("VT_XPU_HOST_PROFILE") &&
+      std::string(std::getenv("VT_XPU_HOST_PROFILE")) == "1";
+  auto outer = vt::xpu::BeginProfileSpan(q);
+  CHECK(bool(outer.state) == (device_profile || host_profile));
+  backend.Memset(q, data, 0x35, 64);
+  auto inner = vt::xpu::BeginProfileSpan(q);
+  backend.Memset(q, data + 8, 0x72, 16);
+  vt::xpu::EndProfileSpan(q, "probe_inner", std::move(inner));
+  vt::xpu::EndProfileSpan(q, "probe_outer", std::move(outer));
+  std::vector<unsigned char> got(64);
+  backend.Copy(q, got.data(), data, got.size());
+  backend.Synchronize(q);
+  for (size_t i = 0; i < got.size(); ++i)
+    CHECK(got[i] == (i >= 8 && i < 24 ? 0x72 : 0x35));
+  const auto events = vt::xpu::DrainProfileEvents();
+  const auto host = vt::xpu::DrainHostProfileRecords();
+  std::vector<vt::xpu::ProfileRecord> spans;
+  std::vector<vt::xpu::HostProfileRecord> host_spans;
+  for (const auto& r : events)
+    if (r.stage == "probe_inner" || r.stage == "probe_outer") spans.push_back(r);
+  for (const auto& r : host)
+    if (r.stage == "probe_inner" || r.stage == "probe_outer") host_spans.push_back(r);
+  REQUIRE(spans.size() == (device_profile ? 2u : 0u));
+  REQUIRE(host_spans.size() == (host_profile ? 2u : 0u));
+  if (device_profile) {
+    CHECK(spans[0].stage == "probe_inner");
+    CHECK(spans[1].stage == "probe_outer");
+    for (const auto& s : spans) {
+      CHECK(s.stream_span);
+      CHECK(s.queue_id == q.id);
+      CHECK(s.end_ns >= s.start_ns);
+    }
+    CHECK(spans[1].start_ns <= spans[0].start_ns);
+    CHECK(spans[1].end_ns >= spans[0].end_ns);
+  }
+  if (host_profile) {
+    CHECK(host_spans[1].start_steady_ns <= host_spans[0].start_steady_ns);
+    CHECK(host_spans[1].end_steady_ns >= host_spans[0].end_steady_ns);
+  }
+  if (device_profile || host_profile) {
+    auto wrong_queue = vt::xpu::BeginProfileSpan(q);
+    CHECK_THROWS(vt::xpu::EndProfileSpan(other, "probe_wrong_queue", std::move(wrong_queue)));
+  }
+  vt::Queue cpu{vt::Device{vt::DeviceType::kCPU, 0}, nullptr};
+  CHECK_FALSE(vt::xpu::BeginProfileSpan(cpu).state);
+  vt::Free(gpu, data);
+  vt::DestroyQueue(other); vt::DestroyQueue(q);
+}
+
+TEST_CASE("XPU profile copies: staged roundtrip records actual chunk bytes and callers") {
+  const vt::Device gpu{vt::DeviceType::kXPU, 0};
+  auto& backend = vt::GetBackend(gpu);
+  auto q = vt::CreateQueue(gpu);
+  constexpr size_t chunk = 4 * 1024 * 1024, bytes = chunk + 37;
+  auto* data = vt::Alloc(gpu, bytes);
+  std::vector<unsigned char> input(bytes), output(bytes);
+  for (size_t i = 0; i < bytes; ++i) input[i] = static_cast<unsigned char>(i % 251);
+  (void)vt::xpu::DrainProfileEvents();
+  (void)vt::xpu::DrainHostProfileRecords();
+  backend.Copy(q, data, input.data(), bytes);
+  backend.Copy(q, output.data(), data, bytes);
+  backend.Synchronize(q);
+  CHECK(output == input);
+  const auto records = vt::xpu::DrainHostProfileRecords();
+  const auto events = vt::xpu::DrainProfileEvents();
+  const bool device_profile = std::getenv("VT_XPU_PROFILE") &&
+      std::string(std::getenv("VT_XPU_PROFILE")) == "1";
+  // These are the existing memcpy commands, without extra queue anchors.
+  // Their device intervals exclude commands queued before the copy.
+  for (const char* stage : {"staged_h2d_copy", "staged_d2h_copy"}) {
+    std::vector<vt::xpu::ProfileRecord> copies;
+    for (const auto& r : events) if (r.stage == stage) copies.push_back(r);
+    REQUIRE(copies.size() == (device_profile ? 2u : 0u));
+    for (const auto& r : copies) {
+      CHECK_FALSE(r.stream_span);
+      CHECK(r.queue_id == q.id);
+      CHECK(r.submit_ns > 0);
+      CHECK(r.start_ns > 0);
+      CHECK(r.end_ns >= r.start_ns);
+    }
+    if (device_profile) CHECK(copies[1].start_ns >= copies[0].end_ns);
+  }
+  const bool enabled = std::getenv("VT_XPU_HOST_PROFILE") &&
+      std::string(std::getenv("VT_XPU_HOST_PROFILE")) == "1";
+  if (!enabled) CHECK(records.empty());
+  for (const char* stage : {"staged_h2d_wait", "staged_d2h_wait"}) {
+    std::vector<vt::xpu::HostProfileRecord> copies;
+    for (const auto& r : records) if (r.stage == stage) copies.push_back(r);
+    CHECK(copies.size() == (enabled ? 2u : 0u));
+    if (!enabled || copies.size() != 2) continue;
+    CHECK(copies[0].copy_bytes == chunk);
+    CHECK(copies[1].copy_bytes == 37);
+    CHECK(copies[0].copy_bytes + copies[1].copy_bytes == bytes);
+    CHECK(copies[0].caller_address != 0);
+    CHECK(copies[0].caller_address == copies[1].caller_address);
+    for (const auto& r : copies) {
+      CHECK(r.queue_id == q.id);
+      CHECK(r.end_steady_ns >= r.start_steady_ns);
+    }
+  }
+  vt::Free(gpu, data);
+  vt::DestroyQueue(q);
+}
 
 namespace {
 using vt::DType;
@@ -240,6 +356,82 @@ TEST_CASE("XPU gather/scatter and embedding: padded rows, duplicate indices, inv
   }
 }
 
+TEST_CASE("XPU IndexCopy: wide ragged duplicate and aliased rows remain last-write-wins") {
+  auto q = vt::CreateQueue({vt::DeviceType::kXPU, 0});
+  for (const auto geometry : {std::pair{37, 129}, std::pair{129, 257},
+                              std::pair{1600, 5120}, std::pair{1600, 6144}}) {
+    const int rows = geometry.first, width = geometry.second, destination_rows = rows + 7;
+    CAPTURE(rows);
+    CAPTURE(width);
+    for (const bool alias : {false, true}) {
+      CAPTURE(alias);
+      Buffer source(q, DType::kF16, {rows, width});
+      Buffer destination(q, DType::kF16, {destination_rows, width});
+      if (width == 6144) {
+        // Actual mixed GDN core layout, with unchanged contiguous bytes.
+        source.t = vt::Tensor::Contiguous(source.t.data, DType::kF16, q.device, {rows, 48, 128});
+        destination.t = vt::Tensor::Contiguous(destination.t.data, DType::kF16, q.device,
+                                              {destination_rows, 48, 128});
+      }
+      Buffer indices(q, DType::kI32, {rows});
+      std::vector<uint16_t> input(size_t(rows) * width), initial(size_t(destination_rows) * width);
+      std::vector<int32_t> ids(rows);
+      for (int r = 0; r < destination_rows; ++r)
+        for (int c = 0; c < width; ++c) {
+          initial[size_t(r) * width + c] = uint16_t(0x4000 + (r * 11 + c) % 2048);
+          if (r < rows) input[size_t(r) * width + c] = uint16_t(0x3000 + (r * 7 + c) % 2048);
+        }
+      for (int r = 0; r < rows; ++r) ids[r] = r % 7 == 0 ? 3 : (r * 13 + 7) % destination_rows;
+      source.upload(input.data()); destination.upload(initial.data()); indices.upload(ids.data());
+      auto in = alias ? destination.t : source.t;
+      in.shape[0] = rows;
+      const auto& snapshot = alias ? initial : input;
+      auto expected = initial;
+      for (int r = 0; r < rows; ++r)
+        std::copy_n(snapshot.begin() + size_t(r) * width, width,
+                    expected.begin() + size_t(ids[r]) * width);
+      vt::IndexCopy(q, destination.t, in, indices.t);
+      auto got = destination.raw();
+      REQUIRE(got.size() == expected.size() * sizeof(uint16_t));
+      CHECK(std::memcmp(got.data(), expected.data(), got.size()) == 0);
+      if (!alias) {
+        const auto unchanged = source.raw();
+        CHECK(std::memcmp(unchanged.data(), input.data(), unchanged.size()) == 0);
+        vt::BreakableGraph graph;
+        {
+          vt::GraphCaptureScope scope(vt::GetBackend(q.device), q, graph,
+                                      vt::GraphCaptureMode::kFull);
+          vt::IndexCopy(q, destination.t, in, indices.t);
+        }
+        REQUIRE(graph.captured());
+        graph.Replay(q);
+        CHECK(destination.raw() == got);
+        // New duplicate routing must be recomputed on replay, not cached.
+        for (int r = 0; r < rows; ++r)
+          ids[r] = r % 11 == 0 ? 5 : (r * 17 + 13) % destination_rows;
+        indices.upload(ids.data());
+        for (int r = 0; r < rows; ++r)
+          std::copy_n(input.begin() + size_t(r) * width, width,
+                      expected.begin() + size_t(ids[r]) * width);
+        graph.Replay(q);
+        got = destination.raw();
+        CHECK(std::memcmp(got.data(), expected.data(), got.size()) == 0);
+        const int32_t valid = ids[0];
+        ids[0] = -1; indices.upload(ids.data());
+        CHECK_THROWS(graph.Replay(q));
+        CHECK(destination.raw() == got);
+        ids[0] = valid; indices.upload(ids.data());
+      }
+      for (const int32_t invalid : {-1, destination_rows}) {
+        ids[0] = invalid; indices.upload(ids.data());
+        CHECK_THROWS(vt::IndexCopy(q, destination.t, in, indices.t));
+        CHECK(destination.raw() == got);
+      }
+    }
+  }
+  vt::DestroyQueue(q);
+}
+
 TEST_CASE("XPU Matmul and MatmulBT: mixed dtypes, strided activation and real BA dimensions") {
   Queues qs;
   for (auto a_type : floats) for (auto b_type : floats) for (bool transpose : {false, true}) {
@@ -308,9 +500,10 @@ TEST_CASE("XPU profile: RMSNorm and BA MatmulBT carry device timestamps"
   vt::MatmulBT(qs.gpu, out.t, norm.t, ba.t);
   CHECK(out.floats().size() == 96);
   const auto records = vt::xpu::DrainProfileEvents();
-  REQUIRE(records.size() == 2);
+  REQUIRE(records.size() == 3);
   CHECK(records[0].stage == "rms_norm");
   CHECK(records[1].stage == "matmul_bt");
+  CHECK(records[2].stage == "staged_d2h_copy");
   for (const auto& record : records) {
     CHECK(record.matrix.empty());
     CHECK(record.queue_id == qs.gpu.id);

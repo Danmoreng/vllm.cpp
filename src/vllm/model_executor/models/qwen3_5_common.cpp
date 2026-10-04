@@ -37,7 +37,8 @@ v1::KVCacheConfig MakeQwen3_5KVCache(const HfConfig& config, int block_size,
 }
 
 v1::KVCacheConfig MakeQwen3_5KVCacheSpec(const HfConfig& config, int block_size,
-                                         int num_blocks, int num_spec) {
+                                         int num_blocks, int num_spec,
+                                         bool share_mtp_pages) {
   const int num_kv_heads = static_cast<int>(config.num_key_value_heads);
   const int head_dim = static_cast<int>(config.head_dim);
   const int num_value_heads = static_cast<int>(config.linear_num_value_heads);
@@ -53,6 +54,7 @@ v1::KVCacheConfig MakeQwen3_5KVCacheSpec(const HfConfig& config, int block_size,
       config.raw["quantization_config"].is_object() &&
       config.raw["quantization_config"].value("quant_method", std::string()) == "gptq";
   const bool exl3_f16 = IsExl3Checkpoint(config);
+  const bool shared_mtp_pages = exl3_f16 && share_mtp_pages && num_spec > 0;
   const bool explicit_f16 = gptq_f16 || exl3_f16;
   const auto precision =
       ResolveQwen3_5DensePrecision(config, gptq_f16, exl3_f16);
@@ -102,21 +104,31 @@ v1::KVCacheConfig MakeQwen3_5KVCacheSpec(const HfConfig& config, int block_size,
               {num_value_heads, value_head_dim, key_head_dim}},
           std::vector<vt::DType>{conv_dtype, ssm_dtype},
           /*page_size_padded=*/std::nullopt,
-          /*mamba_cache_mode=*/"none",
+          // Native recurrence lives in request-owned compact rows. Align mode
+          // reserves k+1 current-state identities plus one transition identity,
+          // rather than charging a GDN page for every historical context page.
+          /*mamba_cache_mode=*/shared_mtp_pages ? "align" : "none",
           /*num_speculative_blocks=*/num_spec));
   // SPEC-MTP I5c: the MTP draft head is one extra full_attention decoder layer
   // (index num_hidden_layers upstream, qwen3_5_mtp.py:105-112) with its OWN paged
   // K/V — registered as a NEW attention KV layer whose draft names are all layer
   // names minus the target's (speculator.py:163-169). Sized exactly like a target
   // full-attn layer; it shares the target's block table / slot mapping. It exists
+  // EXL3 registers it in the target group because the physical IDs are shared;
+  // other checkpoints retain their separate draft group. It exists
   // ONLY when speculative decoding is on (num_spec > 0); num_spec == 0 (the
   // production default) emits the two pre-I5c groups byte for byte, so the draft
   // layer is never allocated and the engine is byte-identical when spec is off.
   if (num_spec > 0) {
-    kv.kv_cache_groups.emplace_back(
-        std::vector<std::string>{"fa_draft"},
-        std::make_shared<v1::FullAttentionSpec>(
-            block_size, num_kv_heads, head_dim, kv_dtype));
+    if (shared_mtp_pages) {
+      kv.mtp_draft_shares_target_pages = true;
+      kv.kv_cache_groups.front().layer_names.push_back("fa_draft");
+    } else {
+      kv.kv_cache_groups.emplace_back(
+          std::vector<std::string>{"fa_draft"},
+          std::make_shared<v1::FullAttentionSpec>(
+              block_size, num_kv_heads, head_dim, kv_dtype));
+    }
   }
   return kv;
 }
