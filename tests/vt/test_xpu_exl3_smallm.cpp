@@ -1,6 +1,7 @@
 #include "xpu_test_helpers.h"
 #include "exl3_fixture.h"
 #include "vt/exl3_grouped.h"
+#include "vt/xpu.h"
 #include "vt/unaligned.h"
 #include "vllm/model_executor/model_loader/safetensors_reader.h"
 #include "vllm/model_executor/models/dense_attn_block.h"
@@ -9,6 +10,9 @@
 #include <cstdlib>
 #include <filesystem>
 #include <iostream>
+#include <chrono>
+#include <fstream>
+#include <nlohmann/json.hpp>
 
 namespace {
 using vt::DType;
@@ -68,6 +72,120 @@ std::vector<float> Floats(const vllm::StTensor& t) {
                           : vt::LoadUnaligned<float>(t.data + i * size);
   return result;
 }
+}
+
+TEST_CASE("XPU P6 SmallM: same original packed weights and complete operator") {
+  const char* fixture_path = std::getenv("VT_B70_SMALLM_FIXTURE");
+  const char* report_path = std::getenv("VT_B70_SMALLM_REPORT");
+  if (!fixture_path || !report_path) { MESSAGE("Set P6 original fixture/report paths"); return; }
+  std::ifstream stream(report_path); REQUIRE(stream.good());
+  nlohmann::json original; stream >> original;
+  REQUIRE(original.at("schema") == "b70-exl3-p6-smallm-original-v1");
+  REQUIRE_FALSE(original.at("profiled").get<bool>());
+  auto fixture = vllm::SafetensorsFile::Open(fixture_path);
+  Queue gpu(vt::DeviceType::kXPU);
+  auto& backend = vt::GetBackend(gpu.q.device);
+  struct Weight {
+    Buffer packed, su, sv, map;
+    Weight(vt::Queue& q, int k, int n, int bits, int groups)
+        : packed(q, DType::kI8, {k / 16, n / 16, 32 * bits}),
+          su(q, DType::kF16, {groups, k}), sv(q, DType::kF16, {n}),
+          map(q, DType::kI32, {n / 128}) {}
+  };
+  std::vector<std::unique_ptr<Weight>> weights;
+  size_t packed_bytes = 0;
+  for (const auto& w : original.at("weights")) {
+    const int k = w.at("k"), n = w.at("n"), bits = w.at("bits"), groups = w.at("groups");
+    auto weight = std::make_unique<Weight>(gpu.q, k, n, bits, groups);
+    const auto prefix = "w" + std::to_string(weights.size());
+    for (const auto& entry : {std::pair{&weight->packed, "packed"}, std::pair{&weight->su, "su"},
+                             std::pair{&weight->sv, "sv"}, std::pair{&weight->map, "map"}}) {
+      const auto& tensor = fixture.Get(prefix + "_" + entry.second);
+      REQUIRE(entry.first->bytes == tensor.nbytes); entry.first->upload(tensor.data);
+      // Bounded exact upload witness, including every full/compact packed byte.
+      constexpr size_t chunk_bytes = 64 * 1024 * 1024;
+      std::vector<unsigned char> chunk(std::min(chunk_bytes, tensor.nbytes));
+      for (size_t pos = 0; pos < tensor.nbytes; pos += chunk_bytes) {
+        const size_t size = std::min(chunk_bytes, tensor.nbytes - pos);
+        backend.Copy(gpu.q, chunk.data(), static_cast<const char*>(entry.first->tensor.data) + pos, size);
+        backend.Synchronize(gpu.q); CHECK(std::memcmp(chunk.data(), tensor.data + pos, size) == 0);
+      }
+    }
+    packed_bytes += weight->packed.bytes;
+    weights.push_back(std::move(weight));
+  }
+  struct Case {
+    int weight, m, k, n, bits;
+    std::string prefix, name;
+    std::unique_ptr<Buffer> input, output;
+    std::unique_ptr<Scratch> scratch;
+  };
+  std::vector<Case> cases;
+  nlohmann::json records = original.at("cases");
+  for (auto& record : records) {
+    Case c;
+    c.weight = record.at("weight"); c.m = record.at("m"); c.k = record.at("k");
+    c.n = record.at("n"); c.bits = record.at("bits");
+    c.prefix = record.at("prefix"); c.name = record.at("name");
+    const int groups = record.at("groups");
+    c.input = std::make_unique<Buffer>(gpu.q, DType::kF16, std::initializer_list<int64_t>{c.m, c.k});
+    c.output = std::make_unique<Buffer>(gpu.q, DType::kF16, std::initializer_list<int64_t>{c.m, c.n});
+    c.scratch = std::make_unique<Scratch>(gpu.q, c.m, c.k, c.n, c.bits, groups);
+    const auto& input = fixture.Get(c.prefix + "_x");
+    REQUIRE(input.nbytes == c.input->bytes); c.input->upload(input.data);
+    const auto& plan = c.scratch->plan;
+    REQUIRE(plan.padded_rows == record.at("padded_m")); REQUIRE(plan.splits == record.at("splits"));
+    record["row_block"] = plan.row_block; record["vector"] = plan.vector;
+    record["tiles_n_per_thread"] = plan.tiles_per_thread;
+    record["tile_rows_per_split"] = plan.tile_rows_per_split;
+    record["native_complete_operator_wall_ms"] = nlohmann::json::array();
+    record["native_device_events"] = nlohmann::json::array();
+    cases.push_back(std::move(c));
+  }
+  auto execute = [&](Case& c) {
+    auto& w = *weights[c.weight];
+    vt::Exl3GroupedLinear(gpu.q, c.output->tensor, c.input->tensor, w.packed.tensor,
+        w.su.tensor, w.sv.tensor, w.map.tensor, c.scratch->had.tensor, c.scratch->parts.tensor,
+        {c.bits, 2, c.name.c_str()});
+  };
+  auto exact = [&](const Buffer& buffer, const std::string& key) {
+    const auto& expected = fixture.Get(key); const auto actual = buffer.download();
+    REQUIRE(actual.size() == expected.nbytes);
+    CHECK(std::memcmp(actual.data(), expected.data, expected.nbytes) == 0);
+  };
+  for (auto& c : cases) {
+    CAPTURE(c.name);
+    CAPTURE(c.m);
+    execute(c); exact(*c.output, c.prefix + "_out");
+    exact(c.scratch->parts, c.prefix + "_parts"); exact(c.scratch->had, c.prefix + "_had_blocked");
+    CheckPadding(*c.scratch, c.m, c.k, int(original["weights"][c.weight]["groups"]));
+  }
+  for (int warm = 0; warm < 2; ++warm) { for (auto& c : cases) execute(c); backend.Synchronize(gpu.q); }
+  (void)vt::xpu::DrainProfileEvents();
+  for (int sample = 0; sample < 3; ++sample) for (size_t ci = 0; ci < cases.size(); ++ci) {
+    // Discard the preceding case's untimed correctness downloads. Preserve
+    // only this complete operator's events, including its metadata readback.
+    (void)vt::xpu::DrainProfileEvents();
+    auto& c = cases[ci]; const auto start = std::chrono::steady_clock::now();
+    execute(c); backend.Synchronize(gpu.q);
+    records[ci]["native_complete_operator_wall_ms"].push_back(
+        std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count());
+    for (const auto& e : vt::xpu::DrainProfileEvents())
+      records[ci]["native_device_events"].push_back({{"sample", sample}, {"stage", e.stage},
+                                                   {"ms", (e.end_ns - e.start_ns) / 1e6}});
+    exact(*c.output, c.prefix + "_out"); exact(c.scratch->parts, c.prefix + "_parts");
+    exact(c.scratch->had, c.prefix + "_had_blocked"); exact(*c.input, c.prefix + "_x");
+  }
+  nlohmann::json report = {{"schema", "b70-exl3-p6-smallm-native-v1"}, {"cases", records},
+      {"packed_device_bytes", packed_bytes}, {"backend_peak_bytes", vt::xpu::GetMemoryInfo().peak_allocated_bytes},
+      {"profiled", std::getenv("VT_XPU_PROFILE") && std::string(std::getenv("VT_XPU_PROFILE")) == "1"},
+      {"scope", "Real different target/draft weights; synthetic same-input operands; no serving/model-state proof"}};
+  if (const char* path = std::getenv("VT_B70_SMALLM_OUTPUT")) {
+    REQUIRE_FALSE(std::filesystem::exists(path)); std::ofstream output(path);
+    output << report.dump(2) << '\n'; output.close(); REQUIRE(output.good());
+  }
+  CHECK(vt::GetReferenceTierHits() == 0);
+  std::cout << "P6_NATIVE_DONE " << cases.size() << " cases, packed bytes " << packed_bytes << std::endl;
 }
 
 TEST_CASE("XPU EXL3 producer SmallM: separate group transforms, padding and refusals") {
