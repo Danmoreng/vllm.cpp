@@ -2,8 +2,23 @@
 #include "vt/exl3_w8a8_panel_plan.h"
 #include <algorithm>
 #include <limits>
+#include <cstdlib>
+#include <string_view>
 
 namespace vt {
+int Exl3W8A8ModelPanelColumns() {
+  const char* value = std::getenv("VT_XPU_EXL3_W8A8_PANEL_COLUMNS");
+  // Smallest bounded candidate with a measured complete-prefill gain. The
+  // explicit128 route remains available for identical-input diagnostics.
+  if (!value) return 1024;
+  const std::string_view width(value);
+  if (width == "128") return 128;
+  if (width == "1024") return 1024;
+  if (width == "2048") return 2048;
+  VT_CHECK(false, "VT_XPU_EXL3_W8A8_PANEL_COLUMNS must be128/1024/2048");
+  return 1024;
+}
+
 Exl3W8A8Plan PlanExl3W8A8(int64_t m, int64_t k, int64_t n,
                          int64_t groups, int bits, int panel_columns) {
   VT_CHECK(m > 128 && m <= 4096, "EXL3 W8A8 requires physical M in [129,4096]");

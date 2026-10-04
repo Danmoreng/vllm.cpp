@@ -49,6 +49,10 @@ struct Exl3W8A8Plan {
 Exl3W8A8Plan PlanExl3W8A8(int64_t m, int64_t k, int64_t n,
                          int64_t groups, int bits, int panel_columns = 128);
 
+// Internal model A/B selection; caller-owned arithmetic defaults remain128.
+// Validate this setting at Large-M admission, before uploading model operands.
+int Exl3W8A8ModelPanelColumns();
+
 // F16 input/output and packed/group metadata have the same layouts as SmallM.
 // M must be in [129,4096]; dispatch is explicit, never an FP16/GPTQ fallback.
 // Finite model operands are required. Zero rows use scale1 and signed INT8

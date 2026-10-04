@@ -20,6 +20,7 @@
 #include "vllm/config/speculative.h"
 #include "vt/xpu_test_helpers.h"
 #include "vt/xpu.h"
+#include "vt/exl3_grouped.h"
 #include "vt/breakable_graph.h"
 #include "vllm/v1/core/sched/scheduler.h"
 
@@ -1871,7 +1872,12 @@ TEST_CASE("XPU EXL3 public engine R11: frozen serving timing workload") {
     CHECK(trace.at("first_scheduled_position") == 0);
   }
   if (profile || host_profile) drain_profiles();
-  result["backend_peak_device_bytes"] = vt::xpu::GetMemoryInfo().peak_allocated_bytes;
+  const auto memory = vt::xpu::GetMemoryInfo();
+  result["backend_peak_device_bytes"] = memory.peak_allocated_bytes;
+  result["backend_live_device_bytes"] = memory.allocated_bytes;
+  result["graph_device_bytes"] = memory.graph_device_bytes;
+  result["w8a8_workspace_bytes"] = memory.w8a8_workspace_bytes;
+  result["w8a8_panel_columns"] = vt::Exl3W8A8ModelPanelColumns();
   CHECK(result["backend_peak_device_bytes"].get<uint64_t>() <= (uint64_t(32) << 30));
   struct rusage usage{};
   REQUIRE(getrusage(RUSAGE_SELF, &usage) == 0);
