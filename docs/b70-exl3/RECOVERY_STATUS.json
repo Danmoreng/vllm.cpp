@@ -1691,7 +1691,16 @@
       "native_C1_graph_exit": 0,
       "native_C1_graph_captures": 2,
       "native_C1_graph_successful_replays": 20,
-      "native_C1_graph_device_bytes_after_retirement": 0
+      "native_C1_graph_device_bytes_after_retirement": 0,
+      "original_C4_receipt": {
+        "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p1-C4-original-v1/receipt-v1.json",
+        "bytes": 22966,
+        "sha256": "bea0d103da8428a2929142b26b2bacd7e42ffd0d38e4b09cbefb5e618b8d47f5"
+      },
+      "original_C4_operator_cases": 9,
+      "original_C4_exit": 0,
+      "original_C4_isolated_request_comparisons": 12,
+      "original_C4_scope": "Derived original C4 Q4 isolated operators, lengths1599/1601/4100/4801, disjoint nonmonotonic physicalpages,3layouts,permutation,request2 causal tail mutation; exact acrosslayouts/permutation/isolatedC1,one actual batchedcall perform. Not model trajectory, nativeC4 implementation or serving gain."
     },
     {
       "task": "P2",
@@ -1830,5 +1839,5 @@
     }
   ],
   "performance_baseline": "7536aededc049b2157f12eadb0f4cc6bbf29b7b7",
-  "performance_next": "P1 trueC4/ragged original and native execution with precise uniform host/device metadata contract, then model route/layout/partition graph identity and emittedcycle model qualification before automatic promotion. C1 operator/refusal/rawgraph packages qualify; P2 bounded performance package complete. LaterP3/P4 remain material; defaultD64/reference/fullstate gates open."
+  "performance_next": "P1 native trueC4/ragged using nowexecuted original9case fixture, precise uniform host/device metadata contract; model route/layout/partition graph identity and emittedcycle qualification before automatic promotion. C1 operator/refusal/rawgraph and boundedP2 complete. LaterP3/P4 material; defaultD64/reference/fullstate gates open."
 }
