@@ -870,7 +870,7 @@
     {
       "task": "R11",
       "capability": "capability screen and measured optimization",
-      "status": "C1_MTP3_graph_active_page_policy_repaired_all387_cycles_equal_to_eager_performance_and_global_qualification_open",
+      "status": "review_break_requested_after_bounded_norm_optimization",
       "implemented": false,
       "operator_tested": false,
       "target_qualified": false,
@@ -883,7 +883,7 @@
         "sha256": "6c1190bef1e683cc3208d4fa5e5d3a35d5363db6aefedac41b582cd2306e09b0"
       },
       "tests": "Structured/MTP unit controls55/55 plus mixed expanded masks144/144, all exit0. First corrected draft/mask native ticket33/33 exit0 still terminates error on chat EOS; retained semantic exit1. Resolved model/chat EOS control15/15 exit0. Frozen v2 public engine full8 suite391/391 exit0, semantic8/8 exit0: four functions/all20 held-out execution cases, two60872-token retrievals, both schema/tool records; all finish stop. All8 prompt IDs exact to prior suite, first6 raw completions unchanged. Selected single-task graders each1/8 pass but intentionally exit1/incomplete. Graph bytes0 after release. Original S1/R06 gates and performance remain open. Native optional profile controls68/68,71/71,81/81; shifted MTP cache boundary red SIGSEGV, repaired29/29. Native C1P4096/O1024 unprofiled2049/2049:6.482 emitted decode tokens/s,15.922s TTFT,173.740s E2E; separate profile2049/2049 exact1024 IDs,403 decode cycles target358.692ms/draft33.663ms. First identical-input C4 fails three cold-position assertions because3200-token cross-request prefix hits; distinct pinned natural first-page prompts then2353/2353, all starts0,951 tokens/common overlap19.7467 aggregate tokens/s,138.297s E2E. Profile host-cap failure retained; per-cycle diagnostic draining repairs it without raising caps. Two actual eager warmup target cycles attribute295.35/301.49ms to129 Gemma5120 norms each. No Python/three-repeat qualification; new candidate capability screen not yet rerun. Geometry-only norm specialization821/821 and native2049/2049 exact IDs yields6.4742 vs6.4822 tok/s; removed, result retained. Native FP32 Gemma boundaries with contract(off), unchanged tree:821/821 short/odd alias/padding controls and64/64 original P128/D1 controls with all four outputs/residuals byte-exact. Full target P128/D1 against all3 fixed original repeats197/197 exit0. Frozen v5 native C1P4096/O1024 unprofiled2049/2049 exit0, all1024 raw IDs and each MTP counter exact to baseline:27.9291 decode emitted tokens/s,14.7053s TTFT,35.8049ms TPOT,51.3338s E2E, observed single-trial decode ratio4.3086. Separate profile2049/2049 exit0, exact IDs, target83.3642ms/draft8.4195ms mean decode spans. No three-repeat/Python parity claim. Same v5 D64 validation804/807 exit1: D11 TV.0221232; D29 TV.287664/KL.227609, top10min9; ancillary greedy mismatchD27. Prior S1 failures preserved; state/R06 qualification not rerun. Initial default P128 export-path refusal159/160 exit1 retained; unique output prefix retry passes without overwriting original fixtures. Frozen v5 native32K633/633 and mixed1058/1058 exit0; mixed21 actual prefill/decode cycles, long-relative TTFT190.864s. Frozen harness v6 explicit O32 warmup then prefix reset: C1 2071/2071 and C4 7794/7794 exit0. Pinned producer config v2 and actual C1/C4 exit0; initial parent-import refusal and wrong physical FP8 dtype guard preserved. Actual policyfp8/storageuint8 verified. First matched C1 decode native27.7745/producer55.7487 tok/s, TTFT4.8890/1.9463s; one trial each, free IDs differ. C4 native133.6263/producer76.1672s E2E; producer has sequential decode phases/no common overlap; no matched simultaneous-C4 decode ratio. Current same frozen v6 capability391/391, semantic8/8 exit0, all8 raw ID sequences exact to historical8/8, graph bytes0 after release. No three-repeat or target qualification. Three unprofiled sequential C1 repeats/engine all pass: native27.6279/27.7745/27.8146 emitted decode tok/s (same1024 IDs every run); producer55.7487/63.9821/64.0197. First producer continuation differs from repeat2/3 at output index48, accepted612/1239 versus666/1074. Median comparison is descriptive across actual own continuations, not numerical or same-continuation parity. Remaining C4 repeats pending. Three unprofiled sequential C4 repeats/engine all pass: native7794/7794 each, E2E133.6263/133.7283/133.7723s; producer76.1672/76.2578/76.3888s. All4 own ID sequences exactly repeat per arm; cross-arm differ. Native overlap66.4272/66.4352/66.4483 tok/s; producer overlapnull in all3, no matched simultaneous-C4 decode ratio. Median E2E throughput ratio.57024. Configuration frozen at batch1600; not best-producer or quality-parity qualification. Separate v6 mixed profile1059/1059 exit0, both256-token IDs exact to unprofiled v5;21 actual mixed cycles. Host target190.789s includes161.590s staged D2H wait/33642 calls; waiting includes prior queued work and is not copy bandwidth or measured GDN arithmetic. Actual chunked GDN events are present. Profiling239.257s E2E is diagnostic only. Frozen v7 copy/caller controls off72/72, host92/92, device-host117/117 exit0; mixed1059/1059 exit0, both256 IDs exact to v5. Actual21 mixed target host spans189.955s; staged D2H160.879s/33642 calls. W8A8 shard mapping160B alone136.747s/2688 calls; this includes prior queued GPU work, not isolated transfer cost or demonstrated speedup. Current v7 full practical screen not rerun; v6 canonical8/8 remains under its own identity. Frozen v8 memcpy event controls off74/74,host94/94,device-host146/146 exit0; mixed1059/1059 exit0, both256 IDs exact to v5. Paired40594 D2H and10900 H2H records under independent clocks; W8A8 shard160B device copy4.593ms vs host136.627s over2688 calls. No copy bandwidth bottleneck established; preceding unrecorded work needs attribution. Frozen v9 existing elementwise event controls off5841/5841,host5861/5861,device-host5913/5913 exit0; mixed1059/1059 exit0, both256 IDs exact to v5. Actual IndexCopy2016 GPU events137.363s inside190.280s target spans. SiLU1.489s is not dominant. Source duplicate scanning repeats per-column; GPU row-group optimization is next. GPU row-group scatter v10 for more128 rows compiles exit0. Focused original plus wide/ragged/duplicates/alias/changed-index graph replay/refusal controls: off5895/5895,host5915/5915,device-host5967/5967 exit0. Test-only v11 actual1600x48x128 extension72/72 exit0. Native unprofiled mixed1059/1059 exit0, all512 IDs and all135 cycles positions/MTP/graph deltas exact to v5,224.04384->84.47434s E2E (single-trial ratio2.65221). Long-relative TTFT190.86383->51.30697s; common overlap27.59495 emitted tok/s. Device peak30467049480B unchanged; graph release0. Separate mixed profile1059/1059, exact IDs; old scatter137362.832696ms/2016 events versus new191.978433ms/1008 large-row group events plus12.687621ms/1008 unchanged small events. No new readback/scratch/host wait. Numerical and current full practical qualification remain open. Current v10 capability retry passes391/391 and semantic8/8 exit0; all8 prompt/output IDs exactly equal to canonical v6,all stop,graph release0. Initial reused old provider trace path aborted exit137; appended trace separately preserved and original v6 exact35,847,296-byte prefix restored with original SHA256. No numerical/performance qualification inferred. Current v10 O32/resetP32768/O256 native653/653 exit0: TTFT39.98335s,decode12.63421 emitted tok/s,E2E60.16680s;256 IDs exact to constructor-only v5. Pinned producer v2 actual matched32K exit0: TTFT18.57784s,decode49.44291,E2E23.73536s. Same original prompt/caps/cache/launch,0prefix hits,both finish length. Cross-arm IDs first differ at index0=56(46040 vs70269); no numerical/quality/same-continuation or three-repeat qualification. Warm mixed native1091/1091 exit0: all512 own IDs exact to un-warmed v10,21 actual mixed cycles,E2E70.79778s,short TTFT.20633s,long-relative TTFT48.71200s,common overlap27.36299 emitted tok/s. Pinned producer v2 mixed exit0: E2E27.68211s,short TTFT.17469s,long-relative TTFT22.19185s; short finishes4.09047s before long first output,common overlapnull. Both prompt/caps/reset0prefix/finished length exact acrossarms; output IDs differ short index0=0(26104 vs479),long index0=51(10345 vs7854). No matched simultaneous-decode, numerical/quality or three-repeat qualification. Post-numerical-repair current source practical screen393/393 and semantic8/8, both exit0; all8 prompt/output IDs byte-exact to historical v10. Four code tasks/all20 held-out cases, two60872-token retrieval tasks, two structured/tool tasks all stop. Device peak30461556091B and graph release0. Trace-enabled sequential requests under C4capacity; no current performance qualification or simultaneous C4 timing. Current frozen post-numerics C1P4096/O1024 unprofiled, graph profile and separate eager profile each1975/1975,one case,exit0. Pinned producer fresh C1 exit0. Native TTFT4.83705611s/decode28.71276031 emitted tok/s/E2E40.46584006s; producer1.948671716s/63.33439783/18.10104495s. Single trial/arm, same original prompt/config/O32 warmup then prefix reset/180W; cross-arm first output difference index53. Native graph profile IDs/all cycle metadata exact to unprofiled. Eager final IDs387 cycles/total counters exact, but two late acceptance/position cycles differ379/380. Graph decode target85.5413ms/draft8.4423ms; separate eager target90.0351ms with DPAS28.0470/Gemma norm20.5267/attention partial14.8933/GDN spec10.3482ms per decode. Nested cost spans not summed; host waits include preceding GPU work. Failed initial receipt all-cycle invariance assertion retained; corrected receipt does not claim eager all-cycle equivalence. Frozen constant-partition diagnostic controls1800/1800 each,exit0: all1024 IDs/all352 cycle metadata match graph/eager. Product shared integer attention-policy bounds plus graph retirement: CPU11/11,focused compileexit0; default C1P4096/O1024 graph/eager each1975/1975,exit0. All1024 IDs/all387 non-timing cycle metadata equal to prior/current eager; two prior late cycle differences closed in this scope. Both graph slots recapture at positions4803/4806 after4800 page boundary. Native unprofiled graph TTFT4.848126379s,decode28.77496707 emitted tok/s,E2E40.39988752s,single trial,no speedup claim. Device peak30369570051B,graph release0. No extra host wait/readback,FP arithmetic/reference/threshold change. Broader state/current full practical/32K/C4/no-MTP/final repeats remain open.",
-      "next_code_change": "One independent Gemma5120 short-row GPU work-distribution optimization retaining original reduction tree and FP32 boundaries; immediate unchanged original same-input norm fixture then focused current C1 graph/eager comparison. Previous rejected compile-time-width-only specialization is not repeated. Rerun current practical screen and measure remaining no-MTP/32K/C4/final small repeats before comprehensive Pro review. Retain frozen D64/strict-state/reference-contract gates.",
+      "next_code_change": "User requested a break: commit/push the tested candidate and prepare a complete tracked-source Pro review ZIP plus current performance/qualification report. Pause the active goal after delivery. Further kernel work awaits the review; original target/state/serving gates remain open.",
       "capability_suite_receipt": {
         "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r11-structured-mtp-v1/receipt-v1.json",
         "bytes": 11148,
@@ -1106,7 +1106,7 @@
         "new_staged_D2H_device_copy_ms": 50.61792199999978
       },
       "current_candidate_capability_screen": {
-        "candidate": "attention-policy-v1",
+        "candidate": "norm-workgroup-v1",
         "measured": false,
         "historical_post_numerics_8_of8_receipt_retained": true
       },
@@ -1129,12 +1129,12 @@
         "sha256": "bb7feb039bf44adeec68262f8e930b12fa81d01ac73df874ecc25ee9fe92d785"
       },
       "current_candidate_matched_C4_three_repeat_comparison": {
-        "candidate": "attention-policy-v1",
+        "candidate": "norm-workgroup-v1",
         "measured": false,
         "historical_v10_receipt_retained": true
       },
       "current_candidate_matched_C4_results": {
-        "candidate": "attention-policy-v1",
+        "candidate": "norm-workgroup-v1",
         "measured": false
       },
       "index_copy_v10_candidate_identity": {
@@ -1279,11 +1279,11 @@
       "current_candidate_C1_performance_remeasured": true,
       "current_candidate_full_serving_performance_remeasured": false,
       "current_candidate_C1_measurement": {
-        "candidate": "attention-policy-v1",
+        "candidate": "norm-workgroup-v1",
         "receipt": {
-          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r11-serving-timing-v1/receipt-attention-policy-v1.json",
-          "bytes": 17349,
-          "sha256": "bc22ded2f8848e56271b98753beadf2f9072b6f73a0390dc225fefbb55443301"
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r11-serving-timing-v1/receipt-norm-workgroup-v1.json",
+          "bytes": 20165,
+          "sha256": "a3143f9182136cd5de70430f1893867a8f848bb0279c4628a9ef7afd05ec60e6"
         },
         "native_graph_report": {
           "schema": "b70-exl3-r11-serving-report-v1",
@@ -1300,26 +1300,26 @@
             "request-0": {
               "prompt_tokens": 4096,
               "emitted_tokens": 1024,
-              "ttft_ms": 4848.126379,
-              "tpot_ms": 34.752429,
-              "end_to_end_ms": 40399.861246,
+              "ttft_ms": 4841.377878,
+              "tpot_ms": 28.792505389051804,
+              "end_to_end_ms": 34296.110891,
               "token_timestamp_granularity": "one timestamp per emitted MTP chunk"
             }
           },
           "common_decode_overlap": {
-            "start_s": 4.848145279,
-            "end_s": 40.399880146,
+            "start_s": 4.841402868,
+            "end_s": 34.296135881,
             "emitted_tokens": 1023,
-            "aggregate_emitted_tokens_per_s": 28.774967067769566,
+            "aggregate_emitted_tokens_per_s": 34.73126032235613,
             "boundary_policy": "exclude start, include end; whole emitted chunks only"
           },
-          "end_to_end_wall_s": 40.399887516,
-          "end_to_end_emitted_tokens_per_s": 25.34660522493916,
+          "end_to_end_wall_s": 34.296143261,
+          "end_to_end_emitted_tokens_per_s": 29.85758463297667,
           "target_qualified": false,
           "serving_qualified": false,
           "cycles": 387,
           "decode_cycles": 384,
-          "mean_decode_cycle_ms": 92.57650351041667,
+          "mean_decode_cycle_ms": 76.6990317395833,
           "mean_emitted_tokens_per_decode_cycle": 2.6640625,
           "accepted": 642,
           "proposed": 1152,
@@ -1332,17 +1332,16 @@
             "sha256": "e479c1c19297b3528547e8938b53f598035218fddd33e926f3daef0ac1bca990"
           },
           "raw_identity": {
-            "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r11-serving-timing-v1/c1-attention-policy-graph-v1.json",
-            "sha256": "fb98572d25b40f89d1b1b851dde536a767e2bb01751cc64d9d1f681508fb4f26"
+            "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r11-serving-timing-v1/c1-norm-workgroup-graph-v1.json",
+            "sha256": "036508fb4c183ab3c26bfea573c67382bdb3956c02ba3d39dfbe83a8c2bd8f8d"
           }
         },
         "trials": 1,
-        "graph_eager_all_IDs_and_non_timing_cycle_metadata_equal": true,
-        "prior_and_current_eager_unchanged": true,
-        "prior_late_two_cycle_difference_closed_in_this_scope": true,
+        "graph_eager_profile_all_IDs_and_non_timing_cycle_metadata_equal": true,
+        "prior_native_IDs_and_cycle_metadata_unchanged": true,
         "current_producer_arm_rerun": false,
         "source_identified_prior_producer_receipt": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r11-serving-timing-v1/receipt-c1-post-numerics-v2.json",
-        "scope": "Current native C1 repair; outputs identical to earlier native single-trial comparison arm. No global target/state/serving or all-context speed parity."
+        "scope": "Bounded original same-input norm and native C1 numerical-behavior/performance improvement only. No new full D64/state,draft,practical screen,C4/32K/no-MTP or producer qualification. Frozen reference-contract gates retained."
       },
       "post_numerics_capability_screen": {
         "candidate": "post-numerics-v1",
@@ -1500,6 +1499,118 @@
         ],
         "target_qualified": false,
         "serving_qualified": false
+      },
+      "norm_short_rows_workgroup_optimization": {
+        "implemented": true,
+        "focused_build_exit": 0,
+        "original_rows": {
+          "cases": 1,
+          "assertions": 821,
+          "exit": 0,
+          "physical_M": [
+            3,
+            4,
+            12,
+            16
+          ],
+          "includes_poisoned_M4_active3": true,
+          "alias_and_refusal_and_guard_bytes_exact": true
+        },
+        "original_P128_D1": {
+          "cases": 1,
+          "assertions": 64,
+          "exit": 0,
+          "all_four_output_and_residual_boundaries_bit_exact": true
+        },
+        "native_C1": {
+          "graph_assertions": 1975,
+          "eager_assertions": 1975,
+          "eager_profile_assertions": 1975,
+          "cases_each": 1,
+          "exit_each": 0,
+          "IDs_and_all_cycle_metadata_invariant": true
+        },
+        "norm_diagnostic_cost": {
+          "target_decode": {
+            "old_mean_ms_per_cycle": 20.5267393802093,
+            "new_mean_ms_per_cycle": 3.755845841145779,
+            "old_events": 49536,
+            "new_events": 49536,
+            "diagnostic_cost_ratio": 5.4652773964618575
+          },
+          "draft_decode": {
+            "old_mean_ms_per_cycle": 1.993189539062512,
+            "new_mean_ms_per_cycle": 0.21958807291666535,
+            "old_events": 5760,
+            "new_events": 5760,
+            "diagnostic_cost_ratio": 9.076948090067425
+          }
+        },
+        "current_eager_top_target_decode_stages": [
+          {
+            "stage": "exl3_smallm_dpas",
+            "count": 98688,
+            "total_ms": 10886.948396999722,
+            "mean_ms_per_cycle": 28.351428117186774,
+            "stream_span_count": 0
+          },
+          {
+            "stage": "attention_split_partial",
+            "count": 6144,
+            "total_ms": 5877.562059999997,
+            "mean_ms_per_cycle": 15.306151197916657,
+            "stream_span_count": 0
+          },
+          {
+            "stage": "gdn_spec_decode_wg",
+            "count": 18432,
+            "total_ms": 4072.9328589999313,
+            "mean_ms_per_cycle": 10.606595986978988,
+            "stream_span_count": 0
+          },
+          {
+            "stage": "rms_norm_gemma5120_fp16",
+            "count": 49536,
+            "total_ms": 1442.2448029999791,
+            "mean_ms_per_cycle": 3.755845841145779,
+            "stream_span_count": 0
+          },
+          {
+            "stage": "gdn_gated_norm_fp16_producer",
+            "count": 18432,
+            "total_ms": 704.750325999992,
+            "mean_ms_per_cycle": 1.8352873072916458,
+            "stream_span_count": 0
+          },
+          {
+            "stage": "silu_and_mul",
+            "count": 24576,
+            "total_ms": 415.48136200003205,
+            "mean_ms_per_cycle": 1.0819827135417501,
+            "stream_span_count": 0
+          },
+          {
+            "stage": "attn_qk_norm_rope_gate_subgroup",
+            "count": 6144,
+            "total_ms": 357.48212200000165,
+            "mean_ms_per_cycle": 0.930943026041671,
+            "stream_span_count": 0
+          },
+          {
+            "stage": "exl3_smallm_output_hadamard",
+            "count": 98688,
+            "total_ms": 332.4908029999615,
+            "mean_ms_per_cycle": 0.865861466145733,
+            "stream_span_count": 0
+          }
+        ],
+        "resources": {
+          "backend_peak_device_bytes": 30369570051,
+          "host_peak_rss_bytes": 13582348288,
+          "after_release_graph_bytes": 0
+        },
+        "single_trial_decode_gain_fraction": 0.20699565843319845,
+        "single_trial_E2E_reduction_fraction": 0.15108319924362834
       }
     }
   ]

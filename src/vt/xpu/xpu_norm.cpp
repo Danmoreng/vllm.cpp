@@ -24,6 +24,65 @@ float Gemma5120OutputValue(float value, float inverse, float weight) {
 }
 
 template <bool Residual>
+void Gemma5120ShortRowsKernel(Queue& q, View dst, View src, View w, View res,
+                              int64_t rows, int width, float eps) {
+  // One work-group per row distributes the original virtual-lane partials.
+  // SLM exchanges preserve the same descending chunk tree, then the same
+  // ascending SG16 tree for each half of the producer's logical SG32.
+  constexpr int lanes = 16;
+  const int workgroup = width / 2, chunks = width / 32;
+  const auto event = NativeQueue(q).submit([&](sycl::handler& h) {
+    sycl::local_accessor<float, 1> sums(sycl::range<1>(width + 1), h);
+    h.parallel_for(sycl::nd_range<1>(sycl::range<1>(rows * workgroup),
+                                    sycl::range<1>(workgroup)),
+        [=](sycl::nd_item<1> item) [[sycl::reqd_sub_group_size(16)]] {
+#pragma clang fp contract(off)
+      const int64_t row = item.get_group_linear_id();
+      const int local = item.get_local_linear_id();
+      const int chunk = local / lanes, lane = local % lanes;
+      for (int half = 0; half < 2; ++half) {
+        float regs[4] = {};
+        for (int col = 4 * (32 * chunk + lane + half * lanes); col < 5120;
+             col += 4 * width) {
+          for (int j = 0; j < 4; ++j) {
+            const float value = Gemma5120Value<Residual>(src, res, row, col + j);
+            regs[j] += value * value;
+          }
+        }
+        sums[half * workgroup + local] = ((regs[0] + regs[1]) + regs[2]) + regs[3];
+      }
+      item.barrier(sycl::access::fence_space::local_space);
+      for (int offset = chunks / 2; offset > 0; offset /= 2) {
+        if (chunk < offset) {
+          sums[local] += sums[local + offset * lanes];
+          sums[workgroup + local] += sums[workgroup + local + offset * lanes];
+        }
+        item.barrier(sycl::access::fence_space::local_space);
+      }
+      if (chunk == 0) {
+        auto group = item.get_sub_group();
+        float a = sums[lane], b = sums[workgroup + lane];
+        for (int offset = 1; offset < lanes; offset *= 2) {
+          a += sycl::shift_group_left(group, a, offset);
+          b += sycl::shift_group_left(group, b, offset);
+        }
+        const float mean = sycl::group_broadcast(group, a + b, 0) * (1.0f / 5120.0f);
+        if (lane == 0) sums[width] = sycl::rsqrt(mean + eps);
+      }
+      item.barrier(sycl::access::fence_space::local_space);
+      const float inverse = sums[width];
+      for (int col = local; col < 5120; col += workgroup) {
+        const float value = Gemma5120Value<Residual>(src, res, row, col);
+        if constexpr (Residual) Store(res, row * res.stride[0] + col, value);
+        Store(dst, row * dst.stride[0] + col,
+              Gemma5120OutputValue(value, inverse, Load(w, col)));
+      }
+    });
+  });
+  RecordProfileEvent(q, "rms_norm_gemma5120_fp16", event);
+}
+
+template <bool Residual>
 void Gemma5120Kernel(Queue& q, View dst, View src, View w, View res,
                      int64_t rows, float eps) {
   // Pinned Torch ReduceConfig: max WG1024, logical SG32, contiguous vec4.
@@ -32,6 +91,10 @@ void Gemma5120Kernel(Queue& q, View dst, View src, View w, View res,
   int height = 1;
   while (height < 32 && height * 2 <= rows) height *= 2;
   const int width = 1024 / height;
+  if (rows > 0 && rows <= 16) {
+    Gemma5120ShortRowsKernel<Residual>(q, dst, src, w, res, rows, width, eps);
+    return;
+  }
   constexpr int lanes = 16, workgroup = 128;
   const auto global = ((rows * lanes + workgroup - 1) / workgroup) * workgroup;
   const auto event = NativeQueue(q).parallel_for(
