@@ -35,8 +35,9 @@ offsets; the existing GPU metadata check proves their agreement with device
 offsets before writes. Distinct request pages/lengths, permutation, poisoned
 padding, aliases and strided output copies match the executed original. Missing
 or ragged host offsets retain the generic route; the speculative classification
-hint alone does not admit a packed batch. C4 graph ownership, model graph policy
-and emitted-cycle qualification remain pending. These are isolated operator
+hint alone does not admit a packed batch. Raw C4/C1 graphs qualify shared scratch,
+fresh metadata, request permutation/input mutation and retirement across queues.
+Model graph policy and emitted-cycle qualification remain pending. These are isolated operator
 proofs; automatic verification stays off by default.
 
 `src/vt/xpu/xpu_attention_decode_xe2.cpp` uses a separate short C1 policy:
