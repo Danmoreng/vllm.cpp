@@ -120,8 +120,14 @@ TEST_CASE("XPU EXL3 W8A8 P2: real rows wider panels preserve rounded intermediat
       return std::chrono::duration<double, std::milli>(
           std::chrono::steady_clock::now() - start).count();
     };
+    (void)vt::xpu::DrainProfileEvents();
     const double cold = execute();
     const std::vector<double> warm{execute(), execute(), execute()};
+    // Separate device cost, cold then three warm samples; empty without profiling.
+    std::vector<double> validation_device_ms;
+    for (const auto& event : vt::xpu::DrainProfileEvents())
+      if (event.stage == "exl3_w8a8_validate_rows")
+        validation_device_ms.push_back((event.end_ns - event.start_ns) / 1e6);
     const auto result = out.download(), scratch = workspace.download(), weights = panel_storage.download();
     const auto parts = vt::PlanExl3W8A8Panels(source_map, groups, width);
     // Check the last128 columns of the actual reconstructed tail in its compact
@@ -183,6 +189,7 @@ TEST_CASE("XPU EXL3 W8A8 P2: real rows wider panels preserve rounded intermediat
     reports.push_back({{"m", m}, {"padded_m", p.padded_rows}, {"width", width}, {"panel_count", parts.size()},
         {"panel_bytes", p.weight_panel_bytes}, {"workspace_bytes", p.workspace_bytes},
         {"cold_operator_ms", cold}, {"warm_operator_ms", warm},
+        {"validation_device_ms", validation_device_ms},
         {"preparation_exact", preparation_exact}, {"Y_exact", y_exact},
         {"output_exact", output_exact}, {"reconstructed_tail_exact", reconstructed_tail_exact}});
     std::cout << "P2_PANEL_OPERATOR " << reports.back().dump() << '\n';
