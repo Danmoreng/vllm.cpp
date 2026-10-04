@@ -1,8 +1,8 @@
 {
   "schema": 1,
-  "active_plan": "docs/B70_CPP_EXL3_IMPLEMENTATION_FIRST_RECOVERY_PLAN_EN.md",
+  "active_plan": "docs/B70_EXL3_NATIVE_PERFORMANCE_IMPLEMENTATION_PLAN_7536aeded_EN.md",
   "scope_reference": "docs/B70-EXL3-Migration-and-Parity-Plan.md",
-  "goal": "Complete R01\u2013R11 and milestones A\u2013E; preserve numerical failures while developing independent features.",
+  "goal": "Implement performance P0\u2013P7 from7536aeded; preserve the prior R01\u2013R11 evidence and open default target/state/serving qualification gates.",
   "completed_milestones": [
     "A_short_P128_native_output",
     "B_P4096_O64_and_chunked32K_native_output"
@@ -1613,5 +1613,67 @@
         "single_trial_E2E_reduction_fraction": 0.15108319924362834
       }
     }
-  ]
+  ],
+  "prior_recovery_plan": "docs/B70_CPP_EXL3_IMPLEMENTATION_FIRST_RECOVERY_PLAN_EN.md",
+  "performance_tasks": [
+    {
+      "task": "P0",
+      "status": "complete_bounded_readiness",
+      "complete": true,
+      "product_arithmetic_changed": false,
+      "receipt": {
+        "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p0-v1/receipt-v1.json",
+        "bytes": 29278,
+        "sha256": "dd2fce69cfb2bd3bb7bf0f7fc77a735744617eb4d462f1af7f584388fd09b2b1"
+      },
+      "tests": {
+        "host_cases": 2,
+        "draft_assertions": 131644,
+        "eager_lifecycle_assertions": 497,
+        "graph_lifecycle_assertions": 489,
+        "exit_each": 0,
+        "initial_draft_directory_failure_retained": true
+      },
+      "target_qualified": false,
+      "serving_qualified": false,
+      "next": "One actually executed pinned original page1600/Q4 route/operand capture (P1), then first P2 panel planning/allocation/implementation at1024/2048. If P1 fixture is unavailable record dependency and proceed with independent P2/P3; no full D64 rerun."
+    },
+    {
+      "task": "P1",
+      "status": "pending",
+      "complete": false
+    },
+    {
+      "task": "P2",
+      "status": "pending",
+      "complete": false
+    },
+    {
+      "task": "P3",
+      "status": "pending",
+      "complete": false
+    },
+    {
+      "task": "P4",
+      "status": "pending",
+      "complete": false
+    },
+    {
+      "task": "P5",
+      "status": "pending",
+      "complete": false
+    },
+    {
+      "task": "P6",
+      "status": "pending",
+      "complete": false
+    },
+    {
+      "task": "P7",
+      "status": "pending",
+      "complete": false
+    }
+  ],
+  "performance_baseline": "7536aededc049b2157f12eadb0f4cc6bbf29b7b7",
+  "performance_next": "One actually executed pinned original page1600/Q4 route/operand capture (P1), then first P2 panel planning/allocation/implementation at1024/2048. If P1 fixture is unavailable record dependency and proceed with independent P2/P3; no full D64 rerun."
 }
