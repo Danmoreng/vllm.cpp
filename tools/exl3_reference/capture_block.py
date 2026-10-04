@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Observe real layer0 eager P128/D1 stages and active recurrent state.
+"""Observe one real GDN layer (0 or 1), eager P128/D1 and active state.
 
 Pinned independent worker; hooks copy bounded active tensors without replacing
 arithmetic. No MTP/graphs. Never read an uninitialized cold state or capacity.
@@ -17,16 +17,22 @@ from extract_projection import digest, headers, write_safetensors
 from runtime_layout import describe, tensor_layout
 
 
+def select_gdn_layer(modules, layer_index):
+    headers.require(type(layer_index) is int and layer_index in (0, 1),
+                    "bounded block capture supports only target GDN layers0/1")
+    suffix = f"language_model.model.layers.{layer_index}"
+    layers = [(name, module) for name, module in modules if name.endswith(suffix)]
+    headers.require(len(layers) == 1, "requires one unique real target GDN layer")
+    headers.require(layers[0][1].layer_type == "linear_attention", "selected layer must be GDN")
+    return layers[0]
+
+
 class BlockCapture:
-    def install_block_capture(self, output):
+    def install_block_capture(self, output, layer_index=0):
         import torch
         from vllm.forward_context import get_forward_context
         runner = self.model_runner
-        layers = [(name, module) for name, module in runner.model.named_modules()
-                  if name.endswith("language_model.model.layers.0")]
-        headers.require(len(layers) == 1, "requires unique real target layer0")
-        name, layer = layers[0]
-        headers.require(layer.layer_type == "linear_attention", "layer0 must be GDN")
+        name, layer = select_gdn_layer(runner.model.named_modules(), layer_index)
         mixer = layer.linear_attn
         self._block_output = Path(output)
         self._block_tensors, self._block_records, self._block_hooks = {}, [], []
@@ -170,21 +176,23 @@ def capture(args):
         llm = LLM(**kwargs)
         ordinary = llm.generate({"prompt_token_ids": tokens}, params, use_tqdm=False)
         headers.require(llm.reset_prefix_cache(), "prefix reset failed")
-        installed = llm.collective_rpc("install_block_capture", timeout=60, args=(str(args.output),))
+        installed = llm.collective_rpc("install_block_capture", timeout=60,
+                                       args=(str(args.output), args.layer_index))
         observed = llm.generate({"prompt_token_ids": tokens}, params, use_tqdm=False)
         ordinary_ids = [list(o.outputs[0].token_ids) for o in ordinary]
         observed_ids = [list(o.outputs[0].token_ids) for o in observed]
         headers.require(ordinary_ids == observed_ids, "observation changed greedy output IDs")
         records = llm.collective_rpc("finish_block_capture", timeout=60)
         headers.require(len(records) == 1, "requires one worker")
-        result = records[0] | {"schema": 1, "kind": "pinned_layer0_eager_P128_D1",
+        result = records[0] | {"schema": 1, "kind": f"pinned_layer{args.layer_index}_eager_P128_D1",
+                              "layer_index": args.layer_index,
                               "image": IMAGE, "checkpoint": reference["checkpoint"]["identity"],
                               "profile_sha256": digest(PROFILE.read_bytes()), "s1_overrides": overrides,
                               "capture_tool_sha256": digest(Path(__file__).read_bytes()),
                               "observer": installed, "prompt_token_ids": tokens,
                               "ordinary_output_ids": ordinary_ids, "observed_output_ids": observed_ids,
                               "ordinary_vs_observed_greedy_ids_exact": True,
-                              "scope": "Actual layer0 eager P128 then D1 stages and active states only. Greedy ID observer check is not bitwise whole-model parity or performance."}
+                              "scope": "Actual selected GDN layer eager P128 then D1 stages and active states only. Greedy ID observer check is not bitwise whole-model parity or performance."}
         with args.output.with_suffix(".json").open("x") as stream:
             json.dump(result, stream, indent=2); stream.write("\n")
         print("BLOCK_CAPTURE_DONE", args.output, result["capture_sha256"], flush=True)
@@ -199,4 +207,5 @@ if __name__ == "__main__":
     parser.add_argument("--reference-manifest", type=Path, required=True)
     parser.add_argument("--model-dir", type=Path, required=True)
     parser.add_argument("--image-identity", required=True)
+    parser.add_argument("--layer-index", type=int, choices=(0, 1), default=0)
     capture(parser.parse_args())

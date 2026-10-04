@@ -6019,6 +6019,8 @@ void AttnGateSplit(Queue& q, Tensor& q_out, Tensor& gate_out, const Tensor& qgat
 // values), gate f32 (sigmoid input must not be rounded), same element count.
 // The sigmoid output-gate applied to the attention result before the o_proj
 // (elementwise on the projection split).
+// Native XPU FP16 attention and output preserve the eager FP16 sigmoid result
+// before multiplication; other admitted dtype combinations use the F32 result.
 void SigmoidGateBf16(Queue& q, Tensor& out, const Tensor& attn, const Tensor& gate);
 
 // Derives the GDN per-head decay g and gate beta from the raw projections

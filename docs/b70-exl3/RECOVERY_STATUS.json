@@ -61,6 +61,177 @@
         "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r10-ba-deterministic-v1/receipt-v1.json",
         "sha256": "22bec12d8824dd66107e4a0718b8bc2d185f8c1351fb252c573b249694fed35b",
         "bytes": 4774
+      },
+      "D29_identical_full_head_test": {
+        "receipt": {
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r02-D29-head-v1/receipt-head-v2.json",
+          "bytes": 9963,
+          "sha256": "f3dbfe3c53ca064eb8f516f55e307670a11fefb2b67977fa3cd063ae71a114d3"
+        },
+        "assertions": 34,
+        "exit": 0,
+        "phases": [
+          "p128",
+          "d1",
+          "d29"
+        ],
+        "all248320_logits_bit_exact": true,
+        "target_qualification": false,
+        "conclusion": "Preserved full-target D29 discrepancy arises upstream of head for the observed reference operands; own-state hidden/block localization follows."
+      },
+      "D29_bounded_own_state_hidden_diagnostic": {
+        "receipt": {
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r02-D29-head-v1/receipt-D29-hidden-v3.json",
+          "bytes": 5362,
+          "sha256": "75eb2e12d493b61a906fcdef5a5454a6503955e9da85f9ce789cd32e45cdb571"
+        },
+        "assertions_total": 508,
+        "assertions_passed": 505,
+        "exit": 1,
+        "collection_complete": true,
+        "all30_logits_byte_exact_to_v5": true,
+        "hidden_summaries": [
+          {
+            "phase": "p128",
+            "half_differences": 4791,
+            "relative_l2": 0.002660345045497551,
+            "max_absolute_error": 0.046875
+          },
+          {
+            "phase": "d1",
+            "half_differences": 4826,
+            "relative_l2": 0.003471292701551868,
+            "max_absolute_error": 0.0625
+          },
+          {
+            "phase": "d11",
+            "half_differences": 5056,
+            "relative_l2": 0.017010066015429887,
+            "max_absolute_error": 0.375
+          },
+          {
+            "phase": "d27",
+            "half_differences": 5062,
+            "relative_l2": 0.01551853199302825,
+            "max_absolute_error": 0.087890625
+          },
+          {
+            "phase": "d29",
+            "half_differences": 5119,
+            "relative_l2": 0.9699208305791053,
+            "max_absolute_error": 24.1953125
+          }
+        ],
+        "numerical_test_pass": false
+      },
+      "D29_selected_block_localization": {
+        "receipt": {
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r02-D29-head-v1/receipt-D29-blocks-v6.json",
+          "bytes": 220255,
+          "sha256": "c36f685928b6d21b14afb6f06e4b190e9f1572a7a111071b080d6e2d9075555c"
+        },
+        "native_assertions": "505/508 exit1; unchanged three gates",
+        "dump_step": 29,
+        "all30_native_logits_byte_exact": true,
+        "block0_byte_exact": true,
+        "first_nonzero_boundary_block": 1,
+        "causal_operation_attributed": false,
+        "original_control_exit": 0,
+        "native_vs_new_original_TV": 0.028381682163670933,
+        "original_no_block_vs_legacy_TV": 0.25237636119262624,
+        "numerical_qualification": false,
+        "next": "Observe/replay actual D29 layer1 GDN active state and operands; retain producer-repeat/protocol distinction"
+      },
+      "D29_layer1_identical_input_state_consumer": {
+        "receipt": {
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r02-D29-head-v1/receipt-D29-layer1-v9.json",
+          "bytes": 16659,
+          "sha256": "09903b34904e80e9eeb04afa39cb49c699d951758496765af7e059cd230cb5c4"
+        },
+        "assertions": "43/43 exit0",
+        "all5120_mixer_values_exact": true,
+        "all786432_active_SSM_values_exact": true,
+        "active_Conv_exact": true,
+        "inactive_slots_unchanged": true,
+        "scope": "Isolated original-operand consumer only; product states unchanged"
+      },
+      "D29_layer1_own_state_localization": {
+        "receipt": {
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r02-D29-head-v1/receipt-D29-own-layer1-v10.json",
+          "bytes": 215149,
+          "sha256": "26f7c7ebc83bc7b38602f82e28668519f5a7efa15e4fe900bd9527d21f077037"
+        },
+        "assertions": "521/524 exit1; unchanged three gates",
+        "all30_logits_byte_exact": true,
+        "input_norm_and_Conv_exact": true,
+        "initial_SSM_relativeL2": 0.00035374988861033624,
+        "originating_operation_attributed": false,
+        "next": "Bound layer1 P128/D1 initial/final state and arithmetic"
+      },
+      "initial_prefill_localization": {
+        "receipt": {
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r02-D29-head-v1/receipt-prefill-attribution-v18.json",
+          "bytes": 75726,
+          "sha256": "911d8f32a6412b88b7365c8d9d1d7228f8ad55d952d970401ce4c6752f88d40b"
+        },
+        "layer1_identical_GDN_assertions": 59,
+        "native_BA_repeat_assertions": 37,
+        "diagnostic_BA_protocol_release_promoted": false,
+        "layer0_core_exact": true,
+        "layer0_first_difference": "49/786432 gated norm halves",
+        "next_code_change": "Qualify same-input gated norm arithmetic and bounded own-state target"
+      },
+      "gated_norm_prefill_repair": {
+        "receipt": {
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r02-D29-head-v1/receipt-gated-norm-v41.json",
+          "bytes": 91105,
+          "sha256": "bb690237fd6ef7dc5d0bb4e8782562b553380fa6ad42f1781034be6bbf6814c3"
+        },
+        "operator_assertions": 183,
+        "shared_assertions": 120,
+        "bounded_model_assertions": 218,
+        "first_layer_P128_D1_boundaries_bit_exact": true,
+        "target_qualified": false,
+        "serving_qualified": false,
+        "next_code_change": "Bounded own-state D29 against retained legacy and separately identified controlled original; then next divergent operation or independent remaining qualification"
+      },
+      "post_gated_norm_D29": {
+        "receipt": {
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r02-D29-head-v1/receipt-D29-gated-v42.json",
+          "bytes": 215182,
+          "sha256": "599b0c6d65298f1c1ba1606627c4d7ed24ec8ba3829cc09494253930f8e80abd"
+        },
+        "exit": 1,
+        "assertions_passed": 518,
+        "assertions_total": 524,
+        "first_nonexact_diagnostic_block": 3,
+        "target_qualified": false,
+        "serving_qualified": false,
+        "next_code_change": "Capture actual original first-attention block3 D29 Q/K/V, gate, rotated operands and active FP8 KV; compare local consumer on identical operands/state, before altering attention arithmetic"
+      },
+      "attention3_gate_repair": {
+        "receipt": {
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r02-D29-head-v1/receipt-attention3-gate-v46.json",
+          "bytes": 40797,
+          "sha256": "076ab8294c9479f14a995d61f07dca240e0d6722cc950d9176b3cc91bcc03d1f"
+        },
+        "original_parent_tensors_byte_exact": 487,
+        "native_observer_assertions_passed": 529,
+        "native_observer_assertions_total": 535,
+        "native_observer_exit": 1,
+        "all30_observer_logits_exact": true,
+        "raw_Qgate_K_V_RoPE_initialized_FP8_KV_exact": true,
+        "remaining_core_differing_halves": 1104,
+        "remaining_core_elements": 6144,
+        "gate_operator_assertions": 46,
+        "gate_operator_exit": 0,
+        "gate_all_three_phases_both_aliases_bit_exact": true,
+        "shared_preamble_assertions": 49,
+        "shared_elementwise_assertions": 5550,
+        "new_host_waits_or_readbacks": false,
+        "target_qualified": false,
+        "serving_qualified": false,
+        "next_code_change": "Bounded repaired native-owned P128+29 against unchanged gates; then isolate remaining split-K attention-core arithmetic on identical operands"
       }
     },
     {
@@ -372,7 +543,7 @@
     {
       "task": "R11",
       "capability": "capability screen and measured optimization",
-      "status": "v17_W8A8_GPU_validation_and_overflow_guard390_of390_operator_tests_pass_current_serving_measurement_and_numerical_qualification_open",
+      "status": "v17_W8A8_operator390_of390_and_mixed1091_of1091_pass_single_trial6_33percent_elapsed_time_reduction_numerical_quality_open",
       "implemented": false,
       "operator_tested": false,
       "target_qualified": false,
@@ -511,7 +682,7 @@
           "sha256": "c4668407097f5ce22ca5e8ac657acba6f6468fe76bd9e50eea37ec64a9493cba"
         }
       },
-      "current_candidate_identity_scope": "Frozen v17 W8A8 finite-validation merge plus pre-narrow overflow guards. Original quantization/GEMM/output transform and SmallM unchanged. GDN4/head6 operator controls390/390 pass; current-source practical/timing/numerical qualification not yet measured. V10 practical and timing receipts retained separately.",
+      "current_candidate_identity_scope": "Frozen v17 product W8A8 finite-validation merge and pre-narrow overflow checks, checkpoint2255ebd125 pushed. Operator390/390; matched warm mixed1091/1091 and constructor-profile1059/1059 pass, all512 IDs/135 cycles exact to v10 at matching startup. Current practical8/8, C1/C4/32K final timing and numerical qualification not transferred.",
       "copy_caller_attribution_complete": true,
       "copy_caller_attribution_receipt": {
         "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r11-serving-timing-v1/receipt-copy-attribution-v7.json",
@@ -693,8 +864,57 @@
         "bytes": 16571,
         "sha256": "782db294d9817bf1e0042243d856c4a11ed4abd728ea6049b872d3b6fd5370d8"
       },
-      "W8A8_GPU_validation_merge_functional_serving_tested": false,
-      "W8A8_GPU_validation_merge_performance_measured": false
+      "W8A8_GPU_validation_merge_functional_serving_tested": true,
+      "W8A8_GPU_validation_merge_performance_measured": true,
+      "W8A8_GPU_validation_merge_serving_receipt": {
+        "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r11-serving-timing-v1/receipt-w8a8-validation-serving-v17.json",
+        "bytes": 11681,
+        "sha256": "84370ed2f7048d16d77f1046ace33c53bf2e7764f3863fb68de7c1c2604d6838"
+      },
+      "W8A8_GPU_validation_merge_serving_results": {
+        "assertions": 1091,
+        "exit": 0,
+        "E2E_s": 66.315986722,
+        "old_E2E_s": 70.797778877,
+        "single_trial_elapsed_time_reduction_fraction": 0.06330413504619126,
+        "single_trial_time_ratio": 1.0675823790994454,
+        "per_request": {
+          "short": {
+            "prompt_tokens": 128,
+            "emitted_tokens": 256,
+            "ttft_ms": 205.79074599999998,
+            "tpot_ms": 221.29318541960782,
+            "end_to_end_ms": 56635.553027999995,
+            "token_timestamp_granularity": "one timestamp per emitted MTP chunk"
+          },
+          "long": {
+            "prompt_tokens": 32768,
+            "emitted_tokens": 256,
+            "ttft_ms": 44285.965840000004,
+            "tpot_ms": 84.12416580000001,
+            "end_to_end_ms": 65737.628119,
+            "token_timestamp_granularity": "one timestamp per emitted MTP chunk"
+          }
+        },
+        "common_decode": {
+          "start_s": 44.864316883,
+          "end_s": 56.635555088,
+          "emitted_tokens": 323,
+          "aggregate_emitted_tokens_per_s": 27.43976414161777,
+          "boundary_policy": "exclude start, include end; whole emitted chunks only"
+        },
+        "accepted": 322,
+        "proposed": 576,
+        "all512_IDs_and135_cycle_counters_positions_graph_deltas_exact_to_v10": true,
+        "backend_peak_device_bytes": 30521661843,
+        "host_peak_rss_bytes": 13549580288,
+        "after_release_graph_bytes": 0
+      },
+      "W8A8_GPU_validation_merge_cost_report": {
+        "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r11-serving-timing-v1/mixed-W8A8-validation-cost-report-v17.json",
+        "bytes": 26964,
+        "sha256": "bc503f0c8063ab677527aa3a07943cd444444ebcc574e5ebb0c8b12b4f8b8aa3"
+      }
     }
   ]
 }

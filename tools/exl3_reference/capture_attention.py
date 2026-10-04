@@ -10,15 +10,28 @@ from pathlib import Path
 from capture_block import BlockCapture
 from capture_projection import IMAGE
 from capture_runtime_layout import PROFILE, active_metadata, verify_inputs
-from extract_projection import digest, headers
-from runtime_layout import initialized_values, tensor_layout
+from extract_projection import digest, headers, write_safetensors
+from runtime_layout import describe, initialized_values, tensor_layout
 
 
-def active_cache_addresses(page_size, capacity, seq_len, blocks, slots, positions):
+def attention_capture_step(selected_step, captured_steps):
+    headers.require(type(selected_step) is int and selected_step in (-1, 29),
+                    "attention observation supports P128/D1 or selected D29 only")
+    headers.require(type(captured_steps) is int and captured_steps >= 0,
+                    "invalid captured attention step count")
+    if selected_step == 29:
+        headers.require(captured_steps == 0, "repeated selected D29 attention")
+        return "d29", 1, 157, 156
+    headers.require(captured_steps < 2, "extra P128/D1 attention step")
+    return ("p128", 128, 128, 0) if captured_steps == 0 else ("d1", 1, 129, 128)
+
+
+def active_cache_addresses(page_size, capacity, seq_len, blocks, slots, positions, *, max_seq_len=129):
     """Validate written rows against actual metadata before reading cache bytes."""
     headers.require(type(page_size) is int and page_size > 0 and
                     type(capacity) is int and capacity > 0 and
-                    type(seq_len) is int and 0 < seq_len <= 129, "bad bounded cache geometry")
+                    type(max_seq_len) is int and max_seq_len in (129, 157) and
+                    type(seq_len) is int and 0 < seq_len <= max_seq_len, "bad bounded cache geometry")
     headers.require(len(blocks) == (seq_len + page_size - 1) // page_size and
                     all(type(b) is int and 0 <= b < capacity for b in blocks),
                     "invalid active block table")
@@ -41,7 +54,9 @@ def observe_projection(original, save):
 
 
 class AttentionCapture(BlockCapture):
-    def install_block_capture(self, output):
+    def install_block_capture(self, output, selected_step=-1, step_counter=None):
+        attention_capture_step(selected_step, 0)
+        headers.require(selected_step == -1 or callable(step_counter), "selected attention needs actual step counter")
         import torch
         from vllm.forward_context import get_forward_context
         runner = self.model_runner
@@ -54,6 +69,7 @@ class AttentionCapture(BlockCapture):
         self._block_output = Path(output)
         self._block_tensors, self._block_records, self._block_hooks = {}, [], []
         self._block_current = None
+        self._attention_selected_step = selected_step
 
         def save(stage, value):
             headers.require(value is not None and self._block_current is not None,
@@ -83,28 +99,31 @@ class AttentionCapture(BlockCapture):
             save("value_bytes_" + stage, rows[..., 256:])
 
         def begin(module, args, kwargs):
+            if selected_step >= 0 and step_counter() != selected_step:
+                return
             metadata = get_forward_context().attn_metadata
             if not metadata or not getattr(runner.req_states, "req_id_to_index", {}):
                 return
-            headers.require(len(self._block_records) < 2, "extra attention step")
+            phase, expected_rows, expected_seq, first_position = attention_capture_step(
+                selected_step, len(self._block_records))
             meta = metadata[attn.layer_name]
             values = dict(zip(("positions", "hidden_states", "residual"), args)) | kwargs
             positions = values["positions"]
             host_positions = positions.detach().cpu().tolist()
             rows = int(meta.num_actual_tokens)
-            phase = "p128" if not self._block_records else "d1"
-            headers.require(rows == (128 if phase == "p128" else 1) and
-                            host_positions == [list(range(128)) if phase == "p128" else [128]] * 3,
+            headers.require(rows == expected_rows and
+                            host_positions == [list(range(first_position, first_position + rows))] * 3,
                             "unexpected attention positions/step shape")
             seq = int(meta.seq_lens[:1].detach().cpu().item())
-            headers.require(seq == (128 if phase == "p128" else 129) and
+            headers.require(seq == expected_seq and
                             meta.seq_lens.numel() == 1 and tuple(meta.query_start_loc.shape) == (2,) and
                             meta.query_start_loc.detach().cpu().tolist() == [0, rows],
                             "unexpected attention request metadata")
             kv = attn.kv_cache
             blocks = meta.block_table[0, :(seq + 1599) // 1600].detach().cpu().tolist()
             slots = meta.slot_mapping[:rows].detach().cpu().tolist()
-            addresses = active_cache_addresses(1600, int(kv.shape[0]), seq, blocks, slots, host_positions[0])
+            addresses = active_cache_addresses(1600, int(kv.shape[0]), seq, blocks, slots, host_positions[0],
+                                               max_seq_len=157 if selected_step == 29 else 129)
             self._block_current = phase
             self._attention_positions = positions[0]
             self._attention_addresses = addresses
@@ -112,7 +131,7 @@ class AttentionCapture(BlockCapture):
                                         "cache_layout": tensor_layout(kv), "logical_addresses": addresses,
                                         "scales": {a: initialized_values(getattr(attn, a), 1)
                                                    for a in ("_k_scale", "_v_scale")},
-                                        "initial_cache_consumed": phase == "d1"})
+                                        "initial_cache_consumed": phase != "p128"})
             save("positions", positions)
             save("slot_mapping", meta.slot_mapping[:rows])
             save("block_table", meta.block_table[:1, :len(blocks)])
@@ -121,8 +140,8 @@ class AttentionCapture(BlockCapture):
             save("hidden_in", values["hidden_states"])
             if values.get("residual") is not None:
                 save("residual_in", values["residual"])
-            if phase == "d1":
-                cache("before", 128, addresses)
+            if phase != "p128":
+                cache("before", seq - rows, addresses)
 
         def end(module, args, kwargs, result):
             if self._block_current is not None:
@@ -178,6 +197,24 @@ class AttentionCapture(BlockCapture):
     def finish_block_capture(self):
         self._attention_mixer._project_qkv_gate = self._attention_original_projection
         self._attention_mixer.rotary_emb._match_cos_sin_cache_dtype = self._attention_original_cos_cache
+        if self._attention_selected_step == 29:
+            import torch
+            torch.xpu.synchronize()
+            for hook in self._block_hooks:
+                hook.remove()
+            headers.require([r["phase"] for r in self._block_records] == ["d29"], "missing selected attention")
+            for label in ("key", "value"):
+                before = self._block_tensors[f"d29_{label}_bytes_before"]
+                after = self._block_tensors[f"d29_{label}_bytes_after"]
+                headers.require(before[1] == [156, 4, 256] and after[1] == [157, 4, 256] and
+                                after[2][:len(before[2])] == before[2], "D29 overwrote earlier initialized KV")
+            write_safetensors(self._block_output, self._block_tensors, {"image": IMAGE, "selected_step": "29"})
+            return {"path": str(self._block_output), "steps": self._block_records,
+                    "capture_sha256": digest(self._block_output.read_bytes()),
+                    "tensor_hashes": {n: {"dtype": t[0], "shape": t[1], "sha256": digest(t[2])}
+                                      for n, t in sorted(self._block_tensors.items())},
+                    "compilation_config": describe(self.model_runner.compilation_config),
+                    "previous_initialized_cache_unchanged": True}
         result = super().finish_block_capture()
         for label in ("key", "value"):
             p = self._block_tensors["p128_" + label + "_bytes_after"]

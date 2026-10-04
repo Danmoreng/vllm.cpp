@@ -1381,13 +1381,15 @@ void ActDumpTensor(Dev d, const char* knob, const std::string& dir,
 // Compact through VT Copy so grouped QKV's row-strided views are captured
 // logically, rather than accidentally reading adjacent K/V columns.
 void DumpFullAttnStage(Dev d, const char* stage, const Tensor& tensor) {
-  const char* dir = actdump::StreamDir();
+  const char* dir = actdump::ActiveStreamDir();
+  const char* knob = "VT_DUMP_ACT";
+  if (dir == nullptr) { dir = actdump::ActiveStageDir(); knob = "VT_DUMP_ACT_SUB"; }
   if (dir == nullptr) return;
   VT_CHECK(tensor.shape[0] > 0, "attention dump requires active rows");
   DBuf compact(d, tensor.dtype,
                std::vector<int64_t>(tensor.shape, tensor.shape + tensor.rank));
   vt::Copy(d.q, compact.t(), tensor);
-  ActDumpTensor(d, "VT_DUMP_ACT", dir, (std::string("attn_") + stage).c_str(),
+  ActDumpTensor(d, knob, dir, (std::string("attn_") + stage).c_str(),
                 compact.t(), tensor.shape[0], tensor.Numel() / tensor.shape[0]);
 }
 
@@ -1398,7 +1400,7 @@ void DumpFullAttnStage(Dev d, const char* stage, const Tensor& tensor) {
 void ActDumpStream(Dev d, int64_t step, int64_t layer, DBuf& hidden, DBuf& res,
                    int64_t T, int64_t H) {
   const char* dir = actdump::StreamDir();
-  if (dir == nullptr || step < 0) return;
+  if (dir == nullptr || !actdump::StepSelected(step)) return;
   const actdump::LayerScope here(step, layer);
   ActDumpTensor(d, "VT_DUMP_ACT", dir, "hidden", hidden.t(), T, H);
   ActDumpTensor(d, "VT_DUMP_ACT", dir, "res", res.t(), T, H);
@@ -5456,7 +5458,14 @@ DBuf GdnBlockPagedMixedSpec(Dev d, const GdnLayerWeights& w, const HfConfig& cfg
 // which is a different quantity on two runs whose forward-call counts differ by
 // one and cannot be joined across two tiers at all.
 void DumpGdnStage(Dev d, const char* stage, const Tensor& t) {
-  const char* dir = actdump::StreamDir();
+  const char* dir = actdump::ActiveStreamDir();
+  const char* knob = "VT_DUMP_ACT";
+  if (dir == nullptr) {
+    // A layer-selected SUB capture also observes the nested GDN boundaries,
+    // without enabling full-model residual-stream downloads.
+    dir = actdump::ActiveStageDir();
+    knob = "VT_DUMP_ACT_SUB";
+  }
   if (dir == nullptr) return;
   const int64_t rows = t.shape[0];
   const int64_t cols = t.Numel() / rows;
@@ -5467,11 +5476,11 @@ void DumpGdnStage(Dev d, const char* stage, const Tensor& t) {
       d.b.Copy(d.q, static_cast<char*>(compact.ptr()) + row * row_bytes,
                static_cast<const char*>(t.data) +
                    row * t.stride[0] * vt::SizeOf(t.dtype), row_bytes);
-    ActDumpTensor(d, "VT_DUMP_ACT", dir,
+    ActDumpTensor(d, knob, dir,
                   (std::string("gdn_") + stage).c_str(), compact.t(), rows, cols);
     return;
   }
-  ActDumpTensor(d, "VT_DUMP_ACT", dir, (std::string("gdn_") + stage).c_str(),
+  ActDumpTensor(d, knob, dir, (std::string("gdn_") + stage).c_str(),
                 t, rows, cols);
 }
 
@@ -8559,7 +8568,7 @@ void RunDenseLayerPaged(Dev d, const Qwen3_5DenseLayerWeights& layer,
   // to every dump NESTED inside the mixer, so the GDN stage probes no longer
   // keep a counter of their own.
   const actdump::LayerScope dump_here(actdump::Current().step, layer_index);
-  const char* dump_sub_dir = actdump::StageDir();
+  const char* dump_sub_dir = actdump::ActiveStageDir();
   auto DumpStage = [&](const char* stage, DBuf& buf) {
     if (dump_sub_dir == nullptr) return;
     ActDumpTensor(d, "VT_DUMP_ACT_SUB", dump_sub_dir, stage, buf.t(), T, H);

@@ -1,5 +1,6 @@
 #include "xpu_common.h"
 #include "xpu_kernels.h"
+#include <sycl/ext/intel/math.hpp>
 
 namespace vt::xpu {
 void TraceXpuOp(OpId op, Queue& q, std::initializer_list<const Tensor*> tensors) {
@@ -90,6 +91,15 @@ void SigmoidGateKernel(Queue& q, Tensor& out, const Tensor& attn, const Tensor& 
     const View dst(target), av(attn), gv(gate);
     const auto event = NativeQueue(q).parallel_for(sycl::range<1>(out.Numel()), [=](sycl::id<1> item) {
       const auto i = item[0];
+      if (dst.dtype == DType::kF16 && av.dtype == DType::kF16) {
+        // Eager FP16 attention multiplies by a materialized FP16 sigmoid.
+        // Keep the gate input's F32 values, then narrow only this result.
+        const float value = Load(gv, gv.offset(i));
+        const float sigmoid = Round(DType::kF16,
+            sycl::ext::intel::math::fdiv_rn(1.0f, 1.0f + sycl::exp(-value)));
+        Store(dst, dst.offset(i), Load(av, av.offset(i)) * sigmoid);
+        return;
+      }
       Store(dst, dst.offset(i), Load(av, av.offset(i)) * (1.0f / (1.0f + sycl::exp(-Load(gv, gv.offset(i))))));
     });
     RecordProfileEvent(q, "sigmoid_gate", event);

@@ -4,10 +4,24 @@ import sys
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tools/exl3_reference"))
-from capture_attention import active_cache_addresses, observe_projection
+from capture_attention import active_cache_addresses, observe_projection, attention_capture_step
 
 
 class AttentionCaptureTest(unittest.TestCase):
+    def test_selected_d29_is_one_step_and_reads_only_initialized_prefix(self):
+        self.assertEqual(attention_capture_step(29, 0), ("d29", 1, 157, 156))
+        self.assertEqual(attention_capture_step(-1, 0), ("p128", 128, 128, 0))
+        self.assertEqual(attention_capture_step(-1, 1), ("d1", 1, 129, 128))
+        for selected, count in [(29, 1), (-1, 2), (28, 0), (True, 0), (29, True)]:
+            with self.assertRaises(ValueError): attention_capture_step(selected, count)
+        addresses = active_cache_addresses(1600, 10, 157, [7], [7 * 1600 + 156], [156], max_seq_len=157)
+        self.assertEqual(addresses[:156], [(7, p) for p in range(156)])
+        self.assertEqual(addresses[156:], [(7, 156)])
+        for maximum, length in [(129, 157), (157, 158), (158, 157), (True, 157)]:
+            with self.assertRaises(ValueError):
+                active_cache_addresses(1600, 10, length, [7], [7 * 1600 + length - 1],
+                                       [length - 1], max_seq_len=maximum)
+
     def test_active_rows_use_actual_nonzero_physical_block(self):
         rows = active_cache_addresses(1600, 10, 129, [7], [7 * 1600 + 128], [128])
         self.assertEqual(len(rows), 129)

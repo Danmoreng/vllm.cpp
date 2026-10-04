@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Replay original fused/split XPU GDN on immutable real layer0 operands.
+"""Replay original fused/split XPU GDN on immutable real layer0/1 operands.
 
 The split operators are from the same pinned binary, not reimplementations.
 Require exact fused/split/full-worker endpoints before accepting intermediates.
@@ -13,11 +13,18 @@ from capture_runtime_layout import verify_inputs
 from extract_projection import digest, headers, write_safetensors
 
 
+def block_layer_index(receipt):
+    index = receipt.get("layer_index", 0)
+    headers.require(type(index) is int and index in (0, 1), "unsupported captured GDN layer")
+    return index
+
+
 def capture(args):
     headers.require(not args.output.exists() and not args.output.with_suffix(".json").exists(),
                     "refusing to overwrite GDN capture")
     verify_inputs(args.reference_manifest, args.model_dir, args.image_identity)
     receipt = json.loads(args.block.with_suffix(".json").read_text())
+    layer_index = block_layer_index(receipt)
     headers.require(receipt["image"] == IMAGE and
                     digest(args.block.read_bytes()) == receipt["capture_sha256"], "block identity mismatch")
     import torch
@@ -35,7 +42,7 @@ def capture(args):
     with safe_open(str(args.model_dir / "model-00001-of-00002.safetensors"), framework="pt") as shard:
         for suffix, dtype in (("conv1d.weight", torch.float16), ("A_log", torch.float32),
                               ("dt_bias", torch.float16)):
-            name = "model.language_model.layers.0.linear_attn." + suffix
+            name = f"model.language_model.layers.{layer_index}.linear_attn." + suffix
             value = shard.get_tensor(name)
             source_weights[name] = {"dtype": str(value.dtype), "shape": list(value.shape),
                                     "sha256": digest(value.view(torch.uint8).numpy().tobytes())}
@@ -109,6 +116,7 @@ def capture(args):
     write_safetensors(args.output, tensors, {"image": IMAGE})
     package = Path("/opt/venv/lib/python3.12/site-packages/vllm_xpu_kernels")
     result = {"image": IMAGE, "kind": "original_fused_split_GDN_real_P128_D1",
+              "layer_index": layer_index,
               "block_sha256": receipt["capture_sha256"], "source_weights": source_weights,
               "capture_sha256": digest(args.output.read_bytes()), "exact_endpoints": endpoints,
               "tool_sha256": digest(Path(__file__).read_bytes()),
