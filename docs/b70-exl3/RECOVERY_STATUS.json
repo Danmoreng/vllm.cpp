@@ -39,7 +39,7 @@
       "target_qualified": false,
       "serving_qualified": false,
       "complete": true,
-      "next_code_change": "Observe original layer20 P128 gate/up, SwiGLU and down projection boundaries; run isolated native consumer on identical original operands/real layer20 weights. Input and post-attention norm already exact; no GDN21 arithmetic repair is justified.",
+      "next_code_change": "Run current bounded native-owned P128+29 against unchanged legacy logit gates and controlled original v81, then isolate first remaining boundary or qualify full D64. No performance transfer or graph/capability completion inferred.",
       "same_input_core_final_state_pass": true,
       "actual_VT_BA_repeatability": "P128 varying 3/6/7 halves; D1 exact in three repeats",
       "result_receipt": {
@@ -398,6 +398,48 @@
         "next": "Observe original layer20 P128 gate/up, SwiGLU and down projection boundaries; run isolated native consumer on identical original operands/real layer20 weights. Input and post-attention norm already exact; no GDN21 arithmetic repair is justified.",
         "target_qualified": false,
         "serving_qualified": false
+      },
+      "P128_block20_SwiGLU_repair": {
+        "receipt": {
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r02-D29-head-v1/receipt-swiglu-repair-v95.json",
+          "bytes": 49159,
+          "sha256": "e5d114a1f5a83bb113937b61793aed60f9abc722ca4d084697dc4d3788725310"
+        },
+        "original_parent_main_exact": 627,
+        "original_GDN21_history_exact": 46,
+        "baseline_strict": {
+          "passed": 39,
+          "assertions": 42,
+          "exit": 1
+        },
+        "same_input_candidate": {
+          "passed": 42,
+          "assertions": 42,
+          "exit": 0,
+          "all_five_stages_bit_exact": true
+        },
+        "actual_P128_D1": {
+          "passed": 230,
+          "assertions": 230,
+          "exit": 0,
+          "all_observed_GDN21_stages_and_active_Conv_SSM_bit_exact": true,
+          "inactive4_slots_unchanged": true
+        },
+        "FP16_midpoint_alias_and_rejection": {
+          "passed": 35,
+          "assertions": 35,
+          "exit": 0
+        },
+        "generic_elementwise": {
+          "passed": 5550,
+          "assertions": 5550,
+          "exit": 0
+        },
+        "current_D29_remeasured": false,
+        "current_performance_remeasured": false,
+        "target_qualified": false,
+        "serving_qualified": false,
+        "next": "Run current bounded native-owned P128+29 against unchanged legacy logit gates and controlled original v81, then isolate first remaining boundary or qualify full D64. No performance transfer or graph/capability completion inferred."
       }
     },
     {

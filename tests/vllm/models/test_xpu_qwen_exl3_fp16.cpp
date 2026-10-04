@@ -188,7 +188,7 @@ struct RealLayer0 {
     const auto has = [&](const std::string& name) {
       return std::find(shard->Names().begin(), shard->Names().end(), name) != shard->Names().end();
     };
-    REQUIRE((layer_index == 0 || layer_index == 1 || layer_index == 21));
+    REQUIRE((layer_index == 0 || layer_index == 1 || layer_index == 20 || layer_index == 21));
     layer = vllm::LoadQwen3_5DenseLayer(get, has, "linear_attention", layer_index, "model.language_model.");
     oracle = vllm::SafetensorsFile::Open((std::filesystem::path(captures) / oracle_name).string());
     REQUIRE(config.hidden_size == 5120);
@@ -1232,6 +1232,62 @@ TEST_CASE("XPU EXL3 real block MLP: captured P128 and D1 complete native MLP") {
     CapturedClose(phase+".down", got, real.oracle->Get(phase+"_hidden_out"), 0.002f, 1e-4f);
     CHECK(empty.Empty());
   }
+  CHECK(vt::GetReferenceTierHits() == 0);
+}
+
+TEST_CASE("XPU EXL3 real layer20 MLP: identical P128 projection and activation operands") {
+  RealLayer0 real(20, "repeat-0.safetensors");
+  const char* output = std::getenv("VT_B70_EXL3_DIAGNOSTIC_OUTPUT");
+  REQUIRE(output != nullptr);
+  xpu_test::Queue gpu(vt::DeviceType::kXPU);
+  vllm::dense_attn::Dev d{vt::GetBackend(gpu.q.device.type), gpu.q, DType::kF16};
+  constexpr int rows = 128, hidden = 5120, intermediate = 17408;
+  REQUIRE(real.config.intermediate_size == intermediate);
+  auto& w = real.layer.mlp;
+  REQUIRE(w.IsExl3());
+  const auto observe = [&](const std::string& stage, vllm::dense_attn::DBuf& result,
+                            const std::string& key, int width) {
+    const auto& expected = real.oracle->Get(key);
+    REQUIRE(expected.dtype == "F16");
+    REQUIRE(expected.shape == std::vector<int64_t>{rows, width});
+    REQUIRE(result.t().dtype == DType::kF16);
+    std::vector<uint16_t> raw(rows * width); result.Download(d, raw.data());
+    size_t different = 0;
+    for (size_t i = 0; i < raw.size(); ++i)
+      different += raw[i] != vt::LoadUnaligned<uint16_t>(expected.data + i * 2);
+    const auto path = std::filesystem::path(output) / ("mlp20-" + stage + ".f16");
+    REQUIRE_FALSE(std::filesystem::exists(path));
+    std::ofstream file(path, std::ios::binary);
+    file.write(reinterpret_cast<const char*>(raw.data()), raw.size() * 2);
+    file.close(); REQUIRE(file.good());
+    std::cout << "MLP20_SAME_INPUT stage=" << stage << " different_halves=" << different << '\n';
+    CHECK(different == 0);
+  };
+  const auto upload = [&](const std::string& key, int width) {
+    const auto& value = real.oracle->Get(key);
+    REQUIRE(value.dtype == "F16");
+    REQUIRE(value.shape == std::vector<int64_t>{rows, width});
+    return vllm::dense_attn::DBuf(d, DType::kF16, {rows, width}, value.data);
+  };
+  auto input = upload("p128_l20_post_attn_norm", hidden);
+  auto gate_up = vllm::dense_exl3::GroupedLinear(d, input.t(),
+      {&w.gate_proj_exl3, &w.up_proj_exl3}, w.gate_up_exl3);
+  observe("gate-up", gate_up, "p128_l20_detail_gate_up", 2 * intermediate);
+  auto original_gate_up = upload("p128_l20_detail_gate_up", 2 * intermediate);
+  vllm::dense_attn::DBuf isolated_act(d, DType::kF16, {rows, intermediate});
+  vt::SiluAndMul(gpu.q, isolated_act.t(), original_gate_up.t());
+  observe("isolated-swiglu", isolated_act, "p128_l20_detail_swiglu", intermediate);
+  vllm::OwnedTensor empty;
+  auto chain_act = vllm::dense_exl3::GateUp(d, input.t(), empty, w.gate_proj_exl3,
+      w.up_proj_exl3, intermediate, &w.gate_up_exl3);
+  observe("chain-swiglu", chain_act, "p128_l20_detail_swiglu", intermediate);
+  auto original_act = upload("p128_l20_detail_swiglu", intermediate);
+  auto isolated_down = vllm::dense_exl3::Linear(d, original_act.t(), empty,
+      w.down_proj_exl3, DType::kF16);
+  observe("isolated-down", isolated_down, "p128_l20_detail_down", hidden);
+  auto chain_down = vllm::dense_exl3::Linear(d, chain_act.t(), empty,
+      w.down_proj_exl3, DType::kF16);
+  observe("chain-down", chain_down, "p128_l20_detail_down", hidden);
   CHECK(vt::GetReferenceTierHits() == 0);
 }
 
