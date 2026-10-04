@@ -1640,14 +1640,14 @@
     },
     {
       "task": "P1",
-      "status": "native_C1_C4_operator_rawgraph_qualified_model_policy_emittedcycle_pending",
+      "status": "native_C1_C4_operator_rawgraph_model_policy_implemented_actual_model_owner_emittedcycle_pending",
       "complete": false,
       "original_capture_exit": 0,
       "host_test_cases_passed": 2,
       "receipt": {
-        "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p1-C4-graph-v1/receipt-v1.json",
-        "bytes": 18790,
-        "sha256": "86eac32415532f666fb80407828765f5802613dbb37fbacd1005f6c413fa6921"
+        "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p1-model-policy-v1/receipt-v1.json",
+        "bytes": 52272,
+        "sha256": "8699d77cb3b8fbb8932c71503040ae1b8391608fa7ed94452012250fe16a1802"
       },
       "original_active_length": 4100,
       "original_splits": 16,
@@ -1709,7 +1709,7 @@
       "native_C4_operator_qualified": true,
       "native_C4_family_assertions": 518,
       "native_C4_family_exit": 0,
-      "native_C4_metadata_assertions": 37,
+      "native_C4_metadata_assertions": 42,
       "native_C4_metadata_exit": 0,
       "native_C4_bench_assertions": 469,
       "native_C4_bench_exit": 0,
@@ -1718,7 +1718,7 @@
         "verify": 0.23134
       },
       "native_C4_operator_elapsed_reduction_percent": 92.01518681508327,
-      "native_C4_scope": "True singlebatched C4Q4 donor, hostuniform offsets proved against fresh device metadata in existing check, private offsets0/1/2/3/4.9originalderived cases x zero/NaN, distinct lengths/pages,permutation/tailmutation; direct/alias/stridedcopy exact with guards/noKVwrites. Ragged2/4/4/4 and missinghint use current generic route exactly; mismatched uniformGPUoffsets/too-small hostbound reject beforewrites. C4+C1 rawoperator graph sharedpool/metadata/replay/retirement qualified220/220 separately; no modeltrajectory/policy/automatic promotion yet.",
+      "native_C4_scope": "True singlebatched C4Q4 donor, hostuniform offsets proved against fresh device metadata in existing check, private offsets0/1/2/3/4.9originalderived cases x zero/NaN, distinct lengths/pages,permutation/tailmutation; direct/alias/stridedcopy exact with guards/noKVwrites. Ragged2/4/4/4 and missinghint use current generic route exactly; requested packed route mismatched uniformGPUoffsets/too-small hostbound reject beforewrites. C4+C1 rawoperator graph sharedpool/metadata/replay/retirement qualified220/220 separately; model route/layout/partition policy implemented with hostchecks and raw roundedbound proof; actual modeltrajectory/owner/automatic promotion pending.",
       "native_C4_operator_receipt": {
         "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p1-C4-native-v1/receipt-v1.json",
         "bytes": 80133,
@@ -1728,7 +1728,16 @@
       "native_C4_C1_graph_exit": 0,
       "native_C4_C1_graph_captures": 2,
       "native_C4_C1_graph_successful_replays": 12,
-      "native_C4_C1_graph_retired_device_bytes": 0
+      "native_C4_C1_graph_retired_device_bytes": 0,
+      "C4_C1_graph_receipt": {
+        "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p1-C4-graph-v1/receipt-v1.json",
+        "bytes": 18790,
+        "sha256": "86eac32415532f666fb80407828765f5802613dbb37fbacd1005f6c413fa6921"
+      },
+      "model_graph_policy_implemented": true,
+      "model_graph_policy_host_assertions": 67,
+      "model_graph_policy_host_exit": 0,
+      "model_graph_policy_owner_qualified": false
     },
     {
       "task": "P2",
@@ -1867,5 +1876,5 @@
     }
   ],
   "performance_baseline": "7536aededc049b2157f12eadb0f4cc6bbf29b7b7",
-  "performance_next": "P1 model graph policy identity for route/physicalKVlayout/activepages/partition, actual retirement proof and current emittedcycle C1P4096/O1024 plusC4 sentinel before promotion. C1/C4 operator/rawgraph/raggedfallback packages and P2 complete in stated scopes. LaterP3/P4 material; defaultD64/reference/fullstate gates open."
+  "performance_next": "P1 actualXPU model owner retirement on verifier/mode/cache/layout and withinpage/pagecross changes with matched eager outputs/ownstate, then current emittedcycle C1P4096/O1024 and C4 sentinel before promotion. Policy code/hostchecks and C1/C4 rawoperator/graph/raggedfallback bounded proofs complete; P2 complete. LaterP3/P4 material; defaultD64/reference/fullstate gates open."
 }

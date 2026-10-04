@@ -63,6 +63,7 @@
 #include <unordered_map>
 #include <utility>
 #include <optional>
+#include <bit>
 #include <vector>
 
 #include "vllm/model_executor/models/dense_fp8_gemm.h"   // dense_fp8:: FP8 W8A8 seam (#940)
@@ -234,6 +235,61 @@ vt::DType detail::GdnOutDType() {
 // Default OFF, so no shipped default and no recorded device measurement moves
 // until that A/B exists. The polarity is opt-IN, unlike `VT_GDN_OUT_BF16`: a
 // leading '1' is the only thing that turns it on.
+detail::XpuAttentionGraphPolicy detail::BuildXpuAttentionGraphPolicy(
+    int64_t requests, int64_t query_rows, int32_t max_seq_len, bool causal,
+    const std::vector<PagedKvCache>& caches) {
+  XpuAttentionGraphPolicy key;
+  key.boundaries = {{requests == 1 && query_rows == 1 &&
+      vt::PagedAttnXpuShortDecodeBound(max_seq_len),
+      vt::PagedAttnXpuLongSplitBound(max_seq_len)}};
+  constexpr const char* names[] = {"VT_XPU_ATTENTION", "VT_XPU_XE2_VERIFY",
+      "VT_XPU_ATTN_SPLIT_EXTENDED", "VT_XPU_ATTN_SPLIT_SPAN",
+      "VT_XPU_ATTN_SPLIT_MAX_PARTS", "VT_XPU_ATTN_SPLIT_ACTIVE_PAGE_CAP",
+      "VT_XPU_ATTN_SPLIT_REDUCE", "VT_XPU_ATTN_PREFILL_TILE", "VT_XPU_ATTN_PROBABILITY"};
+  constexpr const char* defaults[] = {"auto", "0", "1", "", "", "1", "auto", "auto", "single"};
+  for (size_t i = 0; i < key.settings.size(); ++i) {
+    const char* setting = std::getenv(names[i]);
+    key.settings[i] = setting ? setting : defaults[i];
+  }
+  key.causal = causal;
+  const bool packed_requested = key.settings[0] == "verify" ||
+      (key.settings[0] == "auto" && key.settings[1] == "1");
+  const bool active_page_cap = key.settings[5] == "1" || packed_requested;
+  key.kv.reserve(caches.size());
+  for (const auto& cache : caches) {
+    // KvSlice derives physical K/V strides and offset from these values. Include
+    // every layer and base address: an equal logical shape is not an equal binding.
+    const uint32_t k_scale = std::bit_cast<uint32_t>(cache.k_scale);
+    const uint32_t v_scale = std::bit_cast<uint32_t>(cache.v_scale);
+    key.kv.push_back({reinterpret_cast<uintptr_t>(cache.data), uint64_t(cache.dtype),
+        uint64_t(cache.num_blocks), uint64_t(cache.block_size), uint64_t(cache.num_kv_heads),
+        uint64_t(cache.head_size), uint64_t(cache.head_size_v), uint64_t(cache.fp8_kind),
+        k_scale, v_scale, uint64_t(cache.page_size_bytes),
+        uint64_t(active_page_cap ? vt::PagedAttnXpuActivePages(max_seq_len, cache.block_size) : 0),
+        uint64_t(cache.head_size_v > 0 ? cache.head_size_v : cache.head_size)});
+  }
+  return key;
+}
+
+int32_t detail::XpuC4VerifyContextBound(const PagedKvCache& kv, bool fp16,
+    int64_t query_heads, int64_t tokens, const v1::CommonAttentionMetadata& meta) {
+  if (!fp16 || tokens != 16 || meta.num_reqs != 4 || query_heads != 24 ||
+      !meta.causal || meta.max_query_len != 4 || meta.query_start_loc.size() != 5 ||
+      kv.dtype != vt::DType::kI8 || kv.fp8_kind != vt::Fp8KVCacheDataType::kFp8E4M3 ||
+      kv.num_kv_heads != 4 || kv.head_size != 256 ||
+      (kv.head_size_v != 0 && kv.head_size_v != 256) ||
+      (kv.block_size != 1600 && kv.block_size != 1664) ||
+      kv.k_scale != 1.0f || kv.v_scale != 1.0f) return meta.max_seq_len;
+  for (int r = 0; r <= 4; ++r)
+    if (meta.query_start_loc[r] != r * 4) return meta.max_seq_len;
+  const char* setting = std::getenv("VT_XPU_ATTENTION");
+  const std::string_view mode = setting ? setting : "auto";
+  const char* verify = std::getenv("VT_XPU_XE2_VERIFY");
+  if (mode != "verify" && !(mode == "auto" && verify && std::string_view(verify) == "1"))
+    return meta.max_seq_len;
+  return vt::PagedAttnXpuPackedVerifyBound(meta.max_seq_len, kv.block_size);
+}
+
 bool detail::ActF32FlagIsOn(const char* env_value) {
   return env_value != nullptr && env_value[0] == '1';
 }
@@ -6497,7 +6553,9 @@ DBuf FullAttnBlockPaged(Dev d, const FullAttnLayerWeights& w, const HfConfig& cf
   // max_seq_len is the FA-2 launcher's host grid bound (same pattern).
   vt::PagedAttentionArgs pa_args{scale, meta.causal};
   pa_args.query_start_loc_host = meta.query_start_loc.data();
-  pa_args.max_seq_len = meta.max_seq_len;
+  pa_args.max_seq_len = d.q.device.type == vt::DeviceType::kXPU
+      ? detail::XpuC4VerifyContextBound(kv, ActDType(d) == DType::kF16, Hq, T, meta)
+      : meta.max_seq_len;
   // SPEC-DFLASH2 W10 (#1857): the runner's spec-as-decode classification — a
   // uniform-qlen verify stays on the FA-2 split-KV DECODE lane instead of the
   // num_splits=1 prefill ladder. 0 on every non-verify step (routing unchanged).
@@ -12707,7 +12765,7 @@ struct Qwen3_5DenseDecodeGraph::Impl {
     // hand. `vt::BreakableGraph` is non-copyable and is constructed in place.
     vt::BreakableGraph graph;
     int fa_cols = -1;                 // captured block-table column count
-    std::array<int64_t, 3> xpu_attention_policy{{-1, -1, -1}};
+    std::optional<detail::XpuAttentionGraphPolicy> xpu_attention_policy;
     bool warm = false;
     // tt-27b-region-capture: a named per-region over-budget DECLINE (see the
     // census below) is sticky for this size — an over-budget layer's command
@@ -13161,21 +13219,15 @@ ForwardLogits Qwen3_5DenseDecodeGraph::Step(
   // graph. Retire at the short-decode, long Split-K and active-page boundaries.
   // Page changes conservatively retire even when a workspace cap has already
   // saturated the partition count; no device metadata download is needed.
-  std::array<int64_t, 3> attention_policy{{0, 0, 0}};
-  if (d.q.device.type == vt::DeviceType::kXPU) {
-    const char* active_pages = std::getenv("VT_XPU_ATTN_SPLIT_ACTIVE_PAGE_CAP");
-    const bool active_page_cap = !active_pages || std::string_view(active_pages) == "1";
-    attention_policy = {{
-        S == 1 && Q == 1 && vt::PagedAttnXpuShortDecodeBound(pam.max_seq_len),
-        vt::PagedAttnXpuLongSplitBound(pam.max_seq_len),
-        active_page_cap && !attn_kv.empty() ?
-            vt::PagedAttnXpuActivePages(pam.max_seq_len, attn_kv[0].block_size) : 0}};
-  }
-  const bool attention_policy_changed = s.xpu_attention_policy[0] != -1 &&
-      s.xpu_attention_policy != attention_policy;
+  detail::XpuAttentionGraphPolicy attention_policy;
+  if (d.q.device.type == vt::DeviceType::kXPU)
+    attention_policy = detail::BuildXpuAttentionGraphPolicy(
+        pam.num_reqs, Q, pam.max_seq_len, pam.causal, attn_kv);
+  const bool attention_policy_changed = s.xpu_attention_policy &&
+      *s.xpu_attention_policy != attention_policy;
   s.Refresh(ptok, ppos, pam, pgm);
   s.fa_cols = cols;
-  s.xpu_attention_policy = attention_policy;
+  s.xpu_attention_policy = std::move(attention_policy);
   bool seq_continuation = true;  // no seq_lens -> no boundary to detect
   // TT-27B-STEP-DECOMPOSE: the per-step TT refresh block is the "warmup
   // passes" phase — every Warm* call the captured arm makes per step is

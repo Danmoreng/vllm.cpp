@@ -45,6 +45,7 @@
 #include "vllm/model_executor/models/device_pool.h"
 #include "vllm/model_executor/models/model_registry.h"
 #include "vllm/model_executor/models/qwen3_5.h"
+#include "vllm/model_executor/models/qwen3_5_internal.h"
 #include "vllm/model_executor/models/qwen3_5_dense.h"
 #include "vllm/model_executor/models/qwen3_5_mtp.h"
 #include "vllm/transformers_utils/hf_config.h"
@@ -1442,4 +1443,98 @@ TEST_CASE("#2029: a NON-speculative Qwen3_5DecodeGraph capture allocates nothing
                                << harness.backend().allocs() << " in the step");
   CHECK(harness.backend().allocs() > 0);
   CHECK(harness.backend().allocs_during_capture() == 0);
+}
+
+
+namespace {
+struct XpuPolicyEnv {
+  static constexpr const char* names[] = {"VT_XPU_ATTENTION", "VT_XPU_XE2_VERIFY",
+      "VT_XPU_ATTN_SPLIT_EXTENDED", "VT_XPU_ATTN_SPLIT_SPAN", "VT_XPU_ATTN_SPLIT_MAX_PARTS",
+      "VT_XPU_ATTN_SPLIT_ACTIVE_PAGE_CAP", "VT_XPU_ATTN_SPLIT_REDUCE",
+      "VT_XPU_ATTN_PREFILL_TILE", "VT_XPU_ATTN_PROBABILITY"};
+  std::array<std::string, 9> values;
+  std::array<bool, 9> present{};
+  XpuPolicyEnv() {
+    for (size_t i = 0; i < 9; ++i) {
+      const char* v = std::getenv(names[i]); present[i] = v != nullptr;
+      if (v) values[i] = v;
+      unsetenv(names[i]);
+    }
+  }
+  ~XpuPolicyEnv() {
+    for (size_t i = 0; i < 9; ++i)
+      if (present[i]) setenv(names[i], values[i].c_str(), 1); else unsetenv(names[i]);
+  }
+};
+PagedKvCache XpuPolicyKv(void* data) {
+  PagedKvCache kv;
+  kv.data = data; kv.dtype = DType::kI8; kv.num_blocks = 32; kv.block_size = 1600;
+  kv.num_kv_heads = 4; kv.head_size = 256; kv.fp8_kind = vt::Fp8KVCacheDataType::kFp8E4M3;
+  return kv;
+}
+}
+
+TEST_CASE("P1: XPU attention graph policy keys routes partitions and every cache binding") {
+  XpuPolicyEnv env;
+  char a = 0, b = 0, c = 0;
+  std::vector<PagedKvCache> caches{XpuPolicyKv(&a), XpuPolicyKv(&b)};
+  const auto key = [&](int length = 4100) {
+    return vllm::detail::BuildXpuAttentionGraphPolicy(4, 4, length, true, caches);
+  };
+  const auto original = key();
+  CHECK(key(4799) == original); CHECK(key(4800) == original); CHECK_FALSE(key(4801) == original);
+  for (size_t i = 0; i < 9; ++i) {
+    const char* changed[] = {"verify", "1", "0", "64", "64", "0", "scalar", "q16", "residual"};
+    REQUIRE(setenv(XpuPolicyEnv::names[i], changed[i], 1) == 0);
+    CHECK_FALSE(key() == original); unsetenv(XpuPolicyEnv::names[i]); CHECK(key() == original);
+  }
+  const auto saved = caches[1];
+  for (int field = 0; field < 11; ++field) {
+    caches[1] = saved;
+    switch (field) {
+      case 0: caches[1].data = &c; break;
+      case 1: caches[1].dtype = DType::kF16; break;
+      case 2: ++caches[1].num_blocks; break;
+      case 3: caches[1].block_size = 1664; break;
+      case 4: caches[1].num_kv_heads = 2; break;
+      case 5: caches[1].head_size = 128; break;
+      case 6: caches[1].head_size_v = 128; break;
+      case 7: caches[1].fp8_kind = vt::Fp8KVCacheDataType::kAuto; break;
+      case 8: caches[1].k_scale = 0.5f; break;
+      case 9: caches[1].v_scale = 0.5f; break;
+      case 10: caches[1].page_size_bytes = 42; break;
+    }
+    CHECK_FALSE(key() == original);
+  }
+  caches[1] = saved; CHECK(key() == original);
+  CHECK_FALSE(vllm::detail::BuildXpuAttentionGraphPolicy(4, 4, 4100, false, caches) == original);
+  CHECK_FALSE(vllm::detail::BuildXpuAttentionGraphPolicy(1, 1, 960, true, caches) ==
+              vllm::detail::BuildXpuAttentionGraphPolicy(1, 1, 961, true, caches));
+  CHECK_FALSE(key(4095) == key(4096));
+  REQUIRE(setenv("VT_XPU_ATTN_SPLIT_ACTIVE_PAGE_CAP", "0", 1) == 0);
+  CHECK(key(4800) == key(4801));
+  REQUIRE(setenv("VT_XPU_XE2_VERIFY", "1", 1) == 0);
+  CHECK_FALSE(key(4800) == key(4801));  // Packed bound still retires when generic cap is off.
+}
+
+TEST_CASE("P1: XPU attention graph policy bounds only qualified C4 packed verification") {
+  XpuPolicyEnv env; char a = 0; auto kv = XpuPolicyKv(&a);
+  CommonAttentionMetadata meta;
+  meta.num_reqs = 4; meta.num_actual_tokens = 16; meta.max_query_len = 4;
+  meta.query_start_loc = {0, 4, 8, 12, 16}; meta.max_seq_len = 4100; meta.causal = true;
+  const auto bound = [&] { return vllm::detail::XpuC4VerifyContextBound(kv, true, 24, 16, meta); };
+  CHECK(bound() == 4100); REQUIRE(setenv("VT_XPU_XE2_VERIFY", "1", 1) == 0);
+  CHECK(bound() == 4800); kv.head_size_v = 256; CHECK(bound() == 4800);
+  kv.head_size_v = 128; CHECK(bound() == 4100); kv.head_size_v = 0;
+  meta.max_seq_len = 4800; CHECK(bound() == 4800);
+  meta.max_seq_len = 4801; CHECK(bound() == 6400);
+  meta.max_seq_len = 4100; kv.k_scale = 0.5f; CHECK(bound() == 4100); kv.k_scale = 1;
+  CHECK(vllm::detail::XpuC4VerifyContextBound(kv, false, 24, 16, meta) == 4100);
+  CHECK(vllm::detail::XpuC4VerifyContextBound(kv, true, 8, 16, meta) == 4100);
+  meta.query_start_loc = {0, 2, 6, 10, 14}; CHECK(bound() == 4100);
+  meta.query_start_loc = {0, 4, 8, 12, 16}; REQUIRE(setenv("VT_XPU_ATTENTION", "split", 1) == 0);
+  CHECK(bound() == 4100); REQUIRE(setenv("VT_XPU_ATTENTION", "verify", 1) == 0);
+  REQUIRE(setenv("VT_XPU_XE2_VERIFY", "0", 1) == 0); CHECK(bound() == 4800);
+  kv.block_size = 1664; CHECK(bound() == 4992);
+  meta.num_reqs = 1; CHECK(bound() == 4100);
 }
