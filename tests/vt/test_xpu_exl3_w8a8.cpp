@@ -66,7 +66,7 @@ TEST_CASE("EXL3 W8A8 plan: explicit boundary bounded panel and aligned regions")
   CHECK_THROWS(vt::PlanExl3W8A8(4096, 2147483520LL, 2147483520LL, 32767, 6));
 }
 
-TEST_CASE("XPU EXL3 W8A8 P2: real M256 wider panels preserve rounded intermediates") {
+TEST_CASE("XPU EXL3 W8A8 P2: real rows wider panels preserve rounded intermediates") {
   const char* env = std::getenv("VT_B70_EXL3_W8A8_FIXTURE");
   if (!env) std::exit(77);
   const auto f = vllm::SafetensorsFile::Open(env);
@@ -74,10 +74,21 @@ TEST_CASE("XPU EXL3 W8A8 P2: real M256 wider panels preserve rounded intermediat
   const auto& su = f.Get("stacked_suh");
   const auto& sv = f.Get("merged_svh");
   const auto& map = f.Get("source_map");
-  const int m = 256, k = int(su.shape[1]), n = int(sv.shape[0]);
+  int m = 256;
+  if (const char* rows = std::getenv("VT_B70_EXL3_PANEL_ROWS")) {
+    REQUIRE((std::string_view(rows) == "256" || std::string_view(rows) == "896" ||
+             std::string_view(rows) == "1600"));
+    m = std::atoi(rows);
+  }
+  const int k = int(su.shape[1]), n = int(sv.shape[0]);
   const int bits = int(tr.shape[2] / 16), groups = int(su.shape[0]);
   REQUIRE(groups >= 2);
   REQUIRE(std::memcmp(su.data, su.data + k * 2, k * 2) != 0);
+  REQUIRE(map.nbytes == size_t(n / 128) * sizeof(int32_t));
+  const auto suffix = "_m" + std::to_string(m);
+  const auto& x = f.Get("input" + suffix);
+  REQUIRE(x.dtype == "F16");
+  REQUIRE((x.shape == std::vector<int64_t>{m, k}));
   std::vector<int32_t> source_map(n / 128);
   std::memcpy(source_map.data(), map.data, map.nbytes);
   Queue gpu(vt::DeviceType::kXPU);
@@ -86,7 +97,7 @@ TEST_CASE("XPU EXL3 W8A8 P2: real M256 wider panels preserve rounded intermediat
   Buffer suh(gpu.q, DType::kF16, {groups, k}), svh(gpu.q, DType::kF16, {n});
   Buffer mapping(gpu.q, DType::kI32, {n / 128}), input(gpu.q, DType::kF16, {m, k});
   trellis.upload(tr.data); suh.upload(su.data); svh.upload(sv.data);
-  mapping.upload(map.data); input.upload(f.Get("input_m256").data);
+  mapping.upload(map.data); input.upload(x.data);
   std::vector<unsigned char> baseline_output, baseline_workspace;
   nlohmann::json reports = nlohmann::json::array();
   for (int width : {128, 1024, 2048}) {
@@ -97,7 +108,7 @@ TEST_CASE("XPU EXL3 W8A8 P2: real M256 wider panels preserve rounded intermediat
     Buffer panel_storage(gpu.q, DType::kI8, {int64_t(p.weight_panel_bytes + 64)});
     auto panel = vt::Tensor::Contiguous(panel_storage.tensor.data, DType::kI8, gpu.q.device,
                                       {k, p.weight_panel_columns});
-    const vt::Exl3GroupedLinearArgs args{bits, 2, "P2_M256", width};
+    const vt::Exl3GroupedLinearArgs args{bits, 2, "P2_REAL_ROWS", width};
     std::vector<unsigned char> poison(panel_storage.bytes, 0xcd);
     panel_storage.upload(poison.data());
     auto execute = [&] {
@@ -115,7 +126,7 @@ TEST_CASE("XPU EXL3 W8A8 P2: real M256 wider panels preserve rounded intermediat
     // Check the last128 columns of the actual reconstructed tail in its compact
     // layout, and confirm no store crosses the planned capacity into its guard.
     const int tail = parts.back().columns;
-    const auto& last = f.Get("last_weight_panel_m256");
+    const auto& last = f.Get("last_weight_panel" + suffix);
     REQUIRE(last.nbytes == size_t(k) * 128);
     bool reconstructed_tail_exact = true;
     for (int row = 0; row < k; ++row)
@@ -127,7 +138,36 @@ TEST_CASE("XPU EXL3 W8A8 P2: real M256 wider panels preserve rounded intermediat
     bool preparation_exact = true, y_exact = true, output_exact = true;
     if (width == 128) {
       baseline_output = result; baseline_workspace = scratch;
-      Accuracy(result, f.Get("output_m256"), "M256_128_control");
+      const auto& qref = f.Get("xq" + suffix);
+      const auto& sref = f.Get("sx" + suffix);
+      const auto& yref = f.Get("y" + suffix);
+      REQUIRE(qref.nbytes == size_t(groups) * m * k);
+      REQUIRE(sref.nbytes == size_t(groups) * m * sizeof(float));
+      REQUIRE(yref.nbytes == size_t(m) * n * 2);
+      bool original_quantized_exact = true, original_scales_exact = true, padding_exact = true;
+      for (int group = 0; group < groups; ++group) for (int row = 0; row < p.padded_rows; ++row) {
+        const auto* quantized = scratch.data() + p.activation_offset + (size_t(group) * p.padded_rows + row) * k;
+        const auto* scale = scratch.data() + p.row_scale_offset + (size_t(group) * p.padded_rows + row) * sizeof(float);
+        if (row < m) {
+          original_quantized_exact &= std::memcmp(quantized, qref.data + (size_t(group) * m + row) * k, k) == 0;
+          original_scales_exact &= std::memcmp(scale, sref.data + (size_t(group) * m + row) * sizeof(float), sizeof(float)) == 0;
+        } else {
+          padding_exact &= std::all_of(quantized, quantized + k, [](unsigned char v) { return v == 0; });
+          const float one = 1.f;
+          padding_exact &= std::memcmp(scale, &one, sizeof(one)) == 0;
+        }
+      }
+      CHECK(original_quantized_exact);
+      CHECK(original_scales_exact);
+      CHECK(padding_exact);
+      CHECK(std::memcmp(scratch.data() + p.intermediate_offset, yref.data, yref.nbytes) == 0);
+      const auto* pad_y = scratch.data() + p.intermediate_offset + yref.nbytes;
+      CHECK(std::all_of(pad_y, scratch.data() + p.weight_scale_offset,
+                        [](unsigned char v) { return v == 0; }));
+      const auto& original_output = f.Get("output" + suffix);
+      REQUIRE(original_output.nbytes == result.size());
+      CHECK(std::memcmp(result.data(), original_output.data, result.size()) == 0);
+      Accuracy(result, f.Get("output" + suffix), "real_rows_128_control");
     } else {
       preparation_exact = std::equal(scratch.begin(), scratch.begin() + p.intermediate_offset,
                                     baseline_workspace.begin());
@@ -139,7 +179,7 @@ TEST_CASE("XPU EXL3 W8A8 P2: real M256 wider panels preserve rounded intermediat
       CHECK(y_exact);
       CHECK(output_exact);
     }
-    reports.push_back({{"width", width}, {"panel_count", parts.size()},
+    reports.push_back({{"m", m}, {"padded_m", p.padded_rows}, {"width", width}, {"panel_count", parts.size()},
         {"panel_bytes", p.weight_panel_bytes}, {"workspace_bytes", p.workspace_bytes},
         {"cold_operator_ms", cold}, {"warm_operator_ms", warm},
         {"preparation_exact", preparation_exact}, {"Y_exact", y_exact},

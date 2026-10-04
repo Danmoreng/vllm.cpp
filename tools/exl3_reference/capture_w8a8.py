@@ -2,9 +2,10 @@
 """Original fused W8A8 on frozen real packed groups and real worker norm rows.
 
 Retains original INT8/scale/F16 allocations without changing the pinned binary.
-M128 remains the original SmallM control. M129/256 cyclically repeat the real
-P128 operands, with explicit zero and near-zero rows; these are operator inputs,
-not a newly captured long-prompt worker trajectory. No unquantized comparison.
+M128 remains the original SmallM control. Larger forms cyclically repeat the real
+P128 operands, including the actual prefill geometry M1600/M896, with explicit
+zero and near-zero rows. These are bounded operator inputs, not a newly captured
+long-prompt worker trajectory. No unquantized comparison.
 """
 import argparse
 import json
@@ -87,7 +88,7 @@ def capture(args):
     E = ops._get_esimd()
     E.exl3_set_int8(1)
     for m in args.rows:
-        headers.require(m in (128, 129, 256, 4096), "unsupported capture row form")
+        headers.require(m in (128, 129, 256, 896, 1600, 4096), "unsupported capture row form")
         x = real.repeat((m + 127) // 128, 1)[:m].clone()
         x[0] = 0
         x[1] = x[1] * (2.0 ** -20)
@@ -154,7 +155,8 @@ if __name__ == "__main__":
     parser.add_argument("--operands", type=Path, required=True)
     parser.add_argument("--operand-name", default="p128_input_norm_output")
     parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--rows", type=int, nargs="+", default=[128, 129, 256])
+    parser.add_argument("--rows", type=int, nargs="+", choices=(128, 129, 256, 896, 1600, 4096),
+                        default=[128, 129, 256])
     parser.add_argument("--runtime-root", type=Path, default=Path("/opt/exl3xpu"))
     parser.add_argument("--image-identity", required=True)
     capture(parser.parse_args())
