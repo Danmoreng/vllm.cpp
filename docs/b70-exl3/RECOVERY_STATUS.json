@@ -1640,7 +1640,7 @@
     },
     {
       "task": "P1",
-      "status": "native_C1_C4_operator_rawgraph_model_policy_implemented_actual_model_owner_emittedcycle_pending",
+      "status": "native_C1_C4_operator_graph_and_reduced_model_owner_qualified_full_checkpoint_emittedcycle_pending",
       "complete": false,
       "original_capture_exit": 0,
       "host_test_cases_passed": 2,
@@ -1737,7 +1737,18 @@
       "model_graph_policy_implemented": true,
       "model_graph_policy_host_assertions": 67,
       "model_graph_policy_host_exit": 0,
-      "model_graph_policy_owner_qualified": false
+      "model_graph_policy_owner_qualified": true,
+      "model_graph_policy_owner_scope": "Actual XPU Qwen3_5DenseDecodeGraph and native eager with independent reduced synthetic FP16 materialized hybrid weights/caches. Two GDN and two full-attention layers, hidden32/MLP16/vocab40, attention24Q/4KV/D256, page1600 then1664, FP8 E4M3 unit scales, FP32 GDN conv/recurrent. No EXL3 trellis weights, real checkpoint trajectory or serving speed claim. Synthetic prefix initially zero and deliberate positional jump; exact byte parity is between own-state eager and graph, not original Python worker.",
+      "model_graph_policy_owner_assertions": 67416,
+      "model_graph_policy_owner_steps": 52,
+      "model_graph_policy_owner_captures": 12,
+      "model_graph_policy_owner_launches": 40,
+      "model_graph_policy_owner_graph_bytes_after": 0,
+      "model_graph_policy_owner_receipt": {
+        "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p1-model-owner-v1/receipt-v1.json",
+        "bytes": 16594,
+        "sha256": "6698028642583d090f973daa4fe10b0b64f6cad8aafbbf5bfbc8c82bd7f054d3"
+      }
     },
     {
       "task": "P2",
@@ -1876,5 +1887,5 @@
     }
   ],
   "performance_baseline": "7536aededc049b2157f12eadb0f4cc6bbf29b7b7",
-  "performance_next": "P1 actualXPU model owner retirement on verifier/mode/cache/layout and withinpage/pagecross changes with matched eager outputs/ownstate, then current emittedcycle C1P4096/O1024 and C4 sentinel before promotion. Policy code/hostchecks and C1/C4 rawoperator/graph/raggedfallback bounded proofs complete; P2 complete. LaterP3/P4 material; defaultD64/reference/fullstate gates open."
+  "performance_next": "P1 current full pinned EXL3 27B C1 P4096/O1024 generic/packed emitted-cycle comparison and C4 sentinel before automatic promotion. Reduced actual XPU hybrid model owner route/secondcache/page1600-to1664/increasing-context proof passes; not full checkpoint/original state qualification. P2 bounded complete, P3/P4 material next; defaultD64/reference/fullstate gates open."
 }
