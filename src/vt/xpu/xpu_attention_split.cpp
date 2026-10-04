@@ -1,6 +1,7 @@
 #include "xpu_common.h"
 #include "xpu_fp8.h"
 #include "xpu_kernels.h"
+#include "vt/paged_attn_route.h"
 #include <cstdio>
 #include <cstdlib>
 #include <limits>
@@ -47,7 +48,7 @@ bool PagedAttentionSplitKernel(Queue& q, Tensor& out, const Tensor& query, const
   // Long B70 FP8 decode benefits from more independent slices. Keep short
   // contexts and other formats on the established partition count.
   const int64_t context = args.max_seq_len > 0 ? args.max_seq_len : capacity;
-  int max_parts = b70_fp8 && context >= 4096 ? 256 : 32;
+  int max_parts = b70_fp8 && PagedAttnXpuLongSplitBound(context) ? 256 : 32;
   if (const char* setting = std::getenv("VT_XPU_ATTN_SPLIT_MAX_PARTS")) {
     max_parts = std::atoi(setting);
     VT_CHECK(max_parts == 32 || max_parts == 64 || max_parts == 128 || max_parts == 256,
@@ -67,7 +68,7 @@ bool PagedAttentionSplitKernel(Queue& q, Tensor& out, const Tensor& query, const
       !args.window_size && args.logits_soft_cap == 0 &&
       args.k_scale == 1.0f && args.v_scale == 1.0f;
   const int64_t planned_capacity = active_page_cap ?
-      std::min(capacity, ((context + page - 1) / page) * page) : capacity;
+      std::min(capacity, PagedAttnXpuActivePages(context, page) * page) : capacity;
   const int64_t parts = std::min({int64_t{max_parts}, budget_parts,
       std::max(int64_t{1}, (planned_capacity + span - 1) / span)});
   if (const char* trace = std::getenv("VT_XPU_TRACE_SPLIT_PLAN");

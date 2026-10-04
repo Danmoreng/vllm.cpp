@@ -12707,7 +12707,7 @@ struct Qwen3_5DenseDecodeGraph::Impl {
     // hand. `vt::BreakableGraph` is non-copyable and is constructed in place.
     vt::BreakableGraph graph;
     int fa_cols = -1;                 // captured block-table column count
-    int xpu_short_decode_region = -1; // captured host attention policy
+    std::array<int64_t, 3> xpu_attention_policy{{-1, -1, -1}};
     bool warm = false;
     // tt-27b-region-capture: a named per-region over-budget DECLINE (see the
     // census below) is sticky for this size — an over-budget layer's command
@@ -13157,15 +13157,25 @@ ForwardLogits Qwen3_5DenseDecodeGraph::Step(
   // A block-table column-count change reallocates the persistent block_table (the
   // staged/baked H2D dest shape moves) → invalidate this slot's graph + device inputs.
   const bool cols_changed = (s.fa_cols != -1 && s.fa_cols != cols);
-  // XPU C1 attention changes host policy at the short one-split boundary.
-  // Refreshed device lengths cannot change a dispatch baked into the graph.
-  const int short_decode_region = d.q.device.type == vt::DeviceType::kXPU &&
-      S == 1 && Q == 1 && vt::PagedAttnXpuShortDecodeBound(pam.max_seq_len);
-  const bool attention_policy_changed = s.xpu_short_decode_region != -1 &&
-      s.xpu_short_decode_region != short_decode_region;
+  // Device lengths cannot refresh host dispatch/partitioning baked into a
+  // graph. Retire at the short-decode, long Split-K and active-page boundaries.
+  // Page changes conservatively retire even when a workspace cap has already
+  // saturated the partition count; no device metadata download is needed.
+  std::array<int64_t, 3> attention_policy{{0, 0, 0}};
+  if (d.q.device.type == vt::DeviceType::kXPU) {
+    const char* active_pages = std::getenv("VT_XPU_ATTN_SPLIT_ACTIVE_PAGE_CAP");
+    const bool active_page_cap = !active_pages || std::string_view(active_pages) == "1";
+    attention_policy = {{
+        S == 1 && Q == 1 && vt::PagedAttnXpuShortDecodeBound(pam.max_seq_len),
+        vt::PagedAttnXpuLongSplitBound(pam.max_seq_len),
+        active_page_cap && !attn_kv.empty() ?
+            vt::PagedAttnXpuActivePages(pam.max_seq_len, attn_kv[0].block_size) : 0}};
+  }
+  const bool attention_policy_changed = s.xpu_attention_policy[0] != -1 &&
+      s.xpu_attention_policy != attention_policy;
   s.Refresh(ptok, ppos, pam, pgm);
   s.fa_cols = cols;
-  s.xpu_short_decode_region = short_decode_region;
+  s.xpu_attention_policy = attention_policy;
   bool seq_continuation = true;  // no seq_lens -> no boundary to detect
   // TT-27B-STEP-DECOMPOSE: the per-step TT refresh block is the "warmup
   // passes" phase — every Warm* call the captured arm makes per step is
