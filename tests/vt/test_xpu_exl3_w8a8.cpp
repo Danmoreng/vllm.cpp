@@ -1,5 +1,6 @@
 #include "xpu_test_helpers.h"
 #include "vt/exl3_grouped.h"
+#include "vt/exl3_w8a8_panel_plan.h"
 #include "vt/breakable_graph.h"
 #include "vt/unaligned.h"
 #include "vllm/model_executor/model_loader/safetensors_reader.h"
@@ -7,6 +8,9 @@
 #include <cstdlib>
 #include <filesystem>
 #include <iostream>
+#include <chrono>
+#include <fstream>
+#include <nlohmann/json.hpp>
 
 namespace {
 using xpu_test::Buffer;
@@ -59,6 +63,94 @@ TEST_CASE("EXL3 W8A8 plan: explicit boundary bounded panel and aligned regions")
   CHECK_THROWS(vt::PlanExl3W8A8(129, 5120, 16384, 2, 5));
   CHECK_THROWS(vt::PlanExl3W8A8(129, 133248, 128, 1, 4));
   CHECK_THROWS(vt::PlanExl3W8A8(4096, 2147483520LL, 2147483520LL, 32767, 6));
+}
+
+TEST_CASE("XPU EXL3 W8A8 P2: real M256 wider panels preserve rounded intermediates") {
+  const char* env = std::getenv("VT_B70_EXL3_W8A8_FIXTURE");
+  if (!env) std::exit(77);
+  const auto f = vllm::SafetensorsFile::Open(env);
+  const auto& tr = f.Get("merged_trellis");
+  const auto& su = f.Get("stacked_suh");
+  const auto& sv = f.Get("merged_svh");
+  const auto& map = f.Get("source_map");
+  const int m = 256, k = int(su.shape[1]), n = int(sv.shape[0]);
+  const int bits = int(tr.shape[2] / 16), groups = int(su.shape[0]);
+  REQUIRE(groups >= 2);
+  REQUIRE(std::memcmp(su.data, su.data + k * 2, k * 2) != 0);
+  std::vector<int32_t> source_map(n / 128);
+  std::memcpy(source_map.data(), map.data, map.nbytes);
+  Queue gpu(vt::DeviceType::kXPU);
+  auto& backend = vt::GetBackend(gpu.q.device);
+  Buffer trellis(gpu.q, DType::kI8, {k / 16, n / 16, 32 * bits});
+  Buffer suh(gpu.q, DType::kF16, {groups, k}), svh(gpu.q, DType::kF16, {n});
+  Buffer mapping(gpu.q, DType::kI32, {n / 128}), input(gpu.q, DType::kF16, {m, k});
+  trellis.upload(tr.data); suh.upload(su.data); svh.upload(sv.data);
+  mapping.upload(map.data); input.upload(f.Get("input_m256").data);
+  std::vector<unsigned char> baseline_output, baseline_workspace;
+  nlohmann::json reports = nlohmann::json::array();
+  for (int width : {128, 1024, 2048}) {
+    CAPTURE(width);
+    const auto p = vt::PlanExl3W8A8(m, k, n, groups, bits, width);
+    Buffer out(gpu.q, DType::kF16, {m, n});
+    Buffer workspace(gpu.q, DType::kI8, {int64_t(p.workspace_bytes)});
+    Buffer panel_storage(gpu.q, DType::kI8, {int64_t(p.weight_panel_bytes + 64)});
+    auto panel = vt::Tensor::Contiguous(panel_storage.tensor.data, DType::kI8, gpu.q.device,
+                                      {k, p.weight_panel_columns});
+    const vt::Exl3GroupedLinearArgs args{bits, 2, "P2_M256", width};
+    std::vector<unsigned char> poison(panel_storage.bytes, 0xcd);
+    panel_storage.upload(poison.data());
+    auto execute = [&] {
+      const auto start = std::chrono::steady_clock::now();
+      vt::Exl3GroupedW8A8(gpu.q, out.tensor, input.tensor, trellis.tensor, suh.tensor,
+          svh.tensor, mapping.tensor, workspace.tensor, panel, args);
+      backend.Synchronize(gpu.q);
+      return std::chrono::duration<double, std::milli>(
+          std::chrono::steady_clock::now() - start).count();
+    };
+    const double cold = execute();
+    const std::vector<double> warm{execute(), execute(), execute()};
+    const auto result = out.download(), scratch = workspace.download(), weights = panel_storage.download();
+    const auto parts = vt::PlanExl3W8A8Panels(source_map, groups, width);
+    // Check the last128 columns of the actual reconstructed tail in its compact
+    // layout, and confirm no store crosses the planned capacity into its guard.
+    const int tail = parts.back().columns;
+    const auto& last = f.Get("last_weight_panel_m256");
+    REQUIRE(last.nbytes == size_t(k) * 128);
+    bool reconstructed_tail_exact = true;
+    for (int row = 0; row < k; ++row)
+      reconstructed_tail_exact &= std::memcmp(weights.data() + size_t(row) * tail + tail - 128,
+                                               last.data + size_t(row) * 128, 128) == 0;
+    CHECK(reconstructed_tail_exact);
+    CHECK(std::all_of(weights.begin() + p.weight_panel_bytes, weights.end(),
+                      [](unsigned char v) { return v == 0xcd; }));
+    bool preparation_exact = true, y_exact = true, output_exact = true;
+    if (width == 128) {
+      baseline_output = result; baseline_workspace = scratch;
+      Accuracy(result, f.Get("output_m256"), "M256_128_control");
+    } else {
+      preparation_exact = std::equal(scratch.begin(), scratch.begin() + p.intermediate_offset,
+                                    baseline_workspace.begin());
+      y_exact = std::equal(scratch.begin() + p.intermediate_offset,
+                          scratch.begin() + p.weight_scale_offset,
+                          baseline_workspace.begin() + p.intermediate_offset);
+      output_exact = result == baseline_output;
+      CHECK(preparation_exact);
+      CHECK(y_exact);
+      CHECK(output_exact);
+    }
+    reports.push_back({{"width", width}, {"panel_count", parts.size()},
+        {"panel_bytes", p.weight_panel_bytes}, {"workspace_bytes", p.workspace_bytes},
+        {"cold_operator_ms", cold}, {"warm_operator_ms", warm},
+        {"preparation_exact", preparation_exact}, {"Y_exact", y_exact},
+        {"output_exact", output_exact}, {"reconstructed_tail_exact", reconstructed_tail_exact}});
+    std::cout << "P2_PANEL_OPERATOR " << reports.back().dump() << '\n';
+  }
+  if (const char* output = std::getenv("VT_B70_EXL3_PANEL_REPORT")) {
+    REQUIRE_FALSE(std::filesystem::exists(output));
+    std::ofstream file(output); file << reports.dump(2) << '\n';
+    REQUIRE(file.good());
+  }
+  CHECK(vt::GetReferenceTierHits() == 0);
 }
 
 TEST_CASE("XPU EXL3 W8A8: real grouped operator boundary large-M and reuse") {
