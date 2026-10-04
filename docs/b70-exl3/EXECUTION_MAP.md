@@ -2558,3 +2558,27 @@ Six phases: auto verifier on, auto verifier off, explicit verifier with flag off
 Buildv1/v2 retained doctest macro compile failures; buildv3 passes but first worker rejects fixture legacy KN projection's F32 V mixed with FP16 K at existing FP8 guard. Fixturev4 transposes its attention Q/K/V to raw NK without changing values, selecting the established FP16 projection output. No product arithmetic or guard changes. Final focused build actualexit0, GPUtest67416/67416 actualexit0. Resources/commands/source/binary identities and all failed attempts retained in the external receipt.
 
 Receipt: /home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p1-model-owner-v1/receipt-v1.json. P1 remains incomplete, automatic verifier remains off. Next full pinned checkpoint C1P4096/O1024 generic/packed emitted-cycle comparison and C4 sentinel. Default D64 four failures, original/full-all-layer-state qualification and P3–P7 remain open.
+
+
+## 137. P1 current full-checkpoint C1/C4 serving gain, with explicit arithmetic/yield differences
+
+Current linked native test binary from a56f9f05d runs one unprofiled generic(auto/verifier0) and one packed(auto/verifier1) trial per scope. Same fixed checkpoint, full2483206bpw targethead, exact65536 draft map, MTP3/page1600/E4M3, graphs, four-sequence capacity, fixed natural prompts/output limits, O32request warmup then cold-prefix reset. Native/original GPU work never overlaps; production remains stopped. This is a bounded P1 comparison, not P7 three-repeat/final32K/mixed/no-MTP qualification.
+
+| Metric | C1 P4096/O1024 generic | C1 packed | C4 P4096/O256 each generic | C4 packed |
+| --- | ---: | ---: | ---: | ---: |
+| Actual emitted decode tok/s | 34.737578 | 45.600420 | 63.591277 | 95.894648 |
+| E2E seconds | 32.874037 | 25.878165 | 33.959830 | 28.936332 |
+| Mean decode cycle ms | 76.684789 | 60.955752 | 145.053620 | 99.018048 |
+| Emitted tokens/decode cycle | 2.664063 | 2.779891 | 8.972727 | 8.972727 |
+| Accepted/proposed | 642/1152 | 656/1104 | 592/1293 | 590/1299 |
+| Graph captures/replays | 2/382 | 2/366 | 3/109 | 2/109 |
+
+C1TTFT3424.632564ms generic/3444.132268ms packed; chunk-observedTPOT28.787269/21.929622ms. C4 uses one common overlap interval for all requests, excludes starting chunk and includes ending chunks: generic944tokens/14.844803374s, packed943tokens/9.833708341s. This is aggregate batch throughput, never per-request tok/s or sum of separate rates. C4TTFTs stagger ~4.34/9.84/13.65/18.00s as the scheduler prefills distinct requests; this prefill/admission cost remains material.
+
+Measured C1decode+31.2712%, E2Eelapsed-21.2808%, mean-cycleelapsed-20.5113%; C4decode+50.7984%, E2Eelapsed-14.7925%, mean-cycleelapsed-31.7369%. Different precision changes native tokens/acceptance, so not an identical-old-native-output speedup: C1 firstgeneric/packed ID difference index446(3165/466); C4 first differences request0 index255(7948/38383),request1 index194(10896/55350), requests2/3 all256same. Generic C1 all1024IDs and every non-timing cycle field exactly match prior norm-workgroup control, isolating P2's prefill effect. Packed C1 still differs from historical pinned Python at index53(2838/561). Historical Python63.334398tok/s remains an earlier measurement, not refreshed here; current packed native28.0005%below it. No original full-worker quality/parity promotion.
+
+Fullmodel focused cases all actualexit0: C1generic1975/1975, C1packed1895/1895, C4generic2316/2316, C4packed2326/2326. A separate eager O8 profile75/75 actualexit0 proves real full-checkpoint route: three prefillcycles have no packed events; each of four Q4target decodecycles has16packed attention calls, with68total including4draft calls. Its8IDs exactly equal packedO1024prefix. Its profiling/eager timing is not a serving score or captured target-cycle metric. Three target prefillchunks still total615.734367ms SiLU and552.616554ms W8A8 row validation. Eager short targetdecode parent59.882760ms/cycle, nested DPAS28.320651ms and GDNspec10.732446ms; parent/nested spans are not additive and these are not graph steady-state values. This supports P3 next and later P4/P5/P6 by refreshed cost.
+
+Combined backend peaks C1arms30294553923B, packedC430576819927B; every arm graphrelease0B. Five12GiB/2CPU workers cgrouppeaks~4.11–4.15GB, swap0, no OOM/limit/CPUthrottle. Buildonly focused relinkactualexit0. Source/binary/commands/prompt/report/modelmetadata/subset/profile/resources and prior pinned identity references retained externally. No weights/driver/power/broadbenchmark changes.
+
+Receipt: /home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p1-model-serving-v1/receipt-v1.json (36548B,SHA25650b076e6c557045f3f9d2a96dc1f4a3639b9c32ecafe96d59f844e96824fa030). Retain bounded P1 implementation and gain evidence; automatic verifier remains opt-in and P1 completeflagfalse pending default admission/original/full-state qualification. Preserve default D64 four failures and global target/servingfalse. Proceed with independent P3 typed contiguous exact FP16 SiLU; P2 boundedcomplete, later P4–P7 pending.

@@ -1640,7 +1640,7 @@
     },
     {
       "task": "P1",
-      "status": "native_C1_C4_operator_graph_and_reduced_model_owner_qualified_full_checkpoint_emittedcycle_pending",
+      "status": "bounded_native_operator_graph_owner_and_full_checkpoint_serving_gain_measured_default_promotion_qualification_open",
       "complete": false,
       "original_capture_exit": 0,
       "host_test_cases_passed": 2,
@@ -1748,7 +1748,20 @@
         "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p1-model-owner-v1/receipt-v1.json",
         "bytes": 16594,
         "sha256": "6698028642583d090f973daa4fe10b0b64f6cad8aafbbf5bfbc8c82bd7f054d3"
-      }
+      },
+      "model_serving_receipt": {
+        "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p1-model-serving-v1/receipt-v1.json",
+        "bytes": 36548,
+        "sha256": "50b076e6c557045f3f9d2a96dc1f4a3639b9c32ecafe96d59f844e96824fa030"
+      },
+      "full_checkpoint_unprofiled_gain_measured": true,
+      "full_checkpoint_C1_generic_decode_tps": 34.7375783826864,
+      "full_checkpoint_C1_packed_decode_tps": 45.60042045802158,
+      "full_checkpoint_C4_generic_common_decode_tps": 63.59127677321569,
+      "full_checkpoint_C4_packed_common_decode_tps": 95.89464801069192,
+      "full_checkpoint_same_old_native_output": false,
+      "full_checkpoint_route_profile_observed": true,
+      "remaining_qualification": "P1 bounded implementation/operator/rawgraph/reduced-model-owner/real-model-serving gain delivered. Auto/default promotion and integrated original/full-state qualification remain open; unchanged frozen default D64 failures. Singletrials, C4O256 sentinel not finalP7 primaryO1024 repetitions."
     },
     {
       "task": "P2",
@@ -1887,5 +1900,5 @@
     }
   ],
   "performance_baseline": "7536aededc049b2157f12eadb0f4cc6bbf29b7b7",
-  "performance_next": "P1 current full pinned EXL3 27B C1 P4096/O1024 generic/packed emitted-cycle comparison and C4 sentinel before automatic promotion. Reduced actual XPU hybrid model owner route/secondcache/page1600-to1664/increasing-context proof passes; not full checkpoint/original state qualification. P2 bounded complete, P3/P4 material next; defaultD64/reference/fullstate gates open."
+  "performance_next": "Independent P3 typed contiguous exact FP16 SiLU (then optional owned finite-domain table only if needed), smallest exhaustive arithmetic/alias/stride and real MLP/GDN21 checks plus operator/model gain. P1 bounded implementation and C1/C4 actual serving gain measured; auto/default promotion/original fullstate gates remainopen. P2 boundedcomplete, P4/P5/P6 afterrefreshed costs, P7 finalmatrix pending."
 }
