@@ -616,7 +616,32 @@
         "bytes": 4252,
         "sha256": "d617aeb68f7ad61247991dd1ff1cf64d62ce4e98805076680c529e6ed9c39d2f"
       },
-      "functional_graph_integration_complete": true
+      "functional_graph_integration_complete": true,
+      "current_short_decode_graph_boundary": {
+        "receipt": {
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/r10-short-decode-boundary-v1/receipt-v3.json",
+          "bytes": 122046,
+          "sha256": "67c879578de09123d3e4b57bad97b510a2206397533a12ca4b2c8b4b7984b01e"
+        },
+        "baseline_eager": "602/602 exit0",
+        "baseline_graph": "901/991 exit1",
+        "baseline_different_state_tensors": 90,
+        "candidate_eager": "602/602 exit0",
+        "candidate_graph": "991/991 exit0",
+        "all12_native_IDs_and96_Conv_SSM_tensors_exact": true,
+        "all_eager_before_after_states_exact": true,
+        "prompt_tokens": 956,
+        "output_tokens": 12,
+        "MTP": false,
+        "slots": 1,
+        "captures": 4,
+        "replays": 7,
+        "released_graph_device_bytes": 0,
+        "current_performance_remeasured": false,
+        "scope": "Real pinned C1 EXL3 GPU graph crossing960-token host short-decode policy threshold; same frozen binary eager/graph. Not broader current-source MTP/batch/prefix qualification.",
+        "target_qualified": false,
+        "serving_qualified": false
+      }
     },
     {
       "task": "R11",

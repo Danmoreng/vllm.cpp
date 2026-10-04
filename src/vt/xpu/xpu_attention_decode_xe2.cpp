@@ -1,5 +1,6 @@
 #include "xpu_common.h"
 #include "xpu_kernels.h"
+#include "vt/paged_attn_route.h"
 #define B70_VERIFY_MASK 1
 #include "csrc/xpu/attn/xe_2/paged_decode.hpp"
 
@@ -46,8 +47,8 @@ bool PagedAttentionXe2DecodeKernel(Queue& q, Tensor& out, const Tensor& query,
       block_table.shape[0] != 1 || block_table.stride[1] != 1 ||
       seq_lens.rank != 1 || seq_lens.dtype != DType::kI32 || seq_lens.Numel() != 1 ||
       query_start_loc.rank != 1 || query_start_loc.dtype != DType::kI32 ||
-      query_start_loc.Numel() != 2 || args.max_seq_len < 1 ||
-      args.max_seq_len > 15 * 64 || block_table.shape[1] < 1 ||
+      query_start_loc.Numel() != 2 ||
+      !PagedAttnXpuShortDecodeBound(args.max_seq_len) || block_table.shape[1] < 1 ||
       !args.causal || args.window_size || args.logits_soft_cap != 0 ||
       args.k_scale != 1.0f || args.v_scale != 1.0f || args.scale != 1.0f / 16 ||
       (reinterpret_cast<uintptr_t>(query.data) & 15) ||
