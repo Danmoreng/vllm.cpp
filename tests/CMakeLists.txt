@@ -80,6 +80,8 @@ function(vllm_cpp_add_test name)
   # returns 77, which today is all but test_voxtral_e2e.
   set_tests_properties(${name} PROPERTIES SKIP_RETURN_CODE 77)
 endfunction()
+
+vllm_cpp_add_test(test_exl3_w8a8_panel_plan vt/test_exl3_w8a8_panel_plan.cpp)
 if(VLLM_CPP_XPU)
   vllm_cpp_add_test(test_xpu_ops vt/test_xpu_ops.cpp)
   vllm_cpp_add_test(test_xpu_graph vt/test_xpu_graph.cpp)
