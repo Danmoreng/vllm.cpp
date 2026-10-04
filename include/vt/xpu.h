@@ -22,6 +22,7 @@ struct MemoryInfo {
   size_t graph_count = 0, graph_nodes = 0;
   size_t graph_device_bytes = 0; // validation buffers plus SYCL-reported graph memory; excludes driver command lists
   size_t w8a8_workspace_bytes = 0; // included in allocated_bytes; eager shared data+panel pool
+  size_t w8a8_preparation_bytes = 0; // included in allocated_bytes; private checked INT8 rows/scales
 };
 int DeviceCount() noexcept;
 MemoryInfo GetMemoryInfo(int index = 0);

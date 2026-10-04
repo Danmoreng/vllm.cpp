@@ -86,6 +86,75 @@ struct ValidateOutputScale {
   }
 };
 
+// Adapt the donor's HadInQ8WgKernel: keep its FP16 register tiles, SLM maximum
+// and quantization order, adding both checked FP16 boundaries. All stores are
+// private until the host has checked the existing two-word status. Bad blocks
+// become finite zeros before narrowing; a bad row uses scale1/inv0, so there
+// is never a float-to-INT8 conversion of NaN, Inf or an out-of-range value.
+template<int TPR, int NB>
+struct PrepareRows {
+  ::exl3::HadInQ8Kernel<sycl::half> input;
+  uint32_t* valid;
+  void operator()(sycl::nd_item<1> it) const SYCL_ESIMD_KERNEL {
+    using namespace sycl::ext::intel::esimd;
+    slm_init<TPR * (sizeof(float) + sizeof(uint32_t))>();
+    const int t = it.get_local_id(0), row = it.get_group(0);
+    const int m = row % input.M, g = row / input.M, blocks = input.Kdim / 128;
+    simd<sycl::half, 128 * NB> buf;
+    simd<float, 128> mx = 0.0f;
+    bool finite = true;
+#pragma unroll
+    for (int j = 0; j < NB; ++j) {
+      const int kb = t + j * TPR;
+      if (kb < blocks) {
+        auto xi = block_load<sycl::half, 128>(input.x + size_t(m) * input.x_stride + kb * 128);
+        auto su = block_load<sycl::half, 128>(input.suh + size_t(g) * input.Kdim + kb * 128);
+        bool block_finite = !((xi.bit_cast_view<uint16_t>() & 0x7c00u) == 0x7c00u).any() &&
+                            !((su.bit_cast_view<uint16_t>() & 0x7c00u) == 0x7c00u).any();
+        auto v = convert<float>(xi) * convert<float>(su);
+        block_finite &= !((v.bit_cast_view<uint32_t>() & 0x7fffffffu) >= 0x477ff000u).any();
+        if (!block_finite) v = 0.0f;
+        simd<sycl::half, 128> product = convert<sycl::half>(v);
+        block_finite &= !((product.bit_cast_view<uint16_t>() & 0x7c00u) == 0x7c00u).any();
+        v = convert<float>(product);
+        ::exl3::fwht128(v);
+        v *= ::exl3::kRsqrt128;
+        block_finite &= !((v.bit_cast_view<uint32_t>() & 0x7fffffffu) >= 0x477ff000u).any();
+        if (!block_finite) v = 0.0f;
+        simd<sycl::half, 128> vh = convert<sycl::half>(v);
+        block_finite &= !((vh.bit_cast_view<uint16_t>() & 0x7c00u) == 0x7c00u).any();
+        if (!block_finite) vh = sycl::half(0.0f);
+        finite &= block_finite;
+        buf.template select<128, 1>(j * 128) = vh;
+        mx = max(mx, abs(convert<float>(vh)));
+      }
+    }
+    slm_scalar_store<float>(t * sizeof(float), hmax<float>(mx));
+    slm_scalar_store<uint32_t>(TPR * sizeof(float) + t * sizeof(uint32_t), finite ? 1u : 0u);
+    barrier();
+    const bool row_finite = (slm_block_load<uint32_t, TPR>(TPR * sizeof(float)) == 1u).all();
+    const float amax = hmax<float>(slm_block_load<float, TPR>(0));
+    const float scale = row_finite && amax > 0.0f ? amax / 127.0f : 1.0f;
+    const float inv = row_finite ? 1.0f / scale : 0.0f;
+    if (t == 0) {
+      input.sx[size_t(g) * input.Ms + m] = scale;
+      if (!row_finite)
+        atomic_update<atomic_op::store, uint32_t, 1>(valid, simd<uint32_t, 1>(0u),
+                                                    simd<uint32_t, 1>(0u));
+    }
+#pragma unroll
+    for (int j = 0; j < NB; ++j) {
+      const int kb = t + j * TPR;
+      if (kb < blocks) {
+        const simd<sycl::half, 128> b = buf.template select<128, 1>(j * 128);
+        const auto rounded = rnde<float>(convert<float>(b) * inv);
+        block_store<int8_t, 128>(input.xq + (size_t(g) * input.Ms + m) * input.Kdim + kb * 128,
+                                 convert<int8_t>(rounded));
+      }
+    }
+  }
+};
+
 template<int Bits>
 void Reconstruct(Queue& q, const Tensor& tr, Tensor& panel, int k, int n,
                  int first_column, int columns) {
@@ -158,32 +227,69 @@ void Exl3GroupedW8A8Kernel(Queue& q, Tensor& out, const Tensor& in, const Tensor
   ::exl3::HadInQ8Kernel<sycl::half> input{
       static_cast<const sycl::half*>(in.data), static_cast<const sycl::half*>(suh.data),
       xq, sx, m, k, groups, k, plan.padded_rows};
-  Launch(q, int64_t(groups) * m * (k / 128), 8, ValidateRows{input, valid},
+  const auto check_status = [&] {
+    std::array<uint32_t, 2> finite{};
+    backend.Copy(q, finite.data(), valid, sizeof(finite));
+    backend.Synchronize(q);
+    VT_CHECK(finite[1], "EXL3 W8A8 requires finite svh");
+    VT_CHECK(finite[0], "EXL3 W8A8 requires finite inputs and finite FP16 transformed rows");
+  };
+  const char* prepare_setting = std::getenv("VT_XPU_W8A8_PREPARE");
+  bool prepared = false;
+  // Exact checked preparation is the default;0 restores the original route.
+  // Unsupported K or insufficient private budget keeps the existing checks.
+  if ((!prepare_setting || std::string_view(prepare_setting) == "1") && k / 128 <= 144) {
+    const size_t qbytes = size_t(groups) * plan.padded_rows * k;
+    const size_t sbytes = size_t(groups) * plan.padded_rows * sizeof(float);
+    prepared = WithExl3W8A8Preparation(q, qbytes + sbytes, [&](void* storage) {
+      auto candidate = input;
+      candidate.xq = static_cast<int8_t*>(storage);
+      candidate.sx = reinterpret_cast<float*>(static_cast<uint8_t*>(storage) + qbytes);
+      NativeQueue(q).memset(candidate.xq, 0, qbytes);
+      NativeQueue(q).parallel_for(sycl::range<1>(size_t(groups) * plan.padded_rows),
+          [=](sycl::id<1> i) { candidate.sx[i[0]] = 1.0f; });
+      if (k / 128 <= 48)
+        Launch(q, int64_t(groups) * m * 8, 8, PrepareRows<8, 6>{candidate, valid},
+               "exl3_w8a8_prepare_checked");
+      else
+        Launch(q, int64_t(groups) * m * 16, 16, PrepareRows<16, 9>{candidate, valid},
+               "exl3_w8a8_prepare_checked");
+      check_status();
+      // Public preparation stays untouched on either validation failure.
+      RecordGraphWrite(q, workspace.data, Span(workspace));
+      const auto qe = NativeQueue(q).memcpy(xq, candidate.xq, qbytes);
+      const auto se = NativeQueue(q).memcpy(sx, candidate.sx, sbytes);
+      RecordProfileEvent(q, "exl3_w8a8_prepared_commit", qe);
+      RecordProfileEvent(q, "exl3_w8a8_prepared_commit", se);
+    });
+  }
+  if (!prepared) {
+    Launch(q, int64_t(groups) * m * (k / 128), 8, ValidateRows{input, valid},
          "exl3_w8a8_validate_rows");
-  std::array<uint32_t, 2> finite{};
-  backend.Copy(q, finite.data(), valid, sizeof(finite));
-  backend.Synchronize(q);
-  // Preserve the previous error priority if both checks fail.
-  VT_CHECK(finite[1], "EXL3 W8A8 requires finite svh");
-  VT_CHECK(finite[0], "EXL3 W8A8 requires finite inputs and finite FP16 transformed rows");
+    check_status();
+  }
 
   for (const Tensor* t : {&out, &workspace, &panel}) RecordGraphWrite(q, t->data, Span(*t));
   // Poison/stale padding is never consumed by GEMM. The active producer writes
   // every byte of each real row. For zero rows its exact fallback is scale1.
-  NativeQueue(q).memset(xq, 0, size_t(groups) * plan.padded_rows * k);
-  NativeQueue(q).parallel_for(sycl::range<1>(size_t(groups) * plan.padded_rows),
+  if (!prepared) {
+    NativeQueue(q).memset(xq, 0, size_t(groups) * plan.padded_rows * k);
+    NativeQueue(q).parallel_for(sycl::range<1>(size_t(groups) * plan.padded_rows),
                             [=](sycl::id<1> i) { sx[i[0]] = 1.0f; });
+  }
   NativeQueue(q).single_task([=] { *sw = 3.453125f / 127.0f; });
-  if (k / 128 <= 48) {
-    ::exl3::HadInQ8WgKernel<sycl::half, 8, 6> had{
-        input.x, input.suh, xq, sx, m, k, groups, k, plan.padded_rows};
-    Launch(q, int64_t(groups) * m * 8, 8, had, "exl3_w8a8_input_quantize");
-  } else if (k / 128 <= 144) {
-    ::exl3::HadInQ8WgKernel<sycl::half, 16, 9> had{
-        input.x, input.suh, xq, sx, m, k, groups, k, plan.padded_rows};
-    Launch(q, int64_t(groups) * m * 16, 16, had, "exl3_w8a8_input_quantize");
-  } else {
-    Launch(q, int64_t(groups) * m, 8, input, "exl3_w8a8_input_quantize");
+  if (!prepared) {
+    if (k / 128 <= 48) {
+      ::exl3::HadInQ8WgKernel<sycl::half, 8, 6> had{
+          input.x, input.suh, xq, sx, m, k, groups, k, plan.padded_rows};
+      Launch(q, int64_t(groups) * m * 8, 8, had, "exl3_w8a8_input_quantize");
+    } else if (k / 128 <= 144) {
+      ::exl3::HadInQ8WgKernel<sycl::half, 16, 9> had{
+          input.x, input.suh, xq, sx, m, k, groups, k, plan.padded_rows};
+      Launch(q, int64_t(groups) * m * 16, 16, had, "exl3_w8a8_input_quantize");
+    } else {
+      Launch(q, int64_t(groups) * m, 8, input, "exl3_w8a8_input_quantize");
+    }
   }
 
   const auto weight_scale = Tensor::Contiguous(sw, DType::kF32, q.device, {1});

@@ -31,6 +31,9 @@ bool WithExl3Workspace(Queue& q, size_t bytes, const std::function<void(void*)>&
 // Eager-only growable W8A8 workspace plus panel, accounted once per device.
 // Completes every consumer before reuse/growth or another queue's lease.
 bool WithExl3W8A8Workspace(Queue& q, size_t bytes, const std::function<void(void*)>& launch);
+// Separate eager-only private preparation, at most64 MiB per context. False
+// means the caller should retain its original checked preparation route.
+bool WithExl3W8A8Preparation(Queue& q, size_t bytes, const std::function<void(void*)>& launch);
 bool WithGdnWorkspace(Queue& q, size_t bytes, const std::function<void(void*)>& launch);
 bool WithGdnNativeWorkspace(Queue& q, size_t bytes, const std::function<void(void*)>& launch);
 bool WithAttentionWorkspace(Queue& q, size_t bytes, const std::function<void(void*)>& launch);

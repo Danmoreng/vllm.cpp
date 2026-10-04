@@ -134,7 +134,7 @@ struct Context {
   sycl::device device;
   sycl::context context;
   std::mutex mutex;
-  Workspace exl3, gdn, attention, sampling, native_gdn, w8a8;
+  Workspace exl3, gdn, attention, sampling, native_gdn, w8a8, w8a8_preparation;
   std::unordered_map<sycl::queue*, std::unique_ptr<sycl::queue>> queues;
   std::vector<PendingProfileEvent> profile_events;
   std::vector<HostProfileRecord> host_profile_records;
@@ -770,6 +770,7 @@ MemoryInfo GetMemoryInfo(int index) {
   info.attention_workspace_bytes = c.attention.bytes;
   info.sampling_workspace_bytes = c.sampling.bytes;
   info.w8a8_workspace_bytes = c.w8a8.bytes;
+  info.w8a8_preparation_bytes = c.w8a8_preparation.bytes;
   info.peak_allocated_bytes = c.peak_allocated;
   info.graph_count = c.graphs.size(); info.graph_nodes = c.graph_nodes;
   info.graph_device_bytes = c.graph_bytes;
@@ -834,11 +835,12 @@ bool WithExl3Workspace(Queue& q, size_t bytes, const std::function<void(void*)>&
   return WithWorkspace(q, GetContext(q.device.index).exl3, 1,
                        "workspace_wait_exl3", bytes, launch);
 }
-bool WithExl3W8A8Workspace(Queue& q, size_t bytes, const std::function<void(void*)>& launch) {
+namespace {
+bool WithEagerW8A8Workspace(Queue& q, Workspace& workspace, size_t bytes,
+                           const std::function<void(void*)>& launch, const char* wait_stage) {
   VT_CHECK(bytes > 0, "XPU W8A8 workspace must be nonempty");
   auto& native = NativeQueue(q);
   auto& c = GetContext(q.device.index);
-  auto& workspace = c.w8a8;
   std::lock_guard execution(workspace.mutex);
   {
     std::lock_guard lock(c.mutex);
@@ -870,12 +872,22 @@ bool WithExl3W8A8Workspace(Queue& q, size_t bytes, const std::function<void(void
     // can safely retire all validation, oneDNN and output-Hadamard consumers.
     const auto start = HostProfileEnabled() ? SteadyNs() : 0;
     native.wait_and_throw();
-    if (start) RecordHostProfileSpan(q, "workspace_wait_w8a8", start, SteadyNs());
+    if (start) RecordHostProfileSpan(q, wait_stage, start, SteadyNs());
   } catch (...) {
     try { native.wait_and_throw(); } catch (...) {}
     throw;
   }
   return true;
+}
+} // namespace
+bool WithExl3W8A8Workspace(Queue& q, size_t bytes, const std::function<void(void*)>& launch) {
+  return WithEagerW8A8Workspace(q, GetContext(q.device.index).w8a8, bytes, launch,
+                                "workspace_wait_w8a8");
+}
+bool WithExl3W8A8Preparation(Queue& q, size_t bytes, const std::function<void(void*)>& launch) {
+  if (bytes > 64 * 1024 * 1024) return false;
+  return WithEagerW8A8Workspace(q, GetContext(q.device.index).w8a8_preparation, bytes, launch,
+                                "workspace_wait_w8a8_preparation");
 }
 bool WithGdnWorkspace(Queue& q, size_t bytes, const std::function<void(void*)>& launch) {
   VT_CHECK(bytes > 0 && bytes <= 32 * 1024 * 1024, "XPU GDN workspace exceeds 32 MiB budget");
