@@ -3094,3 +3094,24 @@ Native7786/7786 each/actualexit0. All4096IDs/all419semanticcycles exact across3r
 Native devicepeak30594824375B/graphrelease0 each; original peakallocated27960091648B. Actual cgroup peaks native4.11–4.13GB/original6.53–6.63GB; all6swap0/no memory-limit/OOM events. Whole-worker CPU throttle native0, original66/70/81periods include startup, no timed-interval cause inferred. All worker exits/logs/commands/resolved configs/inputs/model-source/build/binary/resource/per-request/continuation identities and recomputable comparisons: /home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p7-final-matrix-v1/C4-comparison-v1.json (557378B,SHA256b4ef57b6b7be6f6722bbbe7fe1b903428378189166489cac70e2213562986f6d); all625artifacts+3related identities verified. Additional original maxdrafts/native target-request counts above are direct maxima of the hash-verified raw frontend spec statistics/cycle positions. Prepared10remaining one-shot command/tool identities are included, none executed yet. Production inactive, onlychatui after completion.
 
 Both final primary C1/C4 three repeats per engine now delivered. Commit/immediatepush under standing authorization. P7/goal remain active/incomplete; next prepared current C1/C4 no-MTP, C1/C4 32K and proper mixed4K/32K sentinels once per engine, then prefix32K/native with original fixture check. DefaultD64 four failures, all-layer state/reference/P1 automatic admission and C1 speed gap remain open. Broader performance qualification not promoted by the C4 total-latency win.
+
+
+## 162. P7 final current no-MTP C1/C4 sentinels: target-only path measured
+
+Unchanged product7feb68781/frozen final SLM binary. One quiet sentinel per engine for C1/C4 P4096/O256each, actualMTP0/page1600/maxcontext262144/maxseq4/180blocks, full2483206bpw target/F16 activations/F32SSM/FP8KV. Original physical block1600 explicitly held when removing speculation (automatic page otherwise changes). O32request warmup/cold-prefix reset; sequential O-C1/N-C1/N-C4/O-C4, both24GiB host/no swap/CPU2. Actual launch/root config depth0, accepted/proposed0 in all4; no draft work inferred or scored.
+
+| Metric | Native | Original |
+|---|---|---|
+|C1 emitted decode tok/s|26.331332|29.494756|
+|C1 TTFT ms|2269.819695|1907.444038|
+|C1 E2E s|11.954127443|10.553060504|
+|C4 all1024 emitted tokens E2E s|35.301705713|42.498134494|
+|C4 actual common-fourway decode tok/s|66.325663|No common-fourway interval|
+
+C1 decode-10.72538%, TTFT+18.99797%, E2E+13.27640%; C4 E2E-16.93352%. NativeC4 observed4overlapping emission intervals/988chunk tokens within the common interval, original1/serial; no sum of request rates or like-for-like fourway original kernel score. Full per-request/chunk TPOT/pauses/cold positions/overlap/graph/cycle accounting retained. Native mean C1 target-only decodecycle37.972423ms; original frontend steps not GPU target-cycle timings. Comparing these different-token sentinels with primary MTP3 is not an isolated draft-cost or acceptance causal proof.
+
+NativeC1 assertions1354/1354, C4 5335/5335, all4actualexit0. All256/1024native IDs and258/266non-timecycles exact prior retained M0 alignment source, despite intervening table/map/SLM changes; not a new original full-state proof. Original/native first differences: C1 at index0; C4 requests0/1/2/3 at134/24/124/3. Autonomous mode comparison against primaryR1: nativeC1 MTP0/MTP3 first differs at53, original at0; nativeC4 at255/41/177/3, originalC4 at48/2/3/3. These maxima/differences are direct comparisons of hash-verified raw IDs. Neither native same-mode determinism nor original variation proves higher/lower numerical accuracy or ideal cross-mode target-distribution parity. Causes remain unproved; reference/all-layer-state gates remain explicit.
+
+Native devicepeaks27323521636B C1/27355196820B C4, graphrelease0; original26840728576B both. Native cgroup peaks3.85GB/original6.50–6.56GB, all4swap0/no memory-limit/OOM. Whole-worker CPU throttle native0/original66/52periods include startup, no score-interval attribution. Exact frozen original no-MTP tool/current native source-build/binary/input/actual command/config/resource/per-request/ID/cycle evidence and recomputable comparison: /home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p7-final-matrix-v1/no-MTP-comparison-v1.json (338189B,SHA256f916ea62f3f25aaf8840efc2c6d1b2cab3d34e930d4dd1b64907aaee145275ca); all648artifacts+4related+2prior native raw identities (654total) independently verified. Production inactive, onlychatui aftercompletion.
+
+Commit/immediatepush under standing authorization. P7/goal active/incomplete. Primary C1/C4 repetitions and no-MTP sentinels delivered; next C1/C4 32K and proper mixed4K/32K sentinels, prefix32K/native plus original fixture check. DefaultD64 four failures, all-layer state/reference/P1 automatic admission and C1 speed gap remain open; no numerical/serving qualification promotion from these timings.

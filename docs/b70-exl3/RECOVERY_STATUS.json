@@ -2916,7 +2916,7 @@
           "sha256": "3da49f66c6730614433e01fb429bc9c4e89d00c1f88a01982534334261bf9c7e"
         }
       },
-      "next": "Execute prepared final one-shot C1/C4 no-MTP, C1/C4 32K and proper4K/32K mixed original/native sentinels with comparable24GiB/no-swap limits, then current prefix32K/native plus original fixture check. C1/C4 planned3quiet repetitions each complete; no extra primary repeats unless a later retained product change or unresolved regression warrants them. DefaultD64 four failures, all-layer state/reference/P1 automatic admission remain open.",
+      "next": "Execute prepared final one-shot C1/C4 32K and proper4K/32K mixed original/native sentinels at24GiB/no swap, then current prefix32K/native plus original fixture check. Primary C1/C4 3repeats and C1/C4 no-MTP one-shot matrix cases complete. Preserve observed MTP0/MTP3 continuation differences; no source/threshold/reference promotion. DefaultD64 four failures, all-layer state/reference/P1 automatic admission and C1 speed gap remain open.",
       "current_quality": {
         "practical_tasks": 8,
         "practical_passed": 8,
@@ -4591,9 +4591,348 @@
           ]
         ],
         "resource_scope": "All6actualexit0, both24GiB/no swap/CPU2/no memory-limit/OOM. Native whole-worker CPU throttle0; original66/70/81 periods include startup, no timed-interval-only attribution."
+      },
+      "final_current_no_MTP": {
+        "comparisons": [
+          {
+            "case": "c1",
+            "original_native_first_differences": {
+              "request-0": {
+                "index": 0,
+                "native": 6374,
+                "original": 760
+              }
+            },
+            "native_E2E_change_percent": 13.276403925408275,
+            "original_common_decode_overlap_available": true,
+            "scope": "One quiet warmed sentinel per engine, not primary three-repeat qualification. No speculative proposals/draft work. Autonomous differing continuations retained.",
+            "native_emitted_decode_gap_percent": -10.725377360521849,
+            "native_TTFT_change_percent": 18.997970571640277
+          },
+          {
+            "case": "c4",
+            "original_native_first_differences": {
+              "request-0": {
+                "index": 134,
+                "native": 948,
+                "original": 9799
+              },
+              "request-1": {
+                "index": 24,
+                "native": 6868,
+                "original": 37452
+              },
+              "request-2": {
+                "index": 124,
+                "native": 7578,
+                "original": 50558
+              },
+              "request-3": {
+                "index": 3,
+                "native": 55287,
+                "original": 6353
+              }
+            },
+            "native_E2E_change_percent": -16.933516886530732,
+            "original_common_decode_overlap_available": false,
+            "scope": "One quiet warmed sentinel per engine, not primary three-repeat qualification. No speculative proposals/draft work. Autonomous differing continuations retained."
+          }
+        ],
+        "native_continuity": [
+          {
+            "case": "c1",
+            "all_native_IDs_and_non_timing_cycles_exact_prior": true,
+            "ID_count": 256,
+            "cycle_count": 258,
+            "prior_raw": {
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p7-no-mtp-align-v1/c1-native-262k-v1.json",
+              "bytes": 184401,
+              "sha256": "548346866c8141405fcd69cf2f98ead06c2bb3e5efac2e72828d56285ceaa6ca"
+            }
+          },
+          {
+            "case": "c4",
+            "all_native_IDs_and_non_timing_cycles_exact_prior": true,
+            "ID_count": 1024,
+            "cycle_count": 266,
+            "prior_raw": {
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p7-no-mtp-align-v1/c4-native-262k-v1.json",
+              "bytes": 467545,
+              "sha256": "f590f7e8bfe7b8afd7377cfa491aadeb5f63223d3bff64ba1e8b827b0fb1fbd4"
+            }
+          }
+        ],
+        "scope": "Current unchanged7feb68781 product, C1/C4 P4096/O256each target-only MTP0, page1600/maxcontext262144/180blocks, maxseq4; O32warmup/cold-prefix reset, both24GiB/no swap/CPU2. Original physical block1600 explicitly held when removing speculation. One sentinel each, sequential O-C1/N-C1/N-C4/O-C4. Actual frontend emission intervals; no original fourway decode rate if serial. Preserve full6bpw248320 target/FP16/FP32state/FP8KV. No isolated target-cycle original timing or quality/accuracy/reference/automatic admission promotion.",
+        "No_MTP_sentinels_complete": true,
+        "P7_complete": false,
+        "qualification_promoted": false,
+        "records": [
+          {
+            "stem": "c1-m0-native-v1",
+            "assertions": {
+              "total": 1354,
+              "passed": 1354,
+              "failed": 0
+            },
+            "mtp_depth": 0,
+            "accepted": 0,
+            "proposed": 0,
+            "end_to_end_wall_s": 11.954127443,
+            "common_decode_overlap": {
+              "start_s": 2.269840415,
+              "end_s": 11.954120763,
+              "emitted_tokens": 255,
+              "aggregate_emitted_tokens_per_s": 26.331331894234417,
+              "boundary_policy": "exclude start, include end; whole emitted chunks only"
+            },
+            "per_request": {
+              "request-0": {
+                "prompt_tokens": 4096,
+                "emitted_tokens": 256,
+                "ttft_ms": 2269.8196949999997,
+                "tpot_ms": 37.97756999215687,
+                "longest_observed_streaming_pause_ms": 38.185379999999824,
+                "end_to_end_ms": 11954.100043,
+                "token_timestamp_granularity": "one timestamp per emitted frontend chunk"
+              }
+            },
+            "cycles": 258,
+            "mean_decode_cycle_ms": 37.972422933333384,
+            "max_overlapping_decode_emission_intervals": 1,
+            "resource_summary": {
+              "actual_exit": 0,
+              "cgroup_peak_bytes": 3853426688,
+              "CPU_throttled_periods": 0
+            },
+            "memory_peak_bytes": 27323521636
+          },
+          {
+            "stem": "c1-m0-original-v1",
+            "assertions": null,
+            "mtp_depth": 0,
+            "accepted": 0,
+            "proposed": 0,
+            "end_to_end_wall_s": 10.553060503996676,
+            "common_decode_overlap": {
+              "start_s": 1.9074452579952776,
+              "end_s": 10.553049994021421,
+              "emitted_tokens": 255,
+              "aggregate_emitted_tokens_per_s": 29.494755749984463,
+              "boundary_policy": "exclude start, include end; whole emitted chunks only"
+            },
+            "per_request": {
+              "request-0": {
+                "prompt_tokens": 4096,
+                "emitted_tokens": 256,
+                "ttft_ms": 1907.4440379918087,
+                "tpot_ms": 33.90433229814174,
+                "longest_observed_streaming_pause_ms": 35.17734201159328,
+                "end_to_end_ms": 10553.048774017952,
+                "token_timestamp_granularity": "one timestamp per emitted frontend chunk"
+              }
+            },
+            "cycles": null,
+            "mean_decode_cycle_ms": null,
+            "max_overlapping_decode_emission_intervals": 1,
+            "resource_summary": {
+              "actual_exit": 0,
+              "cgroup_peak_bytes": 6558887936,
+              "CPU_throttled_periods": 66
+            },
+            "memory_peak_bytes": 26840728576
+          },
+          {
+            "stem": "c4-m0-native-v1",
+            "assertions": {
+              "total": 5335,
+              "passed": 5335,
+              "failed": 0
+            },
+            "mtp_depth": 0,
+            "accepted": 0,
+            "proposed": 0,
+            "end_to_end_wall_s": 35.301705713,
+            "common_decode_overlap": {
+              "start_s": 19.999282872,
+              "end_s": 34.89547774,
+              "emitted_tokens": 988,
+              "aggregate_emitted_tokens_per_s": 66.32566294647644,
+              "boundary_policy": "exclude start, include end; whole emitted chunks only"
+            },
+            "per_request": {
+              "request-0": {
+                "prompt_tokens": 4096,
+                "emitted_tokens": 256,
+                "ttft_ms": 2965.050839,
+                "tpot_ms": 125.2172758862745,
+                "longest_observed_streaming_pause_ms": 2680.4485930000014,
+                "end_to_end_ms": 34895.45619,
+                "token_timestamp_granularity": "one timestamp per emitted frontend chunk"
+              },
+              "request-1": {
+                "prompt_tokens": 4096,
+                "emitted_tokens": 256,
+                "ttft_ms": 9333.847802999999,
+                "tpot_ms": 100.89923910980393,
+                "longest_observed_streaming_pause_ms": 2680.4485930000014,
+                "end_to_end_ms": 35063.153776,
+                "token_timestamp_granularity": "one timestamp per emitted frontend chunk"
+              },
+              "request-2": {
+                "prompt_tokens": 4096,
+                "emitted_tokens": 256,
+                "ttft_ms": 14213.502208,
+                "tpot_ms": 82.21821040392156,
+                "longest_observed_streaming_pause_ms": 2680.4485930000014,
+                "end_to_end_ms": 35179.145861000005,
+                "token_timestamp_granularity": "one timestamp per emitted frontend chunk"
+              },
+              "request-3": {
+                "prompt_tokens": 4096,
+                "emitted_tokens": 256,
+                "ttft_ms": 19998.924312,
+                "tpot_ms": 60.00947302352943,
+                "longest_observed_streaming_pause_ms": 61.25424599999718,
+                "end_to_end_ms": 35301.339933,
+                "token_timestamp_granularity": "one timestamp per emitted frontend chunk"
+              }
+            },
+            "cycles": 266,
+            "mean_decode_cycle_ms": 60.000129415686395,
+            "max_overlapping_decode_emission_intervals": 4,
+            "resource_summary": {
+              "actual_exit": 0,
+              "cgroup_peak_bytes": 3854229504,
+              "CPU_throttled_periods": 0
+            },
+            "memory_peak_bytes": 27355196820
+          },
+          {
+            "stem": "c4-m0-original-v1",
+            "assertions": null,
+            "mtp_depth": 0,
+            "accepted": 0,
+            "proposed": 0,
+            "end_to_end_wall_s": 42.49813449400244,
+            "common_decode_overlap": null,
+            "per_request": {
+              "request-0": {
+                "prompt_tokens": 4096,
+                "emitted_tokens": 256,
+                "ttft_ms": 1906.4066679857206,
+                "tpot_ms": 34.0829816353553,
+                "longest_observed_streaming_pause_ms": 35.164537985110655,
+                "end_to_end_ms": 10597.566985001322,
+                "token_timestamp_granularity": "one timestamp per emitted frontend chunk"
+              },
+              "request-1": {
+                "prompt_tokens": 4096,
+                "emitted_tokens": 256,
+                "ttft_ms": 12511.319482000545,
+                "tpot_ms": 34.158389741102894,
+                "longest_observed_streaming_pause_ms": 35.62599897850305,
+                "end_to_end_ms": 21221.708865981782,
+                "token_timestamp_granularity": "one timestamp per emitted frontend chunk"
+              },
+              "request-2": {
+                "prompt_tokens": 4096,
+                "emitted_tokens": 256,
+                "ttft_ms": 23137.597085005837,
+                "tpot_ms": 34.142964384313125,
+                "longest_observed_streaming_pause_ms": 35.40216799592599,
+                "end_to_end_ms": 31844.053003005683,
+                "token_timestamp_granularity": "one timestamp per emitted frontend chunk"
+              },
+              "request-3": {
+                "prompt_tokens": 4096,
+                "emitted_tokens": 256,
+                "ttft_ms": 33760.431925999,
+                "tpot_ms": 34.262144858903234,
+                "longest_observed_streaming_pause_ms": 35.447378002572805,
+                "end_to_end_ms": 42497.278865019325,
+                "token_timestamp_granularity": "one timestamp per emitted frontend chunk"
+              }
+            },
+            "cycles": null,
+            "mean_decode_cycle_ms": null,
+            "max_overlapping_decode_emission_intervals": 1,
+            "resource_summary": {
+              "actual_exit": 0,
+              "cgroup_peak_bytes": 6504714240,
+              "CPU_throttled_periods": 52
+            },
+            "memory_peak_bytes": 26840728576
+          }
+        ],
+        "receipt": {
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p7-final-matrix-v1/no-MTP-comparison-v1.json",
+          "bytes": 338189,
+          "sha256": "f916ea62f3f25aaf8840efc2c6d1b2cab3d34e930d4dd1b64907aaee145275ca"
+        },
+        "MTP0_vs_MTP3_first_differences": {
+          "c1_native": {
+            "request-0": {
+              "index": 53,
+              "MTP0": 561,
+              "MTP3": 2838
+            }
+          },
+          "c1_original": {
+            "request-0": {
+              "index": 0,
+              "MTP0": 760,
+              "MTP3": 6374
+            }
+          },
+          "c4_native": {
+            "request-0": {
+              "index": 255,
+              "MTP0": 7948,
+              "MTP3": 38383
+            },
+            "request-1": {
+              "index": 41,
+              "MTP0": 2919,
+              "MTP3": 1024
+            },
+            "request-2": {
+              "index": 177,
+              "MTP0": 804,
+              "MTP3": 21099
+            },
+            "request-3": {
+              "index": 3,
+              "MTP0": 55287,
+              "MTP3": 13159
+            }
+          },
+          "c4_original": {
+            "request-0": {
+              "index": 48,
+              "MTP0": 6761,
+              "MTP3": 39666
+            },
+            "request-1": {
+              "index": 2,
+              "MTP0": 725,
+              "MTP3": 14217
+            },
+            "request-2": {
+              "index": 3,
+              "MTP0": 13159,
+              "MTP3": 6353
+            },
+            "request-3": {
+              "index": 3,
+              "MTP0": 6353,
+              "MTP3": 13159
+            }
+          }
+        },
+        "mode_consistency_scope": "Actual autonomous MTP0/MTP3 continuations differ in both engines; native same-mode repeats/old-source continuity are not ideal target-distribution or mode-parity proofs. Cause unproved; cross-mode identical-input probability/all-layer-state qualification remains separate."
       }
     }
   ],
   "performance_baseline": "7536aededc049b2157f12eadb0f4cc6bbf29b7b7",
-  "performance_next": "Execute prepared final one-shot C1/C4 no-MTP, C1/C4 32K and proper4K/32K mixed original/native sentinels with comparable24GiB/no-swap limits, then current prefix32K/native plus original fixture check. C1/C4 planned3quiet repetitions each complete; no extra primary repeats unless a later retained product change or unresolved regression warrants them. DefaultD64 four failures, all-layer state/reference/P1 automatic admission remain open."
+  "performance_next": "Execute prepared final one-shot C1/C4 32K and proper4K/32K mixed original/native sentinels at24GiB/no swap, then current prefix32K/native plus original fixture check. Primary C1/C4 3repeats and C1/C4 no-MTP one-shot matrix cases complete. Preserve observed MTP0/MTP3 continuation differences; no source/threshold/reference promotion. DefaultD64 four failures, all-layer state/reference/P1 automatic admission and C1 speed gap remain open."
 }
