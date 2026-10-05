@@ -6274,9 +6274,39 @@
           "C4 original has serial emission; native shorter E2E is not like-for-like four-way GPU kernel parity. Prefix functional driver lacks matched serving timing."
         ],
         "scope": "All eight bounded serving/prefix cases and lifecycle have current046ece2df binary evidence. Fresh primary originals3each; unchanged executed original sentinel controls explicitly reused with pinned identities. Mixed/C4-32K/lifecycle current identical binary results reused, no reporting-only reruns. Profiles excluded from speed scores. Complete matrix coverage is not full numerical/state/default-route qualification or speed parity."
+      },
+      "two_heldout_all_GDN_state_proof": {
+        "receipt": {
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p7-heldout-state-v1/receipt-v1.json",
+          "bytes": 546649,
+          "sha256": "0543f801dc78769f3dc4a10716a079803805fc173dd0e08c8e6e0e6c5e86a98d"
+        },
+        "verified_identities": 731,
+        "product_arithmetic_changed": false,
+        "host_unit_tests": 21,
+        "native_GPU_assertions_each": 4228,
+        "original_native_successful_actual_exits_each": 0,
+        "heldout_prefixes": 2,
+        "GDN_layers_each": 48,
+        "boundaries": [
+          "P128after",
+          "D1before",
+          "D1after"
+        ],
+        "all288Conv_and288SSM_arrays_exact_original": true,
+        "full_four248320_logit_rows_exact_after_F32_widening": true,
+        "SSM_declared_pointwise_band": "abs(native-original)<=1e-5+1e-4*abs(original)",
+        "pointwise_failures": 0,
+        "retained_failure": "Original-A-v1 exit1: observer incorrectly required native Conv layout[10240,3] instead of actual original[3,10240]. Original-v2 preserves physical original layout; native consumer exports explicit canonical transpose. No arithmetic or fixture-value replacement.",
+        "all_swap_peaks_and_memory_limit_OOM_events_zero": true,
+        "scope": "Two unchanged frozen performance prompt first128-token prefixes, distinct from original synthetic prefix and never used to tune BA/SiLU rounding. Original eager no-MTP controlled deterministic policy scoped only within actual48FP16 unquantized BA forwards, not original default oracle. Read-only hooks copy only initialized active states; cold unconsumed seeds explicitly excluded. Native independent poisoned five-slot caches/active4, teacher-forced original token prefix only, FP16 body/full6bpw head/F32 recurrent/FP8KV. Full48GDN produced P128 state and before/after D1, complete arrays compared. BeforeD1 repeats the previous final state witness; value counts are comparisons, not independent samples. Native page1600, original retained eager target-capture profile/cache layout; this is bounded state arithmetic proof, not MTP3/C4/long-context qualification or serving speed. Does not observe all16initialized attention KV caches and does not independently justify/approve default BA reference-contract promotion.",
+        "default_reference_promoted": false,
+        "full_all_layer_state_qualified": false,
+        "automatic_verifier_enabled": false,
+        "P7_complete": false
       }
     }
   ],
   "performance_baseline": "7536aededc049b2157f12eadb0f4cc6bbf29b7b7",
-  "performance_next": "Current046ece2df bounded matrix (all8serving/prefix cases plus lifecycle), current practical/draft/default-controlled quality and short primary profile complete with integrated receipt; no duplicate benchmark campaign. Next close an actual open state/reference dependency: bounded all-GDN-state original/native P128+D1 proof on two held-out frozen prefixes under separately named controlled BA policy, preserve default oracle/four failures; inspect capture/consumer support before scoped code change. Full-state/reference/P1 automatic qualification and primary speed gap remain open, goalactive."
+  "performance_next": "Current046ece2df matrix/current quality/profile complete; two held-out P128+D1 full48GDN Conv/SSM states and fullhead outputs exact controlled original, current diagnostics/tools/tests delivered without product arithmetic change. Next close remaining actual state dependency: bounded initialized active KV observations/comparison for all16 attention layers at these same contexts, not a new speed campaign. Then independently justify/present default-vs-controlled BA reference contract and integrated verifier/MTP/batch qualification. Default four failures, P1 automatic promotion and primary speed gap remain open; goalactive."
 }

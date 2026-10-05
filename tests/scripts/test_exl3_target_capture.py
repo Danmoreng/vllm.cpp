@@ -16,9 +16,44 @@ from compare_target import compare_row, write_comparison_report, parse_args
 from capture_block import select_gdn_layer
 from capture_gdn import block_layer_index
 from capture_target import validate_gdn_history, selected_boundary_phase
+from capture_target import load_prompt, validate_all_gdn_states, all_target_gdn_layers
 
 
 class TargetCaptureTest(unittest.TestCase):
+    def test_held_out_prompt_preserves_legacy_and_rejects_unbounded_inputs(self):
+        self.assertEqual(load_prompt(None), [1000 + (i * 37) % 4096 for i in range(128)])
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "prompt.json"
+            ids = list(range(128))
+            path.write_text(json.dumps({"prompt_token_ids": ids}))
+            self.assertEqual(load_prompt(path), ids)
+            for invalid in (ids[:-1], ids + [128], [-1] + ids[1:], [248320] + ids[1:],
+                            [True] + ids[1:], ["1"] + ids[1:], {"count": 128}):
+                path.write_text(json.dumps({"prompt_token_ids": invalid}))
+                with self.assertRaises(ValueError): load_prompt(path)
+
+    def test_all_gdn_state_scope_and_complete_target_selection(self):
+        validate_all_gdn_states(1, -1, -1, False, True)
+        validate_all_gdn_states(64, -1, -1, False, False)
+        for steps, block, detail, history, enabled in [(64, -1, -1, False, True),
+                (29, 29, 21, True, True), (1, 29, -1, False, True),
+                (1, -1, 1, False, True), (1, -1, -1, True, True),
+                (1, -1, -1, False, 1)]:
+            with self.assertRaises(ValueError):
+                validate_all_gdn_states(steps, block, detail, history, enabled)
+        modules = {f"language_model.model.layers.{i}": SimpleNamespace(
+            layer_type="full_attention" if i % 4 == 3 else "linear_attention")
+            for i in reversed(range(64))}
+        modules["draft.layers.0"] = SimpleNamespace(layer_type="linear_attention")
+        self.assertEqual([i for i, _ in all_target_gdn_layers(modules, "language_model.model.layers.0")],
+                         [i for i in range(64) if i % 4 != 3])
+        modules["language_model.model.layers.63"].layer_type = "linear_attention"
+        with self.assertRaises(ValueError):
+            all_target_gdn_layers(modules, "language_model.model.layers.0")
+        del modules["language_model.model.layers.63"]
+        with self.assertRaises(ValueError):
+            all_target_gdn_layers(modules, "language_model.model.layers.0")
+
     def test_early_boundaries_stop_at_gdn21_and_preserve_d29_selection(self):
         for index in range(64):
             self.assertEqual(selected_boundary_phase(29, index, 29, False), "d29")
