@@ -148,6 +148,15 @@ KVCacheCoordinator::KVCacheCoordinator(KVCacheConfig kv_cache_config,
       eagle_group_ids.insert(static_cast<int>(i));
     }
   }
+  // Shared EXL3 MTP KV uses the target group's physical page identities.
+  // Draft prefill shifts input IDs by one, so the final draft KV of a hashed
+  // page depends on the next token. Apply the existing last-hit-page drop
+  // before choosing the joint attention/recurrent restore boundary.
+  // Keep the target layer-name discriminator unchanged: is_eagle_group also
+  // identifies draft-only storage during layer-name expansion.
+  if (this->kv_cache_config.mtp_draft_shares_target_pages) {
+    eagle_group_ids.insert(0);
+  }
   // Conservatively fall back to flag all groups when no group is flagged.
   if (use_eagle && eagle_group_ids.empty()) {
     for (std::size_t i = 0; i < this->kv_cache_config.kv_cache_groups.size();

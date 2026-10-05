@@ -118,7 +118,7 @@ class ServingTimingWorker:
                 "host_peak_rss_bytes": resource.getrusage(resource.RUSAGE_SELF).ru_maxrss * 1024}
 
 
-def drive(engine, specs, sampling_factory, warmup=False):
+def drive(engine, specs, sampling_factory, warmup=False, allow_prefix_hits=False):
     """Actual emitted feedback/arrival policy; no reference token injection."""
     traces, emitted, finished, ids = {}, {}, set(), {}
     batches, stats = [], []
@@ -171,7 +171,12 @@ def drive(engine, specs, sampling_factory, warmup=False):
                 key = ids[output.request_id]
                 trace = traces[key]
                 assert output.prompt_token_ids == trace["prompt_ids"]
-                assert output.num_cached_tokens == 0, (key, output.num_cached_tokens)
+                if allow_prefix_hits:
+                    assert 0 <= output.num_cached_tokens < len(trace["prompt_ids"])
+                    if "num_cached_tokens" in trace:
+                        assert trace["num_cached_tokens"] == output.num_cached_tokens
+                else:
+                    assert output.num_cached_tokens == 0, (key, output.num_cached_tokens)
                 trace["num_cached_tokens"] = output.num_cached_tokens
                 assert len(output.outputs) == 1
                 completion = output.outputs[0]
@@ -197,7 +202,8 @@ def drive(engine, specs, sampling_factory, warmup=False):
         for trace in traces.values():
             assert len(trace["ids"]) == trace["output_limit"]
             assert trace["finish_reason"] == "length"
-            assert trace["num_cached_tokens"] == 0
+            if not allow_prefix_hits:
+                assert trace["num_cached_tokens"] == 0
         return {"requests": traces, "frontend_batches": batches, "end_to_end_wall_s": duration}
     finally:
         if not warmup:
@@ -218,6 +224,11 @@ def capture(args):
     assert all(len(r["prompt_ids"]) + r["output_tokens"] <= context_limit for r in task["requests"])
     assert not args.timeline_cycles or depth == 3, "Q4/MTP timeline requires MTP3"
     assert not args.timeline_eager or args.timeline_cycles, "eager diagnostic needs timeline cycles"
+    prefix_pair = getattr(args, "prefix_pair", False)
+    if prefix_pair:
+        assert depth == 3 and len(task["requests"]) == 1 and not args.timeline_cycles
+        assert len(task["requests"][0]["prompt_ids"]) == 32768
+        assert task["requests"][0]["output_tokens"] == 64
     reference = verify_inputs(args.reference_manifest, args.model_dir, args.image_identity)
     import yaml
     profile = yaml.safe_load(PROFILE.read_text())
@@ -271,6 +282,8 @@ def capture(args):
                   "compilation": describe(config.compilation_config)},
               "scope": "Actual public frontend chunk timestamps. Frontend batches are not GPU MTP cycles. "
                        "Constructor startup and identical O32 request warmup are excluded; prefix reset precedes scoring."}
+    if prefix_pair:
+        result["prefix_pair_requested"] = True
     if args.config_only:
         with args.output.open("x") as f:
             json.dump(result, f, indent=2, allow_nan=False); f.write("\n")
@@ -305,6 +318,18 @@ def capture(args):
             result["timeline_install"] = llm.collective_rpc(
                 "serving_timing_enable_timeline", args=(args.timeline_cycles,), timeout=60)
         result.update(drive(engine, task["requests"], sample))
+        if prefix_pair:
+            first = task["requests"][0]
+            repeat = dict(first, id="request-repeat")
+            result["prefix_repeat"] = drive(engine, [repeat], sample, allow_prefix_hits=True)
+            cold = result["requests"][first["id"]]
+            warm = result["prefix_repeat"]["requests"][repeat["id"]]
+            result["prefix_pair_checks"] = {
+                "cold_repeat_ids_exact": cold["ids"] == warm["ids"],
+                "repeat_cached_tokens": warm["num_cached_tokens"],
+                # The pinned MTP full-attention manager drops the final
+                # matched page: draft KV depends on the next input token.
+                "expected_aligned_cached_tokens": max(0, (len(first["prompt_ids"]) - 1) // 1600 - 1) * 1600}
         if args.timeline_cycles:
             result["diagnostic_timeline"] = llm.collective_rpc(
                 "serving_timing_collect_timeline", timeout=60)
@@ -326,6 +351,12 @@ def capture(args):
                        for b in result["frontend_batches"]), "target-only speculative statistics"
         with args.output.open("x") as f:
             json.dump(result, f, indent=2, allow_nan=False); f.write("\n")
+        if prefix_pair:
+            # Retain the raw observations even when the independent prefix
+            # qualification fails; the actual worker exit then remains nonzero.
+            checks = result["prefix_pair_checks"]
+            assert checks["cold_repeat_ids_exact"], "original cold/repeated prefix IDs differ"
+            assert checks["repeat_cached_tokens"] == checks["expected_aligned_cached_tokens"]
         print("PRODUCER_SERVING_PASS", args.output, result["end_to_end_wall_s"], flush=True)
     finally:
         if llm is not None:
@@ -339,6 +370,8 @@ def main():
     p.add_argument("--image-identity", required=True)
     p.add_argument("--case", required=True)
     p.add_argument("--config-only", action="store_true")
+    p.add_argument("--prefix-pair", action="store_true",
+                   help="After one coldP32768/O64 MTP3 request, repeat its exact prefix without reset")
     p.add_argument("--timeline-cycles", type=int, choices=range(5), default=0,
                    help="Separate profiler diagnostic for up to four actual pure-Q4 target/MTP calls")
     p.add_argument("--timeline-eager", action="store_true",

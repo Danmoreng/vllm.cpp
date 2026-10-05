@@ -2744,7 +2744,33 @@
           "bytes": 154,
           "sha256": "88e5887890aaa2fda47626b9672d5bcf577a77e3d781c2677a86bdf22017a0f4"
         }
-      }
+      },
+      "prefix_32K": {
+        "status": "future_dependent_shared_MTP_page_drop_repaired",
+        "original_repeat_cache_tokens": 30400,
+        "native_repeat_cache_tokens": 30400,
+        "native_prompt_tokens_computed": [
+          32768,
+          2368
+        ],
+        "native_assertions": 363,
+        "focused_unit_assertions": 2575,
+        "actual_exit_each": 0,
+        "native_cold_warm_ids_exact": true,
+        "original_cold_warm_ids_exact": true,
+        "original_native_first_ID_difference": 39,
+        "native_before_after_ids_exact": true,
+        "graph_captures": 2,
+        "graph_replays": 56,
+        "graph_release_bytes": 0,
+        "full_state_or_mutated_GPU_draft_proof": false,
+        "receipt": {
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p7-prefix32-v1/receipt-v1.json",
+          "bytes": 127808,
+          "sha256": "3da49f66c6730614433e01fb429bc9c4e89d00c1f88a01982534334261bf9c7e"
+        }
+      },
+      "next": "Current practical/default-controlled/compact-draft qualification, then actual mixed-path source/event diagnosis and arithmetic-preserving work where justified."
     }
   ],
   "performance_baseline": "7536aededc049b2157f12eadb0f4cc6bbf29b7b7",

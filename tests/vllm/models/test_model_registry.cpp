@@ -12,6 +12,8 @@
 #include "vllm/v1/kv_cache_interface.h"
 #include "vllm/v1/kv_cache_dtype.h"
 #include "vllm/v1/core/kv_cache_manager.h"
+#include "vllm/v1/core/kv_cache_utils.h"
+#include "vllm/v1/core/recurrent_prefix_snapshot.h"
 #include "vllm/v1/request.h"
 
 #include <doctest/doctest.h>
@@ -1211,6 +1213,66 @@ TEST_CASE("Qwen3.5 KV-cache spec: EXL3 MTP shares page identity and counts separ
     vllm::v1::ResolveKVCacheGroupLayerNames(kv, cfg.num_hidden_layers, cfg.layer_types);
     CHECK(kv.kv_cache_groups[0].layer_names == names);
     if (depth > 0) CHECK(names.back() == "model.layers.64.self_attn.attn");
+  }
+}
+
+TEST_CASE("Qwen3.5 KV-cache spec: shared EXL3 MTP prefix recomputes the future-dependent draft page") {
+  using namespace vllm::v1;
+  init_none_hash(sha256_cbor);
+  for (int depth : {0, 3}) {
+    CAPTURE(depth);
+    auto kv = vllm::MakeQwen3_5KVCacheSpec(EXL3QwenKVConfig(), 16, 40, depth, true);
+    CHECK(kv.mtp_draft_shares_target_pages == (depth > 0));
+    CHECK_FALSE(kv.kv_cache_groups.front().is_eagle_group);
+    CHECK_FALSE(kv.kv_cache_groups[1].is_eagle_group);
+    kv.recurrent_prefix_snapshots = std::make_shared<RecurrentPrefixSnapshotIndex>(4, 16);
+    auto index = kv.recurrent_prefix_snapshots;
+    KVCacheManager manager(kv, 128, 16, 16, 16, true, /*use_eagle=*/false);
+    const auto request = [](const std::string& id, const std::vector<int32_t>& tokens) {
+      return Request(id, tokens, vllm::SamplingParams{}, 0.0,
+                     get_request_block_hasher(16, sha256_cbor));
+    };
+    std::vector<int32_t> tokens(65);
+    for (int i = 0; i < 65; ++i) tokens[i] = i;
+    auto first = request("cold", tokens);
+    // Publish each block-aligned state exactly as chunked prefill does.
+    for (int position = 0; position < 65; ) {
+      const int count = std::min(16, 65 - position);
+      first.num_computed_tokens = position;
+      REQUIRE(manager.allocate_slots(first, count, 0, std::nullopt, depth).has_value());
+      position += count;
+      if (position % 16 == 0) {
+        auto snapshot = index->Reserve(first.block_hashes[position / 16 - 1], position);
+        REQUIRE(snapshot.has_value());
+        index->Publish(*snapshot);
+      }
+    }
+    manager.free(first);
+    manager.new_step_starts();
+    // Same prompt, or a changed next token after a still-identical hash:
+    // MTP must not reuse the draft page incorporating that next token.
+    for (int mutation : {-1, 64, 48}) {
+      CAPTURE(mutation);
+      auto changed = tokens;
+      if (mutation >= 0) changed[mutation] += 100;
+      auto next = request("warm", changed);
+      const int matched = mutation == 48 ? 48 : 64;
+      const int expected = matched - (depth ? 16 : 0);
+      CHECK(manager.num_matched_prefix_tokens(next) == expected);
+      auto [blocks, hit] = manager.get_computed_blocks(next);
+      REQUIRE(hit == expected);
+      REQUIRE(index->Pinned(next.request_id).has_value());
+      CHECK(index->Pinned(next.request_id)->tokens == expected);
+      CHECK(index->Pinned(next.request_id)->hash == next.block_hashes[expected / 16 - 1]);
+      CHECK(blocks.blocks[0].size() == size_t(expected / 16));
+      // Admission must restore this same boundary, retain the reader until
+      // completion, and release every pin when the request leaves.
+      REQUIRE(manager.allocate_slots(next, 65 - hit, hit, blocks, depth).has_value());
+      CHECK_FALSE(manager.reset_prefix_cache());
+      manager.free(next);
+      CHECK_FALSE(index->Pinned(next.request_id).has_value());
+    }
+    CHECK(manager.reset_prefix_cache());
   }
 }
 
