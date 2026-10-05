@@ -21,7 +21,7 @@ struct Exl3GroupedLinearArgs {
   const char* debug_name = nullptr;
   // Internal large-M A/B control; SmallM arithmetic is unaffected.
   int w8a8_panel_columns = 128;
-  // Private model dispatch payload. Both public W8A8 overloads discard it;
+  // Private model dispatch payload. All public grouped overloads discard it;
   // caller-provided tensors always undergo their actual map readback/check.
   const Exl3W8A8ModelMap* model_map = nullptr;
 };
@@ -90,6 +90,7 @@ class Exl3W8A8ModelMap {
   bool Matches(const Tensor& map, int groups,
                const std::shared_ptr<void>& resident_owner) const;
   const std::vector<Exl3W8A8Panel>& Panels(int columns) const;
+  const std::shared_ptr<void>& ResidentOwner() const { return owner_; }
  private:
   Tensor map_;
   int groups_;
@@ -98,6 +99,14 @@ class Exl3W8A8ModelMap {
 };
 
 namespace detail {
+// Same SmallM operand/scratch checks as the public operator, with versioned
+// immutable model routing. Cold/stale capture uses ordinary replay guards;
+// warmed capture pins the map owner and retains graph read-only protection.
+void Exl3GroupedLinearModel(Queue&, Tensor& out, const Tensor& in,
+    const Tensor& trellis, const Tensor& suh, const Tensor& svh, const Tensor& map,
+    Tensor& in_had, Tensor& partials, const Exl3GroupedLinearArgs&,
+    const std::shared_ptr<void>& resident_owner,
+    std::shared_ptr<const Exl3W8A8ModelMap>& cache);
 // Only model-resident immutable maps may use this seam. All ordinary operand,
 // activation, scale, alias and workspace checks still execute. The cache owns
 // its map allocation, is bounded by its projection owner and is never global.

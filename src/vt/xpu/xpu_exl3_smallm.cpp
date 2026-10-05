@@ -7,6 +7,7 @@
 #include "xpu_common.h"
 #include "xpu_kernels.h"
 #include "vt/exl3_grouped.h"
+#include "vt/xpu_graph_metadata.h"
 #pragma clang diagnostic pop
 #include <exl3xpu/exl3_esimd.h>
 #include <sycl/ext/intel/experimental/grf_size_properties.hpp>
@@ -109,11 +110,18 @@ void Exl3GroupedLinearKernel(Queue& q, Tensor& out, const Tensor& in, const Tens
   VT_CHECK(!Overlap(out, in_had) && !Overlap(out, partials) && !Overlap(in_had, partials),
            "EXL3 SmallM output and scratch may not overlap");
   const auto* mapping = static_cast<const int32_t*>(shard.data);
-  CheckDeviceMetadata(q, [=] {
-    for (int nb = 0; nb < n / 128; ++nb)
-      if (mapping[nb] < 0 || mapping[nb] >= groups) return false;
-    return true;
-  }, "EXL3 SmallM shard_of_nb group out of range", {&shard});
+  if (args.model_map) {
+    // The versioned model certificate validated these immutable routing bytes.
+    // Capture still rejects writes into the map and pins its allocation owner.
+    RecordGraphImmutableRead(q, shard.data, Span(shard), args.model_map->ResidentOwner(),
+                             "EXL3 SmallM immutable source map");
+  } else {
+    CheckDeviceMetadata(q, [=] {
+      for (int nb = 0; nb < n / 128; ++nb)
+        if (mapping[nb] < 0 || mapping[nb] >= groups) return false;
+      return true;
+    }, "EXL3 SmallM shard_of_nb group out of range", {&shard});
+  }
 
   for (const Tensor* t : {&out, &in_had, &partials}) RecordGraphWrite(q, t->data, Span(*t));
   // Poisoned padding must never reach DPAS. The producer zeros the entire

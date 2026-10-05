@@ -2133,6 +2133,17 @@
           "bytes": 73433,
           "sha256": "a18ee71ec5da427989829f3c07672230d1c027cdff117c26a701d35ebf86e35d"
         }
+      },
+      "immutable_SmallM_model_map": {
+        "status": "retained_default1_model_only_source_map_certificate_reuse",
+        "control": "VT_XPU_SMALLM_MODEL_MAP=0",
+        "eager_repeated_map_validation_removed": true,
+        "public_and_cold_replay_actual_guards_preserved": true,
+        "receipt": {
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p7-smallm-map-v1/receipt-v2.json",
+          "bytes": 71748,
+          "sha256": "a302d8724e75129f15d188b1b47266b2809d4f5fe2d6dbb5ec5b982a23663c2c"
+        }
       }
     },
     {
@@ -2904,7 +2915,7 @@
           "sha256": "3da49f66c6730614433e01fb429bc9c4e89d00c1f88a01982534334261bf9c7e"
         }
       },
-      "next": "Qualify immutable model-map reuse in SmallM: actual donor comparison shows native-only static routing guards. Preserve cold capture fallback, graph read-only protection, ownership/generation and untrusted public/replay checks; require complete operator and request evidence.",
+      "next": "Use remaining current dynamic state/KV validation and arithmetic timeline to choose one narrow cause-supported optimization; preserve GPU-first completion and actual mutable public guards. Final refreshed matrix/default D64/full-state/reference/P1 automatic-admission gates remain open; no repeat rejected geometry sweeps.",
       "current_quality": {
         "practical_tasks": 8,
         "practical_passed": 8,
@@ -3175,9 +3186,243 @@
           "bytes": 73433,
           "sha256": "a18ee71ec5da427989829f3c07672230d1c027cdff117c26a701d35ebf86e35d"
         }
+      },
+      "immutable_SmallM_model_map": {
+        "status": "retained_default1_private_model_route_operator_and_bounded_C1_gain",
+        "control": "VT_XPU_SMALLM_MODEL_MAP=0",
+        "public_actual_map_guards_preserved": true,
+        "cold_capture_actual_replay_guards_preserved": true,
+        "warm_graph_read_only_and_actual_allocation_owner": true,
+        "old_graph_new_generation_coexistence": true,
+        "cross_queue_and_concurrent_capture_retirement_tested": true,
+        "new_replay_poll_or_wait": false,
+        "donor_arithmetic_changed": false,
+        "focused_final_GPU": {
+          "ownership": {
+            "total": 199,
+            "passed": 199,
+            "failed": 0
+          },
+          "legacy_graphs": {
+            "total": 154,
+            "passed": 154,
+            "failed": 0
+          },
+          "context_teardown": {
+            "total": 2,
+            "passed": 2,
+            "failed": 0
+          },
+          "context_worker_actual_exit": 0,
+          "default_MTP3_lifecycle": {
+            "total": 483,
+            "passed": 483,
+            "failed": 0
+          }
+        },
+        "operator_unprofiled": [
+          {
+            "graph": false,
+            "off_on_samples_ms": [
+              [
+                9.492357,
+                9.380766,
+                9.194317,
+                9.165007
+              ],
+              [
+                8.380517,
+                8.372547,
+                8.245107,
+                8.195607
+              ]
+            ],
+            "off_on_medians_ms": [
+              9.2875415,
+              8.308827
+            ],
+            "elapsed_change_percent": -10.537928686509757,
+            "scope": "Whole different-weight27-shape sequence, synthetic frozen inputs, full Had/parts/output original bytes checked each sequence, no serving proxy."
+          },
+          {
+            "graph": true,
+            "off_on_samples_ms": [
+              [
+                8.276287,
+                8.240207,
+                8.160877,
+                8.175047
+              ],
+              [
+                8.102897,
+                8.082447,
+                8.024787,
+                8.070707
+              ]
+            ],
+            "off_on_medians_ms": [
+              8.207626999999999,
+              8.076577
+            ],
+            "elapsed_change_percent": -1.596685619363536,
+            "scope": "Whole different-weight27-shape sequence, synthetic frozen inputs, full Had/parts/output original bytes checked each sequence, no serving proxy."
+          }
+        ],
+        "operator_assertions": 4318,
+        "operator_cases": 27,
+        "actual_weight_families": 13,
+        "operator_graph_nodes_off_on": [
+          121,
+          94
+        ],
+        "primary4K_MTP3_unprofiled": {
+          "off": {
+            "report": {
+              "schema": "b70-exl3-r11-serving-report-v1",
+              "case": "c1-p4096-o1024",
+              "mtp_depth": 3,
+              "profiled": false,
+              "unprofiled_serving_measurement": true,
+              "startup_state": "request_warmup_o32_then_prefix_reset",
+              "warmup": {
+                "cycles": 17,
+                "enabled": true,
+                "output_tokens_per_request": 32
+              },
+              "per_request": {
+                "request-0": {
+                  "prompt_tokens": 4096,
+                  "emitted_tokens": 1024,
+                  "ttft_ms": 2483.8990089999998,
+                  "tpot_ms": 21.54347659139785,
+                  "longest_observed_streaming_pause_ms": 70.42336299999974,
+                  "end_to_end_ms": 24522.875562000005,
+                  "token_timestamp_granularity": "one timestamp per emitted MTP chunk"
+                }
+              },
+              "common_decode_overlap": {
+                "start_s": 2.483919989,
+                "end_s": 24.522896542,
+                "emitted_tokens": 1023,
+                "aggregate_emitted_tokens_per_s": 46.417763435605025,
+                "boundary_policy": "exclude start, include end; whole emitted chunks only"
+              },
+              "end_to_end_wall_s": 24.522903922,
+              "end_to_end_emitted_tokens_per_s": 41.75688178109072,
+              "target_qualified": false,
+              "serving_qualified": false,
+              "cycles": 371,
+              "decode_cycles": 368,
+              "mean_decode_cycle_ms": 59.88234992663049,
+              "mean_emitted_tokens_per_decode_cycle": 2.779891304347826,
+              "accepted": 656,
+              "proposed": 1104,
+              "draft_acceptance": 0.5942028985507246,
+              "graph_captures": 2,
+              "graph_replays": 366,
+              "profile_spans": {},
+              "emitted_decode_tokens_per_s": 46.417763435605025
+            },
+            "assertions": {
+              "total": 1900,
+              "passed": 1900,
+              "failed": 0
+            },
+            "device_peak_bytes": 30325887299,
+            "retired_graph_bytes": 0,
+            "host_peak_rss_bytes": 13582979072
+          },
+          "on": {
+            "report": {
+              "schema": "b70-exl3-r11-serving-report-v1",
+              "case": "c1-p4096-o1024",
+              "mtp_depth": 3,
+              "profiled": false,
+              "unprofiled_serving_measurement": true,
+              "startup_state": "request_warmup_o32_then_prefix_reset",
+              "warmup": {
+                "cycles": 17,
+                "enabled": true,
+                "output_tokens_per_request": 32
+              },
+              "per_request": {
+                "request-0": {
+                  "prompt_tokens": 4096,
+                  "emitted_tokens": 1024,
+                  "ttft_ms": 2486.018669,
+                  "tpot_ms": 21.317836111436947,
+                  "longest_observed_streaming_pause_ms": 64.95762199999788,
+                  "end_to_end_ms": 24294.165010999997,
+                  "token_timestamp_granularity": "one timestamp per emitted MTP chunk"
+                }
+              },
+              "common_decode_overlap": {
+                "start_s": 2.486039469,
+                "end_s": 24.294185811,
+                "emitted_tokens": 1023,
+                "aggregate_emitted_tokens_per_s": 46.90907626705617,
+                "boundary_policy": "exclude start, include end; whole emitted chunks only"
+              },
+              "end_to_end_wall_s": 24.294193331,
+              "end_to_end_emitted_tokens_per_s": 42.14998975468555,
+              "target_qualified": false,
+              "serving_qualified": false,
+              "cycles": 371,
+              "decode_cycles": 368,
+              "mean_decode_cycle_ms": 59.25510090489141,
+              "mean_emitted_tokens_per_decode_cycle": 2.779891304347826,
+              "accepted": 656,
+              "proposed": 1104,
+              "draft_acceptance": 0.5942028985507246,
+              "graph_captures": 2,
+              "graph_replays": 366,
+              "profile_spans": {},
+              "emitted_decode_tokens_per_s": 46.90907626705618
+            },
+            "assertions": {
+              "total": 1900,
+              "passed": 1900,
+              "failed": 0
+            },
+            "device_peak_bytes": 30325887299,
+            "retired_graph_bytes": 0,
+            "host_peak_rss_bytes": 13583536128
+          }
+        },
+        "comparison": {
+          "IDs_exact": true,
+          "emitted_IDs": 1024,
+          "all_non_timing_cycles_exact": true,
+          "cycles": 371,
+          "E2E_elapsed_change_percent": -0.9326407334443787,
+          "emitted_decode_gain_percent": 1.058458648342131,
+          "prior_original_median_decode_tps": 63.915754,
+          "native_gap_to_prior_original_percent": -26.607959178489583,
+          "scope": "One quiet warmed unprofiled trial each. Prior original median is descriptive, not a fresh same-continuation/current qualification claim."
+        },
+        "host_observer_static_guards_off_on": [
+          114,
+          0
+        ],
+        "host_observer_metadata_D2H_off_on": [
+          1148,
+          1034
+        ],
+        "host_observer_full_model_dynamic_graph_D2H_off_on": [
+          4,
+          4
+        ],
+        "device_peak_each": 30325887299,
+        "resources": 23,
+        "qualification_promoted": false,
+        "receipt": {
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p7-smallm-map-v1/receipt-v2.json",
+          "bytes": 71748,
+          "sha256": "a302d8724e75129f15d188b1b47266b2809d4f5fe2d6dbb5ec5b982a23663c2c"
+        }
       }
     }
   ],
   "performance_baseline": "7536aededc049b2157f12eadb0f4cc6bbf29b7b7",
-  "performance_next": "Continue narrow SmallM static map consumer qualification against pinned original source, then unresolved final matrix/reference/state/P1 admission gates. Preserve arithmetic and actual public guards; no repeat rejected geometry sweeps."
+  "performance_next": "Use remaining current dynamic state/KV validation and arithmetic timeline to choose one narrow cause-supported optimization; preserve GPU-first completion and actual mutable public guards. Final refreshed matrix/default D64/full-state/reference/P1 automatic-admission gates remain open; no repeat rejected geometry sweeps."
 }

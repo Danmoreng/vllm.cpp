@@ -2,6 +2,7 @@
 #include "exl3_fixture.h"
 #include "vt/exl3_grouped.h"
 #include "vt/xpu.h"
+#include "vt/xpu_graph_metadata.h"
 #include "vt/unaligned.h"
 #include "vllm/model_executor/model_loader/safetensors_reader.h"
 #include "vllm/model_executor/models/dense_attn_block.h"
@@ -12,6 +13,8 @@
 #include <iostream>
 #include <chrono>
 #include <fstream>
+#include <future>
+#include <string_view>
 #include <nlohmann/json.hpp>
 
 namespace {
@@ -92,11 +95,14 @@ TEST_CASE("XPU P6 SmallM: same original packed weights and complete operator") {
           su(q, DType::kF16, {groups, k}), sv(q, DType::kF16, {n}),
           map(q, DType::kI32, {n / 128}) {}
   };
-  std::vector<std::unique_ptr<Weight>> weights;
+  std::vector<std::shared_ptr<Weight>> weights;
+  std::vector<std::shared_ptr<const vt::Exl3W8A8ModelMap>> model_maps;
+  const bool compare_model_map = std::getenv("VT_B70_SMALLM_MODEL_MAP_COMPARE") &&
+      std::string_view(std::getenv("VT_B70_SMALLM_MODEL_MAP_COMPARE")) == "1";
   size_t packed_bytes = 0;
   for (const auto& w : original.at("weights")) {
     const int k = w.at("k"), n = w.at("n"), bits = w.at("bits"), groups = w.at("groups");
-    auto weight = std::make_unique<Weight>(gpu.q, k, n, bits, groups);
+    auto weight = std::make_shared<Weight>(gpu.q, k, n, bits, groups);
     const auto prefix = "w" + std::to_string(weights.size());
     for (const auto& entry : {std::pair{&weight->packed, "packed"}, std::pair{&weight->su, "su"},
                              std::pair{&weight->sv, "sv"}, std::pair{&weight->map, "map"}}) {
@@ -142,11 +148,21 @@ TEST_CASE("XPU P6 SmallM: same original packed weights and complete operator") {
     record["native_device_events"] = nlohmann::json::array();
     cases.push_back(std::move(c));
   }
+  model_maps.resize(weights.size());
   auto execute = [&](Case& c) {
     auto& w = *weights[c.weight];
-    vt::Exl3GroupedLinear(gpu.q, c.output->tensor, c.input->tensor, w.packed.tensor,
-        w.su.tensor, w.sv.tensor, w.map.tensor, c.scratch->had.tensor, c.scratch->parts.tensor,
-        {c.bits, 2, c.name.c_str()});
+    if (compare_model_map) {
+      // This alias owns the Weight object, which owns the actual map Buffer.
+      // Cache slots stay outside Weight to avoid a shared-ownership cycle.
+      const auto owner = std::shared_ptr<void>(weights[c.weight], w.map.tensor.data);
+      vt::detail::Exl3GroupedLinearModel(gpu.q, c.output->tensor, c.input->tensor, w.packed.tensor,
+          w.su.tensor, w.sv.tensor, w.map.tensor, c.scratch->had.tensor, c.scratch->parts.tensor,
+          {c.bits, 2, c.name.c_str()}, owner, model_maps[c.weight]);
+    } else {
+      vt::Exl3GroupedLinear(gpu.q, c.output->tensor, c.input->tensor, w.packed.tensor,
+          w.su.tensor, w.sv.tensor, w.map.tensor, c.scratch->had.tensor, c.scratch->parts.tensor,
+          {c.bits, 2, c.name.c_str()});
+    }
   };
   auto exact = [&](const Buffer& buffer, const std::string& key) {
     const auto& expected = fixture.Get(key); const auto actual = buffer.download();
@@ -159,6 +175,76 @@ TEST_CASE("XPU P6 SmallM: same original packed weights and complete operator") {
     execute(c); exact(*c.output, c.prefix + "_out");
     exact(c.scratch->parts, c.prefix + "_parts"); exact(c.scratch->had, c.prefix + "_had_blocked");
     CheckPadding(*c.scratch, c.m, c.k, int(original["weights"][c.weight]["groups"]));
+  }
+  if (compare_model_map) {
+    const char* env = "VT_XPU_SMALLM_MODEL_MAP";
+    const bool present = std::getenv(env) != nullptr;
+    const std::string prior = present ? std::getenv(env) : "";
+    struct Restore {
+      const char* env; bool present; std::string prior;
+      ~Restore() { if (present) setenv(env, prior.c_str(), 1); else unsetenv(env); }
+    } restore{env, present, prior};
+    auto sequence = [&] { for (auto& c : cases) execute(c); backend.Synchronize(gpu.q); };
+    nlohmann::json warm = nlohmann::json::array(), trials = nlohmann::json::array();
+    for (int i = 0; i < 8; ++i) {
+      setenv(env, i % 2 ? "1" : "0", 1);
+      const auto start = std::chrono::steady_clock::now(); sequence();
+      warm.push_back({{"cached", i % 2 != 0}, {"complete_sequence_wall_ms",
+          std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count()}});
+      (void)vt::xpu::DrainProfileEvents(); (void)vt::xpu::DrainHostProfileRecords();
+    }
+    constexpr bool order[] = {false, true, true, false, true, false, false, true};
+    auto verify = [&] {
+      for (auto& c : cases) {
+        exact(*c.output, c.prefix + "_out"); exact(c.scratch->parts, c.prefix + "_parts");
+        exact(c.scratch->had, c.prefix + "_had_blocked"); exact(*c.input, c.prefix + "_x");
+      }
+      (void)vt::xpu::DrainProfileEvents(); (void)vt::xpu::DrainHostProfileRecords();
+    };
+    auto sample = [&](bool cached, void* graph) {
+      setenv(env, cached ? "1" : "0", 1);
+      const auto start = std::chrono::steady_clock::now();
+      if (graph) { backend.ReplayGraph(gpu.q, graph); backend.Synchronize(gpu.q); }
+      else sequence();
+      const auto elapsed = std::chrono::duration<double, std::milli>(
+          std::chrono::steady_clock::now() - start).count();
+      nlohmann::json trial = {{"cached", cached}, {"graph", graph != nullptr},
+          {"complete_sequence_wall_ms", elapsed}, {"host_events", nlohmann::json::array()}};
+      for (const auto& e : vt::xpu::DrainHostProfileRecords())
+        trial["host_events"].push_back({{"stage", e.stage}, {"ms", (e.end_steady_ns - e.start_steady_ns) / 1e6}});
+      (void)vt::xpu::DrainProfileEvents(); trials.push_back(std::move(trial)); verify();
+    };
+    for (bool cached : order) sample(cached, nullptr);
+    REQUIRE(backend.SupportsGraphCapture());
+    void* graphs[2]{}; const auto before_graphs = vt::xpu::GetMemoryInfo();
+    nlohmann::json graph_nodes = nlohmann::json::array();
+    for (int i = 0; i < 2; ++i) {
+      setenv(env, i ? "1" : "0", 1);
+      const auto nodes = vt::xpu::GetMemoryInfo().graph_nodes;
+      backend.BeginCapture(gpu.q);
+      for (auto& c : cases) execute(c);
+      graphs[i] = backend.EndCaptureGraph(gpu.q);
+      graph_nodes.push_back(vt::xpu::GetMemoryInfo().graph_nodes - nodes);
+      backend.ReplayGraph(gpu.q, graphs[i]); backend.Synchronize(gpu.q); verify();
+    }
+    CHECK(graph_nodes[0].get<size_t>() == graph_nodes[1].get<size_t>() + cases.size());
+    for (bool cached : order) sample(cached, graphs[cached]);
+    backend.DestroyGraph(graphs[0]); backend.DestroyGraph(graphs[1]);
+    CHECK(vt::xpu::GetMemoryInfo().graph_device_bytes == before_graphs.graph_device_bytes);
+    nlohmann::json report = {{"schema", "b70-exl3-p7-smallm-map-native-v1"},
+        {"cases", records}, {"weights", original["weights"]}, {"warm_sequences", warm},
+        {"trials", trials}, {"graph_nodes_off_on", graph_nodes},
+        {"packed_device_bytes", packed_bytes}, {"backend_peak_bytes", vt::xpu::GetMemoryInfo().peak_allocated_bytes},
+        {"host_profile", std::getenv("VT_XPU_HOST_PROFILE") && std::string(std::getenv("VT_XPU_HOST_PROFILE")) == "1"},
+        {"device_profile", std::getenv("VT_XPU_PROFILE") && std::string(std::getenv("VT_XPU_PROFILE")) == "1"},
+        {"measurement_order", "8 alternating sequence warmups then ABBA BAAB eager and graph"},
+        {"scope", "Same real different donor layer weights and synthetic frozen inputs; full Had/parts/output exact each sequence; no serving/model-state proof"}};
+    const char* path = std::getenv("VT_B70_SMALLM_OUTPUT"); REQUIRE(path);
+    REQUIRE_FALSE(std::filesystem::exists(path)); std::ofstream output(path);
+    output << report.dump(2) << '\n'; output.close(); REQUIRE(output.good());
+    CHECK(vt::GetReferenceTierHits() == 0);
+    std::cout << "P7_SMALLM_MAP_BENCH " << cases.size() << " cases, packed bytes " << packed_bytes << std::endl;
+    return;
   }
   for (int warm = 0; warm < 2; ++warm) { for (auto& c : cases) execute(c); backend.Synchronize(gpu.q); }
   (void)vt::xpu::DrainProfileEvents();
@@ -186,6 +272,199 @@ TEST_CASE("XPU P6 SmallM: same original packed weights and complete operator") {
   }
   CHECK(vt::GetReferenceTierHits() == 0);
   std::cout << "P6_NATIVE_DONE " << cases.size() << " cases, packed bytes " << packed_bytes << std::endl;
+}
+
+TEST_CASE("XPU EXL3 SmallM P7: owner retirement excludes a concurrent new capture") {
+  Queue first(vt::DeviceType::kXPU), second(vt::DeviceType::kXPU);
+  auto& backend = vt::GetBackend(first.q.device); REQUIRE(backend.SupportsGraphCapture());
+  const auto graph_bytes = vt::xpu::GetMemoryInfo().graph_device_bytes;
+  std::promise<void> deleting, release, requesting;
+  auto deleting_future = deleting.get_future(), requesting_future = requesting.get_future();
+  const auto release_future = release.get_future().share();
+  Buffer destination(first.q, DType::kI32, {16});
+  auto owner = std::shared_ptr<void>(vt::Alloc(first.q.device, 64),
+      [&, device = first.q.device](void* p) {
+        deleting.set_value(); release_future.wait(); vt::Free(device, p);
+      });
+  backend.Memset(first.q, owner.get(), 0x35, 64); backend.Synchronize(first.q);
+  backend.BeginCapture(first.q);
+  vt::xpu::RecordGraphImmutableRead(first.q, owner.get(), 64, owner, "concurrent retirement source");
+  backend.Copy(first.q, destination.tensor.data, owner.get(), 64);
+  void* graph = backend.EndCaptureGraph(first.q); owner.reset();
+  auto retire = std::async(std::launch::async, [&] { backend.DestroyGraph(graph); });
+  deleting_future.get();
+  auto capture = std::async(std::launch::async, [&] {
+    requesting.set_value(); backend.BeginCapture(second.q);
+  });
+  requesting_future.get();
+  const bool excluded = capture.wait_for(std::chrono::milliseconds(30)) == std::future_status::timeout;
+  // Test-only coordination, no product polling or timed readiness loop.
+  release.set_value(); retire.get(); capture.get(); CHECK(excluded);
+  void* empty = backend.EndCaptureGraph(second.q); backend.DestroyGraph(empty);
+  CHECK(vt::xpu::GetMemoryInfo().graph_device_bytes == graph_bytes);
+}
+
+TEST_CASE("XPU EXL3 SmallM P7: immutable owner survives context teardown") {
+  if (!std::getenv("VT_B70_SMALLM_MAP_CONTEXT_TEARDOWN")) {
+    MESSAGE("Run this teardown sentinel in an isolated worker with VT_B70_SMALLM_MAP_CONTEXT_TEARDOWN=1");
+    return;
+  }
+  Queue gpu(vt::DeviceType::kXPU); auto& backend = vt::GetBackend(gpu.q.device);
+  REQUIRE(backend.SupportsGraphCapture());
+  auto owner = std::shared_ptr<void>(vt::Alloc(gpu.q.device, 64),
+      [device = gpu.q.device](void* p) { vt::Free(device, p); });
+  std::weak_ptr<void> lifetime = owner;
+  // Destination is context-owned USM, deliberately live until context teardown.
+  // No freed input/output storage is left referenced by this test graph.
+  void* destination = vt::Alloc(gpu.q.device, 64);
+  backend.Memset(gpu.q, owner.get(), 0x35, 64); backend.Synchronize(gpu.q);
+  backend.BeginCapture(gpu.q);
+  vt::xpu::RecordGraphImmutableRead(gpu.q, owner.get(), 64, owner, "teardown source map");
+  backend.Copy(gpu.q, destination, owner.get(), 64);
+  (void)backend.EndCaptureGraph(gpu.q); owner.reset(); CHECK_FALSE(lifetime.expired());
+  // The actual worker exit is part of this sentinel: static context teardown
+  // destroys its graph before releasing the final owner and the destination.
+  std::cout << "P7_SMALLM_MAP_CONTEXT_TEARDOWN pending_at_worker_exit=1" << std::endl;
+}
+
+TEST_CASE("XPU EXL3 SmallM P7: immutable model maps preserve guards graph ownership and reload") {
+  const char* name = "VT_XPU_SMALLM_MODEL_MAP";
+  const bool present = std::getenv(name) != nullptr;
+  const std::string prior = present ? std::getenv(name) : "";
+  struct Restore {
+    const char* name; bool present; std::string prior;
+    ~Restore() {
+      if (present) setenv(name, prior.c_str(), 1); else unsetenv(name);
+    }
+  } restore{name, present, prior};
+  setenv(name, "1", 1);
+  constexpr int k = 256, n = 384, groups = 2;
+  const std::vector<int32_t> values{1, 0, 1};
+  Queue first(vt::DeviceType::kXPU), second(vt::DeviceType::kXPU);
+  auto& backend = vt::GetBackend(first.q.device);
+  auto resident_map = [&] {
+    auto owner = std::shared_ptr<void>(vt::Alloc(first.q.device, values.size() * sizeof(int32_t)),
+        [device = first.q.device](void* p) { vt::Free(device, p); });
+    backend.Copy(first.q, owner.get(), values.data(), values.size() * sizeof(int32_t));
+    backend.Synchronize(first.q); return owner;
+  };
+  for (int bits : {4, 6}) for (int m : {1, 4, 16}) {
+    CAPTURE(bits);
+    CAPTURE(m);
+    auto f = exl3_test::MakeFixture(k, n, bits, 0x93adu + bits);
+    auto su = f.suh;
+    for (int i = 0; i < k; ++i)
+      su.push_back(vt::F32ToF16((i % 3 ? .31f : -.62f) * vt::F16ToF32(f.suh[i])));
+    Buffer input(first.q, DType::kF16, {m, k});
+    Buffer packed(first.q, DType::kI8, {k / 16, n / 16, 32 * bits});
+    Buffer scales(first.q, DType::kF16, {groups, k}), svh(first.q, DType::kF16, {n});
+    Buffer output(first.q, DType::kF16, {m, n}); Scratch scratch(first.q, m, k, n, bits, groups);
+    input.put(xpu_test::Values(m * k, 11, .009f)); packed.upload(f.trellis.data());
+    scales.upload(su.data()); svh.upload(f.svh.data());
+    auto owner = resident_map();
+    auto map = vt::Tensor::Contiguous(owner.get(), DType::kI32, first.q.device, {n / 128});
+    std::shared_ptr<const vt::Exl3W8A8ModelMap> cache;
+    const vt::Exl3GroupedLinearArgs args{bits, 2, "P7_SMALLM_MODEL_MAP"};
+    auto run_public = [&](const vt::Tensor& routing, const vt::Exl3GroupedLinearArgs& a) {
+      vt::Exl3GroupedLinear(first.q, output.tensor, input.tensor, packed.tensor, scales.tensor,
+          svh.tensor, routing, scratch.had.tensor, scratch.parts.tensor, a);
+    };
+    auto run_owned = [&](vt::Queue& q) {
+      vt::detail::Exl3GroupedLinearModel(q, output.tensor, input.tensor, packed.tensor, scales.tensor,
+          svh.tensor, map, scratch.had.tensor, scratch.parts.tensor, args, owner, cache);
+    };
+    run_public(map, args);
+    const auto expected = output.download(), had = scratch.had.download(), parts = scratch.parts.download();
+    run_owned(first.q); REQUIRE(cache); CHECK(cache->Matches(map, groups, owner));
+    xpu_test::SameBytes(output.download(), expected); xpu_test::SameBytes(scratch.had.download(), had);
+    xpu_test::SameBytes(scratch.parts.download(), parts);
+    run_owned(second.q); backend.Synchronize(second.q);
+    xpu_test::SameBytes(output.download(), expected); xpu_test::SameBytes(scratch.parts.download(), parts);
+    Buffer bad_map(first.q, DType::kI32, {n / 128});
+    const int32_t bad[] = {1, groups, 0}; bad_map.upload(bad);
+    auto injected = args; injected.model_map = cache.get();
+    CHECK_THROWS_WITH_AS(run_public(bad_map.tensor, injected), doctest::Contains("group out of range"), std::runtime_error);
+    xpu_test::SameBytes(output.download(), expected); xpu_test::SameBytes(scratch.had.download(), had);
+    xpu_test::SameBytes(scratch.parts.download(), parts);
+    auto alias = scratch.parts.tensor; alias.data = output.tensor.data;
+    CHECK_THROWS_AS(vt::detail::Exl3GroupedLinearModel(first.q, output.tensor, input.tensor,
+        packed.tensor, scales.tensor, svh.tensor, map, scratch.had.tensor, alias, args, owner, cache), std::runtime_error);
+    xpu_test::SameBytes(output.download(), expected);
+    if (bits != 4 || m != 4) continue;
+    REQUIRE(backend.SupportsGraphCapture());
+    const auto initial = vt::xpu::GetMemoryInfo();
+    CHECK_FALSE(vt::xpu::IsGraphCapturing(first.q)); backend.BeginCapture(first.q);
+    CHECK(vt::xpu::IsGraphCapturing(first.q)); run_owned(first.q);
+    void* warm_graph = backend.EndCaptureGraph(first.q);
+    CHECK_FALSE(vt::xpu::IsGraphCapturing(first.q));
+    const auto warm_nodes = vt::xpu::GetMemoryInfo().graph_nodes - initial.graph_nodes;
+    backend.ReplayGraph(second.q, warm_graph); backend.Synchronize(second.q);
+    xpu_test::SameBytes(output.download(), expected); xpu_test::SameBytes(scratch.parts.download(), parts);
+    // Even a checked model map must stay read-only in the recorded graph.
+    backend.BeginCapture(first.q); run_owned(first.q); backend.Memset(first.q, map.data, 0, map.Bytes());
+    CHECK_THROWS_WITH_AS(backend.EndCaptureGraph(first.q), doctest::Contains("immutable metadata must remain read-only"), std::runtime_error);
+    xpu_test::SameBytes(output.download(), expected);
+    CHECK(vt::xpu::GetMemoryInfo().graph_count == initial.graph_count + 1);
+    // A rejected capture may contain the last allocation reference. Releasing
+    // it under the context lock would deadlock its ordinary VT Free deleter.
+    auto temporary = resident_map(); std::weak_ptr<void> failed_lifetime = temporary;
+    auto temporary_map = map; temporary_map.data = temporary.get();
+    std::shared_ptr<const vt::Exl3W8A8ModelMap> temporary_cache;
+    auto temporary_run = [&] { vt::detail::Exl3GroupedLinearModel(first.q, output.tensor,
+        input.tensor, packed.tensor, scales.tensor, svh.tensor, temporary_map,
+        scratch.had.tensor, scratch.parts.tensor, args, temporary, temporary_cache); };
+    temporary_run(); backend.Synchronize(first.q);
+    backend.BeginCapture(second.q); backend.BeginCapture(first.q); temporary_run();
+    backend.Memset(first.q, temporary_map.data, 0, temporary_map.Bytes());
+    temporary.reset(); temporary_cache.reset(); CHECK_FALSE(failed_lifetime.expired());
+    CHECK_THROWS_AS(backend.EndCaptureGraph(first.q), std::runtime_error);
+    CHECK_FALSE(failed_lifetime.expired());
+    void* other_capture = backend.EndCaptureGraph(second.q);
+    CHECK(failed_lifetime.expired()); backend.DestroyGraph(other_capture);
+    // A cold model capture uses the actual replay guard, while still pinning
+    // its supplied map owner. No CPU/device readback is attempted in capture.
+    auto cold_owner = resident_map(); auto cold_map = map; cold_map.data = cold_owner.get();
+    std::shared_ptr<const vt::Exl3W8A8ModelMap> cold_cache;
+    backend.BeginCapture(first.q);
+    vt::detail::Exl3GroupedLinearModel(first.q, output.tensor, input.tensor, packed.tensor,
+        scales.tensor, svh.tensor, cold_map, scratch.had.tensor, scratch.parts.tensor,
+        args, cold_owner, cold_cache);
+    void* cold_graph = backend.EndCaptureGraph(first.q); CHECK_FALSE(cold_cache);
+    const auto cold_nodes = vt::xpu::GetMemoryInfo().graph_nodes - initial.graph_nodes - warm_nodes;
+    CHECK(cold_nodes == warm_nodes + 1);
+    backend.ReplayGraph(first.q, cold_graph); xpu_test::SameBytes(output.download(), expected);
+    backend.Copy(first.q, cold_map.data, bad, cold_map.Bytes()); backend.Synchronize(first.q);
+    CHECK_THROWS_WITH_AS(backend.ReplayGraph(first.q, cold_graph), doctest::Contains("group out of range"), std::runtime_error);
+    xpu_test::SameBytes(output.download(), expected); xpu_test::SameBytes(scratch.had.download(), had);
+    xpu_test::SameBytes(scratch.parts.download(), parts);
+    backend.Copy(first.q, cold_map.data, values.data(), cold_map.Bytes()); backend.Synchronize(first.q);
+    std::weak_ptr<void> cold_lifetime = cold_owner; cold_owner.reset();
+    CHECK_FALSE(cold_lifetime.expired()); backend.ReplayGraph(first.q, cold_graph);
+    xpu_test::SameBytes(output.download(), expected); backend.DestroyGraph(cold_graph);
+    CHECK(cold_lifetime.expired());
+    // A new valid generation may coexist with an old captured graph. The old
+    // graph keeps its exact map allocation despite the model cache being reset.
+    std::weak_ptr<void> old_lifetime = owner; cache.reset(); owner.reset();
+    CHECK_FALSE(old_lifetime.expired());
+    owner = resident_map(); map.data = owner.get();
+    const int32_t changed[] = {0, 1, 0}; backend.Copy(first.q, map.data, changed, map.Bytes());
+    backend.Synchronize(first.q); run_public(map, args); const auto changed_expected = output.download();
+    run_owned(first.q); REQUIRE(cache); CHECK(cache->Matches(map, groups, owner));
+    xpu_test::SameBytes(output.download(), changed_expected);
+    backend.ReplayGraph(first.q, warm_graph); xpu_test::SameBytes(output.download(), expected);
+    backend.BeginCapture(second.q); backend.DestroyGraph(warm_graph);
+    CHECK_FALSE(old_lifetime.expired());
+    other_capture = backend.EndCaptureGraph(second.q);
+    CHECK(old_lifetime.expired()); backend.DestroyGraph(other_capture);
+    CHECK(vt::xpu::GetMemoryInfo().graph_device_bytes == initial.graph_device_bytes);
+    unsetenv(name); cache.reset(); run_owned(first.q);
+    REQUIRE(cache); CHECK(cache->Matches(map, groups, owner));
+    xpu_test::SameBytes(output.download(), changed_expected);
+    setenv(name, "1", 1);
+    std::cout << "P7_SMALLM_MODEL_MAP warm_nodes=" << warm_nodes << " cold_nodes=" << cold_nodes
+              << " public_replay_guards=1 owner_retirement=1 generation_reload=1" << std::endl;
+  }
+  CHECK(vt::GetReferenceTierHits() == 0);
 }
 
 TEST_CASE("XPU EXL3 producer SmallM: separate group transforms, padding and refusals") {

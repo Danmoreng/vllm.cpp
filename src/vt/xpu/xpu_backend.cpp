@@ -4,6 +4,7 @@
 #include "xpu_gptq4.h"
 #endif
 #include "vt/xpu.h"
+#include "vt/xpu_graph_metadata.h"
 #include "vt/xpu_profile_span.h"
 #include "vt/gdn_fp16_plan.h"
 #include <sycl/ext/oneapi/matrix/matrix.hpp>
@@ -45,6 +46,13 @@ struct GraphChecks {
   ~GraphChecks() { if (device) sycl::free(device, context); if (host) sycl::free(host, context); }
 };
 struct Recording {
+  struct ImmutableRead {
+    uintptr_t start, end;
+    std::shared_ptr<void> owner;
+    std::string message;
+  };
+  // Declared first so owners outlive the recorded command-graph objects.
+  std::vector<ImmutableRead> immutable_reads;
   RecordingGraph compute, validation;
   std::unique_ptr<GraphChecks> checks;
   struct Span { uintptr_t start, end; size_t check = 0; };
@@ -54,6 +62,8 @@ struct Recording {
       : compute(c, d), validation(c, d), checks(std::make_unique<GraphChecks>(c, d)) {}
 };
 struct Graph {
+  // Also keep allocations alive through executable destruction at shutdown.
+  std::vector<std::shared_ptr<void>> immutable_owners;
   ExecutableGraph executable;
   std::optional<ExecutableGraph> validation;
   std::unique_ptr<GraphChecks> checks;
@@ -141,6 +151,9 @@ struct Context {
   sycl::device device;
   sycl::context context;
   std::mutex mutex;
+  // Captures must not start between unlocking mutex and releasing the last
+  // retired owner (whose Free deleter re-enters mutex). Replay is unaffected.
+  std::mutex graph_owner_lifetime;
   Workspace exl3, gdn, attention, sampling, native_gdn, w8a8, w8a8_preparation;
   ImmutableTable fp16_silu;
   std::unordered_map<sycl::queue*, std::unique_ptr<sycl::queue>> queues;
@@ -148,6 +161,9 @@ struct Context {
   std::vector<HostProfileRecord> host_profile_records;
   std::unordered_map<sycl::queue*, std::unique_ptr<Recording>> recordings;
   std::unordered_map<void*, std::unique_ptr<Graph>> graphs;
+  // Free is forbidden while any queue records. A retired immutable map can
+  // therefore release its last owner only after the last capture has ended.
+  std::vector<std::shared_ptr<void>> retired_immutable_owners;
   std::unordered_map<sycl::queue*, void*> default_graphs;
   size_t graph_nodes = 0, graph_bytes = 0;
   int64_t captures = 0, replays = 0;
@@ -166,11 +182,15 @@ struct Context {
     for (auto& [_, graph] : recordings) {
       try { graph->compute.end_recording(); } catch (...) {}
     }
-    recordings.clear();
+    // Owner deleters can call Free/GetContext. Empty the live maps before
+    // releasing their references, with the queues/context still available.
+    auto retired_recordings = std::move(recordings); recordings.clear();
     try { Drain(); } catch (const std::exception& e) {
       std::fprintf(stderr, "[vt xpu] shutdown wait failed: %s\n", e.what());
     }
-    graphs.clear();
+    auto retired_graphs = std::move(graphs); graphs.clear();
+    retired_recordings.clear(); retired_graphs.clear();
+    retired_immutable_owners.clear();
     for (const auto& [p, _] : allocations) sycl::free(p, context);
     for (const auto& [p, _] : pinned) sycl::free(p, context);
   }
@@ -402,10 +422,16 @@ class XpuBackend final : public Backend {
   bool SupportsCompressedConvState() const override { return true; }
   void BeginCapture(Queue& q) override {
     auto& native = queue(q); auto& c = ctx();
+    std::lock_guard lifetime_lock(c.graph_owner_lifetime);
     std::lock_guard lock(c.mutex);
     VT_CHECK(SupportsGraphCapture(), "XPU device does not support SYCL command graphs");
     VT_CHECK(!c.recordings.count(&native), "XPU queue is already recording a graph");
     VT_CHECK(c.graphs.size() + c.recordings.size() < MaxGraphs, "XPU live graph limit exceeded");
+    // A pre-existing owned graph may be retired by another queue during this
+    // capture, even if this recording itself never reads immutable metadata.
+    for (const auto& [_, graph] : c.graphs) if (!graph->immutable_owners.empty()) {
+      c.retired_immutable_owners.reserve(MaxGraphNodes); break;
+    }
     VT_CHECK(GraphCheckBytes <= c.budget - c.allocated - c.graph_bytes &&
              GraphCheckBytes <= MaxGraphDeviceBytes - c.graph_bytes, "XPU graph validation exceeds memory budget");
     native.wait_and_throw();
@@ -417,10 +443,19 @@ class XpuBackend final : public Backend {
   }
   void* EndCaptureGraph(Queue& q) override {
     auto& native = queue(q); auto& c = ctx();
+    std::lock_guard lifetime_lock(c.graph_owner_lifetime);
+    // Last owner references must be released after the context lock, including
+    // a rejected capture. Their deleters may re-enter the allocation backend.
+    std::unique_ptr<Recording> recording;
+    std::unique_ptr<Graph> graph;
+    std::vector<std::shared_ptr<void>> immutable_owners;
+    std::vector<std::shared_ptr<void>> retired_owners;
     std::lock_guard lock(c.mutex);
     auto it = c.recordings.find(&native);
     VT_CHECK(it != c.recordings.end(), "XPU queue has no active graph capture");
-    auto recording = std::move(it->second); c.recordings.erase(it);
+    recording = std::move(it->second); c.recordings.erase(it);
+    if (c.recordings.empty() && !c.retired_immutable_owners.empty())
+      retired_owners.swap(c.retired_immutable_owners);
     try {
       recording->compute.end_recording(native);
       // Preflight is valid only for externally staged metadata. A graph that
@@ -431,6 +466,12 @@ class XpuBackend final : public Backend {
           VT_CHECK(metadata.start >= write.end || write.start >= metadata.end,
                    std::string("XPU graph metadata must be staged outside capture and remain read-only during replay: ") +
                    recording->checks->messages[metadata.check]);
+      for (const auto& read : recording->immutable_reads) {
+        for (const auto& write : recording->writes)
+          VT_CHECK(read.start >= write.end || write.start >= read.end,
+                   std::string("XPU graph immutable metadata must remain read-only: ") + read.message);
+        immutable_owners.push_back(read.owner);
+      }
       const size_t nodes = recording->compute.get_nodes().size() + recording->validation.get_nodes().size();
       VT_CHECK(nodes <= MaxGraphNodes - c.graph_nodes, "XPU graph node budget exceeded");
       const bool graph_profile = GraphProfileEnabled();
@@ -444,14 +485,21 @@ class XpuBackend final : public Backend {
       const size_t bytes = executable.get_required_mem_size() + (validation ? validation->get_required_mem_size() : 0);
       VT_CHECK(bytes <= MaxGraphDeviceBytes - c.graph_bytes && bytes <= c.budget - c.allocated - c.graph_bytes,
                "XPU graph device-memory budget exceeded");
-      auto graph = std::make_unique<Graph>(Graph{std::move(executable), std::move(validation),
-          std::move(recording->checks), nodes, bytes + GraphCheckBytes, recording->workspace_mask, std::nullopt});
+      graph = std::make_unique<Graph>(Graph{std::move(immutable_owners), std::move(executable),
+          std::move(validation), std::move(recording->checks), nodes,
+          bytes + GraphCheckBytes, recording->workspace_mask, std::nullopt});
       void* handle = graph.get();
       c.graphs.emplace(handle, std::move(graph));
       c.graph_nodes += nodes; c.graph_bytes += bytes; ++c.captures;
       return handle;
     } catch (...) {
       try { recording->compute.end_recording(native); } catch (...) {}
+      if (!c.recordings.empty()) {
+        // Registration reserved the bounded retirement capacity. Keep failed
+        // capture owners until other queues stop recording; no allocation here.
+        for (auto& read : recording->immutable_reads)
+          c.retired_immutable_owners.push_back(std::move(read.owner));
+      }
       c.graph_bytes -= GraphCheckBytes; c.pinned_bytes -= GraphCheckBytes;
       throw;
     }
@@ -511,16 +559,25 @@ class XpuBackend final : public Backend {
   }
   void DestroyGraph(void* handle) override {
     if (!handle) return;
-    auto& c = ctx(); std::lock_guard lock(c.mutex);
+    auto& c = ctx();
+    std::lock_guard lifetime_lock(c.graph_owner_lifetime);
+    std::vector<std::shared_ptr<void>> retired_owners;
+    std::lock_guard lock(c.mutex);
     auto it = c.graphs.find(handle);
     VT_CHECK(it != c.graphs.end(), "XPU graph handle is not owned by this device");
     if (it->second->last) it->second->last->wait_and_throw();
+    if (c.recordings.empty()) retired_owners = std::move(it->second->immutable_owners);
+    else {
+      for (auto& owner : it->second->immutable_owners)
+        c.retired_immutable_owners.push_back(std::move(owner));
+      it->second->immutable_owners.clear();
+    }
     c.graph_nodes -= it->second->nodes; c.graph_bytes -= it->second->bytes;
     c.pinned_bytes -= GraphCheckBytes;
     for (auto p = c.default_graphs.begin(); p != c.default_graphs.end();) {
       if (p->second == handle) p = c.default_graphs.erase(p); else ++p;
     }
-    c.graphs.erase(it);
+    c.graphs.erase(it);  // Destroy GPU executable before releasing map owners.
   }
   void EndCapture(Queue& q) override {
     void* old = nullptr;
@@ -742,6 +799,29 @@ size_t PendingProfileEventCount(int index) {
   auto& c = GetContext(index);
   std::lock_guard<std::mutex> lock(c.mutex);
   return c.profile_events.size();
+}
+bool IsGraphCapturing(Queue& q) {
+  auto& native = NativeQueue(q); auto& c = GetContext(q.device.index);
+  std::lock_guard lock(c.mutex);
+  return c.recordings.count(&native) != 0;
+}
+void RecordGraphImmutableRead(Queue& q, const void* data, size_t bytes,
+    const std::shared_ptr<void>& owner, const char* message) {
+  auto& native = NativeQueue(q); auto& c = GetContext(q.device.index);
+  std::lock_guard lock(c.mutex);
+  auto it = c.recordings.find(&native);
+  if (it == c.recordings.end()) return;
+  VT_CHECK(owner && owner.get() == data, "XPU immutable metadata requires its allocation owner");
+  const auto start = reinterpret_cast<uintptr_t>(data);
+  VT_CHECK(bytes > 0 && bytes <= UINTPTR_MAX - start, "XPU immutable metadata span overflow");
+  size_t owners = c.retired_immutable_owners.size();
+  for (const auto& [_, graph] : c.graphs) owners += graph->immutable_owners.size();
+  for (const auto& [_, recording] : c.recordings) owners += recording->immutable_reads.size();
+  VT_CHECK(owners < MaxGraphNodes, "XPU immutable metadata owner limit exceeded");
+  // One bounded host array makes retirement non-allocating, including a
+  // rejected capture while another queue is recording. No GPU scratch/polling.
+  c.retired_immutable_owners.reserve(MaxGraphNodes);
+  it->second->immutable_reads.push_back({start, start + bytes, owner, message});
 }
 bool CaptureMetadataCheck(Queue& q, const std::function<void(sycl::handler&, int*)>& submit, const char* message,
                           std::initializer_list<const Tensor*> inputs) {
