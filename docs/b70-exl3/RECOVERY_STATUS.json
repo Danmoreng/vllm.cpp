@@ -1,8 +1,8 @@
 {
   "schema": 1,
-  "active_plan": "docs/B70_EXL3_NATIVE_PERFORMANCE_IMPLEMENTATION_PLAN_7536aeded_EN.md",
+  "active_plan": null,
   "scope_reference": "docs/B70-EXL3-Migration-and-Parity-Plan.md",
-  "goal": "Implement performance P0\u2013P7 from7536aeded; preserve the prior R01\u2013R11 evidence and open default target/state/serving qualification gates.",
+  "goal": "Completed user-directed P0-P7 optimization work period and final Pro handoff; Python performance parity and full product qualification are not achieved.",
   "completed_milestones": [
     "A_short_P128_native_output",
     "B_P4096_O64_and_chunked32K_native_output"
@@ -2218,7 +2218,7 @@
     },
     {
       "task": "P7",
-      "status": "in_progress_typed_SLM_serving_gain_retained_default_reference_and_mode_qualification_open",
+      "status": "closed_by_developer_with_final_matrix_and_known_qualification_gaps",
       "complete": false,
       "C1_repetitions_per_engine": 3,
       "actual_native_primary_assertions_each": 1895,
@@ -2263,7 +2263,7 @@
         "bytes": 484222,
         "sha256": "4ef94808be5009536b9e1976410b821ce96d0b958338216b2f29ed18bd87f2ac"
       },
-      "remaining": "Bounded final matrix on046ece complete; QK signed-zero fix has held-out all48GDN/all16KV eager byte proof and controlled65full head rows exact. Current typed SLM default1 has exact operator snapshots/native C1/C4 serving continuity and lifecycle, plus C1/C4short gains; final practical/primary evidence refresh still required. DefaultD64four failures/P1 automatic/default admission and integrated original MTP/C4/long-state qualification remain open. Older matrix keeps046ece identity; no new current Python-parity score.",
+      "remaining": "Execution period closed by developer after final typed SLM optimization. Final practical/draft/target and complete bounded native matrix refreshed on0ea34de4e; original immutable measurements explicitly reused. Unresolved qualification: four unchanged defaultD64 failures, independently justified default-reference contract, P1 automatic/default admission and integrated original MTP/C4/long-state proof; full262K generation/stochastic equivalence untested. Primary C1 speed parity not achieved. These go to new Pro planning, not another old-plan optimization loop.",
       "C4_repetitions_per_engine": 3,
       "C4_native_assertions_each": 7781,
       "C4_native_all4096_ids_and419_non_timing_cycles_exact_repeats": true,
@@ -2916,7 +2916,7 @@
           "sha256": "3da49f66c6730614433e01fb429bc9c4e89d00c1f88a01982534334261bf9c7e"
         }
       },
-      "next": "Typed contiguous GDN memory in existing SLM retained default1: exact495unit/321operator/38default-route/483lifecycle, C1decode+3.36% and C4short common-decode+8.66% native pilot, no new Python score. Next refresh final-candidate changed-path practical/MTP and primary C1/C4 evidence, with fixed frozen binary/inputs and bounded repetitions; reuse unchanged original evidence explicitly. Keep defaultD64four failures/P1 automatic/reference/integratedmode gates open. No further GDN register/geometry sweep without new causal evidence; goalactive/P7incomplete.",
+      "next": "Wait for developer-provided new Pro plan; no further optimization authorized under old plan.",
       "current_quality": {
         "practical_tasks": 8,
         "practical_passed": 8,
@@ -6617,9 +6617,41 @@
         },
         "qualification_promoted": false,
         "remaining": "Single native pilot per arm/C1 and short C4, not a fresh original campaign or three-repeat final candidate matrix. Exact operator snapshots and native serving continuity do not promote integrated all-layer original MTP/C4/long-context state/default reference or P1 automatic admission. Prior completed matrix retains046ece source identity; current default binary needs scoped final practical/primary evidence."
-      }
+      },
+      "execution_closed": true,
+      "final_candidate_matrix_0ea34de4e": {
+        "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p7-candidate-matrix-v3/receipt-v1.json",
+        "bytes": 120168,
+        "sha256": "6e5eb27e27ec606b6758c99fff45899c5120bdc2c82ae5f664980ff2897e6db4"
+      },
+      "final_candidate_quality_0ea34de4e": {
+        "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p7-candidate-quality-v4/receipt-v1.json",
+        "bytes": 67137,
+        "sha256": "e31d4c6c5fee948fb93b07cefb0f9c75656f506b46b0962b7120eb1cf1de01c7"
+      },
+      "qualification_complete": false
     }
   ],
   "performance_baseline": "7536aededc049b2157f12eadb0f4cc6bbf29b7b7",
-  "performance_next": "Typed contiguous GDN memory in existing SLM retained default1: exact495unit/321operator/38default-route/483lifecycle, C1decode+3.36% and C4short common-decode+8.66% native pilot, no new Python score. Next refresh final-candidate changed-path practical/MTP and primary C1/C4 evidence, with fixed frozen binary/inputs and bounded repetitions; reuse unchanged original evidence explicitly. Keep defaultD64four failures/P1 automatic/reference/integratedmode gates open. No further GDN register/geometry sweep without new causal evidence; goalactive/P7incomplete."
+  "performance_next": "Wait for developer-provided new Pro plan; no further optimization authorized under old plan.",
+  "closed_performance_plan": "docs/B70_EXL3_NATIVE_PERFORMANCE_IMPLEMENTATION_PLAN_7536aeded_EN.md",
+  "performance_plan_closure": {
+    "status": "closed_by_developer_after_last_approved_optimization",
+    "date": "2026-10-05",
+    "product_commit": "0ea34de4e005688ebc80f28137c93c83b9c461c3",
+    "report": "docs/b70-exl3/PRO_PERFORMANCE_REVIEW_2026-10-05.txt",
+    "final_matrix": {
+      "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p7-candidate-matrix-v3/receipt-v1.json",
+      "bytes": 120168,
+      "sha256": "6e5eb27e27ec606b6758c99fff45899c5120bdc2c82ae5f664980ff2897e6db4"
+    },
+    "final_quality": {
+      "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p7-candidate-quality-v4/receipt-v1.json",
+      "bytes": 67137,
+      "sha256": "e31d4c6c5fee948fb93b07cefb0f9c75656f506b46b0962b7120eb1cf1de01c7"
+    },
+    "performance_parity_achieved": false,
+    "qualification_promoted": false,
+    "next": "Wait for developer-provided new Pro plan; no further optimization authorized under old plan."
+  }
 }

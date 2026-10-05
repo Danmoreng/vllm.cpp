@@ -1,16 +1,16 @@
 # AGENTS.md: local B70 development
 
-This checkout is a direct collaboration with the developer. Work on the current
-branch and follow `docs/B70_EXL3_NATIVE_PERFORMANCE_IMPLEMENTATION_PLAN_7536aeded_EN.md`
-in small, reviewable steps. The recovery plan
-`docs/B70_CPP_EXL3_IMPLEMENTATION_FIRST_RECOVERY_PLAN_EN.md` and original
-`docs/B70-EXL3-Migration-and-Parity-Plan.md` remain scope/evidence. The developer's
-current instructions take priority. Continue from the implemented native engine
-with bounded P0 readiness, a small P1 original page1600/Q4 capture, then P2
-wider group-correct W8A8 panels as the first performance code delivery. Retain
-open default D64/state/reference gates without blocking independent performance
-implementation. Archived EXL3/GPTQ plans are historical references, not active
-task instructions. GPTQ remains diagnostic only.
+This checkout is a direct collaboration with the developer. Stay on the current
+branch. The developer closed the P0–P7 performance work period on 2026-10-05 after
+the typed-memory speculative GDN SLM change, product commit `0ea34de4e`.
+`docs/B70_EXL3_NATIVE_PERFORMANCE_IMPLEMENTATION_PLAN_7536aeded_EN.md` is now a
+historical executed plan, with unresolved qualification gates preserved. Read
+`docs/b70-exl3/PRO_PERFORMANCE_REVIEW_2026-10-05.txt` and `RECOVERY_STATUS.json`
+for the final checkpoint and Pro handoff. Do not start another optimization or
+restart P0–P7 until the developer supplies a new instruction or plan. The
+developer's current instructions take priority. The recovery and migration
+plans remain scope/evidence; archived EXL3/GPTQ plans are historical references.
+GPTQ remains diagnostic only.
 
 ## How we work
 
