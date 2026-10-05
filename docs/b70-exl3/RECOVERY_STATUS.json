@@ -2072,7 +2072,7 @@
     },
     {
       "task": "P7",
-      "status": "in_progress_typed_short_row_norm_retained_remaining_matrix_open",
+      "status": "in_progress_typed_norm_retained_bounded_no_MTP_measured_capacity_open",
       "complete": false,
       "C1_repetitions_per_engine": 3,
       "actual_native_primary_assertions_each": 1895,
@@ -2117,7 +2117,7 @@
         "bytes": 484222,
         "sha256": "4ef94808be5009536b9e1976410b821ce96d0b958338216b2f29ed18bd87f2ac"
       },
-      "remaining": "P7 incomplete. Typed short-row norm retained after exact same-input proof and single C1/C4 serving gains. Original fixed1600-budget C4 has no4way overlap; original IDs vary. Original eager diagnostic disables compile/graphs and changes custom-op/IR-provider mode; its norm/GDN costs are not compiled-serving same-arithmetic baselines. Remaining actual noMTP support/32K/mixed/prefix/practical/default-controlled/draft/lifecycle plus original admission/stability/P1/default/full-state qualification.",
+      "remaining": "P7 incomplete. Typed short-row norm retained; no-MTP benchmark driver and bounded32768context C1/C4 executions delivered, native262K no-MTP constructor refused safely and remains open. Next qualify target-only EXL3 Mamba align policy against state/prefix/ownership and existing262K capacity guard. Original C4 no4way overlap, trajectories differ. Remaining32K/mixed/prefix/practical/default-controlled/draft/lifecycle plus original stability/P1/default/full-state qualification. Original eager mode differs from compiled graph arithmetic; no blind register sweeps or reference/gate changes.",
       "C4_repetitions_per_engine": 3,
       "C4_native_assertions_each": 7781,
       "C4_native_all4096_ids_and419_non_timing_cycles_exact_repeats": true,
@@ -2197,9 +2197,68 @@
           "bytes": 37547,
           "sha256": "73d55c4c9d65b10e31b4cf93312fc3605a0905215ec730013e9ce67a5e457557"
         }
+      },
+      "no_MTP_diagnostic": {
+        "benchmark_support": "actual no-MTP selection; absent speculation and zero counters required; implicit MTP3/262144 default unchanged",
+        "bounded_context_limit_both": 32768,
+        "fixed_page_batch_blocks": [
+          1600,
+          1600,
+          180
+        ],
+        "input_output_tokens_each": [
+          4096,
+          256
+        ],
+        "matched_executions_per_engine_case": 1,
+        "actual_native_assertions_C1_C4": [
+          1354,
+          5335
+        ],
+        "actual_matched_worker_exits_each": 0,
+        "C1_decode_tps": {
+          "original": 29.510084219312304,
+          "native": 25.2739064267325
+        },
+        "C1_native_decode_change_percent": -14.355017630913846,
+        "C1_ttft_ms": {
+          "original": 1909.1610920149833,
+          "native": 2806.9449959999997
+        },
+        "C1_E2E_s": {
+          "original": 10.550290557992412,
+          "native": 12.896429348
+        },
+        "C1_first_difference": 134,
+        "C4_original_has_four_way_overlap": false,
+        "C4_native_common_interval_tps": 64.63387855021124,
+        "C4_E2E_s": {
+          "original": 42.405380249983864,
+          "native": 37.925103963
+        },
+        "C4_native_E2E_elapsed_change_percent": -10.565348690595865,
+        "C4_first_differences": [
+          48,
+          3,
+          124,
+          3
+        ],
+        "native_262K_first_attempt_actual_exit": 1,
+        "native_262K_refusal": "16.02GiB need versus8.74GiB pool; estimatedmax142400. Original262K pilot succeeds, but is not paired with32768diagnostic. Native no-spec Mamba mode none versus original/MTP3 align; no capacity-guard/cache-policy/reference change.",
+        "native_262K_no_MTP_qualified": false,
+        "default_MTP3_262K_native_O8_assertions": 80,
+        "default_eight_ids_exact_typed_primary_prefix": true,
+        "original_default_MTP3_config_only_actual_exit": 0,
+        "original_config_only_is_runtime_proof": false,
+        "qualification_promoted": false,
+        "receipt": {
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p7-no-mtp-v1/receipt-v1.json",
+          "bytes": 23758,
+          "sha256": "b65d18c2024f5a3231ce9634753b2126debbee17cae0fc2c0e35c2c8198b1475"
+        }
       }
     }
   ],
   "performance_baseline": "7536aededc049b2157f12eadb0f4cc6bbf29b7b7",
-  "performance_next": "P7 next implement actual no-MTP benchmark support with unchanged MTP3 default, execute bounded no-MTP C1/C4 sentinels, then remaining32K/mixed/prefix/practical/default-controlled/compact-draft/lifecycle matrix. Typed short-row Gemma norm retained with exact native IDs/cycles and single-sample complete-serving gains. Further GDN dataflow changes require paired state/arithmetic proof against relevant original path; eager original mode differs from compiled serving. Do not repeat rejected P5 geometry variants or change reference/thresholds. Original C4 admission/stability, compiled same-input norm/P1/defaultD64 four failures/full-state qualification remain open."
+  "performance_next": "P7 next one small EXL3 target-only Mamba align-policy implementation, with focused capacity/state/prefix/graph-owner tests and exact native output proof; preserve262K objective and all capacity guards. Current no-MTP measurements explicitly32768context in both engines and do not qualify262K mode. Then remaining32K/mixed/prefix/practical/default-controlled/compact-draft/lifecycle matrix; further GDN dataflow only with paired arithmetic/state evidence, never repeat rejected P5 register geometry. Original C4 admission/stability/compiled norm/P1/defaultD64 four failures/full-state qualification stay open."
 }
