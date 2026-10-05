@@ -26,6 +26,8 @@ add_test(NAME test_exl3_projection_compare COMMAND ${Python3_EXECUTABLE}
   "${CMAKE_SOURCE_DIR}/tests/scripts/test_exl3_projection_compare.py")
 add_test(NAME test_exl3_runtime_layout COMMAND ${Python3_EXECUTABLE}
   "${CMAKE_SOURCE_DIR}/tests/scripts/test_exl3_runtime_layout.py")
+add_test(NAME test_exl3_mtp_state_scope COMMAND ${Python3_EXECUTABLE}
+  "${CMAKE_SOURCE_DIR}/tests/scripts/test_exl3_mtp_state_scope.py")
 add_executable(b70_provider_trace_probe
   vt/b70_provider_trace_probe.cpp
   ${CMAKE_SOURCE_DIR}/src/vt/op_provider.cpp
