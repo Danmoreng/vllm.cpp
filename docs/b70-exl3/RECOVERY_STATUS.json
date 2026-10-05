@@ -6304,9 +6304,50 @@
         "full_all_layer_state_qualified": false,
         "automatic_verifier_enabled": false,
         "P7_complete": false
+      },
+      "two_heldout_all_attention_KV_diagnostic": {
+        "receipt": {
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p7-heldout-kv-v1/receipt-v1.json",
+          "bytes": 1902061,
+          "sha256": "93a28f727ea93f0d4249f16ec37505c6df94a7d0ba287705e99308379d6d269d"
+        },
+        "verified_identities": 892,
+        "status": "strict_KV_byte_gate_failed_signed_zero_investigation",
+        "product_arithmetic_changed": false,
+        "host_target_tests": 22,
+        "host_attention_address_tests": 6,
+        "build_actual_exit": 0,
+        "original_actual_exit_each": 0,
+        "native_actual_exit_each": 1,
+        "native_assertions_each": {
+          "total": 5711,
+          "passed": 5708,
+          "failed": 3
+        },
+        "attention_layers_each": 16,
+        "heldout_prefixes": 2,
+        "KV_arrays_each": 96,
+        "KV_comparison_bytes_each": 12615680,
+        "KV_byte_differences_each": 3,
+        "unique_difference_each": {
+          "layer": 43,
+          "position": 0,
+          "head": 1,
+          "channel": 32,
+          "native_byte": 0,
+          "original_byte": 128,
+          "FP8_positive_negative_zero_only": true
+        },
+        "GDN_all_arrays_and_full_head_rows_exact": true,
+        "old_original_GDN_head_hashes_unchanged": true,
+        "KV_strict_byte_gate_pass": false,
+        "default_reference_promoted": false,
+        "full_all_layer_state_qualified": false,
+        "P7_complete": false,
+        "scope": "Same two frozen held-out P128/D1 prefixes, separately controlled original eager no-MTP BA policy, page1600 both engines, full6bpw target/FP8KV/F32GDN and24GiB/no-swap/CPU2. Original all16attention captures use actual written-row metadata and check continuity without capacity reads; native independently owns poisoned GDN/FP8 caches. Source change adds diagnostics only. NativeA/Bactualexit1 with three repeated comparisons of one signed-zero key byte, not successful quality tests; decoded zero values equal is descriptive only, strict byte gate not weakened. GDN/head/hidden bytes exact including prior original hashes. BeforeD1 duplicates prior final-state witness. No serving speed inference, ideal-reference promotion or fullMTP/C4/long qualification."
       }
     }
   ],
   "performance_baseline": "7536aededc049b2157f12eadb0f4cc6bbf29b7b7",
-  "performance_next": "Current046ece2df matrix/current quality/profile complete; two held-out P128+D1 full48GDN Conv/SSM states and fullhead outputs exact controlled original, current diagnostics/tools/tests delivered without product arithmetic change. Next close remaining actual state dependency: bounded initialized active KV observations/comparison for all16 attention layers at these same contexts, not a new speed campaign. Then independently justify/present default-vs-controlled BA reference contract and integrated verifier/MTP/batch qualification. Default four failures, P1 automatic promotion and primary speed gap remain open; goalactive."
+  "performance_next": "Current matrix/quality/profile complete and two held-out full48GDN states exact controlled original. New all16attention initializedKV captures/consumer delivered but nativeA/Bstrictbytegate both fail3checks of same layer43 token0/head1/channel32 byte (native+0/original-0); all other bytes and GDN/head exact. Next locate sign loss at real projection/Knorm/RoPE preimage using existing scoped activation dump and read-only original layer43 boundaries before touching product arithmetic. Keep strict byte gate/default four failures/P1 default admission open, goalactive; no repeated final serving campaign."
 }

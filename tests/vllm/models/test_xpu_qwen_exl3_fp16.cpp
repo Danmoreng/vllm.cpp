@@ -1676,9 +1676,53 @@ static void CheckHeldOutGdnStates(const std::string& phase, const std::string& s
   REQUIRE(state_index == 48);
 }
 
+static void CheckHeldOutAttentionKv(const std::string& phase, const std::string& stage,
+                                    vt::Queue& q, const vllm::Qwen3_5DenseWeights& weights,
+                                    const std::vector<vllm::PagedKvCache>& caches, int length,
+                                    const vllm::SafetensorsFile& oracle) {
+  const char* directory = std::getenv("VT_B70_EXL3_STATE_OUTPUT");
+  REQUIRE(directory != nullptr);
+  REQUIRE((length == 128 || length == 129));
+  size_t cache_index = 0;
+  for (size_t layer = 0; layer < weights.layers.size(); ++layer) {
+    if (weights.layers[layer].is_linear_attention) continue;
+    const auto& cache = caches.at(cache_index++);
+    REQUIRE(cache.dtype == DType::kI8);
+    REQUIRE(cache.fp8_kind == vt::Fp8KVCacheDataType::kFp8E4M3);
+    REQUIRE(cache.num_blocks == 1); REQUIRE(cache.block_size == 1600);
+    REQUIRE(cache.num_kv_heads == 4); REQUIRE(cache.head_size == 256);
+    REQUIRE(cache.k_scale == 1.0f); REQUIRE(cache.v_scale == 1.0f);
+    const std::string key = phase + "_l" + std::to_string(layer) + "_" + stage;
+    for (int which = 0; which < 2; ++which) {
+      auto source = vllm::dense_attn::KvSlice(cache, q.device, which);
+      source.shape[1] = length;
+      xpu_test::Buffer compact(q, DType::kI8, {1, length, 4, 256});
+      vt::Copy(q, compact.tensor, source);
+      const auto bytes = compact.download();
+      const std::string label = which == 0 ? "key" : "value";
+      const auto& expected = oracle.Get(key + "_" + label);
+      REQUIRE(expected.dtype == "U8");
+      REQUIRE((expected.shape == std::vector<int64_t>{length, 4, 256}));
+      REQUIRE(expected.nbytes == bytes.size());
+      const auto file = std::filesystem::path(directory) / (key + "-" + label + ".u8");
+      REQUIRE_FALSE(std::filesystem::exists(file));
+      std::ofstream output(file, std::ios::binary);
+      output.write(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+      output.close(); REQUIRE(output.good());
+      const size_t different = std::inner_product(bytes.begin(), bytes.end(), expected.data,
+          size_t{0}, std::plus<size_t>(), [](auto a, auto b) { return size_t(a != b); });
+      std::cout << "HELD_OUT_ATTENTION_KV key=" << key << '_' << label
+                << " bytes=" << bytes.size() << " different=" << different << '\n';
+      CHECK(different == 0);
+    }
+  }
+  REQUIRE(cache_index == 16);
+}
+
 static void RunRealEagerTarget(int decode_steps, int diagnostic_stop = -1,
                                bool attention3_detail = false, int gdn_detail_layer = 1,
-                               bool gdn_history = false, bool held_out_states = false) {
+                               bool gdn_history = false, bool held_out_states = false,
+                               bool held_out_kv = false) {
   const char* model = std::getenv("VT_B70_EXL3_MODEL");
   const char* fixtures = std::getenv("VT_B70_EXL3_S1_FIXTURES");
   if (!model || !fixtures) std::exit(77);
@@ -1687,6 +1731,7 @@ static void RunRealEagerTarget(int decode_steps, int diagnostic_stop = -1,
   REQUIRE((diagnostic_stop == -1 || (decode_steps == 64 && (diagnostic_stop == 29 || diagnostic_stop == 1)) ||
            (decode_steps == 1 && diagnostic_stop == 1)));
   const bool diagnostic = diagnostic_stop >= 0;
+  if (held_out_kv) REQUIRE(held_out_states);
   if (held_out_states) {
     REQUIRE(decode_steps == 1); REQUIRE(diagnostic_stop == 1);
     REQUIRE_FALSE(attention3_detail); REQUIRE_FALSE(gdn_history);
@@ -1727,6 +1772,27 @@ static void RunRealEagerTarget(int decode_steps, int diagnostic_stop = -1,
           CHECK(entry.at("stage") == stage);
           CHECK(entry.at("copied") == !(phase == "p128" && stage == "before"));
         }
+    if (held_out_kv) {
+      const auto& kv = captured_record.at("all_attention_kv_records");
+      REQUIRE(kv.size() == 64);
+      for (const std::string phase : {"p128", "d1"})
+        for (int layer = 3; layer < 64; layer += 4)
+          for (const std::string stage : {"before", "after"}) {
+            const auto& entry = kv.at(phase + "_l" + std::to_string(layer) + "_" + stage);
+            const int length = stage == "before" ? (phase == "p128" ? 0 : 128)
+                                                 : (phase == "p128" ? 128 : 129);
+            CHECK(entry.at("phase") == phase); CHECK(entry.at("layer") == layer);
+            CHECK(entry.at("stage") == stage);
+            CHECK(entry.at("written_logical_length") == length);
+            CHECK(entry.at("copied") == (length > 0));
+            CHECK(entry.at("logical_addresses").size() == size_t(length));
+            for (const std::string scale : {"_k_scale", "_v_scale"}) {
+              const auto& values = entry.at("scales").at(scale).at("values");
+              if (values.is_array()) { REQUIRE(values.size() == 1); CHECK(values.at(0) == 1.0f); }
+              else CHECK(values == 1.0f);
+            }
+          }
+    }
   }
   std::vector<vllm::SafetensorsFile> oracles;
   for (int repeat = 0; repeat < repeats; ++repeat)
@@ -1809,6 +1875,8 @@ static void RunRealEagerTarget(int decode_steps, int diagnostic_stop = -1,
     std::cout << "REAL_TARGET_FORWARD_START " << phase << '\n' << std::flush;
     if (held_out_states && !prefill)
       CheckHeldOutGdnStates(phase, "before", gpu.q, weights, states, oracles[0]);
+    if (held_out_kv && !prefill)
+      CheckHeldOutAttentionKv(phase, "before", gpu.q, weights, caches, 128, oracles[0]);
     const bool capture_hidden = diagnostic &&
         (step == 0 || step == 1 || step == 11 || step == 27 || step == 29);
     const bool capture_gdn_state = diagnostic && !attention3_detail &&
@@ -1847,6 +1915,8 @@ static void RunRealEagerTarget(int decode_steps, int diagnostic_stop = -1,
     backend.Synchronize(gpu.q);
     if (held_out_states)
       CheckHeldOutGdnStates(phase, "after", gpu.q, weights, states, oracles[0]);
+    if (held_out_kv)
+      CheckHeldOutAttentionKv(phase, "after", gpu.q, weights, caches, prefill ? 128 : 129, oracles[0]);
     if (capture_gdn_state) {
       size_t owner_index = 0;
       for (int i = 0; i < gdn_detail_layer; ++i)
@@ -1941,6 +2011,12 @@ TEST_CASE("XPU EXL3 real target diagnostic: held-out P128 D1 all GDN states") {
   // Separate controlled held-out fixture: native state evolves from its own
   // poisoned caches. Only token prefixes are teacher-forced, never states.
   RunRealEagerTarget(1, 1, false, 1, false, true);
+}
+
+TEST_CASE("XPU EXL3 real target diagnostic: held-out P128 D1 all hybrid states") {
+  // Independent native GDN and FP8 caches; only previously written logical KV
+  // rows are compared. Cold poison/capacity is never an original fixture.
+  RunRealEagerTarget(1, 1, false, 1, false, true, true);
 }
 
 TEST_CASE("XPU EXL3 real target diagnostic: own-state through D29 selected final hidden") {
