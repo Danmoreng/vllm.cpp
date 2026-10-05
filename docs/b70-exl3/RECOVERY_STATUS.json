@@ -6432,9 +6432,66 @@
         "performance_parity_achieved": false,
         "P7_complete": false,
         "scope": "Both unchanged held-out P128/D1 inputs, independent native hybrid states/full248320 head/FP8KV/F32GDN, separately controlled original BA, page1600 and only initialized logical rows. BeforeD1 duplicates final P128 witness; counts are comparisons, not independent samples. Original B reused unchanged immutable capture explicitly, new read-only causal original A agrees with all previous original hashes. Current D64 full heads exact prior/control but default four gates still fail. This robustness fix is not a speedup claim; prior046ece serving measurements remain labeled that source. Full MTP/C4/long-context state qualification and P1 automatic admission remain separate/open."
+      },
+      "QK_signed_zero_complete_operator_cost": {
+        "receipt": {
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p7-qk-zero-cost-v1/receipt-v1.json",
+          "bytes": 30997,
+          "sha256": "fe59489672eb0775df1c55277cb5c87fa238d75cc35b1fc79dcd11ba66171aed"
+        },
+        "verified_identities": 65,
+        "comparison": {
+          "p128": {
+            "baseline_medians_ms": [
+              0.1311302265625,
+              0.131079515625
+            ],
+            "candidate_medians_ms": [
+              0.1319460078125,
+              0.1318456953125
+            ],
+            "baseline_median_ms": 0.13110487109375002,
+            "candidate_median_ms": 0.1318958515625,
+            "relative_complete_wall_percent": 0.6033189019989615,
+            "absolute_complete_wall_delta_ms": 0.00079098046874998
+          },
+          "d1": {
+            "baseline_medians_ms": [
+              0.05375359375,
+              0.053740078125
+            ],
+            "candidate_medians_ms": [
+              0.05406578125,
+              0.0540571015625
+            ],
+            "baseline_median_ms": 0.0537468359375,
+            "candidate_median_ms": 0.05406144140625,
+            "relative_complete_wall_percent": 0.5853469571973413,
+            "absolute_complete_wall_delta_ms": 0.00031460546874999967
+          }
+        },
+        "order": [
+          "baseline-R1-v1",
+          "candidate-R1-v1",
+          "candidate-R2-v1",
+          "baseline-R2-v1"
+        ],
+        "baseline_actual_exit_each": 1,
+        "candidate_actual_exit_each": 0,
+        "baseline_assertions_each": {
+          "total": 49,
+          "passed": 46,
+          "failed": 3
+        },
+        "candidate_assertions_each": 49,
+        "product_source": "5acee60d2ef3fcbb6152c54b91d81e4963a623b8",
+        "product_code_changed": false,
+        "new_serving_score_measured": false,
+        "P7_complete": false,
+        "scope": "Actual same held-out layer43 original P128/D1 QKV, RoPE coefficients and pinned checkpoint norm weights. Both frozen executables use identical current timing-test source; old product header/attention source mounted read-only over build only, tracked source never reset. Complete eager host submissions plus one queue-completion wait per128-call batch; three batches after16warm calls, two fresh workers perarm, ABBAorder. All samples including reproducibly slower firstP128batch retained; medians are descriptive, no cause attributed to startup/clock/submission. No profile/device events included, no serving/TPS/TTFT/MTP-Q4 or Python performance claim. Prior full state/D64 evidence remains5ace scoped. Corrected arrays exact and old three strict zero-sign failures retained. No additional arithmetic optimization justified by this small measured cost."
       }
     }
   ],
   "performance_baseline": "7536aededc049b2157f12eadb0f4cc6bbf29b7b7",
-  "performance_next": "QK signed-zero products fixed from actual preimage evidence; auto/scalar operator44/44each, two unchanged held-out complete48GDN/all16initializedKV caches5711/5711each, full65head rows exact prior/control and defaultD64four failures retained. Next bounded complete attention-preamble cost A/B against prior frozen arithmetic, then remaining GPU target-stage optimization from refreshed causal profile. P1 automatic/default and integratedMTP/C4/long/reference qualification remain open; no repeated completed final serving campaign or parity claim. Goalactive."
+  "performance_next": "Bounded signed-zero cost A/B complete: original operands P128/D1 complete preamble+0.6033%/+0.5853%wall, corrected49/49each versus old3strict failures; no new serving score. Next one typed contiguous-memory specialization in existing speculative GDN SLM kernel, preserving ascending-K/all FP32 snapshots/owner barriers and fallback; exact focused unit/graph proof then paired complete operator/request gain before retaining. Do not repeat rejected private-register geometry or completed broad matrix. DefaultD64four failures/P1 automatic/reference/integratedmode gates remain open; goalactive."
 }

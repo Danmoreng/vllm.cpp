@@ -575,7 +575,7 @@ TEST_CASE("XPU EXL3 QK norm: IEEE signed-zero products") {
   xpu_test::SameBytes(output.download(), expected_bytes);
 }
 
-TEST_CASE("XPU EXL3 attention layer43: actual KV signed-zero preimage") {
+static void RunRealKvPreimage(bool benchmark) {
   const char* fixtures = std::getenv("VT_B70_EXL3_S1_FIXTURES");
   const char* model = std::getenv("VT_B70_EXL3_MODEL");
   if (!fixtures || !model) std::exit(77);
@@ -620,6 +620,14 @@ TEST_CASE("XPU EXL3 attention layer43: actual KV signed-zero preimage") {
   };
   vt::RopeArgs rope{10000000.0f, 64};
   rope.fp16_intermediates = true;
+  const bool profiled = std::getenv("VT_XPU_PROFILE") &&
+      std::string(std::getenv("VT_XPU_PROFILE")) == "1";
+  nlohmann::json timing{{"schema", "b70-exl3-layer43-complete-preamble-cost-v1"},
+      {"profiled", profiled}, {"iterations_per_batch", 128}, {"warmup_calls", 16},
+      {"cases", nlohmann::json::array()},
+      {"scope", "Actual held-out original P128/D1 operands and layer43 weights; "
+          "complete eager preamble submissions and batch completion wait. "
+          "Not serving, graph, Q4 verifier or Python performance parity."}};
   for (const std::string phase : {"p128", "d1"}) {
     const auto captured = [&](const char* stage) -> const vllm::StTensor& {
       return oracle.Get(phase + "_l43_preimage_" + stage);
@@ -649,11 +657,58 @@ TEST_CASE("XPU EXL3 attention layer43: actual KV signed-zero preimage") {
     const auto qgate = merged.tensor.Slice(1, 0, 12288);
     const auto input_key = merged.tensor.Slice(1, 12288, 13312);
     xpu_test::Buffer gates(gpu.q, DType::kF32, {rows, 24, 256});
-    vt::AttnQkNormRopeGate(gpu.q, query.tensor, key.tensor, gates.tensor, qgate, input_key,
-                          qw, kw, cache.tensor, vt::RmsNormArgs{1e-6f, true}, rope);
+    const auto invoke = [&] {
+      vt::AttnQkNormRopeGate(gpu.q, query.tensor, key.tensor, gates.tensor, qgate, input_key,
+                            qw, kw, cache.tensor, vt::RmsNormArgs{1e-6f, true}, rope);
+    };
+    invoke();
+    if (benchmark) {
+      for (int i = 0; i < 16; ++i) invoke();
+      vt::GetBackend(gpu.q.device).Synchronize(gpu.q);
+      (void)vt::xpu::DrainProfileEvents();
+      nlohmann::json wall = nlohmann::json::array();
+      nlohmann::json device = nlohmann::json::array();
+      for (int batch = 0; batch < 3; ++batch) {
+        const auto start = std::chrono::steady_clock::now();
+        for (int i = 0; i < 128; ++i) invoke();
+        vt::GetBackend(gpu.q.device).Synchronize(gpu.q);
+        wall.push_back(std::chrono::duration<double, std::milli>(
+            std::chrono::steady_clock::now() - start).count() / 128);
+        const auto events = vt::xpu::DrainProfileEvents();
+        if (profiled) {
+          REQUIRE(events.size() == 128);
+          double ms = 0;
+          for (const auto& event : events) {
+            REQUIRE((event.stage == "attn_qk_norm_rope_gate_subgroup" ||
+                     event.stage == "attn_qk_norm_rope_gate"));
+            ms += (event.end_ns - event.start_ns) / 1e6;
+          }
+          device.push_back(ms / 128);
+        } else CHECK(events.empty());
+      }
+      timing["cases"].push_back({{"phase", phase}, {"rows", rows},
+          {"complete_wall_ms_per_call", wall}, {"device_ms_per_call", device}});
+    }
     compare(phase + ".fused_norm_rope", key, captured("k_rope"));
   }
+  if (benchmark) {
+    const char* directory = std::getenv("VT_B70_EXL3_DIAGNOSTIC_OUTPUT");
+    REQUIRE(directory != nullptr);
+    const auto path = std::filesystem::path(directory) / "preamble-timing.json";
+    REQUIRE_FALSE(std::filesystem::exists(path));
+    std::ofstream output(path); REQUIRE(output.good());
+    output << timing.dump(2) << '\n';
+    output.close(); REQUIRE(output.good());
+  }
   CHECK(vt::GetReferenceTierHits() == 0);
+}
+
+TEST_CASE("XPU EXL3 attention layer43: actual KV signed-zero preimage") {
+  RunRealKvPreimage(false);
+}
+
+TEST_CASE("XPU EXL3 attention layer43: bounded complete preamble cost") {
+  RunRealKvPreimage(true);
 }
 
 TEST_CASE("XPU EXL3 real attention mixer: own cache P128 D1 from original hidden") {
