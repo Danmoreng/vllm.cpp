@@ -6633,7 +6633,7 @@
     }
   ],
   "performance_baseline": "7536aededc049b2157f12eadb0f4cc6bbf29b7b7",
-  "performance_next": "Active upstream readiness/performance plan: U1/U0 complete, U2 partial, F1 stopped at bounded low-benefit precondition, F2 complete with event candidate rejected and model-only direct preparation retained/default1. Q1 integrated C1 strict state failure attributed past exact projections/computed Conv into post-conv preparation/recurrence; C4transition/default admission remain open. Proceed with scoped transition coverage, independent conditional F3 executed cost, U2 contribution composition and U6 final matrix/Pro handoff. Old P0-P7 remains closed.",
+  "performance_next": "Active upstream readiness/performance plan: U1/U0 complete,U2 partial,F1 stopped at bounded low-benefit precondition,F2 complete with event candidate rejected and model-only direct preparation retained/default1. Q1 original C4->C2->C1 cancellation trace passes;native independent cold transition replay/full3316array digest comparison next. Prior C1strictstate failure attributed past exact projections/computed Conv to postconv preparation/recurrence;ordinary admission open. Independent conditional F3 executed cost,U2 contribution composition,U6 final matrix/Pro handoff still open. OldP0-P7 closed.",
   "closed_performance_plan": "docs/B70_EXL3_NATIVE_PERFORMANCE_IMPLEMENTATION_PLAN_7536aeded_EN.md",
   "performance_plan_closure": {
     "status": "closed_by_developer_after_last_approved_optimization",
@@ -6661,7 +6661,7 @@
     "integration_status": "native_merge_regression_pass_GCC16_CPU_build_pass_remaining_portability_open",
     "U0": "complete_portable_projection_identity_slice",
     "U2": "partial_atomic_cache_oneDNN_SmallM_notices_and_clean_CPU_build_complete_contribution_and_remaining_capability_hygiene_open",
-    "Q1": "partial_original_C1_Q4_controlled_capture_pass_native_integrated_exact_state_fail_default_repeatability_fail_C4_pending",
+    "Q1": "partial_original_controlled_C1_and_C4transition_capture_pass_native_C1strictstate_fail_native_transition_pending_default_repeatability_fail",
     "F1": "stopped_at_bounded_precondition_low_measured_producer_cost_no_fusion_variant",
     "F2": "completed_first_event_candidate_rejected_second_direct_candidate_retained_prefill_memory_default_model_only",
     "F3": "conditional_on_demonstrated_current_cost",
@@ -6675,7 +6675,7 @@
     "cpu_limit": "GCC16 now builds the CPU library and selected targets;5 focused CTest cases pass with5019 assertions and one existing registry test-case skip. GCC12 previous unchanged muse_glimmer_mm array-bounds failure retained; not rerun after the cache repair.",
     "other_backends": "Affected Vulkan source compiles and CUDA CUTLASS/Marlin host syntax checks pass. CUDA device build/link/runtime and HIP remain unverified.",
     "performance_scope": "One before/after C1 short native pair:43.61414->43.51202 decode TPS; TTFT2313.785->2318.430ms; request8160.513->8178.879ms. No repeat signal and no refreshed original score.",
-    "next_step": "Q1 first-layer attribution complete: native/original input norm, mixedQKV, BAhalves, computedConv andV exact; original fused/split reproduces core/z/Conv/all4F32snapshots. Native strict931 comparisons unchanged,671fail. Q/K normalization materialization and recurrence reductions differ in source; individual causation/accuracy unproven, no precision/reference/default/threshold change. Small C4->C2->C1 coverage remains; exact Q1 failure need not stall independent F3 current C4long/mixed executed shape/time inclgraphreplays, U2 contribution composition and U6 fixed matrix/Pro handoff. Fast route stays experimental; defaultrepeatability/D27/D29 failures preserved. F2 closed, no lease revival/panel sweep.",
+    "next_step": "Replay new actual controlled original C4prefill/C4Q4/C2Q4/C1Q4 cancellation trace with independent cold native caches and full3316-array digest comparison; do not inject original seeds. Original transition passes;native transition pending. Prior C1stategate still671fail; layer0norm/mixedQKV/BA/computedConv/V exact, postconv/recurrence source precision/reduction differences not single-cause proof. No precision/reference/default/threshold change. Independent F3 current C4long/mixed executed shape/time inclgraphreplays, U2 contribution composition and U6 fixed matrix/Pro handoff remain open. Fast route experimental;defaultrepeatability/D27/D29 preserved. F2 closed,no lease revival/panel sweep.",
     "U0_tests": "23 host tests in4 CTest cases pass, including8 generated artifact tests; no GPU arithmetic changed.",
     "U0_receipt": {
       "artifact": "upstream-u1-integration-v1/u0-receipt-v1.json",
@@ -6759,6 +6759,12 @@
       "artifact": "upstream-q1-layer0-attribution-v1/receipt-v1.json",
       "sha256": "7ff863de020bc885ed328ff67f7387932ea98461832f13cea2266bc0e22eb6c1",
       "bytes": 7998
+    },
+    "Q1_original_transition_tests": "14host methods pass with3new batch-scope tests covering actual C1..4/surviving IDs/ragged lengths/coldC4 and invalid metadata. Original synchronous in-process cancellation driver/eager,no graphs/asyncFalse,maxseq4/batch512;actual target counts4/4/2/1,rows512/16/8/4,allquery lengths4 aftercoldP128. Original MTP3/drafter/rejection unchanged; all4 ordinary/observed output maps exact. All48GDN/16attention full active arrays copied/hashed at producer:3316arrays/6044934144B,1536produced fullF32SSMsnapshots,336consumedSSMseeds,validConv/initializedFP8KV/hidden.896original interstep Conv/SSM/KV-prefix checks exact. Accepted1/4 observed;2/3/ragged/mixed GPU scope absent. No raw state persisted; independent host analyzer checks metadata/descriptor coverage/file identities, not absent raw rehash. Actualexit0,24GiB/no swap/twoCPUs,noOOM,hostcgrouppeak5847810048B. Native transition comparison pending, not autonomous native MTP/default admission/concurrency serving score; existingC1strictfail/defaultrepeatability/D27-D29 unchanged.",
+    "Q1_original_transition_receipt": {
+      "artifact": "upstream-q1-transition-v1/receipt-v1.json",
+      "sha256": "3429e85f51b0f29be1712232b24f1a9a1301210ce7ab4cc17e8c4cc7fe15516c",
+      "bytes": 5634
     }
   }
 }
