@@ -1216,6 +1216,39 @@ TEST_CASE("Qwen3.5 KV-cache spec: EXL3 MTP shares page identity and counts separ
   }
 }
 
+TEST_CASE("Qwen3.5 GDN mixed token views preserve padded producer rows and refuse permutations") {
+  // Padding separates every row from unrelated producer columns (merged BA
+  // and QKVZ use this layout). A dense row-size offset would read poison.
+  std::array<uint16_t, 80> storage{};
+  storage.fill(0x7e00);
+  vt::Tensor source;
+  source.data = storage.data(); source.dtype = vt::DType::kF16;
+  source.rank = 2; source.shape[0] = 10; source.shape[1] = 4;
+  source.stride[0] = 8; source.stride[1] = 1;
+  for (int row = 0; row < 10; ++row)
+    for (int col = 0; col < 4; ++col) storage[row * 8 + col] = uint16_t(row * 4 + col);
+  const auto before = storage;
+  for (const auto& indices : {std::vector<int32_t>{0, 1}, {3, 4, 5}, {9}}) {
+    auto view = vllm::detail::GdnContiguousTokenRowsView(source, indices);
+    REQUIRE(view.has_value());
+    CHECK(view->shape[0] == int64_t(indices.size()));
+    CHECK(view->stride[0] == 8);
+    CHECK(view->shape[1] == 4);
+    CHECK(view->dtype == source.dtype);
+    auto* actual = static_cast<const uint16_t*>(view->data);
+    for (size_t row = 0; row < indices.size(); ++row)
+      for (int col = 0; col < 4; ++col)
+        CHECK(actual[row * view->stride[0] + col] == storage[indices[row] * 8 + col]);
+  }
+  for (const auto& indices : {std::vector<int32_t>{}, {1, 0}, {2, 2}, {-1, 0}, {9, 10}, {10}, {1, 3}})
+    CHECK_FALSE(vllm::detail::GdnContiguousTokenRowsView(source, indices).has_value());
+  source.stride[1] = 2;
+  CHECK_FALSE(vllm::detail::GdnContiguousTokenRowsView(source, {3, 4}).has_value());
+  source.stride[1] = 1; source.stride[0] = 3;
+  CHECK_FALSE(vllm::detail::GdnContiguousTokenRowsView(source, {3, 4}).has_value());
+  CHECK(storage == before);
+}
+
 TEST_CASE("Qwen3.5 KV-cache spec: shared EXL3 MTP prefix recomputes the future-dependent draft page") {
   using namespace vllm::v1;
   init_none_hash(sha256_cbor);
