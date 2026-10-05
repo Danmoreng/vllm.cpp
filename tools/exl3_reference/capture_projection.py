@@ -15,33 +15,11 @@ from pathlib import Path
 import sys
 
 from extract_projection import digest, headers, write_safetensors
+from artifacts import ArtifactRoot, MissingArtifact, checked_fixture
 
 IMAGE = "sha256:8d0e1dbe1e6a3a31e79b5ddcc1c050589c08721360af9374b9acd01236f97918"
 LIB_SHA = "e60e499aefa95b290924ed98545eb815aca9d0fb1f3ede39b37d1ad49f3b522d"
 OPS_SHA = "9c05ea0aefca817fd37cee27f6e6216b6cee2d2a16c6480cafff52dc5ff67c13"
-
-
-def checked_fixture(path):
-    """Reject changed weights/inputs before importing Torch or touching the GPU."""
-    path = Path(path)
-    receipt = headers.read_json(path.with_suffix(".json"))
-    headers.require(digest(path.read_bytes()) == receipt["fixture_sha256"],
-                    "fixture SHA-256 mismatch")
-    report = headers.read_shard_header(path)
-    entries = {t["name"]: t for t in report["tensors"]}
-    expected = receipt["tensor_hashes"]
-    headers.require(entries.keys() == expected.keys(), "fixture tensor set mismatch")
-    with path.open("rb") as stream:
-        base = 8 + report["header_bytes"]
-        for name, entry in entries.items():
-            spec = expected[name]
-            headers.require((entry["dtype"], entry["shape"]) == (spec["dtype"], spec["shape"]),
-                            f"fixture dtype/shape mismatch: {name}")
-            begin, end = entry["data_offsets"]
-            stream.seek(base + begin)
-            headers.require(digest(stream.read(end - begin)) == spec["sha256"],
-                            f"fixture tensor SHA-256 mismatch: {name}")
-    return receipt
 
 
 def checked_runtime(root):
@@ -51,7 +29,8 @@ def checked_runtime(root):
                         f"pinned runtime SHA-256 mismatch: {relative}")
     # Overrides change the arithmetic or route; refuse rather than hide them.
     overrides = [k for k in os.environ if k.startswith("EXL3_") and k not in
-                 {"EXL3_TARGET_RUNTIME", "EXL3_FIX_SPARSE_GDN_RETIREMENT", "EXL3_SDPA_CACHE_CAPACITY"}]
+                 {"EXL3_TARGET_RUNTIME", "EXL3_FIX_SPARSE_GDN_RETIREMENT", "EXL3_SDPA_CACHE_CAPACITY",
+                  "EXL3_ARTIFACT_ROOT"}]
     headers.require(not overrides, f"unexpected EXL3 overrides: {overrides}")
 
 
@@ -185,15 +164,34 @@ def capture(fixture, output, runtime_root, image_identity):
     return result
 
 
-def main():
+def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--fixture", type=Path, required=True)
-    parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--artifact-root", type=Path,
+                        help="Local artifact root; overrides EXL3_ARTIFACT_ROOT")
+    parser.add_argument("--check-only", action="store_true",
+                        help="Validate local fixture identity on the host without inference")
+    parser.add_argument("--optional-artifacts", action="store_true",
+                        help="Return CTest skip code 77 only for missing external artifacts")
+    parser.add_argument("--output", type=Path)
     parser.add_argument("--runtime-root", type=Path, default=Path("/opt/exl3xpu"))
-    parser.add_argument("--image-identity", required=True)
-    args = parser.parse_args()
+    parser.add_argument("--image-identity")
+    args = parser.parse_args(argv)
+    if not args.check_only and (args.output is None or args.image_identity is None):
+        parser.error("capture requires --output and --image-identity")
     try:
-        result = capture(args.fixture, args.output, args.runtime_root, args.image_identity)
+        root = ArtifactRoot(args.artifact_root)
+        fixture = root.resolve(args.fixture)
+        root.resolve(fixture.with_suffix(".json"), constrain=not args.fixture.is_absolute())
+        receipt = checked_fixture(fixture)
+        if args.check_only:
+            print(json.dumps({"fixture_sha256": receipt["fixture_sha256"],
+                              "tensor_hashes": receipt["tensor_hashes"]}, sort_keys=True))
+            return 0
+        result = capture(fixture, args.output, args.runtime_root, args.image_identity)
+    except MissingArtifact as exc:
+        print(f"capture_projection: {exc}", file=sys.stderr)
+        return 77 if args.optional_artifacts else 1
     except (headers.InventoryError, OSError, KeyError, RuntimeError) as exc:
         print(f"capture_projection: {exc}", file=sys.stderr)
         return 1

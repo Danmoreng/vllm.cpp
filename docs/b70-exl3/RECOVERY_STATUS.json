@@ -6659,7 +6659,7 @@
     "upstream_ref": "e67a071a649814e102a91145a0b1b424884f16da",
     "integration_commit": "3dfa3c3193c5950bf284229441e81f26b99d499c",
     "integration_status": "native_merge_regression_pass_cpu_portability_open",
-    "U0": "next_portable_fixture_slice",
+    "U0": "complete_portable_projection_identity_slice",
     "U2": "pending_including_preexisting_CPU_build_errors",
     "Q1": "pending_preserve_default_controlled_reference_labels",
     "F1": "pending_one_fusion_and_at_most_one_smaller_fallback",
@@ -6675,6 +6675,12 @@
     "cpu_limit": "GCC16 full CPU build fails on unchanged shared_ptr atomic deprecations; GCC12 full CPU build fails on unchanged muse_glimmer_mm array-bounds diagnostics. Configurations and affected shared source compiles pass; full CPU build not passed.",
     "other_backends": "Affected Vulkan source compiles and CUDA CUTLASS/Marlin host syntax checks pass. CUDA device build/link/runtime and HIP remain unverified.",
     "performance_scope": "One before/after C1 short native pair:43.61414->43.51202 decode TPS; TTFT2313.785->2318.430ms; request8160.513->8178.879ms. No repeat signal and no refreshed original score.",
-    "next_step": "U0 portable projection fixture validation using generated tiny artifacts, followed by U2 CPU/build portability."
+    "next_step": "U2 first CPU/compiler and oneDNN capability portability slice; preserve existing numerical and lifetime contracts.",
+    "U0_tests": "23 host tests in4 CTest cases pass, including8 generated artifact tests; no GPU arithmetic changed.",
+    "U0_receipt": {
+      "artifact": "upstream-u1-integration-v1/u0-receipt-v1.json",
+      "sha256": "bc83f0a1aed2af155b473cb0b88c79f201e358b8a1f0ef948dbb72813d796422",
+      "bytes": 839
+    }
   }
 }
