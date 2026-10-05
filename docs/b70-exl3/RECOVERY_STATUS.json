@@ -6663,7 +6663,7 @@
     "U2": "partial_atomic_cache_oneDNN_SmallM_notices_and_clean_CPU_build_complete_contribution_and_remaining_capability_hygiene_open",
     "Q1": "pending_preserve_default_controlled_reference_labels",
     "F1": "stopped_at_bounded_precondition_low_measured_producer_cost_no_fusion_variant",
-    "F2": "first_event_lease_candidate_rejected_after_exact_focused_tests_and_no_material_complete_call_or_4K_prefill_gain_second_direct_preparation_candidate_pending",
+    "F2": "first_event_candidate_rejected_second_direct_preparation_implemented_opt_in_focused_checks_pass_broader_qualification_pending",
     "F3": "conditional_on_demonstrated_current_cost",
     "U6": "pending_bounded_final_comparison_and_review_handoff",
     "receipt": {
@@ -6675,7 +6675,7 @@
     "cpu_limit": "GCC16 now builds the CPU library and selected targets;5 focused CTest cases pass with5019 assertions and one existing registry test-case skip. GCC12 previous unchanged muse_glimmer_mm array-bounds failure retained; not rerun after the cache repair.",
     "other_backends": "Affected Vulkan source compiles and CUDA CUTLASS/Marlin host syntax checks pass. CUDA device build/link/runtime and HIP remain unverified.",
     "performance_scope": "One before/after C1 short native pair:43.61414->43.51202 decode TPS; TTFT2313.785->2318.430ms; request8160.513->8178.879ms. No repeat signal and no refreshed original score.",
-    "next_step": "F2 second and final named candidate: model-only direct checked-preparation consumption, with ownership extended through all oneDNN/tail consumers, unchanged explicit-public-workspace contract and fixed1024 panels. Baseline per-callback fences retained after event candidate rejection. Keep Q1, remaining contribution hygiene, conditional F3 and U6 open.",
+    "next_step": "Finish F2 second/final direct-preparation candidate qualification: large QKVZ intermediate/outputs and affected lifecycle/integrated-state checks, then bounded complete-path/memory decision and final repeats. Keep direct route opt-in/default0 meanwhile. Q1, remaining contribution hygiene, conditional F3 and U6 remain open; no first event candidate revival or panel sweep.",
     "U0_tests": "23 host tests in4 CTest cases pass, including8 generated artifact tests; no GPU arithmetic changed.",
     "U0_receipt": {
       "artifact": "upstream-u1-integration-v1/u0-receipt-v1.json",
@@ -6717,6 +6717,12 @@
       "artifact": "upstream-f2-event-leases-v1/receipt-v1.json",
       "sha256": "c60feac99d144d739fe11a8521844cbbfcd5c06adc53bfde1e49b527bb0ca2a6",
       "bytes": 24484
+    },
+    "F2_direct_tests": "Second candidate defaultsOFF via VT_XPU_W8A8_DIRECT_PREPARE=0; model-only compact workspace with preparation ownership through all oneDNN and final Hadamard consumers, original callback fences preserved. Corrected build passes; initial mixed-const pointer compile failure retained. Ownership/two host queues76, actual private/public byte checks GateUpM129/M896/M1600 andQKVZM129 each104, public boundaries1552/7699, model-private budget fallback/reuse17 assertions pass. Optional missing77 and required missing1 without GPU. Complete-call rate changes +2.716/+0.807/+0.153/+3.114% in balanced short trials, fixed panel1024. One fresh unprofiled C1 P4096/O32 MTP3 pair130 each: all32 IDs/all17 complete non-time cycles exact, TTFT2319.338->2287.559ms, three-chunk2319.208->2287.442ms, peak30326149443->30307785027B (18364416B less); single pair, not refreshed original/U6 score. Actual private INT8 activations/scales, reconstructed panel, active F16Y and output checked; oneDNN internal I32 accumulators and full integrated state arrays not captured here. Large QKVZ, broader lifecycle/integrated-state qualification and repeats remain pending; candidate not accepted/default-enabled.",
+    "F2_direct_receipt": {
+      "artifact": "upstream-f2-direct-prepare-v1/receipt-v1.json",
+      "sha256": "856b4060438bc7e7514d1b2aabbc76392944a4b93b4e0ae8df2ad59b1c807b90",
+      "bytes": 15562
     }
   }
 }

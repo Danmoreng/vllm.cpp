@@ -147,6 +147,42 @@ model/oracle data. It builds and passes 289 assertions on the restored baseline.
 No event-lease runtime option remains in the product. Continue only the second
 F2 candidate: direct checked-preparation consumption, measured independently.
 
+F2's second and final candidate is now implemented behind
+`VT_XPU_W8A8_DIRECT_PREPARE=1` (default0). Only the model-owned certificate path
+uses a compact workspace and reads the checked private activation buffer
+directly. Its ownership scope encloses every oneDNN GEMM and the output
+Hadamard; the existing completion fences and lock order remain. Public callers
+still receive complete published scratch, and allocation refusal retains the
+checked generic path. No per-call persistent allocation or panel retuning was
+introduced.
+
+Focused checks pass: ownership/two host queues (76), Gate/Up M129/M896/M1600 and
+QKVZ M129 (104 each), public failure boundaries (1,552/7,699), and model-private
+budget refusal/reuse (17). Actual private INT8 activations/padded scales, final
+reconstructed INT8 panel, active oneDNN F16 intermediate and F16 output are
+byte-exact. Internal oneDNN I32 accumulators are not exported by these tests.
+External cases separately skip optional missing inputs with77 and fail required
+missing inputs with1 before GPU initialization. The initial compile failure is
+preserved in the indexed receipt.
+
+| Complete call, fixed panel1024 | Baseline median ms | Direct median ms | Rate change |
+|---|---:|---:|---:|
+| Gate/Up M129 | 1.4130 | 1.3756 | +2.72% |
+| Gate/Up M896 | 2.4297 | 2.4103 | +0.81% |
+| Gate/Up M1600 | 3.9745 | 3.9684 | +0.15% |
+| QKVZ M129 | 0.6863 | 0.6656 | +3.11% |
+
+One fresh unprofiled native P4096/O32 worker per arm passes130 assertions each,
+preserving all32 IDs and17 complete non-time cycles after O32 warmup/reset.
+TTFT is2,319.338 versus2,287.559ms; three-chunk prefill wall is2,319.208
+versus2,287.442ms. Tracked peak falls from30,326,149,443 to30,307,785,027B
+(18,364,416B), with shared workspace capacity148,387,904 versus130,023,488B
+and unchanged preparation capacity31,202,304B. Mixed-route operator processes
+retain high-water pools and cannot establish that memory reduction themselves.
+This single pair is a first signal, not a refreshed Python/U6 score. The route
+remains opt-in pending large QKVZ, broader lifecycle/integrated-state checks and
+bounded repeat measurements; matching tokens alone does not qualify state.
+
 A clean public contribution composition,
 ordinary-route admission and integrated original MTP state qualification remain
 separate work. Preserve the frozen default D27/D29 failures and controlled-oracle
