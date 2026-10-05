@@ -1822,15 +1822,15 @@ TEST_CASE("XPU EXL3 public engine R11: frozen serving timing workload") {
   // Bound pending diagnostic events to one engine cycle. Drain/serialization
   // happen after its wall timestamp and only in the separate profiling arm;
   // they remain visible in that arm's end-to-end time and host gaps.
-  const auto drain_profiles = [&] {
+  const auto drain_profiles = [&](int cycle) {
     if (profile)
       for (const auto& r : vt::xpu::DrainProfileEvents())
-        result["device_profile_records"].push_back({{"stage", r.stage}, {"matrix", r.matrix},
+        result["device_profile_records"].push_back({{"cycle", cycle}, {"stage", r.stage}, {"matrix", r.matrix},
             {"queue", r.queue_id}, {"start_ns", r.start_ns}, {"end_ns", r.end_ns},
             {"stream_span", r.stream_span}, {"host_submit_ns", r.host_submit_ns}});
     if (host_profile)
       for (const auto& r : vt::xpu::DrainHostProfileRecords())
-        result["host_profile_records"].push_back({{"stage", r.stage}, {"queue", r.queue_id},
+        result["host_profile_records"].push_back({{"cycle", cycle}, {"stage", r.stage}, {"queue", r.queue_id},
             {"start_ns", r.start_steady_ns}, {"end_ns", r.end_steady_ns},
             {"copy_bytes", r.copy_bytes}, {"caller_address", r.caller_address}});
   };
@@ -1873,7 +1873,7 @@ TEST_CASE("XPU EXL3 public engine R11: frozen serving timing workload") {
     const double start = seconds();
     const auto outputs = loaded->engine().step();
     const double end = seconds();
-    if (profile || host_profile) drain_profiles();
+    if (profile || host_profile) drain_profiles(cycle);
     int64_t emitted_this_cycle = 0;
     for (const auto& request : outputs) {
       REQUIRE(request.outputs.size() == 1);
@@ -1926,7 +1926,7 @@ TEST_CASE("XPU EXL3 public engine R11: frozen serving timing workload") {
     CHECK(trace.at("finish_reason") == "length");
     CHECK(trace.at("first_scheduled_position") == 0);
   }
-  if (profile || host_profile) drain_profiles();
+  if (profile || host_profile) drain_profiles(-1);
   const auto memory = vt::xpu::GetMemoryInfo();
   result["backend_peak_device_bytes"] = memory.peak_allocated_bytes;
   result["backend_live_device_bytes"] = memory.allocated_bytes;
