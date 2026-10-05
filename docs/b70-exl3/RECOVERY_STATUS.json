@@ -2915,7 +2915,7 @@
           "sha256": "3da49f66c6730614433e01fb429bc9c4e89d00c1f88a01982534334261bf9c7e"
         }
       },
-      "next": "Use remaining current dynamic state/KV validation and arithmetic timeline to choose one narrow cause-supported optimization; preserve GPU-first completion and actual mutable public guards. Final refreshed matrix/default D64/full-state/reference/P1 automatic-admission gates remain open; no repeat rejected geometry sweeps.",
+      "next": "Try exact FP32 SiLU activation reuse in F16-gate producer gated norm, preserving F32 exp/fdiv_rn before weighted multiply; existing FP16 output table cannot be reused. Require exhaustive gate/output/graph/lifetime/original and complete-path measurements before retention. Preserve rejected-P5 stop and remaining final matrix/default-D64/state/reference/P1 admission gates.",
       "current_quality": {
         "practical_tasks": 8,
         "practical_passed": 8,
@@ -3420,9 +3420,33 @@
           "bytes": 71748,
           "sha256": "a302d8724e75129f15d188b1b47266b2809d4f5fe2d6dbb5ec5b982a23663c2c"
         }
+      },
+      "current_post_SmallM_timeline": {
+        "source_commit": "f45b914d0",
+        "profiled": true,
+        "case": "C1 P4096/O32 MTP3,14Q4 decode cycles",
+        "assertions_each": 130,
+        "worker_exits_each": 0,
+        "all32IDs_equal_unprofiled_primary": true,
+        "graph_eager_non_timing_cycles_exact_except_mode_counters": true,
+        "graph_target_stream_ms": 53.473006,
+        "graph_draft_stream_ms": 5.1486905,
+        "graph_validation_D2H_ms_per_target": 0.026947142857142857,
+        "eager_target_DPAS_ms": 28.35923785714286,
+        "eager_target_GDNspec_ms": 10.966696142857144,
+        "eager_target_GDN_gated_norm_ms": 1.9000755714285713,
+        "eager_target_Gemma_norm_ms": 2.6987708571428572,
+        "prefill_GDN_gated_norm_ms_per_chunk": 71.121494,
+        "TTFT_or_throughput_score": false,
+        "qualification_promoted": false,
+        "receipt": {
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p7-current-timeline-v2/receipt-v1.json",
+          "bytes": 24077,
+          "sha256": "b88c38f1a57d260ed15146e839184e31eefc4733a430d0bf93b21d34e4e710f4"
+        }
       }
     }
   ],
   "performance_baseline": "7536aededc049b2157f12eadb0f4cc6bbf29b7b7",
-  "performance_next": "Use remaining current dynamic state/KV validation and arithmetic timeline to choose one narrow cause-supported optimization; preserve GPU-first completion and actual mutable public guards. Final refreshed matrix/default D64/full-state/reference/P1 automatic-admission gates remain open; no repeat rejected geometry sweeps."
+  "performance_next": "Try exact FP32 SiLU activation reuse in F16-gate producer gated norm, preserving F32 exp/fdiv_rn before weighted multiply; existing FP16 output table cannot be reused. Require exhaustive gate/output/graph/lifetime/original and complete-path measurements before retention. Preserve rejected-P5 stop and remaining final matrix/default-D64/state/reference/P1 admission gates."
 }
