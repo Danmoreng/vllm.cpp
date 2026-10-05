@@ -172,6 +172,22 @@ TEST_CASE("XPU EXL3 W8A8 F2: direct preparation complete calls and queued real c
       std::vector<unsigned char>(public_bytes.begin() + plan.weight_scale_offset,
       public_bytes.begin() + plan.weight_scale_offset + sizeof(float)));
   xpu_test::SameBytes(std::vector<unsigned char>(compact.begin() + compact_bytes, compact.end()), panel_bytes);
+  // Independent integer witness from the pinned original's final group, not
+  // just equality between two native paths. The last panel is compact even
+  // when its source group ends with fewer than1024 columns.
+  REQUIRE(cache.Load());
+  const int last_columns = cache.Load()->Panels(1024).back().columns;
+  REQUIRE(last_columns >= 128);
+  REQUIRE(last_columns <= plan.weight_panel_columns);
+  const auto& last_ref = f.Get("last_weight_panel_m" + std::to_string(m));
+  REQUIRE(last_ref.dtype == "I8");
+  REQUIRE(last_ref.nbytes == size_t(k) * 128);
+  std::vector<unsigned char> last_block(last_ref.nbytes);
+  for (int row = 0; row < k; ++row)
+    std::memcpy(last_block.data() + size_t(row) * 128,
+        compact.data() + compact_bytes + size_t(row) * last_columns + last_columns - 128, 128);
+  xpu_test::SameBytes(last_block,
+      std::vector<unsigned char>(last_ref.data, last_ref.data + last_ref.nbytes));
   // Both pools are high-water allocations. This mixed-route timing process
   // cannot establish a peak-memory reduction; serving uses fresh workers.
   for (bool cross_queue : {false, true}) {

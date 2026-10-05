@@ -6675,7 +6675,7 @@
     "cpu_limit": "GCC16 now builds the CPU library and selected targets;5 focused CTest cases pass with5019 assertions and one existing registry test-case skip. GCC12 previous unchanged muse_glimmer_mm array-bounds failure retained; not rerun after the cache repair.",
     "other_backends": "Affected Vulkan source compiles and CUDA CUTLASS/Marlin host syntax checks pass. CUDA device build/link/runtime and HIP remain unverified.",
     "performance_scope": "One before/after C1 short native pair:43.61414->43.51202 decode TPS; TTFT2313.785->2318.430ms; request8160.513->8178.879ms. No repeat signal and no refreshed original score.",
-    "next_step": "Finish F2 second/final direct-preparation candidate qualification: large QKVZ intermediate/outputs and affected lifecycle/integrated-state checks, then bounded complete-path/memory decision and final repeats. Keep direct route opt-in/default0 meanwhile. Q1, remaining contribution hygiene, conditional F3 and U6 remain open; no first event candidate revival or panel sweep.",
+    "next_step": "F2 second/final candidate: qualify model states after real4K prefill/MTP and affected lifecycle, then bounded complete-path/memory decision and repeats. Large QKVZ operator gate now passes. Keep direct route opt-in/default0 pending decision; Q1, remaining contribution hygiene, conditional F3 and U6 remain open.",
     "U0_tests": "23 host tests in4 CTest cases pass, including8 generated artifact tests; no GPU arithmetic changed.",
     "U0_receipt": {
       "artifact": "upstream-u1-integration-v1/u0-receipt-v1.json",
@@ -6723,6 +6723,12 @@
       "artifact": "upstream-f2-direct-prepare-v1/receipt-v1.json",
       "sha256": "856b4060438bc7e7514d1b2aabbc76392944a4b93b4e0ae8df2ad59b1c807b90",
       "bytes": 15562
+    },
+    "F2_direct_projection_tests": "All six GateUp/QKVZ cases atM129/M896/M1600 pass111/111 each with actual private xq/padded scales/F16Y/final output/public scratch/full final reconstructed panel exact. Added independent pinned-original last128-column INT8 weight witness with actual compact panel row stride. New QKVZ M896/M1600 oracle capture enforces pinned image/library/ops; inputs cyclic existing P128 normalization rows including zero/near-zero, not a newly captured long worker trajectory. Existing distinct queued real/zero consumers and immediate result retirement checks retained. No kernel change, internal oneDNN I32 export, full model-state or reference gate promotion. Candidate remains opt-in/default0; first event variant remains rejected.",
+    "F2_direct_projection_receipt": {
+      "artifact": "upstream-f2-direct-prepare-v1/receipt-v2.json",
+      "sha256": "b00c8dff9ad70ca255fefb0028d9f12e42f13c298f44b33fd36ff5d2541e29b7",
+      "bytes": 11264
     }
   }
 }
