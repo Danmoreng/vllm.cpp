@@ -110,9 +110,42 @@ attribution or a refreshed serving/Python score. F1 stops at its bounded
 precondition because the measured producer work offers little demonstrated
 complete-path potential. No fused variant was implemented or timed, and no
 graph speed upper bound is claimed. Existing typed-SLM arithmetic and state
-storage remain unchanged. The next independent candidate is F2's final-consumer
-event lease, followed separately by direct checked-preparation consumption.
+storage remain unchanged. F2 evaluates final-consumer event leases first,
+followed separately by direct checked-preparation consumption.
 The immutable profile/binary/command receipt is indexed in `RECOVERY_STATUS.json`.
+
+F2's first candidate used a final in-order queue event for the private pools,
+explicit cross-queue dependencies, retirement before growth and synchronous
+exception cleanup. The pinned oneDNN stream copies that same native queue.
+Focused candidate checks passed: synthetic lifetime (290), four real projection
+cases (92 each), public failure boundaries at M129/M1600 (1,552/7,699) and
+private-budget fallback (15 assertions). Complete xq/scales, FP16 intermediates,
+public scratch and output checks remain exact; queued distinct inputs and
+immediate result retirement pass. The real operand fixtures and their cyclic
+P128 expansion are declared in the receipt; QKVZ was tested at M129 only.
+
+| Complete call, fixed panel1024 | Fence median ms | Event median ms | Rate change |
+|---|---:|---:|---:|
+| Gate/Up M129 | 1.3990 | 1.3931 | +0.42% |
+| Gate/Up M896 | 2.6624 | 2.6908 | -1.05% |
+| Gate/Up M1600 | 3.9240 | 3.9240 | +0.00% |
+| QKVZ M129 | 0.8362 | 0.8293 | +0.83% |
+
+One separate unprofiled native P4096/O32 pair, after O32 warmup/prefix reset,
+passes 130 assertions per arm with identical 32 IDs and all 17 non-time cycles.
+Three-chunk TTFT is 2,320.6 versus 2,318.6 ms; tracked device peak is identical
+at 30,326,149,443 bytes. This single short pair does not demonstrate a useful
+gain and is not a refreshed original/U6 score. F2 rejects this first candidate;
+the baseline backend and original projection test are restored byte-exact.
+The complete rejected source capsule, frozen binaries, commands and the initial
+test namespace compile failure remain in the indexed external receipt.
+Broader large-QKVZ/integrated-state qualification was not pursued after rejection.
+
+The retained `test_xpu_w8a8_workspaces` is a hermetic regression for pool readers,
+growth, callback exceptions and queue retirement, requiring a visible GPU but no
+model/oracle data. It builds and passes 289 assertions on the restored baseline.
+No event-lease runtime option remains in the product. Continue only the second
+F2 candidate: direct checked-preparation consumption, measured independently.
 
 A clean public contribution composition,
 ordinary-route admission and integrated original MTP state qualification remain
