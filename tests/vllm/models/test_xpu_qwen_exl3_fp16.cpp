@@ -1607,9 +1607,78 @@ static void ExportAttention3Kv(const std::string& phase, vt::Queue& q,
   output.close(); REQUIRE(output.good());
 }
 
+static void CheckHeldOutGdnStates(const std::string& phase, const std::string& stage,
+                                 vt::Queue& q, const vllm::Qwen3_5DenseWeights& weights,
+                                 const std::vector<vllm::GdnStateCache>& states,
+                                 const vllm::SafetensorsFile& oracle) {
+  const char* directory = std::getenv("VT_B70_EXL3_STATE_OUTPUT");
+  REQUIRE(directory != nullptr);
+  std::filesystem::create_directories(directory);
+  constexpr size_t conv_elements = 10240 * 3, ssm_elements = 48 * 128 * 128;
+  auto& backend = vt::GetBackend(q.device.type);
+  size_t state_index = 0;
+  for (size_t layer = 0; layer < weights.layers.size(); ++layer) {
+    if (!weights.layers[layer].is_linear_attention) continue;
+    const auto& state = states.at(state_index++);
+    REQUIRE(state.conv_state.dtype == DType::kF16);
+    REQUIRE(state.ssm_state.dtype == DType::kF32);
+    REQUIRE(state.conv_state.IsContiguous());
+    REQUIRE(state.ssm_state.IsContiguous());
+    REQUIRE(state.conv_state.shape[0] == 5);
+    REQUIRE(state.ssm_state.shape[0] == 5);
+    const std::string key = phase + "_l" + std::to_string(layer) + "_" + stage;
+    std::vector<uint16_t> conv(conv_elements), canonical(conv_elements);
+    std::vector<float> ssm(ssm_elements);
+    backend.Copy(q, conv.data(), static_cast<const uint16_t*>(state.conv_state.data) +
+                 4 * conv_elements, conv_elements * 2);
+    backend.Copy(q, ssm.data(), static_cast<const float*>(state.ssm_state.data) +
+                 4 * ssm_elements, ssm_elements * 4);
+    backend.Synchronize(q);
+    // Original Conv cache is [history,channel]; native is [channel,history].
+    for (size_t channel = 0; channel < 10240; ++channel)
+      for (size_t history = 0; history < 3; ++history)
+        canonical[history * 10240 + channel] = conv[channel * 3 + history];
+    const auto& expected_conv = oracle.Get(key + "_conv");
+    REQUIRE(expected_conv.dtype == "F16");
+    REQUIRE((expected_conv.shape == std::vector<int64_t>{3, 10240}));
+    const auto& expected_ssm = oracle.Get(key + "_ssm");
+    REQUIRE(expected_ssm.dtype == "F32");
+    REQUIRE((expected_ssm.shape == std::vector<int64_t>{48, 128, 128}));
+    // Export only initialized active bytes, before any comparison can fail.
+    for (const auto& entry : {std::make_tuple("conv.f16", static_cast<const void*>(canonical.data()),
+                                            conv_elements * 2),
+                              std::make_tuple("ssm.f32", static_cast<const void*>(ssm.data()),
+                                            ssm_elements * 4)}) {
+      const auto file = std::filesystem::path(directory) / (key + "-" + std::get<0>(entry));
+      REQUIRE_FALSE(std::filesystem::exists(file));
+      std::ofstream output(file, std::ios::binary);
+      output.write(static_cast<const char*>(std::get<1>(entry)), std::get<2>(entry));
+      output.close(); REQUIRE(output.good());
+    }
+    CHECK(std::memcmp(canonical.data(), expected_conv.data, conv_elements * 2) == 0);
+    const auto expected = CapturedFloats(expected_ssm);
+    REQUIRE(expected.size() == ssm.size());
+    bool finite = true;
+    size_t different = 0, pointwise_failures = 0;
+    double max_error = 0;
+    for (size_t i = 0; i < ssm.size(); ++i) {
+      finite &= std::isfinite(ssm[i]) && std::isfinite(expected[i]);
+      const double error = std::abs(double(ssm[i]) - expected[i]);
+      max_error = std::max(max_error, error);
+      different += ssm[i] != expected[i];
+      pointwise_failures += error > 1e-5 + 1e-4 * std::abs(double(expected[i]));
+    }
+    std::cout << "HELD_OUT_GDN_STATE key=" << key << " different=" << different
+              << " max_error=" << max_error << " pointwise_failures=" << pointwise_failures << '\n';
+    REQUIRE(finite);
+    CHECK(pointwise_failures == 0);
+  }
+  REQUIRE(state_index == 48);
+}
+
 static void RunRealEagerTarget(int decode_steps, int diagnostic_stop = -1,
                                bool attention3_detail = false, int gdn_detail_layer = 1,
-                               bool gdn_history = false) {
+                               bool gdn_history = false, bool held_out_states = false) {
   const char* model = std::getenv("VT_B70_EXL3_MODEL");
   const char* fixtures = std::getenv("VT_B70_EXL3_S1_FIXTURES");
   if (!model || !fixtures) std::exit(77);
@@ -1618,6 +1687,11 @@ static void RunRealEagerTarget(int decode_steps, int diagnostic_stop = -1,
   REQUIRE((diagnostic_stop == -1 || (decode_steps == 64 && (diagnostic_stop == 29 || diagnostic_stop == 1)) ||
            (decode_steps == 1 && diagnostic_stop == 1)));
   const bool diagnostic = diagnostic_stop >= 0;
+  if (held_out_states) {
+    REQUIRE(decode_steps == 1); REQUIRE(diagnostic_stop == 1);
+    REQUIRE_FALSE(attention3_detail); REQUIRE_FALSE(gdn_history);
+    REQUIRE(std::getenv("VT_B70_EXL3_STATE_OUTPUT") != nullptr);
+  }
   if (gdn_history) { REQUIRE(diagnostic_stop == 1); REQUIRE(gdn_detail_layer == 21); }
   const vllm::actdump::StepSelectionScope dump_selection(
       diagnostic && diagnostic_stop != 1 ? diagnostic_stop : -1);
@@ -1628,11 +1702,32 @@ static void RunRealEagerTarget(int decode_steps, int diagnostic_stop = -1,
   const auto output_dir = diagnostic_output ? std::filesystem::path(diagnostic_output) : receipts;
   if (diagnostic_output) std::filesystem::create_directories(output_dir);
   const auto capture_dir = receipts / (decode_steps == 1 ? "target-repeats" : "target-d64");
-  const int repeats = decode_steps == 1 ? 3 : 1;
+  const int repeats = held_out_states ? 1 : (decode_steps == 1 ? 3 : 1);
   std::ifstream record(capture_dir / "repeat-0.json");
-  const auto captured_ids = nlohmann::json::parse(record).at("output_ids").at(0)
+  const auto captured_record = nlohmann::json::parse(record);
+  const auto captured_ids = captured_record.at("output_ids").at(0)
                                 .get<std::vector<int32_t>>();
   REQUIRE(captured_ids.size() == static_cast<size_t>(decode_steps + 1));
+  std::vector<int32_t> prompt_ids;
+  if (held_out_states) {
+    const auto& prompt = captured_record.at("actual_input_witnesses").at("p128").at("token_ids");
+    REQUIRE(prompt.is_array()); REQUIRE(prompt.size() == 128);
+    for (const auto& token : prompt) {
+      REQUIRE(token.is_number_integer()); REQUIRE_FALSE(token.is_boolean());
+      REQUIRE(token.get<int64_t>() >= 0); REQUIRE(token.get<int64_t>() < 248320);
+      prompt_ids.push_back(token.get<int32_t>());
+    }
+    const auto& observations = captured_record.at("all_gdn_state_records");
+    REQUIRE(observations.size() == 192);
+    for (const std::string phase : {"p128", "d1"})
+      for (int layer = 0; layer < 64; ++layer) if (layer % 4 != 3)
+        for (const std::string stage : {"before", "after"}) {
+          const auto& entry = observations.at(phase + "_l" + std::to_string(layer) + "_" + stage);
+          CHECK(entry.at("phase") == phase); CHECK(entry.at("layer") == layer);
+          CHECK(entry.at("stage") == stage);
+          CHECK(entry.at("copied") == !(phase == "p128" && stage == "before"));
+        }
+  }
   std::vector<vllm::SafetensorsFile> oracles;
   for (int repeat = 0; repeat < repeats; ++repeat)
     oracles.push_back(vllm::SafetensorsFile::Open(
@@ -1686,7 +1781,8 @@ static void RunRealEagerTarget(int decode_steps, int diagnostic_stop = -1,
     const std::string phase = prefill ? "p128" : "d" + std::to_string(step);
     std::vector<int32_t> ids(rows), positions(rows);
     for (int i = 0; i < rows; ++i) {
-      ids[i] = prefill ? 1000 + (i * 37) % 4096 : captured_ids[step - 1];
+      ids[i] = prefill ? (held_out_states ? prompt_ids.at(i) : 1000 + (i * 37) % 4096)
+                       : captured_ids[step - 1];
       positions[i] = prefill ? i : 127 + step;
     }
     vllm::v1::CommonAttentionMetadata am;
@@ -1711,6 +1807,8 @@ static void RunRealEagerTarget(int decode_steps, int diagnostic_stop = -1,
       gm.batch_ptr = chunks.batch_ptr; gm.token_chunk_offset_ptr = chunks.token_chunk_offset_ptr;
     } else { gm.num_decodes = gm.num_decode_tokens = 1; }
     std::cout << "REAL_TARGET_FORWARD_START " << phase << '\n' << std::flush;
+    if (held_out_states && !prefill)
+      CheckHeldOutGdnStates(phase, "before", gpu.q, weights, states, oracles[0]);
     const bool capture_hidden = diagnostic &&
         (step == 0 || step == 1 || step == 11 || step == 27 || step == 29);
     const bool capture_gdn_state = diagnostic && !attention3_detail &&
@@ -1747,6 +1845,8 @@ static void RunRealEagerTarget(int decode_steps, int diagnostic_stop = -1,
     auto& backend = vt::GetBackend(gpu.q.device.type);
     backend.Copy(gpu.q, logits.data(), out.device_tensor.data, logits.size() * sizeof(float));
     backend.Synchronize(gpu.q);
+    if (held_out_states)
+      CheckHeldOutGdnStates(phase, "after", gpu.q, weights, states, oracles[0]);
     if (capture_gdn_state) {
       size_t owner_index = 0;
       for (int i = 0; i < gdn_detail_layer; ++i)
@@ -1835,6 +1935,12 @@ TEST_CASE("XPU EXL3 real target: eager P128 D1 full vocabulary comparison") {
 
 TEST_CASE("XPU EXL3 real target: eager P128 D64 full vocabulary continuation") {
   RunRealEagerTarget(64);
+}
+
+TEST_CASE("XPU EXL3 real target diagnostic: held-out P128 D1 all GDN states") {
+  // Separate controlled held-out fixture: native state evolves from its own
+  // poisoned caches. Only token prefixes are teacher-forced, never states.
+  RunRealEagerTarget(1, 1, false, 1, false, true);
 }
 
 TEST_CASE("XPU EXL3 real target diagnostic: own-state through D29 selected final hidden") {

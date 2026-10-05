@@ -88,6 +88,34 @@ def load_trace(path, decode_steps):
     return ids[0]
 
 
+def load_prompt(path):
+    """Keep the legacy input; optional held-out witnesses are exactly P128."""
+    if path is None:
+        return [1000 + (i * 37) % 4096 for i in range(128)]
+    ids = headers.read_json(path)["prompt_token_ids"]
+    headers.require(isinstance(ids, list) and len(ids) == 128 and
+                    all(type(t) is int and 0 <= t < 248320 for t in ids),
+                    "held-out capture requires exactly128 valid target token IDs")
+    return ids
+
+
+def validate_all_gdn_states(decode_steps, block_step, detail_layer, gdn_history, enabled):
+    headers.require(type(enabled) is bool and
+                    (not enabled or (decode_steps == 1 and block_step == -1 and
+                                     detail_layer == -1 and not gdn_history)),
+                    "all-GDN-state observation supports standalone P128/D1 only")
+
+
+def all_target_gdn_layers(modules, first_layer):
+    layers = selected_block_layers(modules, first_layer)
+    expected = [i for i in range(64) if i % 4 != 3]
+    selected = [(i, block) for i, block in layers if block.layer_type == "linear_attention"]
+    headers.require([i for i, _ in selected] == expected and
+                    all(block.layer_type == "full_attention" for i, block in layers if i % 4 == 3),
+                    "all-state capture requires actual48GDN/16attention target blocks")
+    return selected
+
+
 def validate_prefix_witnesses(witnesses, prompt, outputs):
     phases = ["p128"] + [f"d{i}" for i in range(1, len(outputs))]
     headers.require(list(witnesses) == phases, "missing or reordered actual input witnesses")
@@ -151,12 +179,14 @@ class TargetCapture(BlockCapture):
         return {"restored_modules": 48}
 
     def install_target_capture(self, output, decode_steps=1, block_step=-1, detail_layer=-1,
-                               gdn_history=False):
+                               gdn_history=False, all_gdn_states=False):
         import torch
         headers.require(block_step == -1 or (decode_steps == 29 and block_step == 29),
                         "selected block observation is bounded to D29")
         detail_kind = selected_detail_kind(block_step, detail_layer)
         validate_gdn_history(block_step, detail_layer, gdn_history)
+        validate_all_gdn_states(decode_steps, block_step, detail_layer, gdn_history,
+                                all_gdn_states)
         installed = self.install_block_capture(output)
         self._gdn_history_capture = None
         if gdn_history:
@@ -175,6 +205,59 @@ class TargetCapture(BlockCapture):
         model = self.model_runner.model
         modules = dict(model.named_modules())
         layer = modules[installed["layer"]]
+        self._all_gdn_states = all_gdn_states
+        self._all_gdn_state_records = {}
+        if all_gdn_states:
+            from vllm.forward_context import get_forward_context
+
+            def save_state(index, mixer, stage):
+                context = get_forward_context().attn_metadata
+                if not context or not getattr(self.model_runner.req_states, "req_id_to_index", {}):
+                    return
+                step = len(self._target_phases)
+                headers.require(step in (0, 1), "extra all-state target step")
+                meta = context[mixer.prefix]
+                phase, rows = ("p128", 128) if step == 0 else ("d1", 1)
+                headers.require(meta.num_actual_tokens == rows and bool(meta.num_prefills) == (step == 0),
+                                "unexpected all-state phase or active rows")
+                key = f"{phase}_l{index}_{stage}"
+                headers.require(key not in self._all_gdn_state_records, "duplicate all-state observation")
+                indices = meta.prefill_state_indices if step == 0 else meta.non_spec_state_indices_tensor
+                headers.require(indices.numel() == 1, "all-state requires one active slot")
+                slot = int(indices.detach().cpu().item())
+                cache = mixer.kv_cache
+                headers.require(len(cache) == 2 and 0 <= slot < cache[0].shape[0] and
+                                slot < cache[1].shape[0], "invalid all-state cache slot")
+                initial = bool(meta.prefill_has_initial_state.detach().cpu().item()) if step == 0 else True
+                record = {"phase": phase, "layer": index, "stage": stage,
+                          "active_slot": slot, "initial_state_consumed": initial}
+                # Never read the unspecified seed of a cold prefill.
+                if stage == "before" and not initial:
+                    record["copied"] = False
+                else:
+                    for label, value, dtype, shape in (
+                        ("conv", cache[0][slot], torch.float16, (3, 10240)),
+                        ("ssm", cache[1][slot], torch.float32, (48, 128, 128))):
+                        headers.require(value.dtype == dtype and tuple(value.shape) == shape,
+                                        "unexpected active GDN state layout")
+                        host = value.detach().cpu().contiguous()
+                        headers.require(torch.isfinite(host).all().item(), "nonfinite active GDN state")
+                        tensor_key = key + "_" + label
+                        headers.require(tensor_key not in self._block_tensors, "duplicate active state tensor")
+                        self._block_tensors[tensor_key] = (
+                            "F16" if dtype == torch.float16 else "F32", list(shape), host.numpy().tobytes())
+                        record[label + "_layout"] = tensor_layout(value)
+                    record["copied"] = True
+                self._all_gdn_state_records[key] = record
+
+            for index, block in all_target_gdn_layers(modules, installed["layer"]):
+                mixer = block.linear_attn
+                self._target_hooks.append(block.register_forward_pre_hook(
+                    lambda module, args, kwargs, i=index, m=mixer: save_state(i, m, "before"),
+                    with_kwargs=True))
+                self._target_hooks.append(block.register_forward_hook(
+                    lambda module, args, kwargs, result, i=index, m=mixer: save_state(i, m, "after"),
+                    with_kwargs=True))
         self._selected_block_hooks = []
         self._selected_block_counts = {}
         if block_step >= 0:
@@ -355,10 +438,16 @@ class TargetCapture(BlockCapture):
             headers.require(self._selected_block_counts == dict.fromkeys(range(64), 1),
                             "missing, repeated or reordered D29 block observations")
         headers.require(self._target_phases == self._target_expected_phases, "missing full-target head calls")
+        if self._all_gdn_states:
+            expected = {f"{phase}_l{i}_{stage}" for phase in ("p128", "d1")
+                        for i in range(64) if i % 4 != 3 for stage in ("before", "after")}
+            headers.require(set(self._all_gdn_state_records) == expected,
+                            "missing all-GDN-state boundaries")
         return self.finish_block_capture() | {"selected_block_step": self._selected_block_step,
                                               "selected_attention_record": attention_record,
                                               "selected_detail_record": self._selected_detail_record,
                                               "gdn_history_record": history_record,
+                                              "all_gdn_state_records": self._all_gdn_state_records,
                                               "selected_block_counts": self._selected_block_counts,
                                               "target_layouts": self._target_layouts,
                                               "actual_input_witnesses": self._target_witnesses}
@@ -396,6 +485,9 @@ def compare_repeats(paths, decode_steps=1):
 
 def capture(args):
     target_phases(args.decode_steps)
+    validate_all_gdn_states(args.decode_steps, args.block_step, args.detail_layer,
+                            args.gdn_history, args.all_gdn_states)
+    tokens = load_prompt(args.prompt_ids)
     headers.require(1 <= args.repeats <= 3, "repeat count must be bounded by three")
     headers.require(not args.output_dir.exists(), "refusing to overwrite target repeats")
     reference = verify_inputs(args.reference_manifest, args.model_dir, args.image_identity)
@@ -423,7 +515,6 @@ def capture(args):
     if trace is not None:
         overrides["enable_trace_replay"] = True
     kwargs.update(overrides, model=str(args.model_dir), worker_extension_cls="capture_target.TargetCapture")
-    tokens = [1000 + (i * 37) % 4096 for i in range(128)]
     params = SamplingParams(temperature=0, max_tokens=args.decode_steps + 1, ignore_eos=True,
                             trace_decode_token_ids=trace)
     llm = None
@@ -440,7 +531,7 @@ def capture(args):
             path = args.output_dir / f"repeat-{repeat}.safetensors"
             llm.collective_rpc("install_target_capture", timeout=60,
                                args=(str(path), args.decode_steps, args.block_step,
-                                     args.detail_layer, args.gdn_history))
+                                     args.detail_layer, args.gdn_history, args.all_gdn_states))
             observed = llm.generate({"prompt_token_ids": tokens}, params, use_tqdm=False)
             ids = [list(o.outputs[0].token_ids) for o in observed]
             result = llm.collective_rpc("finish_target_capture", timeout=60)
@@ -476,14 +567,16 @@ def capture(args):
               "profile_sha256": digest(PROFILE.read_bytes()), "s1_overrides": overrides,
               "capture_tool_sha256": digest(Path(__file__).read_bytes()),
               "prompt_token_ids": tokens, "ordinary_output_ids": ordinary_ids,
+              "prompt_source_sha256": digest(args.prompt_ids.read_bytes()) if args.prompt_ids else None,
               "observed_output_ids": [r["output_ids"] for r in records],
               "repeats": [{"path": str(p), "sha256": digest(p.read_bytes())} for p in paths],
               "comparisons": compare_repeats(paths, args.decode_steps),
               "selected_block_step": args.block_step,
               "selected_detail_layer": args.detail_layer,
               "selected_gdn_history": args.gdn_history,
+              "all_gdn_states": args.all_gdn_states,
               "diagnostic_deterministic_ba": bool(args.deterministic_ba), "ba_policy": ba_policy,
-              "scope": "Bounded original full-target capture; layer0 states P128/D1, optional read-only D29 block/norm boundaries. Not a native pass or a new numerical envelope."}
+              "scope": "Bounded original full-target capture; layer0 states P128/D1, optional read-only D29 block/norm boundaries or standalone all48GDN active P128/D1 states. Cold unconsumed seeds excluded. No native pass or new numerical envelope."}
     with (args.output_dir / "comparison.json").open("x") as stream:
         json.dump(report, stream, indent=2); stream.write("\n")
     print("TARGET_REPEAT_CAPTURE_DONE", args.output_dir, flush=True)
@@ -504,4 +597,8 @@ if __name__ == "__main__":
                         help="separate diagnostic policy: original BA matmul deterministic; frozen gates unchanged")
     parser.add_argument("--repeats", type=int, choices=(1, 2, 3), default=3)
     parser.add_argument("--trace-capture-json", type=Path)
+    parser.add_argument("--prompt-ids", type=Path,
+                        help="frozen held-out JSON prompt_token_ids, exactly128 valid IDs")
+    parser.add_argument("--all-gdn-states", action="store_true",
+                        help="read-only all48GDN active Conv/SSM boundaries for standalone P128/D1")
     capture(parser.parse_args())
