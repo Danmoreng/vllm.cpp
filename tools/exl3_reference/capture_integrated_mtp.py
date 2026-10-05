@@ -32,10 +32,12 @@ def observe_prepared_batch(original, save):
 
 
 class IntegratedMtpCapture(TargetCapture):
-    def install_integrated_mtp_capture(self, output):
+    def install_integrated_mtp_capture(self, output, layer0_only=False):
         import torch
         from vllm.forward_context import get_forward_context
         runner = self.model_runner
+        headers.require(type(layer0_only) is bool, "invalid attribution scope")
+        self._imt_layer0_only = layer0_only
         headers.require(runner.speculative_config.num_speculative_tokens == 3,
                         "requires actual MTP depth3")
         self._imt_output = Path(output)
@@ -113,7 +115,8 @@ class IntegratedMtpCapture(TargetCapture):
             if self._imt_current is None:
                 return
             record = self._imt_current
-            headers.require(len(record["gdn"]) == 48 and len(record["attention"]) == 16,
+            headers.require(len(record["gdn"]) == (1 if layer0_only else 48) and
+                            len(record["attention"]) == (0 if layer0_only else 16),
                             "missing integrated layer boundaries")
             headers.require(self._imt_embedding_tokens == record["token_ids"],
                             "actual consumed embedding tokens differ from target witness")
@@ -215,6 +218,8 @@ class IntegratedMtpCapture(TargetCapture):
                 save(key + "_value_" + stage, values[..., 256:])
 
         for index, block in layers:
+            if layer0_only and index != 0:
+                continue
             if index % 4 != 3:
                 observer = lambda stage, i=index, m=block.linear_attn: gdn_boundary(i, m, stage)
             else:
@@ -223,7 +228,24 @@ class IntegratedMtpCapture(TargetCapture):
                 lambda module, args, kwargs, observe=observer: observe("before"), with_kwargs=True))
             self._imt_hooks.append(block.register_forward_hook(
                 lambda module, args, kwargs, result, observe=observer: observe("after"), with_kwargs=True))
-        return {"layers": 64, "target_forwards": 3, "changes_arithmetic": False}
+        if layer0_only:
+            block = layers[0][1]
+            for label, module in (("input_norm", block.input_layernorm),
+                                  ("qkvz", block.linear_attn.in_proj_qkvz),
+                                  ("ba", block.linear_attn.in_proj_ba)):
+                def projection(module, args, kwargs, result, label=label):
+                    if self._imt_current is not None:
+                        save("l0_" + label, result[0] if isinstance(result, tuple) else result)
+                self._imt_hooks.append(module.register_forward_hook(projection, with_kwargs=True))
+
+            def core_boundary(module, args, kwargs):
+                if self._imt_current is not None:
+                    values = dict(zip(("x", "z"), args)) | kwargs
+                    save("l0_core", values["x"].reshape(-1, 48, 128))
+                    save("l0_z", values["z"].reshape(-1, 48, 128))
+            self._imt_hooks.append(block.linear_attn.norm.register_forward_pre_hook(core_boundary, with_kwargs=True))
+        return {"layers": 1 if layer0_only else 64, "target_forwards": 3,
+                "changes_arithmetic": False, "layer0_attribution_only": layer0_only}
 
     def finish_integrated_mtp_capture(self):
         for hook in self._imt_hooks:
@@ -270,13 +292,14 @@ def capture(args):
         ordinary = llm.generate({"prompt_token_ids": tokens}, params, use_tqdm=False)
         headers.require(llm.reset_prefix_cache(), "prefix reset failed")
         installed = llm.collective_rpc("install_integrated_mtp_capture", timeout=60,
-                                      args=(str(args.output_dir),))
+                                      args=(str(args.output_dir), args.layer0_only))
         observed = llm.generate({"prompt_token_ids": tokens}, params, use_tqdm=False)
         result = llm.collective_rpc("finish_integrated_mtp_capture", timeout=60)
         headers.require(len(result) == 1, "requires one original worker")
         ids = lambda outputs: [list(o.outputs[0].token_ids) for o in outputs]
         ordinary_exact = ids(ordinary) == ids(observed)
-        result = result[0] | {"schema": "b70-integrated-mtp-C1-Q4-v1", "image": IMAGE,
+        schema = "b70-integrated-mtp-layer0-attribution-v1" if args.layer0_only else "b70-integrated-mtp-C1-Q4-v1"
+        result = result[0] | {"schema": schema, "image": IMAGE,
                   "checkpoint": reference["checkpoint"]["identity"], "observer": installed,
                   "prompt_token_ids": tokens, "output_ids": ids(observed),
                   "ordinary_output_ids": ids(ordinary), "ordinary_ids_exact": ordinary_exact,
@@ -286,7 +309,8 @@ def capture(args):
                   "scope_helper_sha256": digest(Path(__file__).with_name("mtp_state_scope.py").read_bytes()),
                   "profile_sha256": digest(PROFILE.read_bytes()),
                   "reference_manifest_sha256": digest(args.reference_manifest.read_bytes()),
-                  "scope": __doc__}
+                  "scope": __doc__ if not args.layer0_only else
+                      "Layer0 attribution only: actual target norm/projections/core and full active GDN snapshots; no attention KV or whole-model state parity"}
         with (args.output_dir / "capture.json").open("x") as stream:
             json.dump(result, stream, indent=2, allow_nan=False); stream.write("\n")
         # Preserve the observed trace and both trajectories even on a failed
@@ -312,4 +336,6 @@ if __name__ == "__main__":
     parser.add_argument("--image-identity", required=True)
     parser.add_argument("--prompt-ids", type=Path)
     parser.add_argument("--deterministic-ba", action="store_true")
+    parser.add_argument("--layer0-only", action="store_true",
+                        help="small separate attribution capture; preserves full-state captures and their gates")
     capture(parser.parse_args())
