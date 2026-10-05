@@ -2072,7 +2072,7 @@
     },
     {
       "task": "P7",
-      "status": "in_progress_actual_32K_and_proper_mixed_measured_prefix_quality_open",
+      "status": "in_progress_mixed_token_views_retained_prefix_and_current_quality_refreshed",
       "complete": false,
       "C1_repetitions_per_engine": 3,
       "actual_native_primary_assertions_each": 1895,
@@ -2770,7 +2770,7 @@
           "sha256": "3da49f66c6730614433e01fb429bc9c4e89d00c1f88a01982534334261bf9c7e"
         }
       },
-      "next": "Bounded actual mixed-path source/event diagnosis, then arithmetic-preserving dataflow work where justified; keep default/full-state/reference-contract gates explicit.",
+      "next": "Continue from remaining measured mixed W8A8/SiLU/GDN costs against pinned original execution; preserve arithmetic/ownership and explicit default/full-state/reference/P1-admission gaps. Do not repeat rejected variants.",
       "current_quality": {
         "practical_tasks": 8,
         "practical_passed": 8,
@@ -2794,6 +2794,34 @@
           "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p7-current-quality-v1/receipt-v1.json",
           "bytes": 35613,
           "sha256": "b278c9b33f935135356b42ebe026565c7f4861374b674b244a2f099c2c3a5ff7"
+        }
+      },
+      "mixed_token_views": {
+        "default": "scoped_XPU_F16_EXL3_contiguous_model_owned_maps_only",
+        "unprofiled_repeats_each": 1,
+        "E2E_off_s": 56.084838696,
+        "E2E_on_s": 53.032337353,
+        "E2E_elapsed_change_percent": -5.4426497676950625,
+        "mixed_cycle_elapsed_change_percent": -8.933692904405854,
+        "512_IDs_and_135_non_timing_cycles_exact": true,
+        "accepted_proposed_each": [
+          298,
+          642
+        ],
+        "unit_assertions": 49,
+        "strided_GPU_assertions": 362,
+        "serving_assertions_each": 1216,
+        "changed_MTP3_lifecycle_assertions": 483,
+        "actual_exit_each": 0,
+        "profile_removed_gathers": 6048,
+        "profile_removed_index_guards": 6048,
+        "profile_removed_metadata_completion_waits": 6048,
+        "pure_decode_gain_claimed": false,
+        "qualification_promoted": false,
+        "receipt": {
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p7-mixed-diagnosis-v1/receipt-v2.json",
+          "bytes": 25842,
+          "sha256": "74e9461cd3c2ecf48fbf78a50bbf8cdd90a5ca3e445d1b4c8685118978d6d52c"
         }
       }
     }

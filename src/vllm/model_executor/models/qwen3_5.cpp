@@ -103,6 +103,23 @@ void ResetQwen3_5MixedSpecInvocations() {
   g_mixed_spec_invocations.store(0, std::memory_order_relaxed);
 }
 
+std::optional<vt::Tensor> detail::GdnContiguousTokenRowsView(
+    const vt::Tensor& source, const std::vector<int32_t>& indices) {
+  if (source.rank != 2 || !source.data || source.shape[1] <= 0 ||
+      source.stride[1] != 1 || source.stride[0] < source.shape[1] || indices.empty())
+    return std::nullopt;
+  const int64_t first = indices.front();
+  if (first < 0 || first >= source.shape[0] ||
+      indices.size() > size_t(source.shape[0] - first)) return std::nullopt;
+  for (size_t i = 0; i < indices.size(); ++i)
+    if (int64_t(indices[i]) != first + int64_t(i)) return std::nullopt;
+  vt::Tensor view = source;
+  view.data = static_cast<char*>(source.data) +
+      size_t(first) * size_t(source.stride[0]) * vt::SizeOf(source.dtype);
+  view.shape[0] = int64_t(indices.size());
+  return view;
+}
+
 // GDN-MOE-BF16-OUT (#1168) Edit 2 dropped the `e.dense_model` term. It entered at
 // f344decf4 ("dispatch exact packed decode") as one of that change's "real-model
 // safety gates", was never revisited, and neither reference has an equivalent:
@@ -5251,8 +5268,8 @@ void FillAttnCosSin(Dev d, StepDevInputs& sdi, const HfConfig& cfg) {
 // request shares a step with an ordinary prefill request; upstream reclassifies
 // any non-spec DECODE to a prefill whenever a spec row exists (gdn_attn.py:
 // 243-251), so the non-spec side is pure prefill (num_decodes == 0). Split
-// mixed_qkv / a / b by spec_token_indx / non_spec_token_indx into compact
-// per-group buffers (index_select), run the I5a spec recurrence + the prefill
+// mixed_qkv / a / b by spec_token_indx / non_spec_token_indx into per-group
+// inputs (borrow contiguous EXL3 XPU rows or checked index_select), run the I5a spec recurrence + the prefill
 // recurrence independently over the SHARED persistent state, merge the two core
 // outputs back to their original row positions (index_copy), then finish with
 // the shared gated-RMSNorm + out_proj. 1:1 mirror of
@@ -5303,18 +5320,35 @@ DBuf GdnBlockPagedMixedSpec(Dev d, const GdnLayerWeights& w, const HfConfig& cfg
   // ── 1. Split mixed_qkv / a / b by token group (index_select; :1334-1335,
   // :1407-1408). araw/braw may be inner-contiguous row-strided merged views;
   // IndexSelect follows the outer stride and packs each group contiguously. ──
-  DBuf mixed_spec(d, convdt, {ns_tok, conv_dim});
-  DBuf mixed_ns(d, convdt, {nns_tok, conv_dim});
-  vt::IndexSelect(d.q, mixed_spec.t(), mixed, spec_tok);
-  vt::IndexSelect(d.q, mixed_ns.t(), mixed, ns_tok_idx);
-  DBuf a_spec(d, araw.dtype, {ns_tok, Hv});
-  DBuf b_spec(d, braw.dtype, {ns_tok, Hv});
-  DBuf a_ns(d, araw.dtype, {nns_tok, Hv});
-  DBuf b_ns(d, braw.dtype, {nns_tok, Hv});
-  vt::IndexSelect(d.q, a_spec.t(), araw, spec_tok);
-  vt::IndexSelect(d.q, b_spec.t(), braw, spec_tok);
-  vt::IndexSelect(d.q, a_ns.t(), araw, ns_tok_idx);
-  vt::IndexSelect(d.q, b_ns.t(), braw, ns_tok_idx);
+  static const bool token_views = [] {
+    const char* value = std::getenv("VT_XPU_GDN_MIXED_TOKEN_VIEWS");
+    const std::string_view setting = value ? value : "1";
+    VT_CHECK(setting == "0" || setting == "1", "Invalid VT_XPU_GDN_MIXED_TOKEN_VIEWS");
+    return setting == "1";
+  }();
+  const bool borrow_rows = token_views && d.q.device.type == vt::DeviceType::kXPU &&
+      convdt == DType::kF16 && !w.in_proj_qkv_exl3.Empty();
+  // BuildStepDevInputs uploads these same validated host maps once per step.
+  // Projection owners live through this call; conv/post-conv honor dim0
+  // strides and never mutate their inputs. Keep owners for permuted-map or
+  // layout fallbacks and the same-binary rollback.
+  const auto select_rows = [&](const Tensor& source, const Tensor& device_indices,
+                               const std::vector<int32_t>& host_indices, DBuf& owner) {
+    if (borrow_rows)
+      if (auto view = detail::GdnContiguousTokenRowsView(source, host_indices)) return *view;
+    owner = DBuf(d, source.dtype, {int64_t(host_indices.size()), source.shape[1]});
+    vt::IndexSelect(d.q, owner.t(), source, device_indices);
+    return owner.t();
+  };
+  DBuf mixed_spec_owner, mixed_ns_owner, a_spec_owner, b_spec_owner, a_ns_owner, b_ns_owner;
+  const auto& spec_host = *meta.spec_token_indx;
+  const auto& ns_host = *meta.non_spec_token_indx;
+  Tensor mixed_spec = select_rows(mixed, spec_tok, spec_host, mixed_spec_owner);
+  Tensor mixed_ns = select_rows(mixed, ns_tok_idx, ns_host, mixed_ns_owner);
+  Tensor a_spec = select_rows(araw, spec_tok, spec_host, a_spec_owner);
+  Tensor b_spec = select_rows(braw, spec_tok, spec_host, b_spec_owner);
+  Tensor a_ns = select_rows(araw, ns_tok_idx, ns_host, a_ns_owner);
+  Tensor b_ns = select_rows(braw, ns_tok_idx, ns_host, b_ns_owner);
 
   Tensor dcw = convdt == DType::kBF16 || convdt == DType::kF16
                    ? ResidentWeight(d, w.conv1d_weight, {conv_dim, Kw})
@@ -5328,7 +5362,7 @@ DBuf GdnBlockPagedMixedSpec(Dev d, const GdnLayerWeights& w, const HfConfig& cfg
   DBuf dconv_spec(d, convdt, {ns_tok, conv_dim});
   {
     Tensor conv_cache = state.conv_state;
-    vt::CausalConv1dSpecUpdate(d.q, dconv_spec.t(), mixed_spec.t(), dcw,
+    vt::CausalConv1dSpecUpdate(d.q, dconv_spec.t(), mixed_spec, dcw,
                                /*bias=*/nullptr, conv_cache,
                                sdi.gdn_spec_conv_state_idx.t(),
                                sdi.gdn_num_accepted.t(), sdi.gdn_spec_qsl.t(),
@@ -5344,7 +5378,7 @@ DBuf GdnBlockPagedMixedSpec(Dev d, const GdnLayerWeights& w, const HfConfig& cfg
                                    &conv_chunk_offsets};
     DBuf dcs(d, DType::kF32, {np, conv_dim, Kw - 1});
     vt::GdnStateGather(d.q, dcs.t(), state.conv_state, sdi.gdn_state_idx.t());
-    vt::CausalConv1dFwd(d.q, dconv_ns.t(), mixed_ns.t(), dcw, nullptr, dcs.t(),
+    vt::CausalConv1dFwd(d.q, dconv_ns.t(), mixed_ns, dcw, nullptr, dcs.t(),
                         sdi.gdn_non_spec_qsl.t(), sdi.gdn_has_initial.t(),
                         conv_args);
     Tensor conv_cache = state.conv_state;
@@ -5381,7 +5415,7 @@ DBuf GdnBlockPagedMixedSpec(Dev d, const GdnLayerWeights& w, const HfConfig& cfg
     DBuf vf(d, actdt, {ns_tok, Hv, Dv});
     DBuf dg(d, DType::kF32, {ns_tok, Hv});
     DBuf dbeta(d, DType::kF32, {ns_tok, Hv});
-    post_conv(dconv_spec.t(), a_spec.t(), b_spec.t(), ns_tok, dql2, dkl2, vf, dg,
+    post_conv(dconv_spec.t(), a_spec, b_spec, ns_tok, dql2, dkl2, vf, dg,
               dbeta);
     DBuf dcore_spec(d, outdt, {ns_tok, Hv, Dv});
     Tensor ssm_cache = state.ssm_state;
@@ -5401,7 +5435,7 @@ DBuf GdnBlockPagedMixedSpec(Dev d, const GdnLayerWeights& w, const HfConfig& cfg
     DBuf vf(d, actdt, {nns_tok, Hv, Dv});
     DBuf dg(d, DType::kF32, {nns_tok, Hv});
     DBuf dbeta(d, DType::kF32, {nns_tok, Hv});
-    post_conv(dconv_ns.t(), a_ns.t(), b_ns.t(), nns_tok, dql2, dkl2, vf, dg,
+    post_conv(dconv_ns.t(), a_ns, b_ns, nns_tok, dql2, dkl2, vf, dg,
               dbeta);
     DBuf dcore_ns(d, outdt, {nns_tok, Hv, Dv});
     DBuf dss(d, DType::kF32, {np, Hv, Dv, Dk});

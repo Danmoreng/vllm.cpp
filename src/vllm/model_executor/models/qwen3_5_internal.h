@@ -7,6 +7,7 @@
 
 #include <cstdint>
 #include <array>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -164,6 +165,11 @@ inline DenseFa2Class ClassifyDenseFa2(const DenseFa2Eligibility& e) {
 }  // namespace vllm
 
 namespace vllm::detail {
+
+// Borrow a validated model-owned contiguous dim0 interval, preserving the
+// producer row stride. Other token maps/layouts retain the checked gather.
+std::optional<vt::Tensor> GdnContiguousTokenRowsView(
+    const vt::Tensor& source, const std::vector<int32_t>& indices);
 
 struct GdnPackedDecodeEligibility {
   bool runtime_enabled = false;
