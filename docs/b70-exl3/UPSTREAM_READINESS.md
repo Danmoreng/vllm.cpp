@@ -413,3 +413,32 @@ The bounded C1/C4transition scopes are exercised, but Q1 state qualification
 fails. Preserve the experimental verifier and all default-reference failures;
 no math/threshold/reference/default changes are made. Continue independent
 conditional F3 cost evidence, contribution composition and the U6 final matrix.
+
+F3 now records actual logical target query offsets/lengths, request IDs,
+sequence lengths and GDN row classification in each R11 profiling cycle,
+including graph replays. These fields are profiling-only; unprofiled output,
+inference arithmetic and graph policy are unchanged. The focused build passes
+two steps and the small P128/O16 smoke passes116 assertions. All six target
+spans are observed; five decode cycles each contain one actual graph replay.
+
+Canonical C4 P32768/O256 and staggered4K/32K O256 profile runs pass4,386 and
+2,367 assertions, respectively. All four/two requests finish at256 tokens.
+Their187/135 target cycles include98/105 target graph-compute replays. Analysis
+joins events to the target span by same-queue device-timestamp containment,
+not by dispatch/capture counts. Both cases have zero target
+`attention_reference` events and zero ragged pure-decode query-length cycles.
+Nonuniform forms occur during prefill/mixed work, where oneDNN SDPA events are
+visible; this is not evidence of an expensive generic ragged decode kernel.
+All output IDs and all non-time cycle fields remain exact to the historical
+native matrix-v3 controls. That continuity is not an original parity check.
+
+Do not begin a ragged verifier variant from these results. The separate narrow
+FA-output M4 or graph/eager anomaly investigation remains before F3 closure.
+Whole graph replay times are actual, but internal graph attention-node times
+are unavailable; neither capture-only events nor eager kernel times substitute
+for that attribution. These profiled runs are not serving scores or U6 trials.
+Both long workers use24GiB/no swap/two CPUs with no OOM; host cgroup peaks are
+6,397,235,200 and4,728,975,360 bytes. Q1 remains failed/open. Frozen inputs,
+source/binary, commands, complete profiles, resources and analysis are indexed
+in recovery/upstream-f3-shape-profile-v1/receipt-v1.json,6540 bytes,SHA256
+08cd5db5627295fe02a951503a59f5da34b83f0eaecb2944ef13a0076b5bc8bb.

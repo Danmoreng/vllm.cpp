@@ -1949,6 +1949,32 @@ TEST_CASE("XPU EXL3 public engine R11: frozen serving timing workload") {
         {"logical_logit_rows", runner.last_forward_rows()},
         {"graph_captures", graph_after.segments_captured - graph_before.segments_captured},
         {"graph_replays", graph_after.replays - graph_before.replays}});
+    if (profile || host_profile) {
+      // This is the metadata consumed by the completed target forward, also
+      // when its kernels replay a graph. Dispatch/capture logs cannot count
+      // those replays. No tensor downloads or model/graph-policy changes here.
+      const auto& am = runner.last_attn_meta();
+      const auto& gm = runner.last_gdn_meta();
+      REQUIRE(am.num_reqs == runner.last_forward_num_reqs());
+      REQUIRE(am.query_start_loc.size() == size_t(am.num_reqs + 1));
+      REQUIRE(am.query_start_loc.front() == 0);
+      REQUIRE(am.query_start_loc.back() == am.num_actual_tokens);
+      REQUIRE(am.seq_lens.size() == size_t(am.num_reqs));
+      std::vector<int32_t> query_lengths;
+      std::vector<std::string> request_ids;
+      for (int row = 0; row < am.num_reqs; ++row) {
+        const int32_t length = am.query_start_loc[row + 1] - am.query_start_loc[row];
+        REQUIRE(length > 0); REQUIRE(dense[row].has_value());
+        query_lengths.push_back(length); request_ids.push_back(*dense[row]);
+      }
+      result["cycles"].back()["target_shape"] = {
+          {"request_ids", request_ids}, {"query_start_loc", am.query_start_loc},
+          {"query_lengths", query_lengths}, {"seq_lens", am.seq_lens},
+          {"draft_tokens_per_request", step.num_draft_tokens_per_req},
+          {"num_prefills", gm.num_prefills}, {"num_decodes", gm.num_decodes},
+          {"num_spec_decodes", gm.num_spec_decodes},
+          {"scope", "Actual logical target metadata; eager kernel times and whole graph replay times are separate"}};
+    }
     admit();
   }
   result["end_to_end_wall_s"] = seconds();
