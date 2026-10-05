@@ -6665,7 +6665,7 @@
     "F1": "stopped_at_bounded_precondition_low_measured_producer_cost_no_fusion_variant",
     "F2": "completed_first_event_candidate_rejected_second_direct_candidate_retained_prefill_memory_default_model_only",
     "F3": "completed_bounded_actual_shape_and_specific_FAoutM4_investigation_stop_without_kernel_variant",
-    "U6": "primary_C1_fresh_three_native_three_original_scores_complete_remaining_matrix_and_handoff_pending",
+    "U6": "primary_3plus3_M0_one_pair_C4_initial_one_pair_complete_original_C4_overlap_unmet_remaining_long_mixed_life_prefix_composition_handoff",
     "receipt": {
       "artifact": "upstream-u1-integration-v1/receipt-v1.json",
       "sha256": "c0f79e400d9b5dbf62a63f8367bda529308967b608e0ec72b838d178ca8a17af",
@@ -6675,7 +6675,7 @@
     "cpu_limit": "GCC16 now builds the CPU library and selected targets;5 focused CTest cases pass with5019 assertions and one existing registry test-case skip. GCC12 previous unchanged muse_glimmer_mm array-bounds failure retained; not rerun after the cache repair.",
     "other_backends": "Affected Vulkan source compiles and CUDA CUTLASS/Marlin host syntax checks pass. CUDA device build/link/runtime and HIP remain unverified.",
     "performance_scope": "One before/after C1 short native pair:43.61414->43.51202 decode TPS; TTFT2313.785->2318.430ms; request8160.513->8178.879ms. No repeat signal and no refreshed original score.",
-    "next_step": "U6 remainingboundedmatrix: MTP0 C1P4096/O256 oneperarm, C4P4096/O1024oneperarm andonlyexpandthreeifactualoriginalC4overlapproven;longC1/C4P32768/O256 andmixed4K32K nativefresh/originaloneorvalidunchangeddatedcontrols;life/prefix/affectedqualityscopes, thenremainingcomposition/Prohandoff. Primarycurrent3+3 scorescompletewith19.175%Decodegap andoriginaltrajectorystreampreserved. F1/F2/F3closed/no newoptimization/globaltile sweep; preserveQ1/defaultreferencefailedopen andexperimentalverifier/no maththresholdreferencepromotion/P0-P7notresumed.",
+    "next_step": "U6 longC1/C4P32768/O256 andmixed4K32K oneperarm orvalidunchangeddatedcontrols;existinglife/EOS-cancel-reusepoison/graph-eagergraph andprefix32KO64 plusaffectedqualityscope, thenremainingcomposition/reproducibleProhandoff/fullscopeaudit. Primary3+3 andM0/C4initialpairs complete;originalC4actualdraftbatch1/no4overlap, stopadditionalC4repeats/noGPUparityclaim. F1/F2/F3closed/no newoptimization/globaltile sweep; preserveQ1/defaultreferencefailedopen/experimentalverifier/no maththresholdreferencepromotion/P0-P7notresumed.",
     "U0_tests": "23 host tests in4 CTest cases pass, including8 generated artifact tests; no GPU arithmetic changed.",
     "U0_receipt": {
       "artifact": "upstream-u1-integration-v1/u0-receipt-v1.json",
@@ -6800,6 +6800,12 @@
       "artifact": "upstream-u6-final-matrix-v1/primary-receipt-v2.json",
       "sha256": "6861d76b2499927957c030e1d3089773328f3825770816ffbf5d1e96ca61aa9b",
       "bytes": 794
+    },
+    "U6_M0_C4_tests": "Samefrozenprimarysource/binary/envelope180W24GiBnoswapCPU2/page1600/O32warmup-reset,onefreshunprofiledperarm percase,allactual0/noOOMnoswap,hostpeaks<6.6GB. M0C1P4096/O256 native1354assertions;Decode26.320099vs29.464023TPS(-10.670384%);TTFT2239.006979vs1909.506795ms(+17.255774%);E2E11.927448vs10.564141s(+12.905043%). No proposals;nativeall256IDs/nontimecycles exactpriorM0,crossarmfirst48. C4xP4096/O1024native7786assertions,E2E43.953872s,commondecode130.503218TPS(3707tokens/28.405430s),puredecodeC4:346/C3:30/C2:2/C1:30;originalE2E76.220411s/noall4commondecodeinterval/all1524 actualspecschedulerbatchesdrafts1. Frozenactualmetrics/scheduler sourcesprovecountoneperrequest/permodelresult,notconfiguredmaxseq. OriginalC4overlapUNMET:noexpandthree/noC4GPUparitypercent. Native4096IDs/all419nontimecycles exactall3 finalmatrixv3controls;olderprimaryonlycycle388accepted2vs3diff/IDsotherfields exact. Hostanalyzerv1indentfailure, v2fixbutoldercontrolstrictfailure, v3correctfinalmatrixbaselineunchangedassertionspass; failedversions/sixcontrolrelationspreserved,noGPUrerun/productchange/thresholdrelaxation. Crossarmreq0/1/2/3first53/3/124/12;Q1/defaultrefstatequalificationfailedopen.",
+    "U6_M0_C4_receipt": {
+      "artifact": "upstream-u6-final-matrix-v1/m0-c4-receipt-v1.json",
+      "sha256": "a59a513bcd1532b7dd45186e323df0da62f15534c7327716c93960fde1f04aac",
+      "bytes": 7474
     }
   }
 }
