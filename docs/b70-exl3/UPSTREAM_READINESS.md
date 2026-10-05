@@ -78,8 +78,17 @@ dependencies. The GDN directory carries the unchanged Apache-2.0 donor license;
 individual BSD notices remain in their headers. Current source pins, dependency
 build commands and route-specific admission scope are in
 [XPU source dependencies](../XPU.md#current-source-dependencies-and-xe2-scope).
-This documentation step changes no GPU code and needs no automatic test. A fresh
-build from these declared inputs remains separate from the existing cached builds.
+The notices step changes no GPU code and needs no automatic test. A subsequent
+fresh Git archive of `0293084ce`, without a personal `.env`, configures and builds
+the CPU library and selected targets with GCC16.2.1 (624 steps). All four focused
+CTest cases pass: cache ownership, panel planning, external artifact admission
+and direct upload (1,063 C++ assertions plus five host admission methods).
+All GPU backends, oneDNN, downloads, server and diarization are explicitly OFF;
+the linked host test has no SYCL/oneDNN dependency. The receipt is indexed in
+`RECOVERY_STATUS.json`. This is an executed clean CPU build, not a fresh oneDNN
+dependency build, a full suite or GPU qualification. The previously executed
+required/optional SmallM input checks remain the separate GPU-test admission
+evidence. A model and oneAPI were not needed by this CPU slice.
 
 A clean public contribution composition,
 ordinary-route admission and integrated original MTP state qualification remain
