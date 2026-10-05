@@ -31,6 +31,13 @@ void Gemma5120ShortRowsKernel(Queue& q, View dst, View src, View w, View res,
   // ascending SG16 tree for each half of the producer's logical SG32.
   constexpr int lanes = 16;
   const int workgroup = width / 2, chunks = width / 32;
+  // The public RMSNorm contract validates contiguous rows, and this route
+  // admits F16 operands only. Capture typed pointers instead of dynamic View
+  // loads/stores without changing the virtual-lane reduction or F32 sum.
+  const auto* input = static_cast<const sycl::half*>(src.data);
+  const auto* weight = static_cast<const sycl::half*>(w.data);
+  auto* residual = static_cast<sycl::half*>(res.data);
+  auto* output = static_cast<sycl::half*>(dst.data);
   const auto event = NativeQueue(q).submit([&](sycl::handler& h) {
     sycl::local_accessor<float, 1> sums(sycl::range<1>(width + 1), h);
     h.parallel_for(sycl::nd_range<1>(sycl::range<1>(rows * workgroup),
@@ -38,6 +45,7 @@ void Gemma5120ShortRowsKernel(Queue& q, View dst, View src, View w, View res,
         [=](sycl::nd_item<1> item) [[sycl::reqd_sub_group_size(16)]] {
 #pragma clang fp contract(off)
       const int64_t row = item.get_group_linear_id();
+      const int64_t base = row * 5120;
       const int local = item.get_local_linear_id();
       const int chunk = local / lanes, lane = local % lanes;
       for (int half = 0; half < 2; ++half) {
@@ -45,7 +53,9 @@ void Gemma5120ShortRowsKernel(Queue& q, View dst, View src, View w, View res,
         for (int col = 4 * (32 * chunk + lane + half * lanes); col < 5120;
              col += 4 * width) {
           for (int j = 0; j < 4; ++j) {
-            const float value = Gemma5120Value<Residual>(src, res, row, col + j);
+            float value = static_cast<float>(input[base + col + j]);
+            if constexpr (Residual)
+              value += static_cast<float>(residual[base + col + j]);
             regs[j] += value * value;
           }
         }
@@ -72,10 +82,13 @@ void Gemma5120ShortRowsKernel(Queue& q, View dst, View src, View w, View res,
       item.barrier(sycl::access::fence_space::local_space);
       const float inverse = sums[width];
       for (int col = local; col < 5120; col += workgroup) {
-        const float value = Gemma5120Value<Residual>(src, res, row, col);
-        if constexpr (Residual) Store(res, row * res.stride[0] + col, value);
-        Store(dst, row * dst.stride[0] + col,
-              Gemma5120OutputValue(value, inverse, Load(w, col)));
+        float value = static_cast<float>(input[base + col]);
+        if constexpr (Residual) {
+          value += static_cast<float>(residual[base + col]);
+          residual[base + col] = static_cast<sycl::half>(value);
+        }
+        output[base + col] = static_cast<sycl::half>(Gemma5120OutputValue(
+            value, inverse, static_cast<float>(weight[col])));
       }
     });
   });

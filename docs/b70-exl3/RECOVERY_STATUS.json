@@ -2072,7 +2072,7 @@
     },
     {
       "task": "P7",
-      "status": "in_progress_C1_C4_primary_and_original_timeline_refreshed",
+      "status": "in_progress_typed_short_row_norm_retained_remaining_matrix_open",
       "complete": false,
       "C1_repetitions_per_engine": 3,
       "actual_native_primary_assertions_each": 1895,
@@ -2117,7 +2117,7 @@
         "bytes": 484222,
         "sha256": "4ef94808be5009536b9e1976410b821ce96d0b958338216b2f29ed18bd87f2ac"
       },
-      "remaining": "P7 incomplete. Original fixed1600-budget C4 queues without4way overlap; original IDs vary, cause unproved. Actual eager GDN/norm much cheaper than native supplies causal evidence for bounded arithmetic-preserving dataflow/typed-load improvements, not another blind register sweep or changed FP32 reductions. Remaining noMTP/32K/mixed/prefix/practical/default-controlled/draft/lifecycle and original admission/stability. P1/default/full-state remain open.",
+      "remaining": "P7 incomplete. Typed short-row norm retained after exact same-input proof and single C1/C4 serving gains. Original fixed1600-budget C4 has no4way overlap; original IDs vary. Original eager diagnostic disables compile/graphs and changes custom-op/IR-provider mode; its norm/GDN costs are not compiled-serving same-arithmetic baselines. Remaining actual noMTP support/32K/mixed/prefix/practical/default-controlled/draft/lifecycle plus original admission/stability/P1/default/full-state qualification.",
       "C4_repetitions_per_engine": 3,
       "C4_native_assertions_each": 7781,
       "C4_native_all4096_ids_and419_non_timing_cycles_exact_repeats": true,
@@ -2149,9 +2149,57 @@
       },
       "actual_original_eager_main_fused_plus_standalone_norm_ms": 0.3213445,
       "actual_original_eager_multirow_head_norm_ms": 0.0857925,
-      "norm_materialization_hypothesis_unproved": "Structural reference half residual addition before variance versus native F32. Actual installed operator and actual residual dtype need independent same-input proof; no arithmetic/reference/gate change."
+      "norm_materialization_hypothesis_unproved": "Isolated installed default Gemma selects native IR and exactly matches frozen literal F32-sum fixture. Explicit direct XPU norm differs in115729 outputs; stored residuals match. Compiled full-worker norm operator is not captured by this isolated proof; no precision/reference/gate change.",
+      "original_eager_diagnostic_configuration_note": "Actual worker compilationNONE/custom_opsall/IRwrapfalse/vllm_c-native priority; original graph worker VLLM_COMPILE/custom_opsnone/native IR priority/wraptrue. Per-kernel costs are separate diagnostic-mode evidence, not compiled-graph same-arithmetic proof.",
+      "typed_short_row_norm": {
+        "decision": "retain",
+        "physical_rows": [
+          1,
+          16
+        ],
+        "preserved": "FP32 residual sum/reduction tree/materialization/WG/WithOutput ownership; larger/other routes unchanged; no new host polling/workspace/readback",
+        "actual_installed_default_IR_cases": 20,
+        "ordinary_native_IR_output_halves_exact": 798720,
+        "ordinary_native_IR_stored_residual_halves_exact": 399360,
+        "explicit_direct_XPU_output_halves_different": 115729,
+        "focused_alias_padding_assertions": 821,
+        "captured_P128_D1_assertions": 64,
+        "complete_operator_assertions_each": 163,
+        "complete_operator_unprofiled_elapsed_reduction_percent_range": [
+          30.4,
+          55.2
+        ],
+        "serving_repeats_candidate_each": 1,
+        "C1_decode_tps": 46.46608711072351,
+        "C1_decode_change_percent_against_native_baseline_median": 2.3100410674554483,
+        "C1_ttft_ms": 2851.309707,
+        "C1_E2E_s": 24.867392385,
+        "C4_common_four_way_decode_tps": 112.17237299056477,
+        "C4_decode_change_percent_against_native_baseline_median": 4.826172895119574,
+        "C4_mean_request_ttft_ms": 9903.89664225,
+        "C4_E2E_s": 54.75207782,
+        "C1_1024_ids_371_non_timing_cycles_exact_all_three_baselines": true,
+        "C4_4096_ids_419_non_timing_cycles_exact_all_three_baselines": true,
+        "actual_serving_assertions_C1_C4": [
+          1895,
+          7781
+        ],
+        "actual_worker_exit_codes_each": 0,
+        "backend_peak_bytes_unchanged": [
+          30325756227,
+          30627797719
+        ],
+        "after_release_graph_bytes_each": 0,
+        "current_C1_gap_vs_original_median_percent": -27.301042187508685,
+        "qualification_promoted": false,
+        "receipt": {
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p7-norm-materialization-v1/receipt-v1.json",
+          "bytes": 37547,
+          "sha256": "73d55c4c9d65b10e31b4cf93312fc3605a0905215ec730013e9ce67a5e457557"
+        }
+      }
     }
   ],
   "performance_baseline": "7536aededc049b2157f12eadb0f4cc6bbf29b7b7",
-  "performance_next": "P7 next isolate actual installed norm on identical inputs/residuals/weights, check actual dtypes and FP16 residual/materialization boundary against native Gemma5120, without rewriting references/thresholds or changing product arithmetic first. Structural source is not binary proof; multirow cost is separate from main5120 norm. Then bounded arithmetic-preserving typed norm/GDN dataflow optimization only with exact state/operator and complete-path gain. Original C4 admission/stability and remaining noMTP/32K/mixed/prefix/practical/default-controlled/draft/lifecycle matrix stay open."
+  "performance_next": "P7 next implement actual no-MTP benchmark support with unchanged MTP3 default, execute bounded no-MTP C1/C4 sentinels, then remaining32K/mixed/prefix/practical/default-controlled/compact-draft/lifecycle matrix. Typed short-row Gemma norm retained with exact native IDs/cycles and single-sample complete-serving gains. Further GDN dataflow changes require paired state/arithmetic proof against relevant original path; eager original mode differs from compiled serving. Do not repeat rejected P5 geometry variants or change reference/thresholds. Original C4 admission/stability, compiled same-input norm/P1/defaultD64 four failures/full-state qualification remain open."
 }

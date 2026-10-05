@@ -1501,6 +1501,78 @@ TEST_CASE("XPU EXL3 Gemma5120: real short rows aliases strides and poisoned padd
   CHECK(vt::GetReferenceTierHits() == 0);
 }
 
+TEST_CASE("XPU EXL3 Gemma5120: bounded same-input operator timing") {
+  const char* path = std::getenv("VT_B70_EXL3_GEMMA_ROWS_FIXTURE");
+  const char* output = std::getenv("VT_B70_EXL3_GEMMA_PERF_OUTPUT");
+  if (!path || !output) std::exit(77);
+  REQUIRE_FALSE(std::filesystem::exists(output));
+  const bool profiled = std::getenv("VT_XPU_PROFILE") &&
+      std::string(std::getenv("VT_XPU_PROFILE")) == "1";
+  const std::filesystem::path fixture(path);
+  auto metadata = fixture; metadata.replace_extension(".json");
+  std::ifstream record(metadata);
+  const auto cases = nlohmann::json::parse(record).at("cases");
+  const auto oracle = vllm::SafetensorsFile::Open(fixture.string());
+  xpu_test::Queue gpu(vt::DeviceType::kXPU);
+  nlohmann::json report{{"schema", "b70-exl3-gemma5120-operator-timing-v1"},
+      {"profiled", profiled}, {"iterations", 128}, {"cases", nlohmann::json::array()},
+      {"scope", "Identical real operands; complete norm with D2D residual reset per call. "
+          "Batch completion wait only; not serving performance or compiled-original qualification."}};
+  for (const auto& entry : cases) {
+    const auto label = entry.at("label").get<std::string>();
+    CAPTURE(label);
+    const int rows = entry.at("physical_rows");
+    const bool residual = entry.at("residual");
+    xpu_test::Buffer x(gpu.q, DType::kF16, {rows, 5120});
+    xpu_test::Buffer r(gpu.q, DType::kF16, {rows, 5120});
+    xpu_test::Buffer initial(gpu.q, DType::kF16, {rows, 5120});
+    xpu_test::Buffer out(gpu.q, DType::kF16, {rows, 5120});
+    xpu_test::Buffer weight(gpu.q, DType::kF16, {5120});
+    x.upload(oracle.Get(label + "_input").data);
+    weight.upload(oracle.Get(label + "_weight").data);
+    if (residual) initial.upload(oracle.Get(label + "_residual").data);
+    const auto invoke = [&] {
+      if (residual) vt::Copy(gpu.q, r.tensor, initial.tensor);
+      vt::RmsNorm(gpu.q, out.tensor, x.tensor, weight.tensor,
+                  vt::RmsNormArgs{1e-6f, true}, residual ? &r.tensor : nullptr);
+    };
+    for (int i = 0; i < 16; ++i) invoke();
+    vt::GetBackend(gpu.q.device).Synchronize(gpu.q);
+    (void)vt::xpu::DrainProfileEvents();
+    nlohmann::json wall = nlohmann::json::array();
+    nlohmann::json event_times = nlohmann::json::array();
+    for (int batch = 0; batch < 3; ++batch) {
+      const auto start = std::chrono::steady_clock::now();
+      for (int i = 0; i < 128; ++i) invoke();
+      vt::GetBackend(gpu.q.device).Synchronize(gpu.q);
+      wall.push_back(std::chrono::duration<double, std::milli>(
+          std::chrono::steady_clock::now() - start).count() / 128);
+      auto events = vt::xpu::DrainProfileEvents();
+      if (profiled) {
+        size_t norms = 0;
+        double ms = 0;
+        for (const auto& event : events) if (event.stage == "rms_norm_gemma5120_fp16") {
+          ++norms; ms += (event.end_ns - event.start_ns) / 1e6;
+        }
+        REQUIRE(norms == 128);
+        event_times.push_back(ms / 128);
+      } else CHECK(events.empty());
+    }
+    const auto want = [&](const std::string& suffix) {
+      const auto& tensor = oracle.Get(label + suffix);
+      return std::vector<unsigned char>(tensor.data, tensor.data + rows * 5120 * 2);
+    };
+    xpu_test::SameBytes(out.download(), want("_output"));
+    xpu_test::SameBytes(x.download(), want("_input"));
+    if (residual) xpu_test::SameBytes(r.download(), want("_stored_residual"));
+    report["cases"].push_back({{"label", label}, {"rows", rows}, {"residual", residual},
+        {"complete_wall_ms_per_call", wall}, {"norm_event_ms_per_call", event_times}});
+  }
+  CHECK(vt::GetReferenceTierHits() == 0);
+  std::ofstream stream(output); REQUIRE(stream.good());
+  stream << report.dump(2) << '\n';
+}
+
 static void ExportAttention3Kv(const std::string& phase, vt::Queue& q,
                                const vllm::PagedKvCache& cache, int length) {
   const char* directory = std::getenv("VT_B70_EXL3_STATE_OUTPUT");
