@@ -1,8 +1,8 @@
 {
   "schema": 1,
-  "active_plan": null,
+  "active_plan": "docs/B70_EXL3_UPSTREAM_READINESS_AND_PERFORMANCE_PLAN_3803ad4_EN.md",
   "scope_reference": "docs/B70-EXL3-Migration-and-Parity-Plan.md",
-  "goal": "Completed user-directed P0-P7 optimization work period and final Pro handoff; Python performance parity and full product qualification are not achieved.",
+  "goal": "Follow the new upstream readiness and bounded performance plan on the current branch, Main integration first; preserve the closed P0-P7 checkpoint and all open qualification gates.",
   "completed_milestones": [
     "A_short_P128_native_output",
     "B_P4096_O64_and_chunked32K_native_output"
@@ -6653,5 +6653,28 @@
     "performance_parity_achieved": false,
     "qualification_promoted": false,
     "next": "Wait for developer-provided new Pro plan; no further optimization authorized under old plan."
+  },
+  "upstream_readiness_plan": {
+    "baseline_ref": "3803ad4a6b9974f4afd1b6c9ad3e333d5e9b6ff8",
+    "upstream_ref": "e67a071a649814e102a91145a0b1b424884f16da",
+    "integration_commit": "3dfa3c3193c5950bf284229441e81f26b99d499c",
+    "integration_status": "native_merge_regression_pass_cpu_portability_open",
+    "U0": "next_portable_fixture_slice",
+    "U2": "pending_including_preexisting_CPU_build_errors",
+    "Q1": "pending_preserve_default_controlled_reference_labels",
+    "F1": "pending_one_fusion_and_at_most_one_smaller_fallback",
+    "F2": "pending_at_most_two_named_changes",
+    "F3": "conditional_on_demonstrated_current_cost",
+    "U6": "pending_bounded_final_comparison_and_review_handoff",
+    "receipt": {
+      "artifact": "upstream-u1-integration-v1/receipt-v1.json",
+      "sha256": "c0f79e400d9b5dbf62a63f8367bda529308967b608e0ec72b838d178ca8a17af",
+      "bytes": 14972
+    },
+    "native_checks": "Build pass; C1 P4096/O256 MTP3 610/610 with exact256 IDs/113 non-time cycles and unchanged GPU peak; lifecycle483/483 complete payload exact; GDN990/990; route38/38; host load206/206, vision56/56, registry3900/3900.",
+    "cpu_limit": "GCC16 full CPU build fails on unchanged shared_ptr atomic deprecations; GCC12 full CPU build fails on unchanged muse_glimmer_mm array-bounds diagnostics. Configurations and affected shared source compiles pass; full CPU build not passed.",
+    "other_backends": "Affected Vulkan source compiles and CUDA CUTLASS/Marlin host syntax checks pass. CUDA device build/link/runtime and HIP remain unverified.",
+    "performance_scope": "One before/after C1 short native pair:43.61414->43.51202 decode TPS; TTFT2313.785->2318.430ms; request8160.513->8178.879ms. No repeat signal and no refreshed original score.",
+    "next_step": "U0 portable projection fixture validation using generated tiny artifacts, followed by U2 CPU/build portability."
   }
 }
