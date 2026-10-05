@@ -55,6 +55,9 @@ v1::KVCacheConfig MakeQwen3_5KVCacheSpec(const HfConfig& config, int block_size,
       config.raw["quantization_config"].value("quant_method", std::string()) == "gptq";
   const bool exl3_f16 = IsExl3Checkpoint(config);
   const bool shared_mtp_pages = exl3_f16 && share_mtp_pages && num_spec > 0;
+  // Target-only EXL3 has the same compact recurrent ownership as shared MTP.
+  // It needs no draft pages, but must not reserve historical GDN identities.
+  const bool aligned_exl3_pages = exl3_f16 && (num_spec == 0 || shared_mtp_pages);
   const bool explicit_f16 = gptq_f16 || exl3_f16;
   const auto precision =
       ResolveQwen3_5DensePrecision(config, gptq_f16, exl3_f16);
@@ -95,8 +98,8 @@ v1::KVCacheConfig MakeQwen3_5KVCacheSpec(const HfConfig& config, int block_size,
       // (K-1)+k taps (mamba_utils.py:226 `conv_kernel_size - 1 + num_spec`) so
       // the sliding window can be rewound to the accepted count, and
       // num_speculative_blocks = k gives MambaManager the k+1 SSM snapshot slots
-      // per request (mamba/abstract.py:55-59). num_spec == 0 is the production
-      // default and reproduces the pre-I4 spec byte for byte.
+      // per request (mamba/abstract.py:55-59). num_spec == 0 keeps the original
+      // state shapes; EXL3 also uses bounded align ownership without a draft.
       std::make_shared<v1::MambaSpec>(
           block_size,
           std::vector<std::vector<int64_t>>{
@@ -107,7 +110,7 @@ v1::KVCacheConfig MakeQwen3_5KVCacheSpec(const HfConfig& config, int block_size,
           // Native recurrence lives in request-owned compact rows. Align mode
           // reserves k+1 current-state identities plus one transition identity,
           // rather than charging a GDN page for every historical context page.
-          /*mamba_cache_mode=*/shared_mtp_pages ? "align" : "none",
+          /*mamba_cache_mode=*/aligned_exl3_pages ? "align" : "none",
           /*num_speculative_blocks=*/num_spec));
   // SPEC-MTP I5c: the MTP draft head is one extra full_attention decoder layer
   // (index num_hidden_layers upstream, qwen3_5_mtp.py:105-112) with its OWN paged
@@ -117,8 +120,8 @@ v1::KVCacheConfig MakeQwen3_5KVCacheSpec(const HfConfig& config, int block_size,
   // EXL3 registers it in the target group because the physical IDs are shared;
   // other checkpoints retain their separate draft group. It exists
   // ONLY when speculative decoding is on (num_spec > 0); num_spec == 0 (the
-  // production default) emits the two pre-I5c groups byte for byte, so the draft
-  // layer is never allocated and the engine is byte-identical when spec is off.
+  // production default) emits only the two target groups, so the draft layer
+  // is never allocated when speculation is off.
   if (num_spec > 0) {
     if (shared_mtp_pages) {
       kv.mtp_draft_shares_target_pages = true;

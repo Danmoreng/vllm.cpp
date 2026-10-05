@@ -732,6 +732,15 @@ TEST_CASE("XPU EXL3 public engine R09 prefix: joint native MTP3 cold warm state"
   const char* prefix = std::getenv("VT_B70_EXL3_ENGINE_PREFIX");
   if (!model || !output || !prefix) std::exit(77);
   const bool caching = std::stoi(prefix) != 0;
+  const char* depth_setting = std::getenv("VT_B70_EXL3_ENGINE_DEPTH");
+  const int depth = depth_setting ? std::stoi(depth_setting) : 3;
+  REQUIRE((depth == 0 || depth == 3));
+  const char* state_output = std::getenv("VT_B70_EXL3_ENGINE_PREFIX_STATE_OUTPUT");
+  const char* state_baseline = std::getenv("VT_B70_EXL3_ENGINE_PREFIX_STATE_BASELINE");
+  REQUIRE((!state_baseline || state_output));
+  // Optional completed-step evidence only; never overlaps model execution.
+  std::unique_ptr<xpu_test::Queue> probe;
+  if (state_output) probe = std::make_unique<xpu_test::Queue>(vt::DeviceType::kXPU);
   const char* graph_setting = std::getenv("VT_B70_EXL3_ENGINE_GRAPH");
   const bool graph_requested = graph_setting && std::stoi(graph_setting) == 1;
   const bool graph_screen = std::getenv("VT_B70_EXL3_ENGINE_GRAPH_SCREEN") != nullptr;
@@ -753,9 +762,12 @@ TEST_CASE("XPU EXL3 public engine R09 prefix: joint native MTP3 cold warm state"
   params.num_blocks = std::max(64, 3 * ((prompt_tokens + 64 + 1599) / 1600) + 16);
   params.kv_cache_dtype = "fp8";
   params.enable_prefix_caching = caching;
-  params.speculative_config = vllm::ParseSpeculativeConfigJson(
+  if (depth) params.speculative_config = vllm::ParseSpeculativeConfigJson(
       "{\"method\":\"mtp\",\"num_speculative_tokens\":3}");
+  else params.block_size = 1600;  // fixed page protocol, independent of auto sizing
   auto loaded = vllm::entrypoints::LoadedEngine::FromModelDir(model, params);
+  REQUIRE(loaded->block_size() == 1600);
+  REQUIRE(loaded->speculative_config().has_value() == (depth > 0));
   auto& engine = loaded->engine();
   vt::ResetGraphBreakStats();
   std::string passage;
@@ -763,7 +775,7 @@ TEST_CASE("XPU EXL3 public engine R09 prefix: joint native MTP3 cold warm state"
     passage += "A fox found a red umbrella beside a quiet river. The rain stopped, and the fox carried it home. ";
   auto tokens = loaded->tokenizer().Encode(passage);
   REQUIRE(tokens.size() >= size_t(prompt_tokens + 16));
-  nlohmann::json result = {{"prefix_caching", caching}, {"depth", 3},
+  nlohmann::json result = {{"prefix_caching", caching}, {"depth", depth},
       {"lifecycle", lifecycle}, {"prompt_tokens", prompt_tokens},
       {"num_blocks", params.num_blocks}, {"output_tokens", output_tokens},
       {"graph_requested", graph_requested}, {"graph_screen", graph_screen},
@@ -824,11 +836,18 @@ TEST_CASE("XPU EXL3 public engine R09 prefix: joint native MTP3 cold warm state"
     }
     CHECK_FALSE(engine.has_unfinished_requests());
     REQUIRE(current.contains("ids"));
+    if (state_output && req < 2) {
+      current["gdn_states"] = SnapshotGdnStates(loaded->runner().gdn_state(), probe->q,
+          state_output, state_baseline, req);
+    }
     const auto after_request = vt::GetGraphBreakStats();
     current["graph_replays_this_request"] = after_request.replays - before_request.replays;
     if (graph_requested) CHECK(after_request.replays > before_request.replays);
     const int first = current["steps"][0]["positions_begin"];
-    if (!caching || req == 0 || req == 3) CHECK(first == 0);
+    if (!caching || req == 0 || (long_lifecycle && req == 3)) CHECK(first == 0);
+    // A mutation at position1600 invalidates later snapshots, but the first
+    // unchanged page may still be reused. It must never skip the mutation.
+    if (caching && req == 3 && !long_lifecycle) CHECK((first == 0 || first == 1600));
     if (caching && (req == 1 || req == 2)) CHECK(first >= 1600);
     if (long_lifecycle && req == 4) CHECK(first == 0);
     if (req >= 6) CHECK(first == 0);
@@ -884,10 +903,15 @@ TEST_CASE("XPU EXL3 public engine R09 prefix: joint native MTP3 cold warm state"
     CHECK(graph_stats.segments_captured > 0);
     CHECK(graph_stats.replays > 0);
   }
-  CHECK(loaded->runner().spec_drafts_proposed() > 0);
+  if (depth) CHECK(loaded->runner().spec_drafts_proposed() > 0);
+  else {
+    CHECK(loaded->runner().spec_drafts_proposed() == 0);
+    CHECK(loaded->runner().spec_drafts_accepted() == 0);
+  }
   CHECK(vt::GetReferenceTierHits() == 0);
   loaded.reset();
   result["after_engine_release_memory"] = memory();
+  CHECK(result["after_engine_release_memory"]["graph_device_bytes"] == 0);
   save();
 }
 
@@ -906,6 +930,7 @@ TEST_CASE("XPU EXL3 public engine R08 pages: simultaneous exact boundary continu
   params.num_blocks = 32;  // two pages/request plus target/draft/spec reservations
   params.kv_cache_dtype = "fp8";
   params.enable_prefix_caching = false;
+  if (!k) params.block_size = 1600;  // keep the declared boundary protocol
   if (k) params.speculative_config = vllm::ParseSpeculativeConfigJson(
       "{\"method\":\"mtp\",\"num_speculative_tokens\":3}");
   auto loaded = vllm::entrypoints::LoadedEngine::FromModelDir(model, params);

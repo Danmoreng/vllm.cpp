@@ -1214,61 +1214,67 @@ TEST_CASE("Qwen3.5 KV-cache spec: EXL3 MTP shares page identity and counts separ
   }
 }
 
-TEST_CASE("Qwen3.5 KV-cache spec: EXL3 MTP maximum-context admission and recurrent retirement") {
-  constexpr int context = 262144, block_size = 1600, pool_blocks = 170;
+TEST_CASE("Qwen3.5 KV-cache spec: EXL3 target-only and MTP maximum-context admission and recurrent retirement") {
+  constexpr int context = 262144, block_size = 1600;
   const HfConfig cfg = EXL3QwenKVConfig();
-  auto kv = vllm::MakeQwen3_5KVCacheSpec(cfg, block_size, pool_blocks, 3, true);
-  vllm::v1::ResolveKVCacheGroupLayerNames(kv, cfg.num_hidden_layers, cfg.layer_types);
-  vllm::v1::ApplyCacheDType(kv, vllm::v1::ParseCacheDType("fp8", vt::DType::kF16), 1.0F, 1.0F);
-  const auto* mamba = dynamic_cast<const vllm::v1::MambaSpec*>(kv.kv_cache_groups[1].kv_cache_spec.get());
-  REQUIRE(mamba != nullptr);
-  CHECK(mamba->mamba_cache_mode == "align");
-  CHECK(vllm::v1::max_blocks_per_request(*mamba, context, block_size) == 5);
-  CHECK(mamba->max_num_blocks_per_req(context) == 167);  // null-padded logical row
-  const int64_t bytes_per_block = vllm::v1::KVBytesPerBlock(kv);
-  CHECK(bytes_per_block == 17 * 3276800LL);
-  CHECK(vllm::v1::max_memory_usage_bytes_from_groups(kv, context, block_size) ==
-        169 * bytes_per_block);  // 164 FA + five live recurrent identities
-  CHECK_NOTHROW(vllm::v1::check_enough_kv_cache_memory(kv, pool_blocks * bytes_per_block, context, block_size));
-  auto too_small = kv;
-  too_small.num_blocks = pool_blocks - 1;
-  CHECK_THROWS(vllm::v1::check_enough_kv_cache_memory(too_small, (pool_blocks - 1) * bytes_per_block, context, block_size));
-  vllm::v1::KVCacheManager manager(kv, context, block_size, block_size, block_size,
-                                  /*enable_caching=*/false, /*use_eagle=*/false, /*log_stats=*/false);
-  vllm::SamplingParams sampling;
-  sampling.max_tokens = 1024;
-  vllm::v1::Request req("long", std::vector<int32_t>(261120, 42), sampling, 0.0);
-  const auto allocate = [&](const vllm::v1::Request& r, int count) {
-    return manager.allocate_slots(r, count, 0, std::nullopt, 3, 0, false, 0,
-                                  // Scheduler reserves the full prompt only
-                                  // when admitting a waiting/preempted owner.
-                                  /*full_sequence_must_fit=*/r.num_computed_tokens == 0);
-  };
-  int max_live_recurrent = 0;
-  for (int position = 0; position < context; ) {
-    CAPTURE(position);
-    const int count = std::min(block_size, context - position);
-    req.num_computed_tokens = position;
-    REQUIRE(allocate(req, count).has_value());
-    const auto blocks = manager.get_blocks(req.request_id).blocks;
-    REQUIRE(blocks.size() == 2);
-    CHECK(blocks[0].size() == size_t((std::min(context, position + count + 3) + block_size - 1) / block_size));
-    int live_recurrent = 0;
-    for (const auto* block : blocks[1]) {
-      if (!block->is_null) { ++live_recurrent; CHECK(block->ref_cnt == 1); }
+  for (int depth : {0, 3}) {
+    CAPTURE(depth);
+    const int pool_blocks = 167 + depth;  // FA164 + recurrent(2+k) + null
+    // Exercise the production no-spec entry point, including share=false.
+    auto kv = depth ? vllm::MakeQwen3_5KVCacheSpec(cfg, block_size, pool_blocks, depth, true)
+                    : vllm::MakeQwen3_5KVCache(cfg, block_size, pool_blocks);
+    vllm::v1::ResolveKVCacheGroupLayerNames(kv, cfg.num_hidden_layers, cfg.layer_types);
+    vllm::v1::ApplyCacheDType(kv, vllm::v1::ParseCacheDType("fp8", vt::DType::kF16), 1.0F, 1.0F);
+    const auto* mamba = dynamic_cast<const vllm::v1::MambaSpec*>(kv.kv_cache_groups[1].kv_cache_spec.get());
+    REQUIRE(mamba != nullptr);
+    CHECK(mamba->mamba_cache_mode == "align");
+    CHECK(vllm::v1::max_blocks_per_request(*mamba, context, block_size) == 2 + depth);
+    CHECK(mamba->max_num_blocks_per_req(context) == 164 + depth);  // null-padded logical row
+    const int64_t bytes_per_block = vllm::v1::KVBytesPerBlock(kv);
+    CHECK(bytes_per_block == (depth ? 17 : 16) * 3276800LL);
+    CHECK(vllm::v1::max_memory_usage_bytes_from_groups(kv, context, block_size) ==
+          (166 + depth) * bytes_per_block);  // FA + bounded live recurrence
+    CHECK_NOTHROW(vllm::v1::check_enough_kv_cache_memory(kv, pool_blocks * bytes_per_block, context, block_size));
+    auto too_small = kv;
+    too_small.num_blocks = pool_blocks - 1;
+    CHECK_THROWS(vllm::v1::check_enough_kv_cache_memory(too_small, (pool_blocks - 1) * bytes_per_block, context, block_size));
+    vllm::v1::KVCacheManager manager(kv, context, block_size, block_size, block_size,
+                                    /*enable_caching=*/false, /*use_eagle=*/false, /*log_stats=*/false);
+    vllm::SamplingParams sampling;
+    sampling.max_tokens = 1024;
+    vllm::v1::Request req("long", std::vector<int32_t>(261120, 42), sampling, 0.0);
+    const auto allocate = [&](const vllm::v1::Request& r, int count) {
+      return manager.allocate_slots(r, count, 0, std::nullopt, depth, 0, false, 0,
+                                    // Scheduler reserves the full prompt only
+                                    // when admitting a waiting/preempted owner.
+                                    /*full_sequence_must_fit=*/r.num_computed_tokens == 0);
+    };
+    int max_live_recurrent = 0;
+    for (int position = 0; position < context; ) {
+      CAPTURE(position);
+      const int count = std::min(block_size, context - position);
+      req.num_computed_tokens = position;
+      REQUIRE(allocate(req, count).has_value());
+      const auto blocks = manager.get_blocks(req.request_id).blocks;
+      REQUIRE(blocks.size() == 2);
+      CHECK(blocks[0].size() == size_t((std::min(context, position + count + depth) + block_size - 1) / block_size));
+      int live_recurrent = 0;
+      for (const auto* block : blocks[1]) {
+        if (!block->is_null) { ++live_recurrent; CHECK(block->ref_cnt == 1); }
+      }
+      max_live_recurrent = std::max(max_live_recurrent, live_recurrent);
+      CHECK(live_recurrent <= 2 + depth);
+      position += count;
     }
-    max_live_recurrent = std::max(max_live_recurrent, live_recurrent);
-    CHECK(live_recurrent <= 5);
-    position += count;
+    CHECK(max_live_recurrent == 2 + depth);
+    vllm::v1::Request second("second", std::vector<int32_t>(261120, 43), sampling, 0.0);
+    CHECK_FALSE(allocate(second, block_size).has_value());
+    manager.free(req);
+    CHECK(manager.block_pool.get_num_free_blocks() == pool_blocks - 1);
+    CHECK(allocate(second, block_size).has_value());
+    manager.free(second);
+    CHECK(manager.block_pool.get_num_free_blocks() == pool_blocks - 1);
   }
-  CHECK(max_live_recurrent == 5);
-  vllm::v1::Request second("second", std::vector<int32_t>(261120, 43), sampling, 0.0);
-  CHECK_FALSE(allocate(second, block_size).has_value());
-  manager.free(req);
-  CHECK(manager.block_pool.get_num_free_blocks() == pool_blocks - 1);
-  CHECK(allocate(second, block_size).has_value());
-  manager.free(second);
-  CHECK(manager.block_pool.get_num_free_blocks() == pool_blocks - 1);
 }
 
 TEST_CASE("Qwen3.5 KV-cache spec: EXL3 uses FP16 Conv and FP32 recurrence despite BF16 export") {

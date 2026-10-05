@@ -2072,7 +2072,7 @@
     },
     {
       "task": "P7",
-      "status": "in_progress_typed_norm_retained_bounded_no_MTP_measured_capacity_open",
+      "status": "in_progress_target_only_align_retained_bounded_capacity_state_proved",
       "complete": false,
       "C1_repetitions_per_engine": 3,
       "actual_native_primary_assertions_each": 1895,
@@ -2117,7 +2117,7 @@
         "bytes": 484222,
         "sha256": "4ef94808be5009536b9e1976410b821ce96d0b958338216b2f29ed18bd87f2ac"
       },
-      "remaining": "P7 incomplete. Typed short-row norm retained; no-MTP benchmark driver and bounded32768context C1/C4 executions delivered, native262K no-MTP constructor refused safely and remains open. Next qualify target-only EXL3 Mamba align policy against state/prefix/ownership and existing262K capacity guard. Original C4 no4way overlap, trajectories differ. Remaining32K/mixed/prefix/practical/default-controlled/draft/lifecycle plus original stability/P1/default/full-state qualification. Original eager mode differs from compiled graph arithmetic; no blind register sweeps or reference/gate changes.",
+      "remaining": "P7 remaining actual32K-prompt/mixed4K32K-after16/prefix32K/current practical/default-controlled/compact-draft qualification. No default reference promotion; original stability/P1/default/all-state remain open. NativeMTP3 primary typednorm46.466tok/s remains27.301% below original median63.916 on differing trajectories. Original eager diagnostic compilation/custom-op mode differs from compiled graph; no blind register sweeps.",
       "C4_repetitions_per_engine": 3,
       "C4_native_assertions_each": 7781,
       "C4_native_all4096_ids_and419_non_timing_cycles_exact_repeats": true,
@@ -2255,6 +2255,61 @@
           "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p7-no-mtp-v1/receipt-v1.json",
           "bytes": 23758,
           "sha256": "b65d18c2024f5a3231ce9634753b2126debbee17cae0fc2c0e35c2c8198b1475"
+        },
+        "historical_refusal_resolved_by": "no_MTP_align: unchanged guards; fixed1600page/262K constructor and bounded real C1/C4 now pass. Full262K generation remains untested."
+      },
+      "no_MTP_align": {
+        "decision": "retain",
+        "context_capacity_metadata": {
+          "max_context": 262144,
+          "page_tokens": 1600,
+          "attention_blocks": 164,
+          "recurrent_blocks": 2,
+          "minimum_pool_including_null": 167,
+          "pool166_refused": true,
+          "all164_page_transitions_and_complete_retirement_checked": true
+        },
+        "actual_context262144_C1_C4_P4096_O256_generation_passed": true,
+        "full262K_generation_tested": false,
+        "CPU_capacity_assertions": 2520,
+        "legacy_spec_assertions": 41,
+        "prefix_candidate_assertions": 4268,
+        "all48_layer_all5_slot_conv_F16_ssm_F32_bytes_exact": 1539440640,
+        "cold_warm_states_exact": true,
+        "ten_prefix_and_after_cancel_ids_exact": true,
+        "C4_lifecycle_baseline_candidate_assertions": [
+          903,
+          909
+        ],
+        "C4_graph_eager_graph_EOS_cancel_reuse_poisoned_spare_slots_checked": true,
+        "actual_no_MTP_native262K_C1_C4_assertions": [
+          1354,
+          5335
+        ],
+        "actual_native262K_C1_C4_decode_tps": [
+          25.26017374696393,
+          65.01008431295486
+        ],
+        "actual_native262K_C1_TTFT_ms": 2802.459284,
+        "actual_native262K_C1_C4_E2E_s": [
+          12.897428154,
+          37.767551017
+        ],
+        "original262K_C1_prior_pilot_decode_tps": 29.563340254589487,
+        "original262K_C4_fresh_E2E_s": 42.521843009017175,
+        "original262K_C4_has_four_way_overlap": false,
+        "matched32K_native_decode_change_percent": [
+          -0.6354107308047419,
+          0.04110904533651816
+        ],
+        "matched32K_all_output_ids_and_non_timing_cycles_exact": true,
+        "GPU_worker_resources": 9,
+        "swap_and_OOM_or_limit_hits": 0,
+        "qualification_promoted": false,
+        "receipt": {
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p7-no-mtp-align-v1/receipt-v2.json",
+          "bytes": 190476,
+          "sha256": "6833497805d7b13792a2f25ae081688265a0899d6b71ff1803af5c75aff8d4ec"
         }
       }
     }
