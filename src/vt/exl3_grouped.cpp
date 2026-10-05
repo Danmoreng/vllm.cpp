@@ -1,6 +1,8 @@
 #include "vt/exl3_grouped.h"
+#include "vt/backend.h"
 #include "vt/exl3_w8a8_panel_plan.h"
 #include <algorithm>
+#include <atomic>
 #include <limits>
 #include <cstdlib>
 #include <string_view>
@@ -98,7 +100,8 @@ void Exl3GroupedW8A8(Queue& q, Tensor& out, const Tensor& in, const Tensor& tr,
     VT_CHECK(t->device == q.device, "EXL3 W8A8 device mismatch");
   }
   reinterpret_cast<Exl3GroupedLinearFn>(GetOp(OpId::kExl3GroupedW8A8, q.device.type))(
-      q, out, in, tr, suh, svh, shard, workspace, panel, args);
+      q, out, in, tr, suh, svh, shard, workspace, panel,
+      {args.bits, args.codebook, args.debug_name, args.w8a8_panel_columns});
 }
 
 void Exl3GroupedW8A8(Queue& q, Tensor& out, const Tensor& in, const Tensor& tr,
@@ -110,7 +113,70 @@ void Exl3GroupedW8A8(Queue& q, Tensor& out, const Tensor& in, const Tensor& tr,
   // XPU operator. The explicit public overload never admits rank-zero scratch.
   Tensor workspace, panel;
   reinterpret_cast<Exl3GroupedLinearFn>(GetOp(OpId::kExl3GroupedW8A8, q.device.type))(
-      q, out, in, tr, suh, svh, shard, workspace, panel, args);
+      q, out, in, tr, suh, svh, shard, workspace, panel,
+      {args.bits, args.codebook, args.debug_name, args.w8a8_panel_columns});
+}
+
+Exl3W8A8ModelMap::Exl3W8A8ModelMap(Queue& q, const Tensor& map, int groups,
+    const std::shared_ptr<void>& resident_owner)
+    : map_(map), groups_(groups), owner_(resident_owner) {
+  VT_CHECK(q.device.type == DeviceType::kXPU && map.device == q.device &&
+               map.rank == 1 && map.dtype == DType::kI32 && map.IsContiguous() &&
+               map.shape[0] > 0 && map.shape[0] <= std::numeric_limits<int>::max() / 128 &&
+               groups > 0 && owner_ && owner_.get() == map.data,
+           "EXL3 W8A8 model map requires matching resident owner/device/layout");
+  std::vector<int32_t> values(size_t(map.shape[0]));
+  auto& backend = GetBackend(q.device);
+  backend.Copy(q, values.data(), map.data, values.size() * sizeof(int32_t));
+  backend.Synchronize(q);
+  // Use the same complete-map validator/decomposition as the public route.
+  // Publish nothing until every routing value has passed it.
+  for (int i = 0; i < 3; ++i)
+    panels_[i] = PlanExl3W8A8Panels(values, groups, std::array{128, 1024, 2048}[i]);
+}
+
+bool Exl3W8A8ModelMap::Matches(const Tensor& map, int groups,
+    const std::shared_ptr<void>& resident_owner) const {
+  return resident_owner && owner_.get() == resident_owner.get() &&
+      !owner_.owner_before(resident_owner) && !resident_owner.owner_before(owner_) &&
+      map.data == map_.data && map.device == map_.device && map.dtype == map_.dtype &&
+      map.rank == map_.rank && map.shape[0] == map_.shape[0] &&
+      map.stride[0] == map_.stride[0] && groups == groups_;
+}
+
+const std::vector<Exl3W8A8Panel>& Exl3W8A8ModelMap::Panels(int columns) const {
+  VT_CHECK(columns == 128 || columns == 1024 || columns == 2048,
+           "EXL3 W8A8 panel width must be128/1024/2048");
+  return panels_[columns == 128 ? 0 : columns == 1024 ? 1 : 2];
+}
+
+void detail::Exl3GroupedW8A8Model(Queue& q, Tensor& out, const Tensor& in,
+    const Tensor& tr, const Tensor& suh, const Tensor& svh, const Tensor& map,
+    const Exl3GroupedLinearArgs& args, const std::shared_ptr<void>& resident_owner,
+    std::shared_ptr<const Exl3W8A8ModelMap>& cache) {
+  (void)ValidateW8A8Operands(q, out, in, tr, suh, svh, map, args);
+  VT_CHECK(q.device.type == DeviceType::kXPU, "EXL3 shared W8A8 requires XPU");
+  const char* setting = std::getenv("VT_XPU_W8A8_MODEL_MAP");
+  // Model maps are immutable for their allocation generation. The public
+  // tensor entry points still validate their actual device contents each call.
+  const std::string_view mode = setting ? setting : "1";
+  VT_CHECK(mode == "0" || mode == "1", "Invalid VT_XPU_W8A8_MODEL_MAP");
+  if (mode == "0") {
+    Exl3GroupedW8A8(q, out, in, tr, suh, svh, map, args);
+    return;
+  }
+  auto metadata = std::atomic_load(&cache);
+  if (!metadata || !metadata->Matches(map, int(suh.shape[0]), resident_owner)) {
+    metadata = std::make_shared<const Exl3W8A8ModelMap>(q, map, int(suh.shape[0]), resident_owner);
+    std::atomic_store(&cache, metadata);
+  }
+  auto owned_args = args;
+  // A call retains its exact immutable generation even if another queue
+  // publishes a replacement in the model slot while this call is executing.
+  owned_args.model_map = metadata.get();
+  Tensor workspace, panel;
+  reinterpret_cast<Exl3GroupedLinearFn>(GetOp(OpId::kExl3GroupedW8A8, q.device.type))(
+      q, out, in, tr, suh, svh, map, workspace, panel, owned_args);
 }
 
 Exl3SmallMPlan PlanExl3SmallM(int64_t m, int64_t k, int64_t n, int bits) {

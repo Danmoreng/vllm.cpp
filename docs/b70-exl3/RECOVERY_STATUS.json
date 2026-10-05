@@ -1952,7 +1952,7 @@
         "local8": 0.77448,
         "local64": 0.846146
       },
-      "remaining": "P4 bounded package complete with operator/prefill gain, protected failure/owner contracts and exact native C1 trajectory. Single unprofiled trial each, no decode improvement/current Python/full-all-layer/default D64/P7 promotion. Immutable metadata host caching not implemented; existing map readback retained.",
+      "remaining": "Bounded checked preparation and immutable model map caching delivered with their stated operator gains and public/dynamic safety contracts. No static scale cache, SmallM/decode gain or serving/full-state/default D64 qualification promotion.",
       "geometry_receipt": {
         "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p4-validator-geometry-v1/receipt-v1.json",
         "bytes": 18554,
@@ -1999,7 +1999,141 @@
       },
       "full_C1_private_preparation_bytes": 31202304,
       "full_C1_backend_peak_bytes": 30325756227,
-      "retired_graph_bytes": 0
+      "retired_graph_bytes": 0,
+      "model_owned_map_cache": {
+        "status": "retained_default1_private_model_route_small_M1600_operator_gain_no_serving_gain",
+        "control": "VT_XPU_W8A8_MODEL_MAP=0",
+        "allocation_control_block_generation_not_pointer_only": true,
+        "public_actual_map_guards_preserved": true,
+        "dynamic_rows_scales_guards_preserved": true,
+        "SmallM_decode_changed": false,
+        "operator_balanced": [
+          {
+            "rows": 129,
+            "geometry": [
+              5120,
+              34816,
+              2,
+              4
+            ],
+            "profiled": false,
+            "measurement_order": "64 alternating warmups; ABBA BAAB ABBA BAAB",
+            "off_on_samples_ms": [
+              [
+                1.486948,
+                1.457738,
+                1.450188,
+                1.453269,
+                1.448879,
+                1.445428,
+                1.451158,
+                1.446098
+              ],
+              [
+                1.452758,
+                1.457528,
+                1.452318,
+                1.455839,
+                1.445748,
+                1.446378,
+                1.448778,
+                1.433948
+              ]
+            ],
+            "off_on_medians_ms": [
+              1.450673,
+              1.450548
+            ],
+            "elapsed_change_percent": -0.008616690322360565,
+            "assertions": {
+              "total": 98,
+              "passed": 98,
+              "failed": 0
+            }
+          },
+          {
+            "rows": 1600,
+            "geometry": [
+              5120,
+              34816,
+              2,
+              4
+            ],
+            "profiled": false,
+            "measurement_order": "64 alternating warmups; ABBA BAAB ABBA BAAB",
+            "off_on_samples_ms": [
+              [
+                4.098005,
+                3.457315,
+                3.428146,
+                3.412135,
+                3.428196,
+                3.418146,
+                3.420846,
+                3.435176
+              ],
+              [
+                3.782605,
+                3.571806,
+                3.401156,
+                3.406166,
+                3.407086,
+                3.407326,
+                3.407696,
+                3.406956
+              ]
+            ],
+            "off_on_medians_ms": [
+              3.428171,
+              3.407206
+            ],
+            "elapsed_change_percent": -0.6115505906793994,
+            "assertions": {
+              "total": 98,
+              "passed": 98,
+              "failed": 0
+            }
+          }
+        ],
+        "comparison": {
+          "mixed": {
+            "IDs_exact": true,
+            "emitted_IDs": 512,
+            "all_non_timing_cycles_exact": true,
+            "cycles": 135,
+            "E2E_elapsed_change_percent": 0.49903580209158527
+          },
+          "mixed_reverse": {
+            "IDs_exact": true,
+            "emitted_IDs": 512,
+            "all_non_timing_cycles_exact": true,
+            "cycles": 135,
+            "E2E_elapsed_change_percent": -0.6948913229781972
+          },
+          "primary4K": {
+            "IDs_exact": true,
+            "emitted_IDs": 1024,
+            "all_non_timing_cycles_exact": true,
+            "cycles": 371,
+            "E2E_elapsed_change_percent": -0.09187768991221201
+          },
+          "mixed_two_order_mean_elapsed_change_percent": -0.10047789706838506
+        },
+        "final_GPU_assertions": 1628,
+        "final_default_MTP3_lifecycle_assertions": 483,
+        "full_model_map_readbacks_off_on_default": [
+          783,
+          0,
+          0
+        ],
+        "resources": 22,
+        "qualification_promoted": false,
+        "receipt": {
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p7-model-map-v1/receipt-v2.json",
+          "bytes": 73433,
+          "sha256": "a18ee71ec5da427989829f3c07672230d1c027cdff117c26a701d35ebf86e35d"
+        }
+      }
     },
     {
       "task": "P5",
@@ -2770,7 +2904,7 @@
           "sha256": "3da49f66c6730614433e01fb429bc9c4e89d00c1f88a01982534334261bf9c7e"
         }
       },
-      "next": "Continue from actual remaining W8A8/GDN and model-owned immutable metadata costs against pinned original execution. Preserve public validation, GPU completion ownership, numerical materialization and explicit default/full-state/reference/P1-admission gaps; no repeated rejected GRF/panel sweeps.",
+      "next": "Qualify immutable model-map reuse in SmallM: actual donor comparison shows native-only static routing guards. Preserve cold capture fallback, graph read-only protection, ownership/generation and untrusted public/replay checks; require complete operator and request evidence.",
       "current_quality": {
         "practical_tasks": 8,
         "practical_passed": 8,
@@ -2907,9 +3041,143 @@
           "bytes": 63665,
           "sha256": "5a0a9fab9d9d3124d101a1e50c64cc400f2904abd3c49f32ef30d027371cdaaf"
         }
+      },
+      "immutable_model_map": {
+        "status": "retained_default1_private_model_route_small_M1600_operator_gain_no_serving_gain",
+        "control": "VT_XPU_W8A8_MODEL_MAP=0",
+        "allocation_control_block_generation_not_pointer_only": true,
+        "public_actual_map_guards_preserved": true,
+        "dynamic_rows_scales_guards_preserved": true,
+        "SmallM_decode_changed": false,
+        "operator_balanced": [
+          {
+            "rows": 129,
+            "geometry": [
+              5120,
+              34816,
+              2,
+              4
+            ],
+            "profiled": false,
+            "measurement_order": "64 alternating warmups; ABBA BAAB ABBA BAAB",
+            "off_on_samples_ms": [
+              [
+                1.486948,
+                1.457738,
+                1.450188,
+                1.453269,
+                1.448879,
+                1.445428,
+                1.451158,
+                1.446098
+              ],
+              [
+                1.452758,
+                1.457528,
+                1.452318,
+                1.455839,
+                1.445748,
+                1.446378,
+                1.448778,
+                1.433948
+              ]
+            ],
+            "off_on_medians_ms": [
+              1.450673,
+              1.450548
+            ],
+            "elapsed_change_percent": -0.008616690322360565,
+            "assertions": {
+              "total": 98,
+              "passed": 98,
+              "failed": 0
+            }
+          },
+          {
+            "rows": 1600,
+            "geometry": [
+              5120,
+              34816,
+              2,
+              4
+            ],
+            "profiled": false,
+            "measurement_order": "64 alternating warmups; ABBA BAAB ABBA BAAB",
+            "off_on_samples_ms": [
+              [
+                4.098005,
+                3.457315,
+                3.428146,
+                3.412135,
+                3.428196,
+                3.418146,
+                3.420846,
+                3.435176
+              ],
+              [
+                3.782605,
+                3.571806,
+                3.401156,
+                3.406166,
+                3.407086,
+                3.407326,
+                3.407696,
+                3.406956
+              ]
+            ],
+            "off_on_medians_ms": [
+              3.428171,
+              3.407206
+            ],
+            "elapsed_change_percent": -0.6115505906793994,
+            "assertions": {
+              "total": 98,
+              "passed": 98,
+              "failed": 0
+            }
+          }
+        ],
+        "comparison": {
+          "mixed": {
+            "IDs_exact": true,
+            "emitted_IDs": 512,
+            "all_non_timing_cycles_exact": true,
+            "cycles": 135,
+            "E2E_elapsed_change_percent": 0.49903580209158527
+          },
+          "mixed_reverse": {
+            "IDs_exact": true,
+            "emitted_IDs": 512,
+            "all_non_timing_cycles_exact": true,
+            "cycles": 135,
+            "E2E_elapsed_change_percent": -0.6948913229781972
+          },
+          "primary4K": {
+            "IDs_exact": true,
+            "emitted_IDs": 1024,
+            "all_non_timing_cycles_exact": true,
+            "cycles": 371,
+            "E2E_elapsed_change_percent": -0.09187768991221201
+          },
+          "mixed_two_order_mean_elapsed_change_percent": -0.10047789706838506
+        },
+        "final_GPU_assertions": 1628,
+        "final_default_MTP3_lifecycle_assertions": 483,
+        "full_model_map_readbacks_off_on_default": [
+          783,
+          0,
+          0
+        ],
+        "resources": 22,
+        "qualification_promoted": false,
+        "receipt": {
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p7-model-map-v1/receipt-v2.json",
+          "bytes": 73433,
+          "sha256": "a18ee71ec5da427989829f3c07672230d1c027cdff117c26a701d35ebf86e35d"
+        }
       }
     }
   ],
   "performance_baseline": "7536aededc049b2157f12eadb0f4cc6bbf29b7b7",
-  "performance_next": "Continue from actual remaining W8A8/GDN and model-owned immutable metadata costs against pinned original execution. Preserve public validation, GPU completion ownership, numerical materialization and explicit default/full-state/reference/P1-admission gaps; no repeated rejected GRF/panel sweeps."
+  "performance_next": "Continue narrow SmallM static map consumer qualification against pinned original source, then unresolved final matrix/reference/state/P1 admission gates. Preserve arithmetic and actual public guards; no repeat rejected geometry sweeps."
 }

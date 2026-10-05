@@ -184,9 +184,11 @@ void Exl3GroupedW8A8Kernel(Queue& q, Tensor& out, const Tensor& in, const Tensor
                                              {int64_t(plan.workspace_bytes)});
           auto weights = Tensor::Contiguous(static_cast<uint8_t*>(storage) + plan.workspace_bytes,
               DType::kI8, q.device, {k, plan.weight_panel_columns});
-          // Re-enter the explicit public seam: identical shape, overlap and
-          // arithmetic validation applies to owned and caller-provided buffers.
-          vt::Exl3GroupedW8A8(q, out, in, tr, suh, svh, shard, scratch, weights, args);
+          // Operand admission already ran before entering the registered op.
+          // These exact plan-sized private descriptors satisfy scratch layout;
+          // the recursive kernel retains all alignment/overlap/arithmetic checks.
+          // Keep the model certificate across this private workspace recursion.
+          Exl3GroupedW8A8Kernel(q, out, in, tr, suh, svh, shard, scratch, weights, args);
         });
     VT_CHECK(acquired, "EXL3 W8A8 shared scratch exceeds device memory budget");
     return;
@@ -205,11 +207,20 @@ void Exl3GroupedW8A8Kernel(Queue& q, Tensor& out, const Tensor& in, const Tensor
 
   // Eager initial implementation: mapping is small, and the completion wait
   // also ensures that the panel's previous use has retired before reuse.
-  std::vector<int32_t> mapping(n / 128);
+  std::vector<Exl3W8A8Panel> checked_panels;
+  if (!args.model_map) {
+    const auto start = HostProfileSpansEnabled() ? HostProfileClockNs() : 0;
+    std::vector<int32_t> mapping(n / 128);
+    auto& backend = GetBackend(q.device);
+    backend.Copy(q, mapping.data(), shard.data, mapping.size() * sizeof(int32_t));
+    backend.Synchronize(q);
+    checked_panels = PlanExl3W8A8Panels(mapping, groups, args.w8a8_panel_columns);
+    if (start) RecordHostProfileSpan(q, "exl3_w8a8_map_readback_and_plan", start,
+        HostProfileClockNs());
+  }
+  const auto& panels = args.model_map ? args.model_map->Panels(args.w8a8_panel_columns)
+                                    : checked_panels;
   auto& backend = GetBackend(q.device);
-  backend.Copy(q, mapping.data(), shard.data, mapping.size() * sizeof(int32_t));
-  backend.Synchronize(q);
-  const auto panels = PlanExl3W8A8Panels(mapping, groups, args.w8a8_panel_columns);
   const auto* sv_bits = static_cast<const uint16_t*>(svh.data);
 
   auto* bytes = static_cast<uint8_t*>(workspace.data);

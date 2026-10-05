@@ -1,8 +1,12 @@
 #pragma once
 #include <cstddef>
+#include <array>
+#include <memory>
 #include "vt/ops.h"
+#include "vt/exl3_w8a8_panel_plan.h"
 
 namespace vt {
+class Exl3W8A8ModelMap;
 // Pinned EXL3 mul1 SmallM launch geometry. M is the physical row count,
 // including graph padding; M>128 needs the separate W8A8 implementation.
 struct Exl3SmallMPlan {
@@ -17,6 +21,9 @@ struct Exl3GroupedLinearArgs {
   const char* debug_name = nullptr;
   // Internal large-M A/B control; SmallM arithmetic is unaffected.
   int w8a8_panel_columns = 128;
+  // Private model dispatch payload. Both public W8A8 overloads discard it;
+  // caller-provided tensors always undergo their actual map readback/check.
+  const Exl3W8A8ModelMap* model_map = nullptr;
 };
 using Exl3GroupedLinearFn = void (*)(Queue&, Tensor&, const Tensor&, const Tensor&,
     const Tensor&, const Tensor&, const Tensor&, Tensor&, Tensor&,
@@ -71,4 +78,32 @@ void Exl3GroupedW8A8(Queue&, Tensor& out, const Tensor& in, const Tensor& trelli
 void Exl3GroupedW8A8(Queue&, Tensor& out, const Tensor& in, const Tensor& trellis,
     const Tensor& suh, const Tensor& svh, const Tensor& shard_of_nb,
     const Exl3GroupedLinearArgs&);
+
+// Immutable model-only panel metadata. Allocation control-block identity is
+// its residency generation, not just the data address. A replacement upload
+// or device/shape/group change must build a new certificate. In-place edits
+// require a new residency generation; untrusted tensors use the public APIs.
+class Exl3W8A8ModelMap {
+ public:
+  Exl3W8A8ModelMap(Queue&, const Tensor& map, int groups,
+                  const std::shared_ptr<void>& resident_owner);
+  bool Matches(const Tensor& map, int groups,
+               const std::shared_ptr<void>& resident_owner) const;
+  const std::vector<Exl3W8A8Panel>& Panels(int columns) const;
+ private:
+  Tensor map_;
+  int groups_;
+  std::shared_ptr<void> owner_;
+  std::array<std::vector<Exl3W8A8Panel>, 3> panels_;
+};
+
+namespace detail {
+// Only model-resident immutable maps may use this seam. All ordinary operand,
+// activation, scale, alias and workspace checks still execute. The cache owns
+// its map allocation, is bounded by its projection owner and is never global.
+void Exl3GroupedW8A8Model(Queue&, Tensor& out, const Tensor& in,
+    const Tensor& trellis, const Tensor& suh, const Tensor& svh, const Tensor& map,
+    const Exl3GroupedLinearArgs&, const std::shared_ptr<void>& resident_owner,
+    std::shared_ptr<const Exl3W8A8ModelMap>& cache);
+}
 }  // namespace vt

@@ -40,6 +40,8 @@ namespace vt {
 class Backend;
 }  // namespace vt
 
+namespace vt { class Exl3W8A8ModelMap; }
+
 namespace vllm {
 
 // One owned, contiguous, host tensor: heap bytes + shape/dtype. View() builds a
@@ -635,6 +637,7 @@ struct Exl3Weight {
   // Generated XPU one-group routing metadata, owned with the projection.
   // Its immutable device address must survive every decode graph replay.
   mutable OwnedTensor single_source_map;
+  mutable std::shared_ptr<const vt::Exl3W8A8ModelMap> w8a8_model_map;
   // NO DEFAULT ON PURPOSE. An implicit codebook is exactly what shipped a
   // wrong decode: `= 1` here would silently give MCG to every hand-constructed
   // `Exl3Weight`, which is the same shape as reading marker ABSENCE as MCG.
@@ -682,6 +685,7 @@ struct Exl3GroupedWeight {
   OwnedTensor suh;         // F16 [S, K]
   OwnedTensor svh;         // F16 [N]
   OwnedTensor source_map;  // I32 [N/128]
+  mutable std::shared_ptr<const vt::Exl3W8A8ModelMap> w8a8_model_map;
   std::vector<int64_t> output_offsets;  // S+1 column boundaries
   int codebook = -1;
   bool Empty() const { return trellis.Empty(); }
