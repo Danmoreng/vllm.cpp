@@ -2072,7 +2072,7 @@
     },
     {
       "task": "P7",
-      "status": "in_progress_primary_C1_refreshed_graph_eager_timeline",
+      "status": "in_progress_C1_C4_primary_and_original_timeline_refreshed",
       "complete": false,
       "C1_repetitions_per_engine": 3,
       "actual_native_primary_assertions_each": 1895,
@@ -2117,9 +2117,38 @@
         "bytes": 484222,
         "sha256": "4ef94808be5009536b9e1976410b821ce96d0b958338216b2f29ed18bd87f2ac"
       },
-      "remaining": "P7 partial only: C4 primary3 each, original short timeline/repeat-stability cause, remaining bounded matrix incl no-MTP, fresh practical/default-controlled/draft/lifecycle. OriginalR3 different trajectory retained, not excluded as noise. Actual graph removes eager metadata waits; do not remove guards. P1/full-state/default D64 remain open."
+      "remaining": "P7 incomplete. Original fixed1600-budget C4 queues without4way overlap; original IDs vary, cause unproved. Actual eager GDN/norm much cheaper than native supplies causal evidence for bounded arithmetic-preserving dataflow/typed-load improvements, not another blind register sweep or changed FP32 reductions. Remaining noMTP/32K/mixed/prefix/practical/default-controlled/draft/lifecycle and original admission/stability. P1/default/full-state remain open.",
+      "C4_repetitions_per_engine": 3,
+      "C4_native_assertions_each": 7781,
+      "C4_native_all4096_ids_and419_non_timing_cycles_exact_repeats": true,
+      "C4_native_overlapped_tps": [
+        107.05112427682667,
+        107.00798273232314,
+        106.96231378750058
+      ],
+      "C4_original_overlapped_tps": null,
+      "C4_original_has_four_way_overlap": false,
+      "C4_E2E_median_s": {
+        "native": 56.644365752,
+        "original": 76.34234536299482
+      },
+      "C4_native_E2E_elapsed_change_percent": -25.802167221002037,
+      "C4_native_backend_peak_bytes": 30627797719,
+      "C4_original_repeat_ids_stable": false,
+      "actual_original_profile_target_calls_each": 4,
+      "actual_original_profile_head_rows": 4,
+      "actual_original_profile_32_ids_exact_primary_prefix": true,
+      "actual_original_graph_target_plus_head_queue_mean_ms": 41.48257825,
+      "actual_original_graph_MTPpropose_queue_mean_ms": 4.12613275,
+      "actual_original_eager_target_GDN_ms": 0.803863,
+      "actual_original_eager_target_RMSNorm_ms": 0.404742,
+      "receipt_C4_timeline": {
+        "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p7-primary-serving-v1/receipt-c4-timeline-v1.json",
+        "bytes": 390856,
+        "sha256": "c6b18283c52acd690bea601604e640c487abd1c8327f6375b80e978134770f44"
+      }
     }
   ],
   "performance_baseline": "7536aededc049b2157f12eadb0f4cc6bbf29b7b7",
-  "performance_next": "Continue P7 primary C4P4096/O1024 original/native3 each with prepared frozen script, sequential/exclusive. Inspect actual original short device timeline and unstableR3 trajectory before further GDN/norm/wait optimization. Complete remaining bounded matrix/practical/default-controlled/draft/lifecycle; source kernel flags/math unchanged. P6 weighted shared cost near donor; current native C1 median45.41694 vs original63.91575TPS, no parity/default/all-state promotion."
+  "performance_next": "P7 causal bounded norm/GDN operator improvement: actual original eager GDN~.804ms/RMSNorm~.405ms versus native10.984/3.875ms. Inspect typed pointers/dataflow while preserving existing F32 reduction and every FP32 snapshot; focused old/new exact operator checks and unprofiled complete-path gain before promotion. Do not repeat P5 rejected register variants or remove graph safeguards. Original C4 admission/stability investigation, then remaining noMTP/32K/mixed/prefix/practical/default-controlled/draft/lifecycle matrix; no parity/quality promotion."
 }

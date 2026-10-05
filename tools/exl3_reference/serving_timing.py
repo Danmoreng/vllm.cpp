@@ -23,7 +23,81 @@ def identity(path):
 
 
 class ServingTimingWorker:
-    """Read resolved allocations only, through the supported worker RPC."""
+    """Public worker RPC for allocations and optional separate diagnostics."""
+    def serving_timing_enable_timeline(self, limit):
+        """Separate diagnostic: observe actual pure-Q4 target and MTP calls."""
+        import torch
+        assert type(limit) is int and 1 <= limit <= 4
+        assert not hasattr(self, "_serving_timeline")
+        runner = self.model_runner
+        assert runner.speculator is not None
+        self._serving_timeline = []
+        self._serving_timeline_pending = None
+        self._serving_timeline_targets = 0
+        execute = runner.execute_model
+        compute_logits = runner.model.compute_logits
+        propose = runner.speculator.propose
+
+        def observe(stage, call, args, kwargs, shape):
+            begin = torch.xpu.Event(enable_timing=True)
+            end = torch.xpu.Event(enable_timing=True)
+            with torch.profiler.profile(activities=[torch.profiler.ProfilerActivity.CPU,
+                                                   torch.profiler.ProfilerActivity.XPU]) as prof:
+                begin.record()
+                result = call(*args, **kwargs)
+                end.record()
+                torch.xpu.synchronize()
+            events = [{"name": e.name, "us": e.time_range.elapsed_us(),
+                       "device_type": str(e.device_type)} for e in prof.events()
+                      if str(e.device_type).endswith("XPU")]
+            assert events, "no executed original XPU timeline events"
+            self._serving_timeline.append(dict(stage=stage, shape=shape, device_events=events,
+                                              queue_span_ms=begin.elapsed_time(end)))
+            return result
+
+        def target(*args, **kwargs):
+            scheduled = args[0] if args else kwargs["scheduler_output"]
+            rows = scheduled.num_scheduled_tokens
+            if (self._serving_timeline_targets >= limit or not rows or
+                    not scheduled.scheduled_spec_decode_tokens or
+                    not all(count == 4 for count in rows.values())):
+                return execute(*args, **kwargs)
+            shape = {"num_requests": len(rows), "actual_rows": sum(rows.values()),
+                     "scheduled_rows": dict(rows),
+                     "proposed_lengths": {k: len(v) for k, v in
+                                          scheduled.scheduled_spec_decode_tokens.items()}}
+            result = observe("target_execute_model", execute, args, kwargs, shape)
+            self._serving_timeline_targets += 1
+            self._serving_timeline_pending = shape
+            return result
+
+        def draft(*args, **kwargs):
+            shape = self._serving_timeline_pending
+            if shape is None:
+                return propose(*args, **kwargs)
+            self._serving_timeline_pending = None
+            return observe("mtp_propose", propose, args, kwargs, shape)
+
+        def head(*args, **kwargs):
+            shape = self._serving_timeline_pending
+            if shape is None:
+                return compute_logits(*args, **kwargs)
+            hidden = args[0] if args else kwargs["hidden_states"]
+            actual = dict(shape, head_rows=hidden.shape[0], hidden_dtype=str(hidden.dtype))
+            return observe("target_compute_logits", compute_logits, args, kwargs, actual)
+
+        runner.execute_model = target
+        runner.model.compute_logits = head
+        runner.speculator.propose = draft
+        return {"enabled": True, "limit": limit,
+                "scope": "Separate profiling only; actual calls/outputs, no tensor replacement"}
+
+    def serving_timing_collect_timeline(self):
+        assert self._serving_timeline_targets > 0
+        assert self._serving_timeline_pending is None
+        assert len(self._serving_timeline) == 3 * self._serving_timeline_targets
+        return self._serving_timeline
+
     def serving_timing_snapshot(self):
         import torch
         torch.xpu.synchronize()
@@ -137,6 +211,7 @@ def capture(args):
     assert workload["sampling"] == {"temperature": 0.0, "ignore_eos": True}
     task = next(c for c in workload["cases"] if c["id"] == args.case)
     assert task["cache_state"] == "cold" and 1 <= len(task["requests"]) <= 4
+    assert not args.timeline_eager or args.timeline_cycles, "eager diagnostic needs timeline cycles"
     reference = verify_inputs(args.reference_manifest, args.model_dir, args.image_identity)
     import yaml
     profile = yaml.safe_load(PROFILE.read_text())
@@ -164,13 +239,15 @@ def capture(args):
                  "async_scheduling": False, "disable_log_stats": False,
                  "compilation_config": {"cudagraph_mode": "FULL_DECODE_ONLY",
                                         "cudagraph_capture_sizes": [1, 2, 4, 8, 12, 16]}}
+    if args.timeline_eager:
+        overrides.update(enforce_eager=True, compilation_config={"cudagraph_mode": "NONE"})
     kwargs.update(overrides, model=str(args.model_dir),
                   worker_extension_cls="serving_timing.ServingTimingWorker")
     assert kwargs["dtype"] == "float16" and kwargs["kv_cache_dtype"] == "fp8"
     assert kwargs["speculative_config"] == {"method": "mtp", "num_speculative_tokens": 3}
     config = EngineArgs(**kwargs).create_engine_config()
     result = {"schema": "b70-exl3-r11-producer-serving-output-v1", "case": args.case,
-              "cache_state": "cold", "profiled": False,
+              "cache_state": "cold", "profiled": bool(args.timeline_cycles),
               "startup_state": "request_warmup_o32_then_prefix_reset",
               "sampling": {"temperature": 0.0, "ignore_eos": True},
               "image": args.image_identity, "checkpoint": reference["checkpoint"]["identity"],
@@ -210,7 +287,16 @@ def capture(args):
         assert worker["cache_dtype_policy"] == "fp8" and worker["kv_dtype"] == "torch.uint8"
         assert worker["speculation"]["method"] == "mtp" and worker["speculation"]["tokens"] == 3
         assert worker["kv_cache_config"]["fields"]["num_blocks"] == 180
+        if args.timeline_cycles:
+            result["timeline_install"] = llm.collective_rpc(
+                "serving_timing_enable_timeline", args=(args.timeline_cycles,), timeout=60)
         result.update(drive(engine, task["requests"], sample))
+        if args.timeline_cycles:
+            result["diagnostic_timeline"] = llm.collective_rpc(
+                "serving_timing_collect_timeline", timeout=60)
+            result["scope"] += (" Separate actual Q4 target/propose profiler observers enabled; "
+                                "profiled frontend times are not serving scores. "
+                                "Device kernel durations can overlap and are not additive latency.")
         result["finished_worker"] = llm.collective_rpc("serving_timing_snapshot", timeout=60)
         result["frontend_host_peak_rss_bytes"] = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss * 1024
         final = result["finished_worker"][0]
@@ -233,6 +319,10 @@ def main():
     p.add_argument("--image-identity", required=True)
     p.add_argument("--case", required=True)
     p.add_argument("--config-only", action="store_true")
+    p.add_argument("--timeline-cycles", type=int, choices=range(5), default=0,
+                   help="Separate profiler diagnostic for up to four actual pure-Q4 target/MTP calls")
+    p.add_argument("--timeline-eager", action="store_true",
+                   help="Disable graphs only for the explicitly separate timeline diagnostic")
     capture(p.parse_args())
 
 
