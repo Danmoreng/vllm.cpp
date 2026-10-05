@@ -5842,6 +5842,7 @@ DBuf GdnBlockPaged(Dev d, const GdnLayerWeights& w, const HfConfig& cfg,
                                conv_cache, sdi.gdn_spec_conv_state_idx.t(),
                                sdi.gdn_num_accepted.t(), sdi.gdn_spec_qsl.t(),
                                vt::CausalConv1dArgs{true});
+    DumpGdnStage(d, "spec_conv", dconv.t());
   } else if (np > 0) {
     // Any prefill: conv over the WHOLE non-spec stream (decodes lead, each with
     // has_initial_state=1). qwen_gdn_linear_attn.py:1360-1375.
@@ -5973,6 +5974,7 @@ DBuf GdnBlockPaged(Dev d, const GdnLayerWeights& w, const HfConfig& cfg,
       DumpGdnStage(d, "postconv_k", dkl2.t());
       DumpGdnStage(d, "postconv_v", vf.t());
       DumpGdnStage(d, "postconv_beta", dbeta.t());
+      DumpGdnStage(d, "postconv_g", dg.t());
       if (const char* td = std::getenv("VT_DUMP_TRUST")) {
         vt::tenstorrent::TrustDump(d.q, td, "pc_q", dql2.t());
         vt::tenstorrent::TrustDump(d.q, td, "pc_v", vf.t());

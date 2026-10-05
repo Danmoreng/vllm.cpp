@@ -2187,6 +2187,11 @@ TEST_CASE("XPU EXL3 real target diagnostic: integrated C1 Q4 original trace repl
   const char* capture = std::getenv("VT_B70_EXL3_MTP_CAPTURE");
   const char* output = std::getenv("VT_B70_EXL3_DIAGNOSTIC_OUTPUT");
   if (!model || !capture || !output) std::exit(77);
+  const char* attribution = std::getenv("VT_B70_EXL3_MTP_LAYER0_ATTRIBUTION");
+  REQUIRE((attribution == nullptr || std::string(attribution) == "1"));
+  const bool layer0_attribution = attribution != nullptr;
+  const vllm::actdump::StepSelectionScope only_first_q4(layer0_attribution ? 1 : -1);
+  const vllm::actdump::StageLayerSelectionScope only_layer0(layer0_attribution ? 0 : -1);
   const std::filesystem::path model_dir(model), capture_dir(capture), output_dir(output);
   REQUIRE_FALSE(std::filesystem::exists(output_dir));
   std::ifstream file(capture_dir / "capture.json"); REQUIRE(file.good());
@@ -2261,6 +2266,7 @@ TEST_CASE("XPU EXL3 real target diagnostic: integrated C1 Q4 original trace repl
   nlohmann::json result = {{"reference_label", label},
       {"ordinary_original_ids_exact", reference.at("ordinary_ids_exact")},
       {"native_states_injected", false}, {"native_snapshot_slots", {3, 2, 1, 0}},
+      {"raw_export_scope", layer0_attribution ? "layer0_and_target_hidden" : "all"},
       {"comparisons", nlohmann::json::array()},
       {"scope", "Cold native full-target replay of original MTP inputs/accepted lengths; eager C1, not autonomous native draft/rejection or ordinary admission"}};
   auto save = [&] {
@@ -2275,10 +2281,13 @@ TEST_CASE("XPU EXL3 real target diagnostic: integrated C1 Q4 original trace repl
     REQUIRE(expected.dtype == dtype); REQUIRE(expected.shape == shape);
     REQUIRE(expected.nbytes == bytes.size());
     const auto path = output_dir / ("step-" + std::to_string(step) + "-" + key + ".bin");
-    REQUIRE_FALSE(std::filesystem::exists(path));
-    std::ofstream raw(path, std::ios::binary);
-    raw.write(reinterpret_cast<const char*>(bytes.data()), bytes.size());
-    raw.close(); REQUIRE(raw.good());
+    const bool export_raw = !layer0_attribution || key.starts_with("l0_") || key == "target_hidden";
+    if (export_raw) {
+      REQUIRE_FALSE(std::filesystem::exists(path));
+      std::ofstream raw(path, std::ios::binary);
+      raw.write(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+      raw.close(); REQUIRE(raw.good());
+    }
     const size_t different = std::inner_product(bytes.begin(), bytes.end(), expected.data,
         size_t{0}, std::plus<size_t>(), [](auto a, auto b) { return size_t(a != b); });
     bool finite = true;
@@ -2300,7 +2309,8 @@ TEST_CASE("XPU EXL3 real target diagnostic: integrated C1 Q4 original trace repl
     }
     result["comparisons"].push_back({{"step", step}, {"key", key}, {"dtype", dtype},
         {"shape", shape}, {"bytes", bytes.size()}, {"different_bytes", different},
-        {"finite", finite}, {"max_abs_error", max_error}, {"file", path.filename().string()}});
+        {"finite", finite}, {"max_abs_error", max_error},
+        {"file", export_raw ? nlohmann::json(path.filename().string()) : nlohmann::json(nullptr)}});
     std::cout << "INTEGRATED_NATIVE_COMPARE step=" << step << " key=" << key
               << " different_bytes=" << different << " max_error=" << max_error << '\n';
     CHECK(finite); CHECK(different == 0);

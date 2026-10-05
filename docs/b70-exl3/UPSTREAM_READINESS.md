@@ -320,3 +320,41 @@ of original MTP inputs, not an autonomous native drafter/rejection comparison.
 C4->C2->C1 and ordinary qualification remain open. The experimental fast route,
 controlled/default labels and oldD27/D29 failures remain; independent F3/U2/U6
 work is not blocked by this failed qualification gate.
+
+The first-layer Q1 attribution now excludes incoming normalization, projection
+and computed Conv as the source of this firstQ4 difference. A separate compact
+original capture preserves all19 shared layer0/target-hidden tensor descriptors
+from controlled-v3 and all consumed tokens/positions/accepted lengths. Its36
+payload hashes pass; ordinary/observed16 IDs remain exact. The native diagnostic
+retains all931 comparisons: every comparison field and all19 exported raw arrays
+are identical to the preceding full native witness. Actualexit1,6414 assertions,
+5743 passed/671 failed; fewer assertions reflect omitted duplicate raw-file
+exports, not omitted state comparisons. Small raw exports total36,425,728B.
+
+On the first actualQ4 step, all three native input-norm reads, mixed QKV, both BA
+halves, the computed F16 Conv output and post-conv V are byte-exact to original.
+The new isolated original speculative GDN tool reuses only captured original
+seeds in separate operator copies, preserving actual13/12/11/10 slots, shared
+cache strides/offset and poisoned spare rows with capacity bounded to14. Both
+pinned fused and split operators match seven complete full-worker endpoints:
+core, z, Conv and all four full FP32 token snapshots. Split Q/K/V/B/A stay
+unchanged through the original recurrence. This is attribution only; no captured
+original state enters native inference and no product arithmetic changes.
+
+The remaining difference is within post-conv preparation/recurrence. The source
+shows original speculative Q/K normalization in F32 local values with subgroup
+reductions, while native materializes normalized/scaled Q/K in F16 before its
+ascending-K recurrence. Those are concrete source differences, not proof that
+either alone explains every differing state byte or that either engine is more
+accurate. Keep the original FP16/materialization contract for performance work;
+this diagnostic does not authorize a precision change or reference correction.
+
+Focused native build4 steps and11 host tests pass. Original compact and split
+workers actually exit0; native actually exits1 at the unchanged strict gate.
+All use sequential24GiB/no-swap/two-CPU workers with no OOM. Commands, frozen
+tools/sources/binary, resource measurements and independent payload/boundary
+analysis are in recovery/upstream-q1-layer0-attribution-v1/receipt-v1.json,
+7998 bytes,SHA2567ff863de020bc885ed328ff67f7387932ea98461832f13cea2266bc0e22eb6c1.
+C4->C2->C1, default-reference admission and autonomous native MTP equivalence
+remain unproven. The experimental fast route and frozen default failures stay;
+independent F3/U2/U6 work can proceed without waiting for exact Q1 parity.
