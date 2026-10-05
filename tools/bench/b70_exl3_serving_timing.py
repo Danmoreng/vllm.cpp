@@ -27,6 +27,7 @@ def prepare(p4k, p32k, c4_prompts):
     four = read(p4k)["prompt_token_ids"]
     long = read(p32k)["prompt_token_ids"]
     assert len(four) == 4096 and len(long) == 32768
+    assert four[:1600] != long[:1600], "mixed cold requests must not share their first page"
     distinct = [p["prompt_token_ids"] for p in read(c4_prompts)["prompts"]]
     assert len(distinct) == 4 and all(len(p) == 4096 for p in distinct)
     # Prefix caching stays enabled. Different first physical pages prevent
@@ -50,14 +51,27 @@ def prepare(p4k, p32k, c4_prompts):
     ]})
     for concurrency in (1, 4):
         cases.append({"id": f"c{concurrency}-p4096-o256-m0", "cache_state": "cold",
-                      "mtp_depth": 0, "max_model_len": 32768, "requests": [
+                      "mtp_depth": 0, "max_model_len": 262144, "requests": [
             {"id": f"request-{i}", "prompt_ids": distinct[i] if concurrency == 4 else four,
              "output_tokens": 256} for i in range(concurrency)]})
+    # Keep the historical P128 mixed case identifiable. The performance plan
+    # asks for a separate genuine4K decode owner before the32K admission.
+    cases.append({"id": "mixed-p4096-p32768-o256", "cache_state": "cold", "requests": [
+        {"id": "short", "prompt_ids": four, "output_tokens": 256},
+        {"id": "long", "prompt_ids": long, "output_tokens": 256,
+         "after_emitted": {"request": "short", "tokens": 16}},
+    ]})
+    # Frozen natural-token composition: four distinct4K introductions followed
+    # by the same frozen32K tail. No runtime tokenization or cross-prefix hits.
+    cases.append({"id": "c4-p32768-o256", "cache_state": "cold", "requests": [
+        {"id": f"request-{i}", "prompt_ids": distinct[i] + long[4096:],
+         "output_tokens": 256} for i in range(4)]})
     return {"schema": "b70-exl3-r11-serving-workload-v1",
             "sources": [identity(p4k), identity(p32k), identity(c4_prompts)],
             "sampling": {"temperature": 0.0, "ignore_eos": True},
             "note": "Exact token budgets in both arms; this is throughput work, not text quality. "
                     "C4 uses four distinct frozen natural prompts with different first pages; "
+                    "C4-32K composes each distinct4K introduction with the frozen32K tail; "
                     "cold means a fresh engine and each request starts at position zero.",
             "cases": cases}
 
@@ -110,10 +124,22 @@ def summarize(raw, case):
             "prompt_tokens": len(spec["prompt_ids"]), "emitted_tokens": count,
             "ttft_ms": 1000 * positive(first - trace["admitted_at_s"]),
             "tpot_ms": 1000 * (last - first) / (count - 1) if count > 1 else None,
+            "longest_observed_streaming_pause_ms": max(
+                (1000 * (right["at_s"] - left["at_s"])
+                 for left, right in zip(observations, observations[1:])), default=None),
             "end_to_end_ms": 1000 * positive(trace["finished_at_s"] - trace["admitted_at_s"]),
             "token_timestamp_granularity": "one timestamp per emitted MTP chunk" if depth else
                                            "one timestamp per emitted frontend chunk",
         }
+        if "after_emitted" in spec:
+            trigger = spec["after_emitted"]
+            observed = [o for o in traces[trigger["request"]]["observations"]
+                        if o["at_s"] <= trace["admitted_at_s"]]
+            assert observed and observed[-1]["tokens"] >= trigger["tokens"], "early mixed admission"
+            assert len(observed) == 1 or observed[-2]["tokens"] < trigger["tokens"], "late mixed admission"
+            per_request[key]["admission_trigger"] = dict(
+                trigger, observed_tokens_at_admission=observed[-1]["tokens"],
+                observed_at_s=observed[-1]["at_s"])
     # Use the SAME common interval for every request; never add individual tok/s.
     overlap_start = max(t["observations"][0]["at_s"] for t in traces.values())
     overlap_end = min(t["observations"][-1]["at_s"] for t in traces.values())
@@ -227,7 +253,24 @@ def self_check():
     report = summarize(raw, case)
     assert report["common_decode_overlap"]["aggregate_emitted_tokens_per_s"] == 1.0
     assert report["per_request"]["a"]["tpot_ms"] == 1500.0
+    assert report["per_request"]["a"]["longest_observed_streaming_pause_ms"] == 3000.0
     assert report["end_to_end_emitted_tokens_per_s"] == 1.2
+    triggered_case = json.loads(json.dumps(case))
+    triggered_case["requests"][1]["after_emitted"] = {"request": "a", "tokens": 1}
+    triggered = json.loads(json.dumps(raw))
+    triggered["requests"]["b"]["admitted_at_s"] = 1.5
+    assert summarize(triggered, triggered_case)["per_request"]["b"]["admission_trigger"][
+        "observed_tokens_at_admission"] == 1
+    for arrived, first, reason in ((0.5, 2.0, "early mixed admission"),
+                                  (4.5, 4.75, "late mixed admission")):
+        triggered["requests"]["b"]["admitted_at_s"] = arrived
+        triggered["requests"]["b"]["observations"][0]["at_s"] = first
+        try:
+            summarize(triggered, triggered_case)
+        except AssertionError as error:
+            assert str(error) == reason
+        else:
+            raise AssertionError("early/late mixed admission cannot qualify the requested trigger")
     producer = json.loads(json.dumps(raw))
     producer.update(schema="b70-exl3-r11-producer-serving-output-v1",
                     startup_state="request_warmup_o32_then_prefix_reset")

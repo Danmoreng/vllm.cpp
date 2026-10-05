@@ -2311,6 +2311,21 @@
           "bytes": 190476,
           "sha256": "6833497805d7b13792a2f25ae081688265a0899d6b71ff1803af5c75aff8d4ec"
         }
+      },
+      "long_mixed_benchmark_support": {
+        "status": "delivered_host_checked_GPU_execution_pending",
+        "proper_mixed_4K_32K_admission_after_emitted": 16,
+        "four_distinct_32K_prompts": true,
+        "no_MTP_new_workload_context_restored": 262144,
+        "longest_observed_streaming_pause_reported": true,
+        "actual_trigger_observations_checked": true,
+        "actual_self_check_and_frozen_input_prepare_exit": 0,
+        "GPU_case_pass_claim": false,
+        "receipt": {
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p7-long-mixed-v1/driver-receipt-v1.json",
+          "bytes": 3260,
+          "sha256": "a98221cc62cbc3de5281d777ac4372bb08b375fd2ba2ad0e2c887d5c73ab6cae"
+        }
       }
     }
   ],
