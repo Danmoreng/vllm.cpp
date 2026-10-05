@@ -2218,7 +2218,7 @@
     },
     {
       "task": "P7",
-      "status": "in_progress_current_matrix_complete_reference_state_qualification_open",
+      "status": "in_progress_bounded_hybrid_state_bytes_closed_default_reference_and_mode_qualification_open",
       "complete": false,
       "C1_repetitions_per_engine": 3,
       "actual_native_primary_assertions_each": 1895,
@@ -2263,7 +2263,7 @@
         "bytes": 484222,
         "sha256": "4ef94808be5009536b9e1976410b821ce96d0b958338216b2f29ed18bd87f2ac"
       },
-      "remaining": "Retained current mixed output placement preserves full native operator state/output and autonomous model trajectories, improves mixed1.69% and C4-32K2.46%. Current quiet gaps: mixed E2E+19.99%,C4-32K+30.24% vs original; prior C1 decode-21.86%/C1-32K-22.53% not new measurements. Final-candidate primary/C4/practical/default-controlled/draft/state/reference and automatic verifier admission remain distinct open qualification.",
+      "remaining": "Bounded final serving matrix on046ece complete; new QK signed-zero robustness fix has current two-prefix all48GDN/all16KV byte proof and current65full controlled head rows exact. Default D64 still four failures, P1 automatic/default admission and integrated MTP/C4/long state qualification remain open. No new serving score for this arithmetic repair; prior measurements retain046ece identity.",
       "C4_repetitions_per_engine": 3,
       "C4_native_assertions_each": 7781,
       "C4_native_all4096_ids_and419_non_timing_cycles_exact_repeats": true,
@@ -6345,9 +6345,96 @@
         "full_all_layer_state_qualified": false,
         "P7_complete": false,
         "scope": "Same two frozen held-out P128/D1 prefixes, separately controlled original eager no-MTP BA policy, page1600 both engines, full6bpw target/FP8KV/F32GDN and24GiB/no-swap/CPU2. Original all16attention captures use actual written-row metadata and check continuity without capacity reads; native independently owns poisoned GDN/FP8 caches. Source change adds diagnostics only. NativeA/Bactualexit1 with three repeated comparisons of one signed-zero key byte, not successful quality tests; decoded zero values equal is descriptive only, strict byte gate not weakened. GDN/head/hidden bytes exact including prior original hashes. BeforeD1 duplicates prior final-state witness. No serving speed inference, ideal-reference promotion or fullMTP/C4/long qualification."
+      },
+      "QK_signed_zero_product_fix": {
+        "receipt": {
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p7-kv-preimage-v1/receipt-v1.json",
+          "bytes": 666518,
+          "sha256": "e06ff19c52374e033e164d0426fa23f8326b5ffe71bf15f926917dfcc5cc69a7"
+        },
+        "verified_identities": 2446,
+        "status": "bounded_all_hybrid_state_byte_gate_passed_default_reference_open",
+        "cause": "Actual original layer43 Gemma k_norm channel32 weight -1 yields effective factor +0. Native normalization loses negative-zero multiplication sign; standalone Norm has511/4 sign-only differences and fused P128 K has1. Raw input norm/key projections exact; independent RopeFromCache exact. Operand-sign XOR restores zero-product IEEE signs at each F32 multiply, including incoming -0. Scalar fused RoPE must use the same signed product helper as normalization.",
+        "retained_change": "ProducerFloatProduct preserves F32 multiplication zero signs; QK normalization uses it twice and scalar FP16 fused RoPE uses it before existing F16 narrowing. No captured values, zero canonicalization, FP8 codec/layout/threshold/reference changes or host polling.",
+        "focused_compile_actual_exit": 0,
+        "host_target_tests": 22,
+        "host_attention_tests": 6,
+        "original_causal_A_actual_exit": 0,
+        "old_original_A_tensor_hashes_exact": true,
+        "original_B_immutable_capture_explicitly_reused": true,
+        "GPU_operator_actual_exits": {
+          "auto": 0,
+          "reference_scalar": 0
+        },
+        "GPU_operator_assertions_each": 44,
+        "heldout": {
+          "A": {
+            "actual_exit": 0,
+            "assertions": 5711,
+            "GDN_complete_arrays": 288,
+            "GDN_arrays_byte_exact": true,
+            "attention_layers": 16,
+            "initialized_KV_arrays": 96,
+            "initialized_KV_comparison_bytes": 12615680,
+            "all_KV_bytes_exact": true,
+            "full_two_head_rows_exact_widened_F32": true,
+            "final_hidden_rows_exact": true,
+            "original_fixture_reused": {
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p7-heldout-kv-v1/target-A-v1/repeat-0.safetensors",
+              "bytes": 522137768,
+              "sha256": "2932b179842e225b19e8ade47116571ccc1f8ccb0471d44bbca09a0e19aeb71c"
+            }
+          },
+          "B": {
+            "actual_exit": 0,
+            "assertions": 5711,
+            "GDN_complete_arrays": 288,
+            "GDN_arrays_byte_exact": true,
+            "attention_layers": 16,
+            "initialized_KV_arrays": 96,
+            "initialized_KV_comparison_bytes": 12615680,
+            "all_KV_bytes_exact": true,
+            "full_two_head_rows_exact_widened_F32": true,
+            "final_hidden_rows_exact": true,
+            "original_fixture_reused": {
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p7-heldout-kv-v1/target-B-v1/repeat-0.safetensors",
+              "bytes": 522137768,
+              "sha256": "f52370ccc78cc88465dcaa007418658e35e7f7a71f3201acf6c7b41c321651a9"
+            }
+          }
+        },
+        "default_D64": {
+          "actual_exit": 1,
+          "total_assertions": 808,
+          "passed": 804,
+          "failed": 4,
+          "failed_rows": [
+            {
+              "phase": "d27",
+              "TV": 0.0305754,
+              "KL": 0.00212581,
+              "top10": 10
+            },
+            {
+              "phase": "d29",
+              "TV": 0.212752,
+              "KL": 0.163144,
+              "top10": 9
+            }
+          ],
+          "complete_head_rows_exact_prior_and_separately_controlled": 65,
+          "complete_head_values": 16140800
+        },
+        "default_reference_promoted": false,
+        "automatic_verifier_enabled": false,
+        "full_all_supported_modes_state_qualified": false,
+        "new_serving_score_measured": false,
+        "performance_parity_achieved": false,
+        "P7_complete": false,
+        "scope": "Both unchanged held-out P128/D1 inputs, independent native hybrid states/full248320 head/FP8KV/F32GDN, separately controlled original BA, page1600 and only initialized logical rows. BeforeD1 duplicates final P128 witness; counts are comparisons, not independent samples. Original B reused unchanged immutable capture explicitly, new read-only causal original A agrees with all previous original hashes. Current D64 full heads exact prior/control but default four gates still fail. This robustness fix is not a speedup claim; prior046ece serving measurements remain labeled that source. Full MTP/C4/long-context state qualification and P1 automatic admission remain separate/open."
       }
     }
   ],
   "performance_baseline": "7536aededc049b2157f12eadb0f4cc6bbf29b7b7",
-  "performance_next": "Current matrix/quality/profile complete and two held-out full48GDN states exact controlled original. New all16attention initializedKV captures/consumer delivered but nativeA/Bstrictbytegate both fail3checks of same layer43 token0/head1/channel32 byte (native+0/original-0); all other bytes and GDN/head exact. Next locate sign loss at real projection/Knorm/RoPE preimage using existing scoped activation dump and read-only original layer43 boundaries before touching product arithmetic. Keep strict byte gate/default four failures/P1 default admission open, goalactive; no repeated final serving campaign."
+  "performance_next": "QK signed-zero products fixed from actual preimage evidence; auto/scalar operator44/44each, two unchanged held-out complete48GDN/all16initializedKV caches5711/5711each, full65head rows exact prior/control and defaultD64four failures retained. Next bounded complete attention-preamble cost A/B against prior frozen arithmetic, then remaining GPU target-stage optimization from refreshed causal profile. P1 automatic/default and integratedMTP/C4/long/reference qualification remain open; no repeated completed final serving campaign or parity claim. Goalactive."
 }

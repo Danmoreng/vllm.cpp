@@ -50,12 +50,25 @@ inline float ProducerQkMean256Scalar(View src, int64_t base, int64_t outputs) {
   return partials[0] / 256.0f;
 }
 
+inline float ProducerFloatProduct(float first, float second) {
+  const float product = sycl::ext::intel::math::fmul_rn(first, second);
+  // The pinned XPU multiply returns +0 for a negative value times the
+  // Gemma factor +0. Preserve IEEE multiplication's operand-sign XOR,
+  // including signed-zero inputs and products that underflow to zero.
+  if (product == 0.0f) {
+    const uint32_t sign = (sycl::bit_cast<uint32_t>(first) ^
+                           sycl::bit_cast<uint32_t>(second)) & 0x80000000u;
+    return sycl::bit_cast<float>(sign);
+  }
+  return product;
+}
+
 inline float ProducerQkNormValue(float value, float inverse, float weight, bool gemma) {
   // Original eager IR materializes each F32 multiply before narrowing to
-  // F16. Request both boundaries explicitly in Q/K normalization.
+  // F16. Preserve each operation, including an incoming signed zero.
   const float effective_weight = gemma
       ? sycl::ext::intel::math::fadd_rn(1.0f, weight) : weight;
-  const float normalized = sycl::ext::intel::math::fmul_rn(value, inverse);
-  return sycl::ext::intel::math::fmul_rn(normalized, effective_weight);
+  const float normalized = ProducerFloatProduct(value, inverse);
+  return ProducerFloatProduct(normalized, effective_weight);
 }
 }  // namespace vt::xpu

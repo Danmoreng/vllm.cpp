@@ -241,7 +241,7 @@ void AttnQkNormRopeGateKernel(Queue& q, Tensor& q_out, Tensor& k_out,
           // store. Without an explicit F32 operation this scalar kernel
           // lowered these products to half FMul and lost the observed boundary.
           const auto product = [](float a, float b) {
-            return Round(DType::kF16, sycl::ext::intel::math::fmul_rn(a, b));
+            return Round(DType::kF16, ProducerFloatProduct(a, b));
           };
           value = i < half ? product(first, hc) - product(second, hs)
                            : product(first, hs) + product(second, hc);
