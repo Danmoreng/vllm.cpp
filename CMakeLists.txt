@@ -61,6 +61,18 @@ else()
   add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-ffp-contract=off>)
 endif()
 
+# Release archives must not embed the absolute build directory. FetchContent
+# dependencies (parakeet.cpp's vendored ggml) live under CMAKE_BINARY_DIR/_deps,
+# so their __FILE__/assert strings carry that absolute path, and the
+# deterministic-archive validator (scripts/validate-release-archive.py
+# --forbid-path) correctly rejects such artifacts. Rewrite the prefix instead of
+# weakening the validator.
+if(NOT MSVC)
+  add_compile_options(
+    "-ffile-prefix-map=${CMAKE_CURRENT_SOURCE_DIR}=."
+    "-ffile-prefix-map=${CMAKE_CURRENT_BINARY_DIR}=.")
+endif()
+
 option(VLLM_CPP_BUILD_TESTS "Build tests" ON)
 option(VLLM_CPP_XPU "Build the native SYCL/Level Zero XPU backend (requires icpx)" OFF)
 option(VLLM_CPP_XPU_GPTQ4 "Enable the pinned oneDNN XPU GPTQ W4A16 and dense F16 operators" OFF)
@@ -866,6 +878,12 @@ add_library(vllm STATIC
   src/vllm/model_executor/models/mimo_v2_registry.cpp
   src/vllm/model_executor/models/mimo_v2_weights.cpp
   src/vllm/model_executor/models/mimo_v2.cpp
+  # Kolibri-1 (MODEL-TEXT-kolibri-1) is a NEW architecture TU pair following
+  # the mimo_v2 seam: registry + weights + CPU forward. W2 adds the CPU
+  # hybrid forward (RNoPE, qk-norm, sandwich norms, sigmoid-logit-add MoE).
+  src/vllm/model_executor/models/kolibri1_registry.cpp
+  src/vllm/model_executor/models/kolibri1_weights.cpp
+  src/vllm/model_executor/models/kolibri1_forward.cpp
   src/vllm/model_executor/models/qwen4_exp_ple.cpp
   src/vllm/model_executor/models/qwen4_exp.cpp
   src/vllm/model_executor/models/qwen4_exp_weights.cpp
