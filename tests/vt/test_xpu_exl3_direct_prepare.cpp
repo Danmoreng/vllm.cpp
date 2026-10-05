@@ -206,4 +206,3 @@ TEST_CASE("XPU EXL3 W8A8 F2: direct preparation complete calls and queued real c
       {"public_scratch_exact",true},{"queued_distinct_consumers_exact",true}}).dump() << std::endl;
   CHECK(vt::GetReferenceTierHits() == 0);
 }
-
