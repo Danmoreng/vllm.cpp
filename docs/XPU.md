@@ -72,6 +72,41 @@ This dependency selection does not promote the experimental B70 verifier or
 change any numerical/admission guards. See the scoped capability and unresolved
 qualification results in [UPSTREAM_READINESS.md](b70-exl3/UPSTREAM_READINESS.md).
 
+## SmallM test inputs and outcomes
+
+`test_xpu_exl3_smallm` runs three synthetic GPU cases without a model or oracle
+fixture. `test_xpu_exl3_smallm_teardown` runs the context-exit sentinel in its
+own process; no opt-in environment variable is needed. Both still require an
+XPU build and a visible GPU. They do not qualify model/reference parity.
+
+`test_xpu_exl3_smallm_external` contains six external cases. CTest registers
+them separately as `test_xpu_exl3_smallm_external_{packed,m1_m4,gate_up,attention,head,swiglu}`.
+Each checks its environment and complete file set before its GPU work.
+Missing optional data exits77 and skips that case; wrong path types, malformed
+present inputs and numerical failures remain errors. All these GPU tests use
+`RUN_SERIAL`; routine tests never download data or alter a service.
+
+| External case | Explicit input environment |
+|---|---|
+| `packed` | `VT_B70_SMALLM_FIXTURE` and `VT_B70_SMALLM_REPORT` (files) |
+| `m1_m4` | `VT_B70_EXL3_S0B_FIXTURES` (directory) |
+| `gate_up`, `swiglu` | `VT_B70_EXL3_S0B_FIXTURES` and `VT_B70_EXL3_S1_FIXTURES` (directories) |
+| `attention`, `head` | `VT_B70_EXL3_S1_FIXTURES` (directory) |
+
+For required SmallM qualification, configure
+`-DVLLM_CPP_REQUIRE_EXL3_TEST_ARTIFACTS=ON`. It requires tests and XPU enabled;
+CTest sets `EXL3_REQUIRE_ARTIFACTS=1` for each external case. Missing inputs then
+exit1 and fail the job. Direct executable callers can set the same environment
+variable. The default OFF does not override an explicitly required environment.
+An optional skip is unavailable qualification, even when CTest's summary is
+green. CPU builds do not register the GPU cases, and cannot configure required
+SmallM qualification with XPU disabled. The host-only
+`test_exl3_external_artifacts` checks admission/exit codes without oneAPI or a
+GPU; it does not validate tensor payloads.
+
+Use [the reference tools](../tools/exl3_reference/README.md) to prepare the
+explicit capture files; old receipt paths and binary identities stay unchanged.
+
 ## Checkpoint inventory
 
 Python 3.11 or newer is sufficient. The default command reads configuration,

@@ -17,6 +17,11 @@ add_test(NAME test_exl3_projection_capture COMMAND ${Python3_EXECUTABLE}
   "${CMAKE_SOURCE_DIR}/tests/scripts/test_exl3_projection_capture.py")
 add_test(NAME test_exl3_artifacts COMMAND ${Python3_EXECUTABLE}
   "${CMAKE_SOURCE_DIR}/tests/scripts/test_exl3_artifacts.py")
+add_executable(exl3_external_artifact_probe support/exl3_external_artifact_probe.cpp)
+vllm_cpp_set_warnings(exl3_external_artifact_probe)
+add_test(NAME test_exl3_external_artifacts COMMAND ${Python3_EXECUTABLE}
+  "${CMAKE_SOURCE_DIR}/tests/scripts/test_exl3_external_artifacts.py"
+  $<TARGET_FILE:exl3_external_artifact_probe>)
 add_test(NAME test_exl3_projection_compare COMMAND ${Python3_EXECUTABLE}
   "${CMAKE_SOURCE_DIR}/tests/scripts/test_exl3_projection_compare.py")
 add_test(NAME test_exl3_runtime_layout COMMAND ${Python3_EXECUTABLE}
@@ -99,6 +104,37 @@ if(VLLM_CPP_XPU)
   vllm_cpp_add_test(test_xpu_async_output vllm/v1/worker/test_xpu_async_output.cpp)
   vllm_cpp_add_test(test_xpu_exl3 vt/test_xpu_exl3.cpp)
   vllm_cpp_add_test(test_xpu_exl3_smallm vt/test_xpu_exl3_smallm.cpp)
+  vllm_cpp_add_test(test_xpu_exl3_smallm_teardown vt/test_xpu_exl3_smallm_teardown.cpp)
+  set_tests_properties(test_xpu_exl3_smallm test_xpu_exl3_smallm_teardown
+    PROPERTIES RUN_SERIAL TRUE LABELS "xpu;hermetic")
+  add_executable(test_xpu_exl3_smallm_external vt/test_xpu_exl3_smallm_external.cpp)
+  target_include_directories(test_xpu_exl3_smallm_external PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+  if(TARGET vllm::sanitize_test_shared)
+    target_link_libraries(test_xpu_exl3_smallm_external PRIVATE vllm::sanitize_test_shared vllm_test_main)
+  else()
+    target_link_libraries(test_xpu_exl3_smallm_external PRIVATE vllm::vllm vllm_test_main)
+  endif()
+  vllm_cpp_set_warnings(test_xpu_exl3_smallm_external)
+  # Separate processes preserve each external case's availability/result.
+  # No umbrella CTest can exit77 before reaching an unrelated synthetic case.
+  foreach(entry IN ITEMS
+      "packed|*XPU P6 SmallM:*"
+      "m1_m4|*SmallM: real M1/M4*"
+      "gate_up|*SmallM: real grouped Gate/Up*"
+      "attention|*SmallM: real attention groups*"
+      "head|*SmallM: full 6bpw head*"
+      "swiglu|*XPU EXL3 real Gate/Up SwiGLU:*")
+    string(REPLACE "|" ";" fields "${entry}")
+    list(GET fields 0 name)
+    list(GET fields 1 selector)
+    set(test_name test_xpu_exl3_smallm_external_${name})
+    add_test(NAME ${test_name} COMMAND test_xpu_exl3_smallm_external "--test-case=${selector}")
+    set_tests_properties(${test_name} PROPERTIES
+      SKIP_RETURN_CODE 77 RUN_SERIAL TRUE LABELS "xpu;external")
+    if(VLLM_CPP_REQUIRE_EXL3_TEST_ARTIFACTS)
+      set_tests_properties(${test_name} PROPERTIES ENVIRONMENT "EXL3_REQUIRE_ARTIFACTS=1")
+    endif()
+  endforeach()
   vllm_cpp_add_test(test_xpu_exl3_w8a8 vt/test_xpu_exl3_w8a8.cpp)
   vllm_cpp_add_test(test_xpu_gdn_fp16_variable vt/test_xpu_gdn_fp16_variable.cpp)
   target_include_directories(test_xpu_exl3 PRIVATE ${CMAKE_SOURCE_DIR}/src)

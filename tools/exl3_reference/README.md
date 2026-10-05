@@ -122,7 +122,7 @@ python /tools/exl3_reference/capture_grouped.py \
 ```
 
 After that GPU job finishes, the regular native engine test
-`test_xpu_exl3_smallm '--test-case=*real grouped*'` needs both
+`test_xpu_exl3_smallm_external '--test-case=*real grouped*'` needs both
 `VT_B70_EXL3_S0B_FIXTURES` and `VT_B70_EXL3_S1_FIXTURES`. It checks the actual
 native loader/merge and both the typed operator and model-resident wrapper.
 This is a grouped-linear arithmetic gate, not whole MLP/model parity.
@@ -131,7 +131,7 @@ For the complete target head, extract full-width `lm_head` into
 `full_head.safetensors` and pass exactly one fixture with `--single-source`.
 This explicit mode avoids an extra host packed concatenation; it retains the
 same runtime, full-width and tensor identity checks. The native focused case
-`test_xpu_exl3_smallm '--test-case=*full 6bpw head*'` needs only
+`test_xpu_exl3_smallm_external '--test-case=*full 6bpw head*'` needs only
 `VT_B70_EXL3_S1_FIXTURES`. It checks all 953,548,800 packed GPU bytes in bounded
 64 MiB chunks and the actual model linear seam at M1/4/12/16/128 without a
 dense head copy. The observed full-head producer uses one split at every M.
