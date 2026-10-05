@@ -380,3 +380,36 @@ CPUs and no OOM. The capsule is recovery/upstream-q1-transition-v1/receipt-v1.js
 Native cold-cache transition replay/full-array digest comparison remains next.
 This original-only evidence does not change the existing native C1 strict
 state failure, default-reference decision or experimental verifier policy.
+
+The native C4->C2->C1 full-target replay now completes all3,316 full-array
+digest checks and actually fails:117,366 assertions,114,068 passed/3,298 failed.
+All arrays are finite;18 hashes match and3,298 differ. Per-step exact/different
+counts are4/509,8/1593,4/797 and2/399. The first difference is already the cold
+C4prefill r0_l0_ssm_after_t0; all four layer0 raw Conv-history arrays match.
+Those histories do not establish computed Conv-output equality. FirstQ4 seeds
+are therefore already different, and later failures include propagation.
+
+Native caches start independently poisoned and retain stable16-slot/four-page
+request ownership across survivor compaction. All336 native consumed SSM hashes
+match their own preceding accepted-token producers; all128 firstQ4 initialized
+KV-prefix hashes match the native prefill. The four initial layer0 native SSM
+states are distinct, nonzero and not untouched poison. No original state enters
+native inference; original tokens/positions/accepted lengths alone are replayed.
+This does not compare autonomous native draft/rejection or cancellation scheduling.
+
+The source's existing FP16 producer-prefill eligibility requiresnp==1, so C4
+does not enter that C1-specific path. Actual eager trace has48 chunkedGDN M512,
+16 EXL3oneDNN attention M512 and16 verifier calls each atM16/M8/M4. This locates
+a concrete capability/route difference, not its sole arithmetic cause or the
+numeric magnitude of the state deviations. Both workers hash all6,044,934,144B;
+raw arrays are transient. Host analysis validates coverage/reported hashes and
+producer continuity, not absent raw payloads or numeric error magnitudes.
+
+The focused build passes2 steps; native actualexit1 uses24GiB/no swap/two CPUs
+with no OOM. Sources/binary, commands, failures/resources and independent
+descriptor/ownership analysis are in recovery/upstream-q1-transition-v1/receipt-v2.json,
+5872 bytes,SHA256eaa509fca429b119cd8c1274d7f2dfc943f8ee0378ef620edc95ad8b3cb332ff.
+The bounded C1/C4transition scopes are exercised, but Q1 state qualification
+fails. Preserve the experimental verifier and all default-reference failures;
+no math/threshold/reference/default changes are made. Continue independent
+conditional F3 cost evidence, contribution composition and the U6 final matrix.

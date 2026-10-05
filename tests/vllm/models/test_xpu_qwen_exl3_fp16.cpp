@@ -10,7 +10,9 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <map>
 #include <numeric>
+#include <set>
 #include <tuple>
 #include <vector>
 
@@ -24,6 +26,7 @@
 #include "vllm/model_executor/models/qwen3_5_attn_block.h"
 #include "vllm/model_executor/models/act_dump.h"
 #include "vllm/v1/attention/backends/gdn_attn.h"
+#include "vllm/v1/core/kv_cache_utils.h"
 #include "vt/exl3_fixture.h"
 #include "vt/unaligned.h"
 #include "vt/xpu_test_helpers.h"
@@ -2406,6 +2409,262 @@ TEST_CASE("XPU EXL3 real target diagnostic: integrated C1 Q4 original trace repl
     save();
   }
   CHECK(result.at("comparisons").size() == 931);
+  CHECK(vt::GetReferenceTierHits() == 0);
+}
+
+TEST_CASE("XPU EXL3 real target diagnostic: integrated C4 C2 C1 original trace digest replay") {
+  // Full target only: actual original tokens/positions/accepted lengths replayed
+  // from cold native caches. No original state injection or autonomous native
+  // draft/rejection/cancellation-scheduler equivalence. SHA covers every byte,
+  // not selected rows or a relaxed numeric tolerance; raw arrays are transient.
+  const char* model = std::getenv("VT_B70_EXL3_MODEL");
+  const char* capture = std::getenv("VT_B70_EXL3_MTP_CAPTURE");
+  const char* output = std::getenv("VT_B70_EXL3_DIAGNOSTIC_OUTPUT");
+  if (!model || !capture || !output) std::exit(77);
+  const std::filesystem::path model_dir(model), capture_dir(capture), output_dir(output);
+  REQUIRE_FALSE(std::filesystem::exists(output_dir));
+  std::ifstream source(capture_dir / "capture.json"); REQUIRE(source.good());
+  const auto reference = nlohmann::json::parse(source);
+  REQUIRE(reference.at("schema") == "b70-integrated-mtp-C4-C2-C1-digests-v1");
+  REQUIRE(reference.at("reference_label") == "controlled_deterministic_BA");
+  REQUIRE(reference.at("ordinary_observed_outputs_exact") == true);
+  REQUIRE(reference.at("actual_target_counts") == std::vector<int>{4, 4, 2, 1});
+  const auto& steps = reference.at("steps"); REQUIRE(steps.size() == 4);
+  const auto initial_ids = steps.at(0).at("request_ids").get<std::vector<std::string>>();
+  REQUIRE(initial_ids.size() == 4);
+  std::map<std::string, int> request_owners;
+  for (int i = 0; i < 4; ++i) REQUIRE(request_owners.emplace(initial_ids[i], i).second);
+  constexpr int counts[] = {4, 4, 2, 1}, expected_arrays[] = {513, 1601, 801, 401};
+  for (int step = 0; step < 4; ++step) {
+    const auto& record = steps.at(step);
+    const int count = counts[step], width = step == 0 ? 128 : 4;
+    REQUIRE(record.at("step") == step); REQUIRE(record.at("embedding_token_ids_exact") == true);
+    REQUIRE(record.at("request_ids").size() == size_t(count));
+    REQUIRE(record.at("seq_lens").size() == size_t(count)); REQUIRE(record.at("rows").size() == size_t(count));
+    REQUIRE(record.at("token_ids").size() == size_t(count * width));
+    std::vector<int32_t> qsl(count + 1); std::iota(qsl.begin(), qsl.end(), 0);
+    for (auto& v : qsl) v *= width;
+    REQUIRE(record.at("query_start_loc") == qsl);
+    REQUIRE(record.at("gdn").size() == 48); REQUIRE(record.at("attention").size() == 16);
+    REQUIRE(record.at("tensors").size() == size_t(expected_arrays[step]));
+    REQUIRE(record.at("positions").size() == 3);
+    std::set<std::string> actual;
+    for (int row = 0; row < count; ++row) {
+      const std::string id = record.at("request_ids").at(row);
+      REQUIRE(request_owners.contains(id)); REQUIRE(actual.insert(id).second);
+      const int owner = request_owners.at(id);
+      REQUIRE((step < 2 || (step == 2 && owner >= 2) || (step == 3 && owner == 3)));
+      const auto& r = record.at("rows").at(row);
+      REQUIRE(r.at("request_id") == id); REQUIRE(r.at("row") == row);
+      REQUIRE(r.at("begin") == row * width); REQUIRE(r.at("end") == (row + 1) * width);
+      REQUIRE(r.at("cold_prefill") == (step == 0));
+      const int seq = record.at("seq_lens").at(row);
+      REQUIRE(seq >= 128 + (step == 0 ? 0 : width)); REQUIRE(seq <= 160);
+      if (step == 0) REQUIRE(seq == 128);
+      for (int token = row * width; token < (row + 1) * width; ++token) {
+        const auto& id_value = record.at("token_ids").at(token);
+        REQUIRE(id_value.is_number_integer()); REQUIRE_FALSE(id_value.is_boolean());
+        REQUIRE(id_value.get<int64_t>() >= 0); REQUIRE(id_value.get<int64_t>() < 248320);
+        for (int axis = 0; axis < 3; ++axis)
+          REQUIRE(record.at("positions").at(axis).at(token) == seq - width + token - row * width);
+      }
+    }
+  }
+  const auto config = vllm::LoadHfConfig((model_dir / "config.json").string());
+  REQUIRE(config.num_hidden_layers == 64); REQUIRE(config.vocab_size == 248320);
+  std::vector<vllm::SafetensorsFile> shards;
+  for (const char* name : {"model-00001-of-00002.safetensors", "model-00002-of-00002.safetensors"})
+    shards.push_back(vllm::SafetensorsFile::Open((model_dir / name).string()));
+  xpu_test::Queue gpu(vt::DeviceType::kXPU);
+  auto weights = vllm::LoadQwen3_5Dense(shards, config, &gpu.q);
+  REQUIRE(weights.exl3_checkpoint); REQUIRE(weights.precision.activation == DType::kF16);
+  auto& backend = vt::GetBackend(gpu.q.device);
+  constexpr int slots = 16, channels = 10240, history = 6, page = 1600;
+  constexpr size_t ssm_bytes = 48 * 128 * 128 * sizeof(float);
+  std::vector<std::unique_ptr<xpu_test::Buffer>> owners;
+  std::vector<vllm::GdnStateCache> states;
+  std::vector<vllm::PagedKvCache> caches;
+  for (const auto& layer : weights.layers) {
+    if (layer.is_linear_attention) {
+      auto conv = std::make_unique<xpu_test::Buffer>(gpu.q, DType::kF16,
+          std::initializer_list<int64_t>{slots, channels, history});
+      auto ssm = std::make_unique<xpu_test::Buffer>(gpu.q, DType::kF32,
+          std::initializer_list<int64_t>{slots, 48, 128, 128});
+      conv->put(std::vector<float>(slots * channels * history, 0.125f));
+      ssm->put(std::vector<float>(slots * 48 * 128 * 128, 0.125f));
+      vllm::GdnStateCache state; state.conv_state = conv->tensor; state.ssm_state = ssm->tensor;
+      states.push_back(state); owners.push_back(std::move(conv)); owners.push_back(std::move(ssm));
+    } else {
+      auto kv = std::make_unique<xpu_test::Buffer>(gpu.q, DType::kI8,
+          std::initializer_list<int64_t>{2 * 4 * page * 4 * 256});
+      kv->upload(std::vector<uint8_t>(kv->bytes, 0x7f).data());
+      vllm::PagedKvCache cache;
+      cache.data = kv->tensor.data; cache.dtype = DType::kI8;
+      cache.num_blocks = 4; cache.block_size = page; cache.num_kv_heads = 4; cache.head_size = 256;
+      cache.fp8_kind = vt::Fp8KVCacheDataType::kFp8E4M3;
+      caches.push_back(cache); owners.push_back(std::move(kv));
+    }
+  }
+  REQUIRE(states.size() == 48); REQUIRE(caches.size() == 16);
+  std::filesystem::create_directories(output_dir);
+  nlohmann::json result = {{"reference_label", reference.at("reference_label")},
+      {"native_states_injected", false}, {"raw_arrays_persisted", false},
+      {"native_ownership", request_owners}, {"comparisons", nlohmann::json::array()},
+      {"scope", "Full-array digests for cold native target replay of actual original C4/C2/C1 MTP inputs/accepted lengths; not autonomous draft/rejection or native cancellation scheduler equivalence"}};
+  std::set<std::pair<int, std::string>> compared;
+  auto compare = [&](int step, const std::string& key, const std::vector<uint8_t>& raw,
+                     const std::string& dtype, const std::vector<int64_t>& shape) {
+    CAPTURE(step);
+    CAPTURE(key);
+    REQUIRE(compared.emplace(step, key).second);
+    const auto& expected = steps.at(step).at("tensors").at(key);
+    REQUIRE(expected.at("dtype") == dtype); REQUIRE(expected.at("shape") == shape);
+    REQUIRE(expected.at("bytes") == raw.size()); REQUIRE(expected.at("finite") == true);
+    const std::string expected_sha = expected.at("sha256"); REQUIRE(expected_sha.size() == 64);
+    REQUIRE(std::all_of(expected_sha.begin(), expected_sha.end(), [](char c) {
+      return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f');
+    }));
+    const auto digest = vllm::v1::sha256_bytes(std::string(reinterpret_cast<const char*>(raw.data()), raw.size()));
+    constexpr char hex[] = "0123456789abcdef";
+    REQUIRE(digest.size() == 32);
+    std::string sha; sha.reserve(64);
+    for (unsigned char c : digest) { sha += hex[c >> 4]; sha += hex[c & 15]; }
+    bool finite = true;
+    if (dtype != "U8") {
+      const size_t width = dtype == "F32" ? 4 : 2;
+      for (size_t i = 0; i < raw.size(); i += width) {
+        float value;
+        if (width == 4) std::memcpy(&value, raw.data() + i, 4);
+        else { uint16_t v; std::memcpy(&v, raw.data() + i, 2); value = vt::F16ToF32(v); }
+        finite &= std::isfinite(value);
+      }
+    }
+    const bool exact = sha == expected_sha;
+    result["comparisons"].push_back({{"step", step}, {"key", key}, {"dtype", dtype}, {"shape", shape},
+        {"bytes", raw.size()}, {"finite", finite}, {"native_sha256", sha},
+        {"original_sha256", expected_sha}, {"bit_exact", exact}});
+    std::cout << "MTP_TRANSITION_NATIVE_COMPARE step=" << step << " key=" << key << " exact=" << exact << '\n';
+    CHECK(finite); CHECK(exact);
+  };
+  for (int step = 0; step < 4; ++step) {
+    const auto& record = steps.at(step);
+    const int count = counts[step], width = step == 0 ? 128 : 4, rows = count * width;
+    const auto ids = record.at("token_ids").get<std::vector<int32_t>>();
+    const auto positions = record.at("positions").at(0).get<std::vector<int32_t>>();
+    const auto qsl = record.at("query_start_loc").get<std::vector<int32_t>>();
+    const auto seq = record.at("seq_lens").get<std::vector<int32_t>>();
+    std::vector<int32_t> bases, blocks, accepted, spec_slots;
+    for (int row = 0; row < count; ++row) {
+      const int owner = request_owners.at(record.at("request_ids").at(row).get<std::string>());
+      blocks.push_back(owner); bases.push_back(owner * 4 + 3);
+      for (int token = 0; token < 4; ++token) spec_slots.push_back(owner * 4 + 3 - token);
+      if (step) {
+        const auto& n = record.at("gdn").at("l0").at("previous_accepted_tokens").at(row);
+        REQUIRE(n.is_number_integer()); REQUIRE_FALSE(n.is_boolean());
+        REQUIRE(n.get<int>() >= 1); REQUIRE(n.get<int>() <= 4); accepted.push_back(n.get<int>());
+      }
+    }
+    vllm::v1::CommonAttentionMetadata am;
+    am.num_reqs = count; am.num_actual_tokens = rows;
+    am.query_start_loc = am.query_start_loc_cpu = qsl;
+    am.seq_lens = am.seq_lens_cpu = seq; am.max_query_len = width;
+    am.max_seq_len = *std::max_element(seq.begin(), seq.end());
+    am.block_table_num_cols = 1; am.block_table_tensor = blocks; am.causal = true;
+    for (int row = 0; row < count; ++row) for (int t = qsl[row]; t < qsl[row + 1]; ++t)
+      am.slot_mapping.push_back(blocks[row] * page + positions[t]);
+    vllm::v1::GDNAttentionMetadata gm;
+    gm.num_actual_tokens = rows;
+    if (step == 0) {
+      gm.num_prefills = count; gm.num_prefill_tokens = rows;
+      gm.non_spec_state_indices_tensor = gm.prefill_state_indices = bases;
+      gm.non_spec_query_start_loc = gm.prefill_query_start_loc = qsl;
+      gm.has_initial_state = gm.prefill_has_initial_state = std::vector<uint8_t>(count, 0);
+      const auto chunks = vllm::v1::ComputeCausalConv1dMetadata(qsl);
+      gm.batch_ptr = chunks.batch_ptr; gm.token_chunk_offset_ptr = chunks.token_chunk_offset_ptr;
+    } else {
+      gm.num_spec_decodes = count; gm.num_spec_decode_tokens = rows;
+      gm.spec_state_indices_num_cols = 4; gm.spec_state_indices_tensor = spec_slots;
+      gm.spec_query_start_loc = qsl; gm.spec_sequence_masks = std::vector<uint8_t>(count, 1);
+      std::vector<int32_t> token_indices(rows); std::iota(token_indices.begin(), token_indices.end(), 0);
+      gm.spec_token_indx = token_indices; gm.num_accepted_tokens = accepted;
+    }
+    auto boundary = [&](const std::string& stage) {
+      size_t gi = 0, ai = 0;
+      for (size_t layer = 0; layer < weights.layers.size(); ++layer) {
+        const std::string key = "l" + std::to_string(layer);
+        const bool linear = weights.layers[layer].is_linear_attention;
+        const auto index = linear ? gi++ : ai++;
+        for (int row = 0; row < count; ++row) {
+          const std::string prefix = "r" + std::to_string(row) + "_" + key;
+          if (linear) {
+            const auto& state = states.at(index);
+            const auto& entry = record.at("gdn").at(key);
+            REQUIRE(entry.at("cold_unconsumed_seed_excluded") == (step == 0));
+            if (step) REQUIRE(entry.at("previous_accepted_tokens") == accepted);
+            const auto& plan = entry.at("plans").at(row); REQUIRE(plan.at("row") == row);
+            const int begin = stage == "before" ? accepted[row] - 1 : 0;
+            const int length = stage == "before" || step == 0 ? 3 : 6;
+            REQUIRE(plan.at("conv_" + stage) == std::vector<int32_t>{begin, begin + length});
+            auto conv = state.conv_state;
+            conv.data = static_cast<uint16_t*>(conv.data) + bases[row] * channels * history + begin;
+            conv.shape[0] = 1; conv.shape[2] = length;
+            xpu_test::Buffer packed(gpu.q, DType::kF16, {1, channels, length});
+            vt::Copy(gpu.q, packed.tensor, conv);
+            const auto values = packed.download();
+            std::vector<uint8_t> canonical(values.size());
+            for (int c = 0; c < channels; ++c) for (int h = 0; h < length; ++h)
+              std::memcpy(canonical.data() + (h * channels + c) * 2,
+                          values.data() + (c * length + h) * 2, 2);
+            compare(step, prefix + "_conv_" + stage, canonical, "F16", {length, channels});
+            const int snapshots = stage == "before" || step == 0 ? 1 : 4;
+            if (stage == "before")
+              REQUIRE(plan.at("ssm_before") == entry.at("spec_state_indices").at(row).at(accepted[row] - 1));
+            else REQUIRE(plan.at("ssm_after").size() == size_t(snapshots));
+            for (int token = 0; token < snapshots; ++token) {
+              const int slot = bases[row] - (stage == "before" ? accepted[row] - 1 : token);
+              std::vector<uint8_t> ssm(ssm_bytes);
+              backend.Copy(gpu.q, ssm.data(), static_cast<const uint8_t*>(state.ssm_state.data) + slot * ssm_bytes, ssm_bytes);
+              backend.Synchronize(gpu.q);
+              compare(step, prefix + "_ssm_" + stage + (stage == "after" ? "_t" + std::to_string(token) : ""),
+                      ssm, "F32", {48, 128, 128});
+            }
+          } else {
+            const auto& cache = caches.at(index);
+            const int length = stage == "before" ? seq[row] - width : seq[row];
+            const auto& scope = record.at("attention").at(key).at(stage).at(row);
+            REQUIRE(scope.at("row") == row); REQUIRE(scope.at("written_logical_length") == length);
+            const auto& addresses = scope.at("addresses"); REQUIRE(addresses.size() == size_t(length));
+            for (int t = 0; t < length; ++t) {
+              REQUIRE(addresses.at(t).at(0) == addresses.at(0).at(0)); REQUIRE(addresses.at(t).at(1) == t);
+            }
+            for (int which = 0; which < 2; ++which) {
+              auto view = vllm::dense_attn::KvSlice(cache, gpu.q.device, which);
+              view.data = static_cast<uint8_t*>(view.data) + blocks[row] * view.stride[0];
+              view.shape[0] = 1; view.shape[1] = length;
+              xpu_test::Buffer packed(gpu.q, DType::kI8, {1, length, 4, 256});
+              vt::Copy(gpu.q, packed.tensor, view);
+              compare(step, prefix + (which ? "_value_" : "_key_") + stage,
+                      packed.download(), "U8", {length, 4, 256});
+            }
+          }
+        }
+      }
+    };
+    if (step) boundary("before");
+    vllm::Qwen3_5MTPHiddenStates hidden;
+    std::vector<int32_t> gather;
+    if (step == 0) for (int row = 0; row < count; ++row) gather.push_back(qsl[row + 1] - 1);
+    std::cout << "MTP_TRANSITION_NATIVE_FORWARD " << step << '\n' << std::flush;
+    auto logits = vllm::Qwen3_5DenseModel::ForwardDeviceTap(ids, positions, am, gm, caches,
+        states, weights, config, gpu.q, &hidden, gather);
+    REQUIRE(logits.rows == (step == 0 ? count : rows)); REQUIRE(hidden.tensor.dtype == DType::kF16);
+    boundary("after");
+    xpu_test::Buffer hidden_copy(gpu.q, DType::kF16, {rows, 5120});
+    vt::Copy(gpu.q, hidden_copy.tensor, hidden.tensor);
+    compare(step, "target_hidden", hidden_copy.download(), "F16", {rows, 5120});
+    std::ofstream out(output_dir / "comparison.json"); out << result.dump(2) << '\n'; out.close(); REQUIRE(out.good());
+  }
+  CHECK(result.at("comparisons").size() == 3316);
   CHECK(vt::GetReferenceTierHits() == 0);
 }
 
