@@ -2218,7 +2218,7 @@
     },
     {
       "task": "P7",
-      "status": "in_progress_current_C1_C4_primary_complete_remaining_sentinels_running",
+      "status": "in_progress_current_matrix_complete_reference_state_qualification_open",
       "complete": false,
       "C1_repetitions_per_engine": 3,
       "actual_native_primary_assertions_each": 1895,
@@ -5976,9 +5976,307 @@
           75,
           78
         ]
+      },
+      "final_candidate_remaining_sentinels_046ece2df": {
+        "product_source": "046ece2dfde4d5326b44a6f36f82047a9ad4aeb2",
+        "receipt": {
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p7-candidate-matrix-v2/sentinels-comparison-v1.json",
+          "bytes": 147232,
+          "sha256": "cb106bcd061858a4f015a74270ba575e744eb5f41ed881d7955cbb3d69310d93"
+        },
+        "verified_identities": 466,
+        "comparisons": {
+          "c1-m0": {
+            "E2E_s": {
+              "native": 11.976956602,
+              "original": 10.553060503996676
+            },
+            "native_E2E_change_percent": 13.492731302583394,
+            "common_overlap_decode_tps": {
+              "native": 26.26343437971123,
+              "original": 29.494755749984463
+            },
+            "original_native_first_ID_differences": {
+              "request-0": {
+                "index": 0,
+                "current": 6374,
+                "reference": 760
+              }
+            },
+            "native_decode_change_percent": -10.955579349983037,
+            "TTFT_ms": {
+              "native": 2267.6140389999996,
+              "original": 1907.4440379918087
+            }
+          },
+          "c4-m0": {
+            "E2E_s": {
+              "native": 35.369281395,
+              "original": 42.49813449400244
+            },
+            "native_E2E_change_percent": -16.774508302260895,
+            "common_overlap_decode_tps": {
+              "native": 66.19307994179078,
+              "original": null
+            },
+            "original_native_first_ID_differences": {
+              "request-0": {
+                "index": 134,
+                "current": 948,
+                "reference": 9799
+              },
+              "request-1": {
+                "index": 24,
+                "current": 6868,
+                "reference": 37452
+              },
+              "request-2": {
+                "index": 124,
+                "current": 7578,
+                "reference": 50558
+              },
+              "request-3": {
+                "index": 3,
+                "current": 55287,
+                "reference": 6353
+              }
+            }
+          },
+          "c1-long": {
+            "E2E_s": {
+              "native": 28.348614192,
+              "original": 23.48842889300431
+            },
+            "native_E2E_change_percent": 20.69182796829474,
+            "common_overlap_decode_tps": {
+              "native": 38.529324700608576,
+              "original": 50.12260939640904
+            },
+            "original_native_first_ID_differences": {
+              "request-0": {
+                "index": 51,
+                "current": 10345,
+                "reference": 7854
+              }
+            },
+            "native_decode_change_percent": -23.129850651053786,
+            "TTFT_ms": {
+              "native": 21730.140277,
+              "original": 18400.860498979455
+            }
+          }
+        },
+        "native_continuity": {
+          "c1-m0": {
+            "all_IDs_and_non_timing_cycles_exact_prior": true,
+            "ID_count": 256,
+            "cycles": 258
+          },
+          "c4-m0": {
+            "all_IDs_and_non_timing_cycles_exact_prior": true,
+            "ID_count": 1024,
+            "cycles": 266
+          },
+          "c1-long": {
+            "all_IDs_and_non_timing_cycles_exact_prior": true,
+            "ID_count": 256,
+            "cycles": 125
+          }
+        },
+        "native_actual_exits_each": 0,
+        "native_assertions": [
+          1354,
+          5335,
+          633
+        ],
+        "original_fixed_executed_controls_reused": true,
+        "scope": "Current046ece2df C1/C4 P4096/O256each MTP0 and C1 P32768/O256 MTP3 once. Current native workers freshly executed; unchanged original executed final-matrix controls reused with exact hashes, tool checks and normalized command equality; not claimed fresh original runs. Same workload/prompt bytes, O32warmup/reset, page1600/maxcontext262144/full6bpw head/compact subset/FP8KV,24GiB/no-swap/CPU2. Actual autonomous continuations differ; original emission overlap checked, no fabricated C4 original aggregate decode. No full-state/default-reference or all-mode qualification inferred."
+      },
+      "final_candidate_prefix_046ece2df": {
+        "receipt": {
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p7-candidate-matrix-v2/prefix-comparison-v1.json",
+          "bytes": 65570,
+          "sha256": "35ff488ee3a6a3665bca7e79321285a846daea11867f96275daeeb2c9b9f4d9a"
+        },
+        "verified_identities": 230,
+        "native": {
+          "actual_exit": 0,
+          "assertions": 363,
+          "first_positions": [
+            0,
+            30400
+          ],
+          "prompt_tokens_computed": [
+            32768,
+            2368
+          ],
+          "cold_repeat_all64IDs_exact": true,
+          "all128IDs_exact_prior": true,
+          "graph_stats": {
+            "captures": 2,
+            "replays": 56
+          },
+          "after_engine_release_memory": {
+            "attention_workspace_bytes": 16777216,
+            "backend_live_device_bytes": 1003742667,
+            "backend_peak_device_bytes": 30403660867,
+            "driver_free_bytes": 30138867712,
+            "driver_free_known": true,
+            "exl3_workspace_bytes": 0,
+            "gdn_workspace_bytes": 0,
+            "graph_device_bytes": 0,
+            "host_peak_rss_bytes": 13598273536,
+            "native_gdn_workspace_bytes": 230686720,
+            "pinned_host_bytes": 0
+          }
+        },
+        "original_fixture_checks": {
+          "cold_repeat_ids_exact": true,
+          "repeat_cached_tokens": 30400,
+          "expected_aligned_cached_tokens": 30400
+        },
+        "original_native_first_ID_difference": {
+          "index": 51,
+          "native": 10345,
+          "original": 7854
+        },
+        "scope": "Current046ece2df native functional P32768/O64 prefix pair, MTP3/page1600/maxcontext262144/full6bpw head/compact subset/FP8KV,24GiB/no-swap/CPU2. Reused unchanged hash-identified original executed prefix fixture and actual tool/command. Native functional driver has per-step memory probes and no matched serving timestamps/O32warmup, so no native/original speed ratio or cached-token prefill throughput. Same-engine equivalence is not all-layer/original suffix qualification."
+      },
+      "final_candidate_short_profile_046ece2df": {
+        "receipt": {
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p7-candidate-matrix-v2/profile-comparison-v1.json",
+          "bytes": 10674,
+          "sha256": "c24dd636c9075c003646dd1cb72b649f11e79e8fd7667020e9a1a962ae812d52"
+        },
+        "actual_exit": 0,
+        "assertions": 130,
+        "pure_decode_cycles": 14,
+        "stage_means_ms": {
+          "device_profile_records": {
+            "target": 49.20019342857143,
+            "draft": 5.249374857142858
+          },
+          "host_profile_records": {
+            "target": 0.23528721428571428,
+            "draft": 5.254652357142857
+          }
+        },
+        "all32_IDs_exact_primary_prefix": true,
+        "graph_validation_host_readback_ms_per_cycle": 0.027801285714285716,
+        "scope": "Current046ece2df separate C1 P4096/O32 MTP3 device+host diagnostic, O32warmup/reset. Never used as quiet throughput score. Target/draft device queue spans versus host submission/enqueue spans use distinct clock domains and cannot be subtracted; nested event sums not additive critical path. Graph target inner kernels are not exposed by this receipt. Last two budget-constrained cycles intentionally excluded from trajectory comparison. No newly isolated original target timing or all-state qualification."
+      },
+      "final_candidate_integrated_matrix_046ece2df": {
+        "receipt": {
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p7-candidate-matrix-v2/integrated-matrix-v1.json",
+          "bytes": 19270,
+          "sha256": "4c5ec4a3f25856f8165ac678a8c1c964c91f0b78d466c5924258965b68c30267"
+        },
+        "matrix": [
+          {
+            "case": "C1-4K-M3",
+            "repetitions_each_engine": 3,
+            "receipt": {
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p7-candidate-matrix-v2/primary-C1-comparison-v1.json",
+              "bytes": 60962,
+              "sha256": "2288cd06cc9c579c8cf8ec5283d73f1ff595e0b36a55152a5f1de8184f75a078"
+            }
+          },
+          {
+            "case": "C4-4K-M3",
+            "repetitions_each_engine": 3,
+            "receipt": {
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p7-candidate-matrix-v2/primary-C4-comparison-v1.json",
+              "bytes": 71793,
+              "sha256": "6a31516061faa73d49bca1ae24d53599498ed353fd95ae2a67c7cfc59801ad61"
+            }
+          },
+          {
+            "case": "C1-4K-M0",
+            "native_current_repetitions": 1,
+            "original_reused_executed_repetitions": 1,
+            "receipt": {
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p7-candidate-matrix-v2/sentinels-comparison-v1.json",
+              "bytes": 147232,
+              "sha256": "cb106bcd061858a4f015a74270ba575e744eb5f41ed881d7955cbb3d69310d93"
+            }
+          },
+          {
+            "case": "C4-4K-M0",
+            "native_current_repetitions": 1,
+            "original_reused_executed_repetitions": 1,
+            "receipt": {
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p7-candidate-matrix-v2/sentinels-comparison-v1.json",
+              "bytes": 147232,
+              "sha256": "cb106bcd061858a4f015a74270ba575e744eb5f41ed881d7955cbb3d69310d93"
+            }
+          },
+          {
+            "case": "C1-32K-M3",
+            "native_current_repetitions": 1,
+            "original_reused_executed_repetitions": 1,
+            "receipt": {
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p7-candidate-matrix-v2/sentinels-comparison-v1.json",
+              "bytes": 147232,
+              "sha256": "cb106bcd061858a4f015a74270ba575e744eb5f41ed881d7955cbb3d69310d93"
+            }
+          },
+          {
+            "case": "C4-32K-M3",
+            "native_current_repetitions": 1,
+            "original_reused_executed_repetitions": 1,
+            "receipt": {
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p7-mixed-output-views-v1/receipt-v1.json",
+              "bytes": 41455,
+              "sha256": "6e73e121f2fd934ead34d84ac694b367446bf9005d1689bf40e3c0ece1f5cd51"
+            }
+          },
+          {
+            "case": "MIXED-4K-32K",
+            "native_current_repetitions": 1,
+            "original_reused_executed_repetitions": 1,
+            "receipt": {
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p7-mixed-output-views-v1/receipt-v1.json",
+              "bytes": 41455,
+              "sha256": "6e73e121f2fd934ead34d84ac694b367446bf9005d1689bf40e3c0ece1f5cd51"
+            }
+          },
+          {
+            "case": "PREFIX-32K",
+            "native_current_pair": 1,
+            "original_reused_fixture_pair": 1,
+            "receipt": {
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p7-candidate-matrix-v2/prefix-comparison-v1.json",
+              "bytes": 65570,
+              "sha256": "35ff488ee3a6a3665bca7e79321285a846daea11867f96275daeeb2c9b9f4d9a"
+            }
+          },
+          {
+            "case": "LIFECYCLE",
+            "native_current_assertions": 483,
+            "actual_exit": 0,
+            "receipt": {
+              "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p7-mixed-output-views-v1/receipt-v1.json",
+              "bytes": 41455,
+              "sha256": "6e73e121f2fd934ead34d84ac694b367446bf9005d1689bf40e3c0ece1f5cd51"
+            }
+          }
+        ],
+        "verified_transitive_artifact_identities": 1100,
+        "matrix_executed": true,
+        "primary_three_repeats_each_engine_complete": true,
+        "performance_parity_achieved": false,
+        "qualification_promoted": false,
+        "P7_complete": false,
+        "remaining": [
+          "Full declared original/all-layer state qualification and independently justified default-versus-controlled BA reference contract with two held-out prefixes. Default four failures retained.",
+          "P1 automatic/default verifier promotion remains off pending integrated arithmetic/state qualification.",
+          "Primary C1 decode21.888% below original median; identify remaining GPU stage gap. C1-32K23.130% below original, mixed E2E19.987% longer, C4-32KE2E30.236% longer.",
+          "C4 original has serial emission; native shorter E2E is not like-for-like four-way GPU kernel parity. Prefix functional driver lacks matched serving timing."
+        ],
+        "scope": "All eight bounded serving/prefix cases and lifecycle have current046ece2df binary evidence. Fresh primary originals3each; unchanged executed original sentinel controls explicitly reused with pinned identities. Mixed/C4-32K/lifecycle current identical binary results reused, no reporting-only reruns. Profiles excluded from speed scores. Complete matrix coverage is not full numerical/state/default-route qualification or speed parity."
       }
     }
   ],
   "performance_baseline": "7536aededc049b2157f12eadb0f4cc6bbf29b7b7",
-  "performance_next": "Current046ece2df primary C1/C4 original/native3each complete. Remaining current native no-MTP/C1-32K/prefix sentinels and separate short primary profile running sequentially (run-remaining-native-v1.py); never restart a live worker. Unchanged original sentinel source/workloads/resources may reuse fixed prior executed receipts; current mixed/C4-32K/lifecycle already executed. Default-reference four failures/full-all-layer/P1 admission gates remain open."
+  "performance_next": "Current046ece2df bounded matrix (all8serving/prefix cases plus lifecycle), current practical/draft/default-controlled quality and short primary profile complete with integrated receipt; no duplicate benchmark campaign. Next close an actual open state/reference dependency: bounded all-GDN-state original/native P128+D1 proof on two held-out frozen prefixes under separately named controlled BA policy, preserve default oracle/four failures; inspect capture/consumer support before scoped code change. Full-state/reference/P1 automatic qualification and primary speed gap remain open, goalactive."
 }
