@@ -442,3 +442,40 @@ Both long workers use24GiB/no swap/two CPUs with no OOM; host cgroup peaks are
 source/binary, commands, complete profiles, resources and analysis are indexed
 in recovery/upstream-f3-shape-profile-v1/receipt-v1.json,6540 bytes,SHA256
 08cd5db5627295fe02a951503a59f5da34b83f0eaecb2944ef13a0076b5bc8bb.
+
+F3's remaining FA-output M4 investigation is now complete and stops without a
+kernel variant. A one-weight manifest selects only the historical real
+target-attention output projection, M4/K6144/N5120/4bits, MB8/NT4/18splits.
+The current native target links one step. Pinned original ordinary/observed
+and repeat outputs are exact; all eight complete fixture payload hashes are
+independently checked and their descriptors/hashes match the historical
+capture. Current native unprofiled and profiled operators pass49 assertions
+each, checking full input-Hadamard, FP32 partials and F16 output bytes.
+
+Separate three-sample GPU profiles give core medians81.352us original and
+81.562us native (+0.26%); sample ranges74.374–92.394us and80.834–82.293us
+overlap. The historical +20.62% core anomaly is not reproduced in this narrow
+single-weight state; this does not establish universal core parity. Unprofiled
+public complete-call medians remain104.419us original and112.529us native,
+with uncached native map validation; do not substitute core time for that cost.
+This is a synthetic identical-input operator test, not current model operands.
+
+The same native operator's eager/graph and public/certified-map checks pass173
+assertions in each of separate profiled/unprofiled workers, retaining full
+intermediate/output equality, correct5/4 graph-node counts and retirement.
+Unprofiled certified-map eager/graph medians are94.075/97.244us; the3.169us
+single-call difference is not evidence of a material compiled-kernel anomaly
+or a serving gain. Internal graph node times remain unattributed. The donor
+ESIMD header is unchanged/identical; no new kernel, graph policy or math change
+is made, and no global tile sweep is justified by these results.
+
+The first oracle attempt fails before GPU execution because the frozen tool
+package omitted its `b70_inventory.py` dependency. The separately recorded
+second attempt includes that module and passes; the failure is preserved.
+All six successful workers use24GiB/no swap/two CPUs with no OOM; peaks remain
+below0.8GiB. Source/binary, commands, payloads, resources and independent
+analysis are in recovery/upstream-f3-faout-m4-v1/receipt-v1.json,18499 bytes,
+SHA256ab7a0ccfcced0afe014b5a6f95412654350fb8c1250144efd2046740c5823903.
+Together with the actual long/mixed shape profiles this closes the bounded F3
+investigation. Continue remaining U2 contribution composition and U6; Q1 and
+the original/default qualification failures remain open, not reclassified.
