@@ -42,7 +42,7 @@ inline int64_t PagedAttnXpuActivePages(int64_t max_seq_len, int64_t page) {
   return max_seq_len > 0 && page > 0 ? 1 + (max_seq_len - 1) / page : 0;
 }
 
-// Packed C4 metadata validation bakes this upper bound into a graph. Keep it
+// Packed batched metadata validation bakes this upper bound into a graph. Keep it
 // stable within a page; the model retires the graph at active-page boundaries.
 // This sizes the kernel, not the request/context limit or allocated cache.
 inline int32_t PagedAttnXpuPackedVerifyBound(int32_t max_seq_len, int64_t page) {

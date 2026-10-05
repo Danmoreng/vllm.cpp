@@ -2218,7 +2218,7 @@
     },
     {
       "task": "P7",
-      "status": "in_progress_current_quality_and_bounded_serving_prefix_matrix_executed_performance_state_reference_and_admission_gates_open",
+      "status": "in_progress_C2_C3_original_verifier_extension_operator_and_owner_passed_affected_model_evaluation_active",
       "complete": false,
       "C1_repetitions_per_engine": 3,
       "actual_native_primary_assertions_each": 1895,
@@ -2916,7 +2916,7 @@
           "sha256": "3da49f66c6730614433e01fb429bc9c4e89d00c1f88a01982534334261bf9c7e"
         }
       },
-      "next": "Obtain focused identical-input original C2/C3 uniformQ4 verifier proof and complete-operator baseline, then extend bounded native admission only if arithmetic/masking/output/state/graph-owner gates pass and complete path gains. Current32K tail means397.149ms C3/291.351ms C2 versus117.359ms C4/63.207ms C1, mostly graph replays; source admits onlyC1/C4. This is a measured partial-batch cost hypothesis, not isolated attention causality. Keep defaultD64/state/reference/P1 automatic-admission and primary/long/mixed gaps explicit; no repeat of completed matrix without a new change/noise/regression.",
+      "next": "Finish live affected C4-32K candidate worker, compare current mixed/C4-32K raw timings/resources/IDs/cycles against frozen7feb originals/controls, preserve deliberate changed attention arithmetic and actual continuation differences. Existing lifecycle483/483 on candidate. No blanket transfer of prior full practical/default-controlled qualification; automatic verifier/defaultD64/all-layer gates remain open.",
       "current_quality": {
         "practical_tasks": 8,
         "practical_passed": 8,
@@ -5156,9 +5156,113 @@
         "C4-32K-M3",
         "MIXED-4K-32K",
         "PREFIX-32K"
-      ]
+      ],
+      "partial_batched_verifier": {
+        "status": "operator_original_graph_owner_passed_mixed_gain_measured_C4_32K_worker_live",
+        "product_parent": "dbaa601942ae6b9ac8a03fc8cc5c04a43ec315ab",
+        "operator_receipt": {
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p7-verify-partial-v1/operator-receipt-v1.json",
+          "bytes": 130908,
+          "sha256": "b8f6b114136a894cbb7619e615ad0561037e009679cdd41ce55cef0fd1f9b380"
+        },
+        "original_cases": 12,
+        "native_quiet_assertions": 1216,
+        "native_profile_assertions": 1220,
+        "current_C4_original_assertions": 464,
+        "host_policy_assertions": 36,
+        "model_owner_assertions": 98720,
+        "model_owner_steps": 88,
+        "model_owner_captures": 20,
+        "model_owner_replays": 68,
+        "model_owner_live_graphs_max": 6,
+        "model_owner_graph_release_bytes": 0,
+        "operator": [
+          {
+            "case": "c2-q4-long-rounded",
+            "split_median_ms": 11.949989,
+            "verify_median_ms": 0.56049,
+            "elapsed_change_percent": -95.30970279554232,
+            "samples": {
+              "split": [
+                12.38525,
+                11.768589,
+                11.949989
+              ],
+              "verify": [
+                0.57711,
+                0.55322,
+                0.56049
+              ]
+            }
+          },
+          {
+            "case": "c2-q4-short-rounded",
+            "split_median_ms": 1.5355,
+            "verify_median_ms": 0.13309,
+            "elapsed_change_percent": -91.3324649951156,
+            "samples": {
+              "split": [
+                1.5355,
+                1.51983,
+                1.559
+              ],
+              "verify": [
+                0.13748,
+                0.13309,
+                0.13189
+              ]
+            }
+          },
+          {
+            "case": "c3-q4-long-rounded",
+            "split_median_ms": 17.668239,
+            "verify_median_ms": 0.94514,
+            "elapsed_change_percent": -94.65062703758989,
+            "samples": {
+              "split": [
+                17.499728,
+                17.682969,
+                17.668239
+              ],
+              "verify": [
+                0.95411,
+                0.94245,
+                0.94514
+              ]
+            }
+          },
+          {
+            "case": "c3-q4-short-rounded",
+            "split_median_ms": 2.25973,
+            "verify_median_ms": 0.20371,
+            "elapsed_change_percent": -90.98520619720055,
+            "samples": {
+              "split": [
+                2.29747,
+                2.25096,
+                2.25973
+              ],
+              "verify": [
+                0.20364,
+                0.20371,
+                0.20384
+              ]
+            }
+          }
+        ],
+        "actual_lifecycle_assertions": 483,
+        "mixed_candidate_E2E_s": 37.270828376,
+        "mixed_prior_E2E_s": 47.290145648,
+        "mixed_elapsed_change_percent": -21.18690296827991,
+        "mixed_long_all256IDs_exact_prior": true,
+        "mixed_short_first_difference_prior": 209,
+        "mixed_scope": "One quiet candidate; C2/C3 changed from genericF32 to originalF16 attention arithmetic, not identical old trajectory. Final raw/resource comparison and C4-32K measurement pending live sequential runner.",
+        "qualification_promoted": false,
+        "automatic_verifier_enabled": false,
+        "P7_complete": false
+      }
     }
   ],
   "performance_baseline": "7536aededc049b2157f12eadb0f4cc6bbf29b7b7",
-  "performance_next": "Obtain focused identical-input original C2/C3 uniformQ4 verifier proof and complete-operator baseline, then extend bounded native admission only if arithmetic/masking/output/state/graph-owner gates pass and complete path gains. Current32K tail means397.149ms C3/291.351ms C2 versus117.359ms C4/63.207ms C1, mostly graph replays; source admits onlyC1/C4. This is a measured partial-batch cost hypothesis, not isolated attention causality. Keep defaultD64/state/reference/P1 automatic-admission and primary/long/mixed gaps explicit; no repeat of completed matrix without a new change/noise/regression."
+  "performance_next": "Finish live affected C4-32K candidate worker, compare current mixed/C4-32K raw timings/resources/IDs/cycles against frozen7feb originals/controls, preserve deliberate changed attention arithmetic and actual continuation differences. Existing lifecycle483/483 on candidate. No blanket transfer of prior full practical/default-controlled qualification; automatic verifier/defaultD64/all-layer gates remain open."
 }

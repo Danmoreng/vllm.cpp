@@ -1522,26 +1522,41 @@ TEST_CASE("P1: XPU attention graph policy keys routes partitions and every cache
   CHECK_FALSE(key(4800) == key(4801));  // Packed bound still retires when generic cap is off.
 }
 
-TEST_CASE("P1: XPU attention graph policy bounds only qualified C4 packed verification") {
+TEST_CASE("P1: XPU attention graph policy bounds only qualified batched packed verification") {
   XpuPolicyEnv env; char a = 0; auto kv = XpuPolicyKv(&a);
   CommonAttentionMetadata meta;
   meta.num_reqs = 4; meta.num_actual_tokens = 16; meta.max_query_len = 4;
   meta.query_start_loc = {0, 4, 8, 12, 16}; meta.max_seq_len = 4100; meta.causal = true;
-  const auto bound = [&] { return vllm::detail::XpuC4VerifyContextBound(kv, true, 24, 16, meta); };
+  const auto bound = [&] { return vllm::detail::XpuBatchedVerifyContextBound(kv, true, 24, 16, meta); };
   CHECK(bound() == 4100); REQUIRE(setenv("VT_XPU_XE2_VERIFY", "1", 1) == 0);
   CHECK(bound() == 4800); kv.head_size_v = 256; CHECK(bound() == 4800);
   kv.head_size_v = 128; CHECK(bound() == 4100); kv.head_size_v = 0;
   meta.max_seq_len = 4800; CHECK(bound() == 4800);
   meta.max_seq_len = 4801; CHECK(bound() == 6400);
   meta.max_seq_len = 4100; kv.k_scale = 0.5f; CHECK(bound() == 4100); kv.k_scale = 1;
-  CHECK(vllm::detail::XpuC4VerifyContextBound(kv, false, 24, 16, meta) == 4100);
-  CHECK(vllm::detail::XpuC4VerifyContextBound(kv, true, 8, 16, meta) == 4100);
+  CHECK(vllm::detail::XpuBatchedVerifyContextBound(kv, false, 24, 16, meta) == 4100);
+  CHECK(vllm::detail::XpuBatchedVerifyContextBound(kv, true, 8, 16, meta) == 4100);
   meta.query_start_loc = {0, 2, 6, 10, 14}; CHECK(bound() == 4100);
   meta.query_start_loc = {0, 4, 8, 12, 16}; REQUIRE(setenv("VT_XPU_ATTENTION", "split", 1) == 0);
   CHECK(bound() == 4100); REQUIRE(setenv("VT_XPU_ATTENTION", "verify", 1) == 0);
   REQUIRE(setenv("VT_XPU_XE2_VERIFY", "0", 1) == 0); CHECK(bound() == 4800);
   kv.block_size = 1664; CHECK(bound() == 4992);
   meta.num_reqs = 1; CHECK(bound() == 4100);
+  kv.block_size = 1600;
+  for (int requests : {2, 3}) {
+    meta.num_reqs = requests; meta.num_actual_tokens = requests * 4;
+    meta.query_start_loc.clear();
+    for (int r = 0; r <= requests; ++r) meta.query_start_loc.push_back(r * 4);
+    const auto partial = [&] { return vllm::detail::XpuBatchedVerifyContextBound(kv, true, 24, requests * 4, meta); };
+    CHECK(partial() == 4800);
+    meta.max_seq_len = 4800; CHECK(partial() == 4800);
+    meta.max_seq_len = 4801; CHECK(partial() == 6400);
+    meta.max_seq_len = 32768; CHECK(partial() == 33600);
+    meta.query_start_loc[1] = 3; CHECK(partial() == 32768); meta.query_start_loc[1] = 4;
+    CHECK(vllm::detail::XpuBatchedVerifyContextBound(kv, true, 24, requests * 4 - 1, meta) == 32768);
+    REQUIRE(setenv("VT_XPU_ATTENTION", "split", 1) == 0); CHECK(partial() == 32768);
+    REQUIRE(setenv("VT_XPU_ATTENTION", "verify", 1) == 0); meta.max_seq_len = 4100;
+  }
 }
 
 
@@ -1651,17 +1666,18 @@ struct P1XpuCaches {
   }
 };
 int32_t P1PhysicalPage(int request, int page) { return request * 4 + 3 - page; }
-CommonAttentionMetadata P1XpuMeta(int32_t pos, int32_t page) {
+CommonAttentionMetadata P1XpuMeta(int32_t pos, int32_t page, int requests = 4) {
   CommonAttentionMetadata m;
-  m.num_reqs = 4; m.num_actual_tokens = 16; m.max_query_len = 4;
-  m.query_start_loc = m.query_start_loc_cpu = {0, 4, 8, 12, 16};
+  m.num_reqs = requests; m.num_actual_tokens = requests * 4; m.max_query_len = 4;
+  for (int r = 0; r <= requests; ++r) m.query_start_loc.push_back(r * 4);
+  m.query_start_loc_cpu = m.query_start_loc;
   // Unequal contexts share the same host partition/bound, but have distinct
   // disjoint request pages and fresh lengths/positions/slots on every replay.
-  for (int r = 0; r < 4; ++r) m.seq_lens.push_back(pos + 4 - r * 7);
+  for (int r = 0; r < requests; ++r) m.seq_lens.push_back(pos + 4 - r * 7);
   m.seq_lens_cpu = m.seq_lens; m.max_seq_len = pos + 4;
   m.block_table_num_cols = 164;
-  m.block_table_tensor.assign(4 * 164, -1);
-  for (int r = 0; r < 4; ++r) {
+  m.block_table_tensor.assign(requests * 164, -1);
+  for (int r = 0; r < requests; ++r) {
     const int active = (m.seq_lens[r] + page - 1) / page;
     for (int p = 0; p < active; ++p)
       m.block_table_tensor[r * 164 + p] = P1PhysicalPage(r, p);
@@ -1672,10 +1688,10 @@ CommonAttentionMetadata P1XpuMeta(int32_t pos, int32_t page) {
   }
   m.causal = true; return m;
 }
-std::vector<unsigned char> P1XpuLogits(const vllm::ForwardLogits& logits, vt::Queue& q) {
-  REQUIRE(logits.rows == 16); REQUIRE(logits.vocab == 40);
+std::vector<unsigned char> P1XpuLogits(const vllm::ForwardLogits& logits, vt::Queue& q, int rows = 16) {
+  REQUIRE(logits.rows == rows); REQUIRE(logits.vocab == 40);
   REQUIRE(logits.device_tensor.dtype == DType::kF32);
-  std::vector<unsigned char> result(16 * 40 * sizeof(float));
+  std::vector<unsigned char> result(rows * 40 * sizeof(float));
   auto& b = vt::GetBackend(q.device);
   b.Copy(q, result.data(), logits.device_tensor.data, result.size()); b.Synchronize(q);
   bool nonzero = false;
@@ -1722,8 +1738,6 @@ TEST_CASE("P1: XPU dense model retires route and cache graphs with exact own-sta
   config.max_position_embeddings = 6656;
   auto weights = P1XpuWeights(config);
   P1XpuCaches eager(q, config), captured(q, config);
-  auto gm = SpecGdnMeta(4, 4);
-  for (int i = 0; i < 16; ++i) (*gm.spec_state_indices_tensor)[i] = i;
   // The graph is declared after every baked input owner. Retired allocations
   // and their byte snapshots remain valid until all graph work has completed.
   std::vector<std::unique_ptr<P1XpuBuffer>> retired;
@@ -1731,7 +1745,10 @@ TEST_CASE("P1: XPU dense model retires route and cache graphs with exact own-sta
   vt::ResetGraphBreakStats();
   auto graph = std::make_unique<vllm::Qwen3_5DenseDecodeGraph>(weights, config, q, 4);
   int step = 0, captures = 0, launches = 0;
-  const auto phase = [&](const char* name, int pos, int count, int expected_captures) {
+  const auto phase = [&](const char* name, int pos, int count, int expected_captures,
+                         int requests = 4, int expected_live_graphs = 2) {
+    auto gm = SpecGdnMeta(requests, 4);
+    for (int i = 0; i < requests * 4; ++i) (*gm.spec_state_indices_tensor)[i] = i;
     const auto before = vt::GetGraphBreakStats();
     vt::xpu::DrainProfileEvents();
     const int64_t replay_before = graph->replay_count();
@@ -1740,9 +1757,9 @@ TEST_CASE("P1: XPU dense model retires route and cache graphs with exact own-sta
       CAPTURE(i);
       CAPTURE(step);
       const int page = int(captured.kv.front().block_size);
-      auto meta = P1XpuMeta(pos + 4 * i, page);
+      auto meta = P1XpuMeta(pos + 4 * i, page, requests);
       std::vector<int32_t> tokens, positions;
-      for (int r = 0; r < 4; ++r)
+      for (int r = 0; r < requests; ++r)
         for (int j = 0; j < 4; ++j) {
           tokens.push_back((step * 3 + r * 11 + j * 5) % 40);
           positions.push_back(pos + 4 * i + j - r * 7);
@@ -1751,11 +1768,11 @@ TEST_CASE("P1: XPU dense model retires route and cache graphs with exact own-sta
       {
         auto logits = vllm::Qwen3_5DenseModel::ForwardDevice(tokens, positions, meta, gm,
             eager.kv, eager.gdn, weights, config, q, {});
-        expected = P1XpuLogits(logits, q);
+        expected = P1XpuLogits(logits, q, requests * 4);
       }
       {
         auto logits = graph->Step(tokens, positions, meta, gm, captured.kv, captured.gdn);
-        REQUIRE(P1XpuLogits(logits, q) == expected);
+        REQUIRE(P1XpuLogits(logits, q, requests * 4) == expected);
       }
       for (size_t k = 0; k < captured.kv_buffers.size(); ++k)
         REQUIRE(captured.kv_buffers[k]->Read() == eager.kv_buffers[k]->Read());
@@ -1768,7 +1785,7 @@ TEST_CASE("P1: XPU dense model retires route and cache graphs with exact own-sta
     // Each policy transition needs two cold steps (one per ring slot); the
     // capture step executes its graph once and counts as a replay launch.
     CHECK(graph->replay_count() - replay_before == count - expected_captures);
-    CHECK(graph->captured()); CHECK(vt::xpu::GetMemoryInfo().graph_count == 2);
+    CHECK(graph->captured()); CHECK(vt::xpu::GetMemoryInfo().graph_count == expected_live_graphs);
     captures += got; launches += int(graph->replay_count() - replay_before);
     const auto events = vt::xpu::DrainProfileEvents();
     const auto packs = std::count_if(events.begin(), events.end(), [](const auto& event) {
@@ -1810,7 +1827,13 @@ TEST_CASE("P1: XPU dense model retires route and cache graphs with exact own-sta
       arm->kv[k].block_size = 1664;
     }
   phase("physical-page-layout-1664", 4828, 8, 2);
-  CHECK(step == 52); CHECK(captures == 12); CHECK(launches == 40);
+  // Each logical row shape owns its existing two-slot ring. Establish both C2
+  // captures before the boundary so the next phase proves their retirement.
+  phase("partial-C3-stable-bound", 4860, 8, 2, 3, 4);
+  phase("partial-C2-stable-bound", 4892, 8, 2, 2, 6);
+  phase("partial-C2-cross-page", 4980, 12, 2, 2, 6);
+  phase("partial-C4-return", 5030, 8, 2, 4, 6);
+  CHECK(step == 88); CHECK(captures == 20); CHECK(launches == 68);
   const auto peak = vt::xpu::GetMemoryInfo().peak_allocated_bytes;
   graph.reset();  // destroys every model graph before its baked buffers die
   CHECK(vt::xpu::GetMemoryInfo().graph_count == 0);
