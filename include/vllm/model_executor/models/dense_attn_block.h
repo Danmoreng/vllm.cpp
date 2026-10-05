@@ -372,8 +372,8 @@ inline DBuf Exl3GroupedMatmulD(Dev d, const vt::Tensor& x,
   }
   DBuf out(d, vt::DType::kF16, {M, N});
   if (M > 128) {
-    vt::Exl3GroupedW8A8(d.q, out.t(), x, trellis, suh, svh, map,
-                       {bits, w.codebook, w.name.c_str(), panel_columns});
+    vt::detail::Exl3GroupedW8A8Model(d.q, out.t(), x, trellis, suh, svh, map,
+        {bits, w.codebook, w.name.c_str(), panel_columns}, w.source_map.d_dev, w.w8a8_model_map);
     // One backend-owned completion lease replaces per-projection DBuf scratch.
     return out;
   }
@@ -421,8 +421,9 @@ inline DBuf Exl3MatmulD(Dev d, const vt::Tensor& x, const Exl3Weight& w,
     });
     DBuf out(d, vt::DType::kF16, {M, N});
     if (M > 128) {
-      vt::Exl3GroupedW8A8(d.q, out.t(), x, trellis, suh, svh, shard,
-                         {w.Bits(), w.codebook, w.name.c_str(), panel_columns});
+      vt::detail::Exl3GroupedW8A8Model(d.q, out.t(), x, trellis, suh, svh, shard,
+          {w.Bits(), w.codebook, w.name.c_str(), panel_columns},
+          w.single_source_map.d_dev, w.w8a8_model_map);
       return out;
     }
     const auto plan = vt::PlanExl3SmallM(M, K, N, w.Bits());

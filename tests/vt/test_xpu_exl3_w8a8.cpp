@@ -11,6 +11,7 @@
 #include <iostream>
 #include <chrono>
 #include <fstream>
+#include <future>
 #include <string_view>
 #include <nlohmann/json.hpp>
 
@@ -65,6 +66,255 @@ TEST_CASE("EXL3 W8A8 plan: explicit boundary bounded panel and aligned regions")
   CHECK_THROWS(vt::PlanExl3W8A8(129, 5120, 16384, 2, 5));
   CHECK_THROWS(vt::PlanExl3W8A8(129, 133248, 128, 1, 4));
   CHECK_THROWS(vt::PlanExl3W8A8(4096, 2147483520LL, 2147483520LL, 32767, 6));
+}
+
+TEST_CASE("XPU EXL3 W8A8 P7: model map ownership generations public guards and queues") {
+  const char* fixture = std::getenv("VT_B70_EXL3_W8A8_FIXTURE");
+  if (!fixture) std::exit(77);
+  const bool present = std::getenv("VT_XPU_W8A8_MODEL_MAP") != nullptr;
+  const std::string prior = present ? std::getenv("VT_XPU_W8A8_MODEL_MAP") : "";
+  struct Restore {
+    bool present; std::string prior;
+    ~Restore() {
+      if (present) setenv("VT_XPU_W8A8_MODEL_MAP", prior.c_str(), 1);
+      else unsetenv("VT_XPU_W8A8_MODEL_MAP");
+    }
+  } restore{present, prior};
+  setenv("VT_XPU_W8A8_MODEL_MAP", "1", 1);
+  const auto f = vllm::SafetensorsFile::Open(fixture);
+  const auto& tr = f.Get("merged_trellis"); const auto& su = f.Get("stacked_suh");
+  const auto& sv = f.Get("merged_svh"); const auto& original_map = f.Get("source_map");
+  const int k = int(su.shape[1]), n = int(sv.shape[0]), groups = int(su.shape[0]);
+  const int bits = int(tr.shape[2] / 16), m = 129;
+  REQUIRE(groups >= 2);
+  Queue first(vt::DeviceType::kXPU), second(vt::DeviceType::kXPU);
+  Buffer trellis(first.q, DType::kI8, {k / 16, n / 16, 32 * bits});
+  Buffer suh(first.q, DType::kF16, {groups, k}), svh(first.q, DType::kF16, {n});
+  Buffer input(first.q, DType::kF16, {m, k}), out(first.q, DType::kF16, {m, n});
+  trellis.upload(tr.data); suh.upload(su.data); svh.upload(sv.data);
+  input.upload(f.Get("input_m129").data);
+  auto owner = std::shared_ptr<void>(vt::Alloc(first.q.device, original_map.nbytes),
+      [device = first.q.device](void* ptr) { vt::Free(device, ptr); });
+  auto map = vt::Tensor::Contiguous(owner.get(), DType::kI32, first.q.device, {n / 128});
+  auto upload_map = [&](const void* bytes) {
+    vt::GetBackend(first.q.device).Copy(first.q, map.data, bytes, map.Bytes());
+    vt::GetBackend(first.q.device).Synchronize(first.q);
+  };
+  upload_map(original_map.data);
+  std::shared_ptr<const vt::Exl3W8A8ModelMap> cache;
+  for (int width : {1024, 128, 2048, 1024}) {
+    CAPTURE(width);
+    const vt::Exl3GroupedLinearArgs args{bits, 2, "P7_MODEL_MAP", width};
+    vt::Exl3GroupedW8A8(first.q, out.tensor, input.tensor, trellis.tensor,
+        suh.tensor, svh.tensor, map, args);
+    const auto expected = out.download();
+    const auto old_cache = cache;
+    vt::detail::Exl3GroupedW8A8Model(second.q, out.tensor, input.tensor, trellis.tensor,
+        suh.tensor, svh.tensor, map, args, owner, cache);
+    vt::GetBackend(second.q.device).Synchronize(second.q);
+    xpu_test::SameBytes(out.download(), expected);
+    REQUIRE(cache); CHECK(cache->Matches(map, groups, owner));
+    if (old_cache) CHECK(cache == old_cache);
+  }
+  // Two cold host callers on distinct queues publish/read the slot atomically.
+  // Each call keeps its own immutable certificate until submissions complete.
+  {
+    const auto expected = out.download();
+    Buffer other_out(second.q, DType::kF16, {m, n});
+    cache.reset();
+    const vt::Exl3GroupedLinearArgs concurrent_args{bits, 2, "P7_CONCURRENT_MAP", 1024};
+    auto first_call = std::async(std::launch::async, [&] {
+      vt::detail::Exl3GroupedW8A8Model(first.q, out.tensor, input.tensor, trellis.tensor,
+          suh.tensor, svh.tensor, map, concurrent_args, owner, cache);
+      vt::GetBackend(first.q.device).Synchronize(first.q);
+    });
+    auto second_call = std::async(std::launch::async, [&] {
+      vt::detail::Exl3GroupedW8A8Model(second.q, other_out.tensor, input.tensor, trellis.tensor,
+          suh.tensor, svh.tensor, map, concurrent_args, owner, cache);
+      vt::GetBackend(second.q.device).Synchronize(second.q);
+    });
+    REQUIRE_NOTHROW(first_call.get()); REQUIRE_NOTHROW(second_call.get());
+    xpu_test::SameBytes(out.download(), expected);
+    xpu_test::SameBytes(other_out.download(), expected);
+    REQUIRE(cache); CHECK(cache->Matches(map, groups, owner));
+  }
+  // Same address, distinct ownership control block: this is a new residency
+  // generation. An alias sharing the original control block remains valid.
+  std::shared_ptr<void> alias(owner, owner.get());
+  CHECK(cache->Matches(map, groups, alias));
+  auto generation = std::shared_ptr<void>(owner.get(), [keep = owner](void*) {});
+  CHECK_FALSE(cache->Matches(map, groups, generation));
+  auto wrong = map; wrong.shape[0] -= 1;
+  CHECK_FALSE(cache->Matches(wrong, groups, owner));
+  wrong = map; wrong.stride[0] = 2;
+  CHECK_FALSE(cache->Matches(wrong, groups, owner));
+  wrong = map; wrong.device.type = vt::DeviceType::kCPU;
+  CHECK_FALSE(cache->Matches(wrong, groups, owner));
+  CHECK_FALSE(cache->Matches(map, groups - 1, owner));
+  const auto previous_cache = cache;
+  const vt::Exl3GroupedLinearArgs args{bits, 2, "P7_MODEL_MAP", 1024};
+  vt::detail::Exl3GroupedW8A8Model(first.q, out.tensor, input.tensor, trellis.tensor,
+      suh.tensor, svh.tensor, map, args, generation, cache);
+  CHECK(cache != previous_cache); CHECK(cache->Matches(map, groups, generation));
+  const auto preserved = out.download();
+  // Public callers cannot suppress validation with a cached payload, even
+  // after modifying an allocation in place. Both public seams must discard it.
+  std::vector<int32_t> bad(size_t(n / 128));
+  std::memcpy(bad.data(), original_map.data, original_map.nbytes); bad[0] = groups;
+  upload_map(bad.data());
+  auto injected = args; injected.model_map = cache.get();
+  CHECK_THROWS_WITH_AS(vt::Exl3GroupedW8A8(first.q, out.tensor, input.tensor,
+      trellis.tensor, suh.tensor, svh.tensor, map, injected),
+      doctest::Contains("shard_of_nb group out of range"), std::runtime_error);
+  xpu_test::SameBytes(out.download(), preserved);
+  const auto plan = vt::PlanExl3W8A8(m, k, n, groups, bits, 1024);
+  Buffer scratch(first.q, DType::kI8, {int64_t(plan.workspace_bytes)});
+  Buffer panel(first.q, DType::kI8, {k, plan.weight_panel_columns});
+  const std::vector<unsigned char> poison_scratch(scratch.bytes, 0xa5), poison_panel(panel.bytes, 0xcd);
+  scratch.upload(poison_scratch.data()); panel.upload(poison_panel.data());
+  CHECK_THROWS_WITH_AS(vt::Exl3GroupedW8A8(first.q, out.tensor, input.tensor,
+      trellis.tensor, suh.tensor, svh.tensor, map, scratch.tensor, panel.tensor, injected),
+      doctest::Contains("shard_of_nb group out of range"), std::runtime_error);
+  xpu_test::SameBytes(out.download(), preserved);
+  xpu_test::SameBytes(scratch.download(), poison_scratch);
+  xpu_test::SameBytes(panel.download(), poison_panel);
+  auto next_generation = std::shared_ptr<void>(owner.get(), [keep = owner](void*) {});
+  CHECK_THROWS_WITH_AS(vt::detail::Exl3GroupedW8A8Model(first.q, out.tensor, input.tensor,
+      trellis.tensor, suh.tensor, svh.tensor, map, args, next_generation, cache),
+      doctest::Contains("shard_of_nb group out of range"), std::runtime_error);
+  xpu_test::SameBytes(out.download(), preserved); CHECK(cache->Matches(map, groups, generation));
+  upload_map(original_map.data);
+  // Actual new allocation/reload invalidates the certificate and receives its
+  // own checked decomposition; the old cache keeps its allocation alive.
+  auto replacement = std::shared_ptr<void>(vt::Alloc(first.q.device, map.Bytes()),
+      [device = first.q.device](void* ptr) { vt::Free(device, ptr); });
+  auto new_map = map; new_map.data = replacement.get();
+  vt::GetBackend(first.q.device).Copy(first.q, new_map.data, original_map.data, map.Bytes());
+  vt::GetBackend(first.q.device).Synchronize(first.q);
+  CHECK_FALSE(cache->Matches(new_map, groups, replacement));
+  vt::detail::Exl3GroupedW8A8Model(first.q, out.tensor, input.tensor, trellis.tensor,
+      suh.tensor, svh.tensor, new_map, args, replacement, cache);
+  xpu_test::SameBytes(out.download(), preserved);
+  CHECK(cache->Matches(new_map, groups, replacement));
+  // A warm routing certificate never removes dynamic input or scale guards.
+  auto execute_owned = [&] { vt::detail::Exl3GroupedW8A8Model(first.q, out.tensor,
+      input.tensor, trellis.tensor, suh.tensor, svh.tensor, new_map, args, replacement, cache); };
+  auto bad_input = input.download(), bad_suh = suh.download(), bad_svh = svh.download();
+  const uint16_t nan = 0x7e35, inf = 0x7c00;
+  std::memcpy(bad_input.data(), &nan, 2); input.upload(bad_input.data());
+  CHECK_THROWS_WITH_AS(execute_owned(), doctest::Contains("finite inputs"), std::runtime_error);
+  xpu_test::SameBytes(out.download(), preserved);
+  std::memcpy(bad_svh.data(), &inf, 2); svh.upload(bad_svh.data());
+  CHECK_THROWS_WITH_AS(execute_owned(), doctest::Contains("finite svh"), std::runtime_error);
+  xpu_test::SameBytes(out.download(), preserved);
+  svh.upload(sv.data); input.upload(f.Get("input_m129").data);
+  std::memcpy(bad_suh.data(), &inf, 2); suh.upload(bad_suh.data());
+  CHECK_THROWS_WITH_AS(execute_owned(), doctest::Contains("finite inputs"), std::runtime_error);
+  xpu_test::SameBytes(out.download(), preserved);
+  suh.upload(su.data); execute_owned(); xpu_test::SameBytes(out.download(), preserved);
+  // Managed W8A8 remains eager-only, including a warmed model certificate.
+  if (vt::GetBackend(first.q.device).SupportsGraphCapture()) {
+    auto& backend = vt::GetBackend(first.q.device);
+    backend.BeginCapture(first.q);
+    CHECK_THROWS_WITH_AS(execute_owned(), doctest::Contains("eager-only"), std::runtime_error);
+    void* graph = backend.EndCaptureGraph(first.q); backend.DestroyGraph(graph);
+    xpu_test::SameBytes(out.download(), preserved);
+    CHECK(vt::xpu::GetMemoryInfo().graph_device_bytes == 0);
+  }
+  std::weak_ptr<void> lifetime = replacement;
+  // The model-only default must exercise the certificate, not silently select
+  // the public fallback. Public calls above still ignored an injected payload.
+  unsetenv("VT_XPU_W8A8_MODEL_MAP"); cache.reset();
+  execute_owned();
+  REQUIRE(cache); CHECK(cache->Matches(new_map, groups, replacement));
+  xpu_test::SameBytes(out.download(), preserved);
+  replacement.reset(); CHECK_FALSE(lifetime.expired());
+  cache.reset(); CHECK(lifetime.expired());
+  CHECK(vt::GetReferenceTierHits() == 0);
+  std::cout << "P7_MODEL_MAP ownership_generations=1 public_guards=1 cross_queue=1 retired_owner=1" << std::endl;
+}
+
+TEST_CASE("XPU EXL3 W8A8 P7: model map complete operator gain") {
+  const char* fixture = std::getenv("VT_B70_EXL3_W8A8_FIXTURE");
+  if (!fixture) std::exit(77);
+  const bool present = std::getenv("VT_XPU_W8A8_MODEL_MAP") != nullptr;
+  const std::string prior = present ? std::getenv("VT_XPU_W8A8_MODEL_MAP") : "";
+  struct Restore {
+    bool present; std::string prior;
+    ~Restore() {
+      if (present) setenv("VT_XPU_W8A8_MODEL_MAP", prior.c_str(), 1);
+      else unsetenv("VT_XPU_W8A8_MODEL_MAP");
+    }
+  } restore{present, prior};
+  const auto f = vllm::SafetensorsFile::Open(fixture);
+  const int m = std::getenv("VT_B70_EXL3_PANEL_ROWS") ? std::atoi(std::getenv("VT_B70_EXL3_PANEL_ROWS")) : 129;
+  REQUIRE((m == 129 || m == 1600));
+  const auto& tr = f.Get("merged_trellis"); const auto& su = f.Get("stacked_suh");
+  const auto& sv = f.Get("merged_svh"); const auto& routing = f.Get("source_map");
+  const int k = int(su.shape[1]), n = int(sv.shape[0]), groups = int(su.shape[0]);
+  const int bits = int(tr.shape[2] / 16);
+  Queue gpu(vt::DeviceType::kXPU);
+  Buffer trellis(gpu.q, DType::kI8, {k / 16, n / 16, 32 * bits});
+  Buffer suh(gpu.q, DType::kF16, {groups, k}), svh(gpu.q, DType::kF16, {n});
+  Buffer input(gpu.q, DType::kF16, {m, k}), out(gpu.q, DType::kF16, {m, n});
+  trellis.upload(tr.data); suh.upload(su.data); svh.upload(sv.data);
+  input.upload(f.Get("input_m" + std::to_string(m)).data);
+  auto owner = std::shared_ptr<void>(vt::Alloc(gpu.q.device, routing.nbytes),
+      [device = gpu.q.device](void* ptr) { vt::Free(device, ptr); });
+  auto map = vt::Tensor::Contiguous(owner.get(), DType::kI32, gpu.q.device, {n / 128});
+  vt::GetBackend(gpu.q.device).Copy(gpu.q, map.data, routing.data, routing.nbytes);
+  vt::GetBackend(gpu.q.device).Synchronize(gpu.q);
+  std::shared_ptr<const vt::Exl3W8A8ModelMap> cache;
+  const vt::Exl3GroupedLinearArgs args{bits, 2, "P7_MODEL_MAP_BENCH", 1024};
+  auto execute = [&] { vt::detail::Exl3GroupedW8A8Model(gpu.q, out.tensor, input.tensor,
+      trellis.tensor, suh.tensor, svh.tensor, map, args, owner, cache);
+      vt::GetBackend(gpu.q.device).Synchronize(gpu.q); };
+  const auto before = input.download();
+  // Both arms reach steady execution before any sample. The former two-warm,
+  // all-off-then-all-on order confounded this small host change with GPU warmup.
+  nlohmann::json warm = nlohmann::json::array();
+  for (int i = 0; i < 64; ++i) {
+    const bool cached = i % 2 != 0;
+    setenv("VT_XPU_W8A8_MODEL_MAP", cached ? "1" : "0", 1);
+    const auto start = std::chrono::steady_clock::now(); execute();
+    warm.push_back({{"cached", cached}, {"complete_operator_wall_ms",
+        std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count()}});
+    (void)vt::xpu::DrainProfileEvents(); (void)vt::xpu::DrainHostProfileRecords();
+  }
+  const auto expected = out.download();
+  (void)vt::xpu::DrainProfileEvents(); (void)vt::xpu::DrainHostProfileRecords();
+  nlohmann::json trials = nlohmann::json::array();
+  // ABBA/BAAB puts both routes equally early and late; record actual order and
+  // each complete operator, rather than comparing two sequential medians.
+  constexpr bool order[] = {false, true, true, false, true, false, false, true,
+                           false, true, true, false, true, false, false, true};
+  for (bool cached : order) {
+    setenv("VT_XPU_W8A8_MODEL_MAP", cached ? "1" : "0", 1);
+    const auto start = std::chrono::steady_clock::now(); execute();
+    const auto elapsed = std::chrono::duration<double, std::milli>(
+        std::chrono::steady_clock::now() - start).count();
+    const auto events = vt::xpu::DrainProfileEvents();
+    const auto hosts = vt::xpu::DrainHostProfileRecords();
+    nlohmann::json trial = {{"cached", cached}, {"complete_operator_wall_ms", elapsed},
+        {"device_events", nlohmann::json::array()}, {"host_events", nlohmann::json::array()}};
+    for (const auto& e : events)
+      trial["device_events"].push_back({{"stage", e.stage}, {"ms", (e.end_ns - e.start_ns) / 1e6}});
+    for (const auto& e : hosts)
+      trial["host_events"].push_back({{"stage", e.stage}, {"ms", (e.end_steady_ns - e.start_steady_ns) / 1e6}});
+    trials.push_back(std::move(trial));
+    xpu_test::SameBytes(out.download(), expected);
+    xpu_test::SameBytes(input.download(), before);
+    REQUIRE(cache); CHECK(cache->Matches(map, groups, owner));
+    (void)vt::xpu::DrainProfileEvents(); (void)vt::xpu::DrainHostProfileRecords();
+  }
+  nlohmann::json result = {{"rows", m}, {"k", k}, {"n", n}, {"groups", groups},
+      {"bits", bits}, {"warm_complete_operators", warm}, {"trials", trials},
+      {"measurement_order", "64 alternating warmups; ABBA BAAB ABBA BAAB"},
+      {"device_profile", std::getenv("VT_XPU_PROFILE") && std::string_view(std::getenv("VT_XPU_PROFILE")) == "1"},
+      {"host_profile", std::getenv("VT_XPU_HOST_PROFILE") && std::string_view(std::getenv("VT_XPU_HOST_PROFILE")) == "1"},
+      {"exact_native_bytes", true}};
+  std::cout << "P7_MODEL_MAP_BALANCED " << result.dump() << std::endl;
+  CHECK(vt::GetReferenceTierHits() == 0);
 }
 
 TEST_CASE("XPU EXL3 W8A8 P2: real rows wider panels preserve rounded intermediates") {
