@@ -2218,7 +2218,7 @@
     },
     {
       "task": "P7",
-      "status": "in_progress_final_candidate_quality_refreshed_primary_C1_pairs_running",
+      "status": "in_progress_current_C1_primary_complete_C4_primary_workers_running",
       "complete": false,
       "C1_repetitions_per_engine": 3,
       "actual_native_primary_assertions_each": 1895,
@@ -5588,9 +5588,152 @@
         "all_three_worker_CPU_throttled_periods_zero": true,
         "qualification_promoted": false,
         "P7_complete": false
+      },
+      "final_candidate_primary_C1_046ece2df": {
+        "product_source": "046ece2dfde4d5326b44a6f36f82047a9ad4aeb2",
+        "receipt": {
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p7-candidate-matrix-v2/primary-C1-comparison-v1.json",
+          "bytes": 60962,
+          "sha256": "2288cd06cc9c579c8cf8ec5283d73f1ff595e0b36a55152a5f1de8184f75a078"
+        },
+        "verified_primary_identities": 164,
+        "memory_receipt": {
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p7-candidate-matrix-v2/memory-C1-v1.json",
+          "bytes": 4424,
+          "sha256": "0860f36e06c6c303b2c22116af521bb6034b00f41840486ce83cd1b073258697"
+        },
+        "repetitions_each_engine": 3,
+        "actual_GPU_worker_exits_each": 0,
+        "native_assertions_each": 1900,
+        "stats": {
+          "native": {
+            "emitted_decode_tps": [
+              49.957792548532915,
+              49.76045698331976,
+              49.88499618552231
+            ],
+            "TTFT_ms": [
+              2331.5669080000002,
+              2347.233409,
+              2335.864165
+            ],
+            "E2E_s": [
+              22.808878459,
+              22.905753197,
+              22.843058046
+            ],
+            "mean_MTP_decode_cycle_ms": [
+              55.63859223641309,
+              55.85930171739123,
+              55.71979923641305
+            ],
+            "accepted": [
+              656,
+              656,
+              656
+            ],
+            "proposed": [
+              1104,
+              1104,
+              1104
+            ],
+            "median": {
+              "emitted_decode_tps": 49.88499618552231,
+              "TTFT_ms": 2335.864165,
+              "E2E_s": 22.843058046
+            }
+          },
+          "original": {
+            "emitted_decode_tps": [
+              63.94147167654978,
+              63.86340557303269,
+              55.39618365932981
+            ],
+            "TTFT_ms": [
+              1953.5384239861742,
+              1951.5525129972957,
+              1951.9909050140996
+            ],
+            "E2E_s": [
+              17.952562627004227,
+              17.970133999013342,
+              20.418986310978653
+            ],
+            "mean_MTP_decode_cycle_ms": [
+              null,
+              null,
+              null
+            ],
+            "accepted": [
+              666,
+              666,
+              612
+            ],
+            "proposed": [
+              1074,
+              1074,
+              1239
+            ],
+            "median": {
+              "emitted_decode_tps": 63.86340557303269,
+              "TTFT_ms": 1951.9909050140996,
+              "E2E_s": 17.970133999013342
+            }
+          }
+        },
+        "native_median_change_percent": {
+          "emitted_decode_tps": -21.88797991914947,
+          "TTFT_ms": 19.665729947810775,
+          "E2E_s": 27.11679304814425
+        },
+        "continuity": {
+          "native_all1024_IDs_and_non_timing_cycles_exact_repeats_and_prior": true,
+          "native_cycle_count": 371,
+          "original_repeat_first_differences": {
+            "2": null,
+            "3": {
+              "index": 48,
+              "first": 6761,
+              "second": 39666
+            }
+          },
+          "original_native_first_difference_each": {
+            "1": {
+              "index": 68,
+              "first": 279,
+              "second": 1396
+            },
+            "2": {
+              "index": 68,
+              "first": 279,
+              "second": 1396
+            },
+            "3": {
+              "index": 48,
+              "first": 39666,
+              "second": 6761
+            }
+          }
+        },
+        "native_device_peak_bytes_each": 30326149443,
+        "original_Torch_peak_allocated_bytes_each": 27960091648,
+        "all_swap_peaks_and_memory_limit_OOM_events_zero": true,
+        "original_whole_worker_CPU_throttled_periods": [
+          88,
+          75,
+          81
+        ],
+        "native_whole_worker_CPU_throttled_periods": [
+          0,
+          0,
+          0
+        ],
+        "scope": "Same frozen P4096/O1024,MTP3,checkpoint/subset/full6bpw head,page1600,FP8KV,O32warmup/reset and24GiB/no-swap/CPU2. Fresh original/native three trials, never concurrent. Actual emitted chunks, not forward-rate proxy. Independent autonomous continuations may differ; no ideal target-distribution/all-layer/state qualification inferred from speeds or repeats.",
+        "qualification_promoted": false,
+        "P7_complete": false
       }
     }
   ],
   "performance_baseline": "7536aededc049b2157f12eadb0f4cc6bbf29b7b7",
-  "performance_next": "Current product046ece2df practical/draft/default-controlled qualification refreshed; source-current lifecycle already483/483. Run planned primary C1 original/native3each in candidate-matrix-v2, then primary C4 and remaining current native sentinels; reuse current same-source mixed/C4-32K/lifecycle. DefaultD64 four failures, full-all-layer/reference/P1 automatic-admission gates remain open."
+  "performance_next": "Current046ece2df practical/draft/default-controlled and primaryC1 original/native3each refreshed. Primary C4 native/original3each now live sequentially in candidate-matrix-v2 (run-primary-C4-v1.py); never restart a live worker. Then current no-MTP/C1-32K/prefix sentinels once and bounded separate current primary target profile. Reuse already executed same-source mixed/C4-32K/lifecycle. Default-reference four failures/full-all-layer/P1 admission gates remain open."
 }
