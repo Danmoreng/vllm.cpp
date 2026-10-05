@@ -236,6 +236,7 @@ TEST_CASE("XPU GPTQ dense F16 matmul with optional bias") {
       expected[row * n + col] = sum + vt::F16ToF32(b_bits[col]);
     }
   }
+  const auto before = vt::xpu::GetGptq4RuntimeStats(q.device.index);
   vt::MatmulDenseF16(q, output.tensor, activation.tensor, weight.tensor,
                      &bias.tensor);
   vt::GetBackend(q.device).Synchronize(q);
@@ -245,7 +246,7 @@ TEST_CASE("XPU GPTQ dense F16 matmul with optional bias") {
   RequireClose(output_no_bias.Read(), expected_no_bias);
   const auto stats = vt::xpu::GetGptq4RuntimeStats(q.device.index);
   CHECK(stats.engine_count == 1);
-  CHECK(stats.primitive_count == 3);
+  CHECK(stats.primitive_count == before.primitive_count + 2);
 }
 
 TEST_CASE("XPU GPTQ oneDNN profile brackets packed and dense stream spans"

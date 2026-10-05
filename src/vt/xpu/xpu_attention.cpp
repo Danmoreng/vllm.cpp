@@ -500,7 +500,7 @@ void PagedAttentionKernel(Queue& q, Tensor& out, const Tensor& query, const Tens
         device.get_info<sycl::info::device::driver_version>() == "1.17.39758+10" &&
         device.get_platform().get_info<sycl::info::platform::version>() == "1.17";
     bool onednn = false;
-#ifdef VLLM_CPP_XPU_GPTQ4
+#ifdef VLLM_CPP_XPU_ONEDNN
     if (mode == "exl3_onednn" || (automatic && tokens > 128))
       onednn = PagedAttentionExl3OneDnnKernel(q, target, query, key_cache, value_cache,
           block_table, seq_lens, query_start_loc, args);

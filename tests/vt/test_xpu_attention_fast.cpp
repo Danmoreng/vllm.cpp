@@ -95,7 +95,7 @@ struct Fixture {
   std::vector<float> result() { auto data = out.floats(); data.resize(tokens * 24 * 256); return data; }
 };
 }
-#ifdef VLLM_CPP_XPU_GPTQ4
+#ifdef VLLM_CPP_XPU_ONEDNN
 TEST_CASE("XPU EXL3 oneDNN attention: exact page boundaries scales and query padding"
           * doctest::skip(!std::getenv("VT_XPU_PROFILE"))) {
   Queue cpu(vt::DeviceType::kCPU), gpu(vt::DeviceType::kXPU);

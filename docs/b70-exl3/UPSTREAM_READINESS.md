@@ -50,7 +50,20 @@ model, GPU, oracle image or third-party Python package. See the
 [tool usage](../../tools/exl3_reference/README.md) for required failures versus
 optional external skips. Missing required qualification inputs never pass.
 
-CPU/build cleanup, a clean public contribution composition, licensing review,
+U2 names the shared optional dependency `VLLM_CPP_XPU_ONEDNN`; the old
+`VLLM_CPP_XPU_GPTQ4` CMake option remains a compatibility alias. Both produce
+identical compile commands and keep oneDNN at 3.13.0. Both OFF removes the
+capability without leaving a sticky cache value. CPU checks pass without XPU
+or oneDNN, and the oneDNN-disabled XPU backend smoke/operator compile passes.
+The new option alone builds and passes W8A8 ownership (76), oneDNN attention
+(74), isolated dense FP16 (199) and MTP lifecycle (483) assertions; the latter's
+complete payload remains exact. The disabled-stub build failure and initial
+order-dependent dense-test failure remain in the indexed external receipt.
+The corrected dense case also passes with its preceding packed diagnostic
+(1,232 assertions together). No performance or qualification gate is promoted.
+See [XPU build options](../XPU.md#shared-onednn-capability) for the interface.
+
+Test separation, a clean public contribution composition, licensing review,
 ordinary-route admission and integrated original MTP state qualification remain
 separate work. Preserve the frozen default D27/D29 failures and controlled-oracle
 label; no verifier default or full-backend qualification has been promoted.
