@@ -549,3 +549,47 @@ the cross-arm supplement primary-receipt-v2.json is794 bytes,SHA256
 6861d76b2499927957c030e1d3089773328f3825770816ffbf5d1e96ca61aa9b.
 Only the primary six scores are complete. MTP0, C4 overlap, long/mixed,
 lifecycle/prefix, remaining contribution composition and final handoff remain.
+
+U6's MTP0 sentinel and initial C4 pair are now complete on the same frozen
+native source/binary and fixed envelope. Each case has one fresh unprofiled
+worker per arm; all four actual exits are0, with no swap/OOM and host peaks
+below6.6GB. No engine arithmetic, graph policy or qualification default changes.
+
+| C1 P4096/O256 MTP0 | Native | Original | Native change |
+|---|---:|---:|---:|
+| Decode emitted tokens/s | 26.3201 | 29.4640 | -10.670% |
+| TTFT ms | 2,239.007 | 1,909.507 | +17.256% |
+| End-to-end s | 11.9274 | 10.5641 | +12.905% |
+
+Native passes1,354 assertions and all256 IDs/non-time cycles remain exact to
+the historical final MTP0 control. Both engines have zero proposed/accepted
+drafts and physical page1600. Cross-arm tokens first differ at48; this is an
+autonomous target-only timing sentinel, not numerical parity or a kernel gain.
+
+C4 P4096/O1024 each passes7,786 native assertions, finishes in43.9539s and has
+130.5032 aggregate emitted tokens/s over its28.4054s common decode interval
+(3,707 tokens). Pure-decode target request-count histograms are4:346,3:30,2:2,
+1:30. Original finishes in76.2204s but has no all-four common decode interval.
+All1,524 actual speculative scheduler outputs have `num_drafts==1`, and logs
+show one running/three waiting. The frozen original `SpecDecodingStats` and
+`Scheduler.update_from_output` sources establish that this counter counts
+speculative requests in one actual model-result update, not configured maxseqs.
+Genuine original C4 overlap remains unproven: do not expand to three repeats
+or derive a C4 GPU-parity percentage from the different scheduling scopes.
+Cross-arm first token differences are53/3/124/12 for requests0/1/2/3.
+
+All4,096 native IDs/all419 non-time cycles are exact to all three **final**
+matrix-v3 controls. The initial host analyzer incorrectly selected older
+primary controls, which differ only atcycle388's accepted counter (2 versus3)
+while IDs/all other fields match. Preserve that older relation, not a claim of
+full equality to it. Analyzer v1 also has an arm-loop indentation failure;
+v2 fixes it, then exposes the older-control mismatch; v3 selects the actual
+final matrix-v3 baseline and retains the unchanged full-cycle assertions.
+Failed versions and all six historical control comparisons remain indexed;
+no GPU rerun, product correction or threshold relaxation is made.
+
+Results, commands, resources, source-counter interpretation and analysis are in
+recovery/upstream-u6-final-matrix-v1/m0-c4-receipt-v1.json,7474 bytes,SHA256
+a59a513bcd1532b7dd45186e323df0da62f15534c7327716c93960fde1f04aac.
+Continue long/mixed, lifecycle/prefix, remaining composition and handoff;
+Q1/default-reference qualification remains failed/open.
