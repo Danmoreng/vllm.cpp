@@ -591,13 +591,28 @@ void GdnSpecDecodeKernel(Queue& q, Tensor& out, const Tensor& qi,
           std::find(sizes.begin(), sizes.end(), 32) != sizes.end();
     }
     if (slm_selected) {
+      const char* typed_setting = std::getenv("VT_XPU_GDN_SPEC_SLM_TYPED");
+      const std::string_view typed_mode = typed_setting ? typed_setting : "1";
+      VT_CHECK(typed_mode == "0" || typed_mode == "1", "Invalid VT_XPU_GDN_SPEC_SLM_TYPED");
+      const bool typed_selected = typed_mode == "1" && target.dtype == DType::kF16 &&
+          target.IsContiguous() && qi.IsContiguous() && ki.IsContiguous() &&
+          vi.IsContiguous() && g.IsContiguous() && beta.IsContiguous();
       // Each WG owns 64 independent value rows within one head/request.
       // Contiguous transfers use [K,value xor low K bits] SLM so both transfer
       // and value-row accesses spread over the local addresses. Each
       // value owner retains the original ascending-K scalar accumulation.
       // No private128-element state, parallel-K reduction or precision change.
       constexpr int values = 64, keys = 128;
-      const auto event = NativeQueue(q).submit([&](sycl::handler& h) {
+      // Typed memory removes dynamic View dtype branches from the inner-K
+      // loops. Preserve the same SLM layout and ascending-K arithmetic.
+      const auto* query_half = static_cast<const sycl::half*>(qi.data);
+      const auto* key_half = static_cast<const sycl::half*>(ki.data);
+      const auto* value_half = static_cast<const sycl::half*>(vi.data);
+      const auto* gates_float = static_cast<const float*>(g.data);
+      const auto* beta_float = static_cast<const float*>(beta.data);
+      auto* output_half = static_cast<sycl::half*>(target.data);
+      const auto launch = [&]<bool Typed>() {
+        return NativeQueue(q).submit([&](sycl::handler& h) {
         sycl::local_accessor<float, 1> s(sycl::range<1>(values * keys), h);
         h.parallel_for(sycl::nd_range<1>(items, values),
             [=](sycl::nd_item<1> item) [[sycl::reqd_sub_group_size(32)]] {
@@ -609,9 +624,13 @@ void GdnSpecDecodeKernel(Queue& q, Tensor& out, const Tensor& qi,
           const int64_t first = offsets[request], last = offsets[request + 1];
           const int32_t initial = ids[request * cols + nat[request] - 1];
           const int64_t out_channel = head * dv + value;
+          const auto write = [&](int64_t pos, float x) {
+            if constexpr (Typed) output_half[pos] = sycl::half(x);
+            else Store(dst, pos, x);
+          };
           if (initial < 0) {
             for (int64_t token = first; token < last; ++token)
-              Store(dst, token * hv * dv + out_channel, 0.0f);
+              write(token * hv * dv + out_channel, 0.0f);
             return;  // Entire WG has the same request and initial slot.
           }
           if (first == last) return;
@@ -622,26 +641,35 @@ void GdnSpecDecodeKernel(Queue& q, Tensor& out, const Tensor& qi,
           const int64_t key_head = head / (hv / hk);
           for (int64_t token = first; token < last; ++token) {
             const int64_t key_base = (token * hk + key_head) * keys;
-            const float decay = sycl::exp(Load(gs, token * hv + head));
+            const float gate = Typed ? gates_float[token * hv + head] : Load(gs, token * hv + head);
+            const float decay = sycl::exp(gate);
             float prediction = 0.0f;
 #pragma unroll 1
             for (int j = 0; j < keys; ++j) {
               const int address = j * values + (lane ^ (j % values));
               const float decayed = s[address] * decay;
               s[address] = decayed;
-              prediction += decayed * Load(ks, key_base + j);
+              const float key_value = Typed ? static_cast<float>(key_half[key_base + j])
+                                            : Load(ks, key_base + j);
+              prediction += decayed * key_value;
             }
-            const float delta = (Load(vs, token * hv * dv + out_channel) - prediction) *
-                                Load(bs, token * hv + head);
+            const float value_input = Typed ? static_cast<float>(value_half[token * hv * dv + out_channel])
+                                            : Load(vs, token * hv * dv + out_channel);
+            const float beta_input = Typed ? beta_float[token * hv + head] : Load(bs, token * hv + head);
+            const float delta = (value_input - prediction) * beta_input;
             float output = 0.0f;
 #pragma unroll 1
             for (int j = 0; j < keys; ++j) {
               const int address = j * values + (lane ^ (j % values));
-              const float updated = s[address] + delta * Load(ks, key_base + j);
+              const float key_value = Typed ? static_cast<float>(key_half[key_base + j])
+                                            : Load(ks, key_base + j);
+              const float query_value = Typed ? static_cast<float>(query_half[key_base + j])
+                                              : Load(qs, key_base + j);
+              const float updated = s[address] + delta * key_value;
               s[address] = updated;
-              output += updated * (Load(qs, key_base + j) * scale);
+              output += updated * (query_value * scale);
             }
-            Store(dst, token * hv * dv + out_channel, output);
+            write(token * hv * dv + out_channel, output);
             // A different lane transfers this owner's state row. Complete all
             // updates first, then all snapshot reads before the next token.
             item.barrier(sycl::access::fence_space::local_space);
@@ -655,7 +683,9 @@ void GdnSpecDecodeKernel(Queue& q, Tensor& out, const Tensor& qi,
           }
         });
       });
-      RecordProfileEvent(q, "gdn_spec_decode_slm", event);
+      };
+      const auto event = typed_selected ? launch.operator()<true>() : launch.operator()<false>();
+      RecordProfileEvent(q, typed_selected ? "gdn_spec_decode_slm_typed" : "gdn_spec_decode_slm", event);
       return;
     }
     const auto work = [=](int64_t index) {

@@ -1209,6 +1209,15 @@ struct P7SpecSlmEnv {
   ~P7SpecSlmEnv() { if (had) setenv("VT_XPU_GDN_SPEC_SLM", old.c_str(), 1); else unsetenv("VT_XPU_GDN_SPEC_SLM"); }
   void Select(bool on) { REQUIRE(setenv("VT_XPU_GDN_SPEC_SLM", on ? "1" : "0", 1) == 0); }
 };
+struct P7SpecTypedEnv {
+  const bool had = std::getenv("VT_XPU_GDN_SPEC_SLM_TYPED") != nullptr;
+  const std::string old = had ? std::getenv("VT_XPU_GDN_SPEC_SLM_TYPED") : "";
+  ~P7SpecTypedEnv() {
+    if (had) setenv("VT_XPU_GDN_SPEC_SLM_TYPED", old.c_str(), 1);
+    else unsetenv("VT_XPU_GDN_SPEC_SLM_TYPED");
+  }
+  void Select(bool on) { REQUIRE(setenv("VT_XPU_GDN_SPEC_SLM_TYPED", on ? "1" : "0", 1) == 0); }
+};
 struct P7SpecOperands {
   static constexpr int hk = 16, hv = 48, D = 128, cols = 4;
   vt::Queue& q;
@@ -1345,4 +1354,117 @@ TEST_CASE("XPU P7 speculative GDN SLM: paired complete operator timing") {
   report["SLM_per_WG_bytes"]=32768;
   report["new_device_workspace_bytes"]=0;
   std::ofstream f(path); REQUIRE(f.good()); f << report.dump(2) << std::endl;
+}
+
+TEST_CASE("XPU P7 speculative GDN SLM typed: exact snapshots F16 graphs and fallback") {
+  Queue gpu(vt::DeviceType::kXPU); P7SpecSlmEnv mode; P7SpecTypedEnv typed;
+  auto& backend = vt::GetBackend(gpu.q.device); mode.Select(true);
+  for (const auto& lengths : std::vector<std::vector<int>>{{1}, {4}, {4,4,4,4}, {4,2,1,0}}) {
+    for (auto type : {DType::kF16, DType::kF32}) {
+      P7SpecOperands c(gpu.q, lengths, type);
+      const auto qb=c.query.download(), kb=c.key.download(), vb=c.value.download(),
+                 gb=c.gate.download(), bb=c.beta.download();
+      for (int selector=1; selector<=4; ++selector) {
+        for (int r=0; r<c.requests; ++r) c.counts[r]=1+(selector+r-1)%4;
+        c.Stage(); c.Reset(); typed.Select(false); c.Run();
+        const auto expected=c.output.download(), snapshots=c.state.download();
+        c.Reset(); typed.Select(true); c.Run();
+        SameBytes(c.output.download(), expected); SameBytes(c.state.download(), snapshots);
+      }
+      for (int r=0; r<c.requests; ++r)
+        for (int j=1; j<4; ++j) c.indices[r*4+j]=c.indices[r*4];
+      c.Stage(); c.Reset(); typed.Select(false); c.Run();
+      auto expected=c.output.download(), snapshots=c.state.download();
+      c.Reset(); typed.Select(true); c.Run();
+      SameBytes(c.output.download(), expected); SameBytes(c.state.download(), snapshots);
+      c.indices[0]=-1; c.counts[0]=1; c.Stage(); c.Reset(); typed.Select(false); c.Run();
+      expected=c.output.download(); snapshots=c.state.download();
+      c.Reset(); typed.Select(true); c.Run();
+      SameBytes(c.output.download(), expected); SameBytes(c.state.download(), snapshots);
+      SameBytes(c.query.download(), qb); SameBytes(c.key.download(), kb);
+      SameBytes(c.value.download(), vb); SameBytes(c.gate.download(), gb); SameBytes(c.beta.download(), bb);
+      if (c.requests==4 && type==DType::kF16 && backend.SupportsGraphCapture()) {
+        vt::BreakableGraph graph;
+        { vt::GraphCaptureScope scope(backend, gpu.q, graph, vt::GraphCaptureMode::kFull); c.Run(); }
+        REQUIRE(graph.captured());
+        c.Reset(); graph.Replay(gpu.q);
+        SameBytes(c.output.download(), expected); SameBytes(c.state.download(), snapshots);
+        c.counts[0]=2; c.Stage(); c.Reset(); typed.Select(false); c.Run();
+        expected=c.output.download(); snapshots=c.state.download();
+        c.Reset(); graph.Replay(gpu.q);
+        SameBytes(c.output.download(), expected); SameBytes(c.state.download(), snapshots);
+        const auto before=c.state.download(), out=c.output.download();
+        c.indices[4]=c.indices[1]; c.Stage();
+        CHECK_THROWS_WITH_AS(graph.Replay(gpu.q), doctest::Contains("invalid offsets, accepted count or state slot"), std::runtime_error);
+        SameBytes(c.state.download(), before); SameBytes(c.output.download(), out);
+        graph.Reset(); CHECK(vt::xpu::GetMemoryInfo().graph_device_bytes==0);
+      }
+    }
+  }
+  P7SpecOperands c(gpu.q, {4}, DType::kF16); const auto value=c.value.download();
+  c.Reset(); typed.Select(false); c.Run(&c.value.tensor);
+  const auto expected=c.value.download(), snapshots=c.state.download();
+  c.value.upload(value.data()); c.Reset(); typed.Select(true); c.Run(&c.value.tensor);
+  SameBytes(c.value.download(), expected); SameBytes(c.state.download(), snapshots);
+  const auto before=c.state.download(), out=c.output.download();
+  REQUIRE(setenv("VT_XPU_GDN_SPEC_SLM_TYPED", "invalid", 1)==0);
+  CHECK_THROWS_WITH_AS(c.Run(), doctest::Contains("Invalid VT_XPU_GDN_SPEC_SLM_TYPED"), std::runtime_error);
+  SameBytes(c.state.download(), before); SameBytes(c.output.download(), out);
+  CHECK(vt::GetReferenceTierHits()==0);
+}
+
+TEST_CASE("XPU P7 speculative GDN SLM typed: paired complete operator timing") {
+  const char* path=std::getenv("VT_B70_GDN_SLM_OUTPUT");
+  if (!path) { MESSAGE("set VT_B70_GDN_SLM_OUTPUT for focused paired timing"); return; }
+  REQUIRE_FALSE(std::filesystem::exists(path));
+  Queue gpu(vt::DeviceType::kXPU); P7SpecSlmEnv mode; P7SpecTypedEnv typed;
+  auto& backend=vt::GetBackend(gpu.q.device); mode.Select(true);
+  nlohmann::json report={{"schema","b70-exl3-p7-gdn-slm-typed-operator-v1"},
+      {"cases",nlohmann::json::array()}};
+  for (const auto& lengths : std::vector<std::vector<int>>{{4}, {4,4,4,4}, {4,2,1,3}}) {
+    P7SpecOperands c(gpu.q, lengths, DType::kF16);
+    for (int r=0; r<c.requests; ++r) c.counts[r]=r+1;
+    c.Stage(); typed.Select(false); c.Reset(); c.Run();
+    const auto expected=c.output.download(), snapshots=c.state.download();
+    for (int i=0; i<16; ++i) { typed.Select(i%2); c.Reset(); c.Run(); backend.Synchronize(gpu.q); }
+    nlohmann::json trials=nlohmann::json::array();
+    for (bool on : {false,true,true,false,true,false,false,true,false,true,true,false,true,false,false,true}) {
+      typed.Select(on); c.Reset(); const auto start=std::chrono::steady_clock::now();
+      c.Run(); backend.Synchronize(gpu.q);
+      const double ms=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-start).count();
+      trials.push_back({{"typed",on},{"complete_operator_ms",ms}});
+      SameBytes(c.output.download(), expected); SameBytes(c.state.download(), snapshots);
+    }
+    report["cases"].push_back({{"requests",c.requests},{"lengths",lengths},
+        {"dtype","F16 output/qkv, F32 gates/state"},{"accepted_selectors",c.counts},
+        {"state_bytes",c.state.bytes},{"trials",trials},{"all_output_snapshots_exact",true}});
+  }
+  report["SLM_per_WG_bytes"]=32768; report["new_device_workspace_bytes"]=0;
+  std::ofstream f(path); REQUIRE(f.good()); f << report.dump(2) << std::endl;
+}
+
+TEST_CASE("XPU P7 speculative GDN SLM typed: actual selected kernel") {
+  if (!std::getenv("VT_B70_GDN_SLM_DEFAULT_PROBE")) { MESSAGE("run selection probe with device profiling"); return; }
+  REQUIRE(std::getenv("VT_XPU_GDN_SPEC_WG")==nullptr);
+  Queue gpu(vt::DeviceType::kXPU); P7SpecSlmEnv mode; P7SpecTypedEnv typed;
+  mode.Select(true);
+  for (auto type : {DType::kF16, DType::kF32}) {
+    P7SpecOperands c(gpu.q, {4}, type);
+    for (int setting : {0, 1, 2}) {
+      c.Reset();
+      if (setting == 2) REQUIRE(unsetenv("VT_XPU_GDN_SPEC_SLM_TYPED") == 0);
+      else typed.Select(setting == 1);
+      (void)vt::xpu::DrainProfileEvents(); c.Run();
+      c.output.download();
+      int selected=0, fallback=0;
+      for (const auto& event : vt::xpu::DrainProfileEvents()) {
+        selected+=event.stage=="gdn_spec_decode_slm_typed";
+        fallback+=event.stage=="gdn_spec_decode_slm";
+      }
+      CHECK(selected==int(setting != 0 && type==DType::kF16));
+      CHECK(fallback==int(setting == 0 || type==DType::kF32));
+      std::cout << "P7_SLM_TYPED_ROUTE output=" << vt::Name(type) << " setting=" << setting
+                << " selected=" << selected << " fallback=" << fallback << '\n';
+    }
+  }
 }
