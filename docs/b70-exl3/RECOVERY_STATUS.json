@@ -6664,7 +6664,7 @@
     "Q1": "bounded_eager_C1_and_C4transition_target_replays_executed_strictstate_fail_default_repeatability_fail_verifier_experimental_qualification_open",
     "F1": "stopped_at_bounded_precondition_low_measured_producer_cost_no_fusion_variant",
     "F2": "completed_first_event_candidate_rejected_second_direct_candidate_retained_prefill_memory_default_model_only",
-    "F3": "conditional_on_demonstrated_current_cost",
+    "F3": "actual_C4long_mixed_shape_and_replay_cost_evidence_complete_no_generic_ragged_decode_observed_specific_FAoutM4_or_graph_eager_investigation_pending",
     "U6": "pending_bounded_final_comparison_and_review_handoff",
     "receipt": {
       "artifact": "upstream-u1-integration-v1/receipt-v1.json",
@@ -6675,7 +6675,7 @@
     "cpu_limit": "GCC16 now builds the CPU library and selected targets;5 focused CTest cases pass with5019 assertions and one existing registry test-case skip. GCC12 previous unchanged muse_glimmer_mm array-bounds failure retained; not rerun after the cache repair.",
     "other_backends": "Affected Vulkan source compiles and CUDA CUTLASS/Marlin host syntax checks pass. CUDA device build/link/runtime and HIP remain unverified.",
     "performance_scope": "One before/after C1 short native pair:43.61414->43.51202 decode TPS; TTFT2313.785->2318.430ms; request8160.513->8178.879ms. No repeat signal and no refreshed original score.",
-    "next_step": "Proceed with independent conditionalF3: current C4long/mixed actual executed shape/time inclgraphreplays before any variant; then remainingU2 contribution composition/U6 fixedmatrix and Prohandoff. Bounded Q1 C1/C4transition target scopes exercised butstrictstatequalification fails: C1 firstQ4l0SSM afterexactprefill/seeds;C4 alreadycoldprefilll0SSM with4exactrawConv histories. Native ownSSM336/firstQ4KV128 continuity checks pass;C4np4 excludesexistingnp1 FP16producer andtraceusesgeneralchunkedM512, isolatedcause/magnitudeunproven. Keep fastverifier experimental/defaultref/D27-D29 evidence, no precision/math/threshold/default correction. F2 closed,no lease revival/panel sweep;closedP0-P7 not resumed.",
+    "next_step": "F3 actualC4long/mixed evidence complete withzero generic raggeddecode cost: do not create raggedverifier variant. Investigate onlyspecific historicalFAoutM4/native-donor orgraph-eager anomaly beforeF3closure, no globalSmallM/tile/panel sweep. Then remainingU2 contribution composition/U6 fixedmatrix and Prohandoff. PreserveQ1 strictstate/default-reference failed/open andexperimentalverifier, no math/threshold/reference/default promotion; F2 closed andP0-P7 not resumed.",
     "U0_tests": "23 host tests in4 CTest cases pass, including8 generated artifact tests; no GPU arithmetic changed.",
     "U0_receipt": {
       "artifact": "upstream-u1-integration-v1/u0-receipt-v1.json",
@@ -6771,6 +6771,12 @@
       "artifact": "upstream-q1-transition-v1/receipt-v2.json",
       "sha256": "eaa509fca429b119cd8c1274d7f2dfc943f8ee0378ef620edc95ad8b3cb332ff",
       "bytes": 5872
+    },
+    "F3_profile_tests": "Profiling-only R11 actual logical target query/request/sequence/GDN metadata, no inference arithmetic/graph policy or unprofiled JSON changes. Focused build2steps; smoke116pass,6targetcycles/5actualtargetgraphreplays. Canonical C4P32768/O2564386pass,187targetcycles/98targetgraphreplays; mixed4K/32KO2562367pass,135targetcycles/105targetgraphreplays. Same-queue device-timestamp containment assigns eager events/whole graph-compute replay to target spans. Both zero target attention_reference events/zero ragged puredecode cycles; nonuniform prefill/mixed shapes show oneDNN SDPA. All4/2 requests256IDs and allnontimecycles exact historicalnative matrixv3 controls,notoriginalparity. Profiled runs notservingscores/U6; graph internal attention-node times unavailable. 24GiB/no swap/CPU2,noOOM,hostcgrouppeaks6397235200/4728975360B. No raggedvariant justified; specific FAoutM4/graph-eager anomaly remains, Q1 failed/open.",
+    "F3_profile_receipt": {
+      "artifact": "upstream-f3-shape-profile-v1/receipt-v1.json",
+      "sha256": "08cd5db5627295fe02a951503a59f5da34b83f0eaecb2944ef13a0076b5bc8bb",
+      "bytes": 6540
     }
   }
 }
