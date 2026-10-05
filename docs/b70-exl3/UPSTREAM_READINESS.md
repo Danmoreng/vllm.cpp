@@ -257,3 +257,35 @@ A clean public contribution composition,
 ordinary-route admission and integrated original MTP state qualification remain
 separate work. Preserve the frozen default D27/D29 failures and controlled-oracle
 label; no verifier default or full-backend qualification has been promoted.
+
+Q1 now has an original integrated C1 trace: cold P128 followed by two actual
+Q4 target forwards with the original depth3 MTP drafter and rejection sampler.
+The capture validates the real embedding-module token witness even when the
+VLM runner passes root input_ids=None. It copies all48GDN consumed seeds and
+full per-token FP32 snapshots, valid Conv windows and only initialized logical
+FP8 KV rows from all16attention layers. Cold unconsumed seeds, spare SSM slots
+and unwritten/rejected-tail KV capacity are excluded. Each complete arm contains
+931 tensors/1704365720 bytes,432 produced SSM snapshots and96 consumed seeds.
+Payload identities and256 inter-step seed/KV-prefix checks per arm pass exactly;
+11 focused host admission/observer tests pass without Torch, model or GPU.
+
+Default-v1 actually exits1 after an observer assumed root input_ids was present;
+the embedding witness corrects that error. Default-v2 captures all three complete
+forwards but actually exits1 at the ordinary/observed16-ID repeatability gate.
+Both failures and the default-v2 full boundary payloads remain preserved.
+Controlled-v3 separately enables the existing scoped deterministic BA diagnostic:
+actualexit0, ordinary/observed16IDs exact, all three complete boundary captures
+and initialized-state continuity checks pass. Its sequence lengths are128/132/133
+with previous accepted counts1/1; this is not acceptance-diversity coverage.
+These observations do not establish that the observer caused the default
+trajectory difference or that native arithmetic is more accurate.
+
+The capsule is recovery/upstream-q1-integrated-mtp-v1/receipt-v1.json,
+11377 bytes,SHA2569ee24b4d13679ef172f7e6e94347ae3a6d9d2dee54d681949502007dbcf10817.
+Frozen tool versions, exact commands/resources, failed exits, per-forward raw
+payloads and the reproducible integrity/continuity analyzer are included there.
+All workers used the pinned original image,24GiB/no swap/two CPUs; no OOM was
+observed. These eager observed runs are not serving-performance scores.
+Native replay against the actual tokens/accepted lengths and C4->C2->C1 remain
+next. Controlled/default labels and frozen D27/D29 failures remain separate;
+no ordinary verifier admission or whole-backend state parity is claimed.
