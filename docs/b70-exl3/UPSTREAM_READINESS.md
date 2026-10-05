@@ -509,3 +509,43 @@ The patch, source identities, actual apply/build/test results and rules are
 indexed in recovery/upstream-u2-contribution-surface-v1/receipt-v1.json,3832
 bytes,SHA2565937c05476c42f6cd8eb5781919ed627369490a7a5419c4b558b6b54d09f0ec0.
 Remaining feature composition must not delay U6's bounded final matrix.
+
+U6's primary C1 P4096/O1024/MTP3 comparison is now refreshed on source
+`fd40e0b92`, frozen native binary
+`c0ca1870dac2707889e02e648bd806d33d8b26a08b4fa99d8747ac21a9461ae3`.
+Three fresh unprofiled engines per arm run sequentially in order N1/O1/O2/N2/N3/O3.
+All native workers pass1,900 assertions; all six actual exits are0. The matched
+workload/checkpoint/subset, page1600/180blocks, FP16/FP8, O32 warmup/prefix reset,
+unchanged180W and24GiB/no swap/two CPUs are checked. Native direct preparation
+uses its defaultON; the fast verifier is still explicitly experimental.
+Original uses the existing matched serving-config overrides, compiled graphs
+and no arithmetic-control override; constructor startup is excluded.
+
+| Current C1 median | Native | Original | Native change |
+|---|---:|---:|---:|
+| Decode emitted tokens/s | 51.7066 | 63.9737 | -19.175% |
+| TTFT ms | 2,295.125 | 1,950.013 | +17.698% |
+| End-to-end s | 22.0799 | 17.9410 | +23.069% |
+
+Native decode samples are51.9685/51.7066/51.5097; all1,024 output IDs and all371
+non-time cycle fields remain exact across repeats and to F2. Each proposes1,104
+draft tokens and accepts656. Original samples are55.7053/64.0197/63.9737; none
+is discarded. R1 accepts612/1,239 and is byte-exact in its1,024 IDs to historical
+original R3. R2 accepts666/1,074 and is exact to historical original R1; current
+original R1 versus R2/R3 first differs at token48. All nine cross-arm token
+comparisons are retained: native differs from original R1 at48 and R2/R3 at68.
+Timing is therefore an autonomous workload comparison, not numerical/state
+parity or a same-operand kernel speedup. Q1/default-reference failures remain.
+
+The native tracked device peak is30,307,785,027 bytes and shared workspace
+130,023,488 bytes; original R1 Torch peak allocated/reserved is27,960,091,648/
+28,324,134,912 bytes. These accounting scopes differ. Host cgroup peaks remain
+below7.4GB with no OOM/swap. Output chunk timestamps are not individual-token
+latency samples; original frontend batches are not GPU target/MTP cycles.
+Commands, source/tools/binary and actual scores/resources/analysis are indexed
+in recovery/upstream-u6-final-matrix-v1/primary-receipt-v1.json,14998 bytes,
+SHA256d4761a3fe962c00be910ab321017a2b022d9c0780cd54b44a5405fdad73ce6ba;
+the cross-arm supplement primary-receipt-v2.json is794 bytes,SHA256
+6861d76b2499927957c030e1d3089773328f3825770816ffbf5d1e96ca61aa9b.
+Only the primary six scores are complete. MTP0, C4 overlap, long/mixed,
+lifecycle/prefix, remaining contribution composition and final handoff remain.

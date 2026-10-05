@@ -6665,7 +6665,7 @@
     "F1": "stopped_at_bounded_precondition_low_measured_producer_cost_no_fusion_variant",
     "F2": "completed_first_event_candidate_rejected_second_direct_candidate_retained_prefill_memory_default_model_only",
     "F3": "completed_bounded_actual_shape_and_specific_FAoutM4_investigation_stop_without_kernel_variant",
-    "U6": "pending_bounded_final_comparison_and_review_handoff",
+    "U6": "primary_C1_fresh_three_native_three_original_scores_complete_remaining_matrix_and_handoff_pending",
     "receipt": {
       "artifact": "upstream-u1-integration-v1/receipt-v1.json",
       "sha256": "c0f79e400d9b5dbf62a63f8367bda529308967b608e0ec72b838d178ca8a17af",
@@ -6675,7 +6675,7 @@
     "cpu_limit": "GCC16 now builds the CPU library and selected targets;5 focused CTest cases pass with5019 assertions and one existing registry test-case skip. GCC12 previous unchanged muse_glimmer_mm array-bounds failure retained; not rerun after the cache repair.",
     "other_backends": "Affected Vulkan source compiles and CUDA CUTLASS/Marlin host syntax checks pass. CUDA device build/link/runtime and HIP remain unverified.",
     "performance_scope": "One before/after C1 short native pair:43.61414->43.51202 decode TPS; TTFT2313.785->2318.430ms; request8160.513->8178.879ms. No repeat signal and no refreshed original score.",
-    "next_step": "ProceedU6 boundedfixedmatrix onfinalacceptedsource/binary withcurrentpairedoriginalcontrols andhonestC4 overlap, withoutstalling onremainingU2 largerfeaturecomposition. Firstcleanportableinfrastructurepatch applied/testedatupstream; fullnativepubliccontribution/maintaineradmission notclaimed. F1/F2/F3closed;no newoptimizationvariant/globaltile sweep. PreserveQ1 strictstate/default-reference failed/open andexperimentalverifier, no math/threshold/reference/default promotion; P0-P7notresumed. Then reproducibleProhandoff andremainingcomposition/open-gates audit.",
+    "next_step": "U6 remainingboundedmatrix: MTP0 C1P4096/O256 oneperarm, C4P4096/O1024oneperarm andonlyexpandthreeifactualoriginalC4overlapproven;longC1/C4P32768/O256 andmixed4K32K nativefresh/originaloneorvalidunchangeddatedcontrols;life/prefix/affectedqualityscopes, thenremainingcomposition/Prohandoff. Primarycurrent3+3 scorescompletewith19.175%Decodegap andoriginaltrajectorystreampreserved. F1/F2/F3closed/no newoptimization/globaltile sweep; preserveQ1/defaultreferencefailedopen andexperimentalverifier/no maththresholdreferencepromotion/P0-P7notresumed.",
     "U0_tests": "23 host tests in4 CTest cases pass, including8 generated artifact tests; no GPU arithmetic changed.",
     "U0_receipt": {
       "artifact": "upstream-u1-integration-v1/u0-receipt-v1.json",
@@ -6789,6 +6789,17 @@
       "artifact": "upstream-u2-contribution-surface-v1/receipt-v1.json",
       "sha256": "5937c05476c42f6cd8eb5781919ed627369490a7a5419c4b558b6b54d09f0ec0",
       "bytes": 3832
+    },
+    "U6_primary_tests": "Sourcefd40e0b92 frozennativeSHA c0ca1870dac2707889e02e648bd806d33d8b26a08b4fa99d8747ac21a9461ae3. C1P4096/O1024/MTP3 threefreshunprofiled native/original engines inN1/O1/O2/N2/N3/O3order, eachactual0/native1900assertions. Samecheckpoint/subset/workload,page1600/180blocks/FP16/FP8/O32warmup-prefixreset/180Wunchanged/24GiBnoswapCPU2. Defaultdirectprepare/experimentalnativeverifier1;originalmatchedcompiledservingconfig/noarithmeticoverride/noeagerdenominator/startupexcluded. Median native/originalDecode51.7066018454/63.9736591436TPS(-19.175169%);TTFT2295.125221/1950.012792ms(+17.697957%);E2E22.07986029/17.940983184s(+23.069400%). Native1024IDs/all371nontimecycles exact allrepeats/F2,accepted656/proposed1104. Original55.7053/64.0197/63.9737TPS allretained;slowR1accepted612/1239exacthistoricR3;R2accepted666/1074exacthistoricR1;currentreferencefirstrepeatdifference48. Allnine crossarm comparisons: nativevsoriginalR1first48/R2R3first68, no alltoken/stateparity/sameoperandkernelspeedup. Nativepeak30307785027B/workspace130023488B vsoriginalR1Torchpeakallocated27960091648/reserved28324134912B differentaccounting. Hostpeaks<7.4GB/noOOMnoswap. OriginalfrontendbatchesnotGPUcycles/chunktimesnotindividualtokens. M0/C4overlap/longmixed/lifeprefix/composition/handoffstillpending;Q1/defaultqualificationfailedopen.",
+    "U6_primary_receipt": {
+      "artifact": "upstream-u6-final-matrix-v1/primary-receipt-v1.json",
+      "sha256": "d4761a3fe962c00be910ab321017a2b022d9c0780cd54b44a5405fdad73ce6ba",
+      "bytes": 14998
+    },
+    "U6_primary_token_receipt": {
+      "artifact": "upstream-u6-final-matrix-v1/primary-receipt-v2.json",
+      "sha256": "6861d76b2499927957c030e1d3089773328f3825770816ffbf5d1e96ca61aa9b",
+      "bytes": 794
     }
   }
 }
