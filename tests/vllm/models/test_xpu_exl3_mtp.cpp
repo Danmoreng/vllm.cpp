@@ -744,7 +744,10 @@ TEST_CASE("XPU EXL3 public engine R09 prefix: joint native MTP3 cold warm state"
   const char* graph_setting = std::getenv("VT_B70_EXL3_ENGINE_GRAPH");
   const bool graph_requested = graph_setting && std::stoi(graph_setting) == 1;
   const bool graph_screen = std::getenv("VT_B70_EXL3_ENGINE_GRAPH_SCREEN") != nullptr;
-  const int output_tokens = graph_screen ? 16 : 8;  // matched controls outlive both cold slots
+  const char* output_setting = std::getenv("VT_B70_EXL3_ENGINE_PREFIX_OUTPUT_TOKENS");
+  const int output_tokens = output_setting ? std::stoi(output_setting) : (graph_screen ? 16 : 8);
+  REQUIRE((output_tokens >= 1 && output_tokens <= 64));
+  const bool pair_only = std::getenv("VT_B70_EXL3_ENGINE_PREFIX_PAIR_ONLY") != nullptr;
   const bool lifecycle = std::getenv("VT_B70_EXL3_ENGINE_PREFIX_LIFECYCLE") != nullptr;
   const char* prompt_length = std::getenv("VT_B70_EXL3_ENGINE_PREFIX_PROMPT");
   const int prompt_tokens = prompt_length ? std::stoi(prompt_length) : 3201;
@@ -754,6 +757,7 @@ TEST_CASE("XPU EXL3 public engine R09 prefix: joint native MTP3 cold warm state"
   const bool long_lifecycle = std::getenv("VT_B70_EXL3_ENGINE_PREFIX_LONG_LIFECYCLE") != nullptr;
   REQUIRE_FALSE((long_case && lifecycle));
   REQUIRE_FALSE((long_lifecycle && !long_case));
+  REQUIRE_FALSE((pair_only && (lifecycle || long_lifecycle)));
   REQUIRE_FALSE(std::filesystem::exists(output));
   vllm::entrypoints::EngineParams params;
   params.max_model_len = std::max(4096, prompt_tokens + 64);
@@ -762,6 +766,14 @@ TEST_CASE("XPU EXL3 public engine R09 prefix: joint native MTP3 cold warm state"
   params.num_blocks = std::max(64, 3 * ((prompt_tokens + 64 + 1599) / 1600) + 16);
   params.kv_cache_dtype = "fp8";
   params.enable_prefix_caching = caching;
+  if (pair_only) {
+    REQUIRE(depth == 3);
+    REQUIRE(prompt_tokens == 32768);
+    REQUIRE(output_tokens == 64);
+    params.max_model_len = 262144;
+    params.max_num_seqs = 4;
+    params.num_blocks = 180;
+  }
   if (depth) params.speculative_config = vllm::ParseSpeculativeConfigJson(
       "{\"method\":\"mtp\",\"num_speculative_tokens\":3}");
   else params.block_size = 1600;  // fixed page protocol, independent of auto sizing
@@ -774,11 +786,17 @@ TEST_CASE("XPU EXL3 public engine R09 prefix: joint native MTP3 cold warm state"
   for (int repeat = 0; repeat < prompt_tokens / 16 + 32; ++repeat)
     passage += "A fox found a red umbrella beside a quiet river. The rain stopped, and the fox carried it home. ";
   auto tokens = loaded->tokenizer().Encode(passage);
-  REQUIRE(tokens.size() >= size_t(prompt_tokens + 16));
+  if (const char* ids_path = std::getenv("VT_B70_EXL3_ENGINE_PREFIX_PROMPT_IDS")) {
+    std::ifstream file(ids_path); REQUIRE(file.good());
+    tokens = nlohmann::json::parse(file).at("prompt_token_ids").get<std::vector<int32_t>>();
+  }
+  REQUIRE(tokens.size() >= size_t(prompt_tokens + (pair_only ? 0 : 16)));
   nlohmann::json result = {{"prefix_caching", caching}, {"depth", depth},
       {"lifecycle", lifecycle}, {"prompt_tokens", prompt_tokens},
       {"num_blocks", params.num_blocks}, {"output_tokens", output_tokens},
       {"graph_requested", graph_requested}, {"graph_screen", graph_screen},
+      {"pair_only", pair_only}, {"max_model_len", params.max_model_len},
+      {"max_num_seqs", params.max_num_seqs}, {"block_size", loaded->block_size()},
       {"requests", nlohmann::json::array()}};
   const auto memory = [&] {
     const auto info = vt::xpu::GetMemoryInfo();
@@ -799,7 +817,7 @@ TEST_CASE("XPU EXL3 public engine R09 prefix: joint native MTP3 cold warm state"
   const auto save = [&] {
     std::ofstream file(output); file << result.dump(2) << '\n'; file.close(); REQUIRE(file.good());
   };
-  for (int req = 0; req < (long_case ? (long_lifecycle ? 5 : 3) : (lifecycle ? 10 : 5)); ++req) {
+  for (int req = 0; req < (pair_only ? 2 : (long_case ? (long_lifecycle ? 5 : 3) : (lifecycle ? 10 : 5))); ++req) {
     std::vector<int32_t> prompt(tokens.begin(), tokens.begin() + prompt_tokens + (req == 2 ? 16 : 0));
     if (req == 3) prompt[1600] = prompt[1600] == 0 ? 1 : 0;
     if (long_lifecycle && req == 3) prompt[0] = 6;  // distinct64K prefix evicts old snapshots/pages
@@ -816,7 +834,7 @@ TEST_CASE("XPU EXL3 public engine R09 prefix: joint native MTP3 cold warm state"
     auto& current = result["requests"].back();
     const auto before_request = vt::GetGraphBreakStats();
     engine.add_request(name, prompt, sampling);
-    for (int step = 0; engine.has_unfinished_requests() && step < (prompt_tokens + 1599) / 1600 + 32; ++step) {
+    for (int step = 0; engine.has_unfinished_requests() && step < (prompt_tokens + 1599) / 1600 + output_tokens + 8; ++step) {
       const auto outputs = engine.step();
       const auto graph_stats = vt::GetGraphBreakStats();
       const auto& input = loaded->runner().last_step();
@@ -847,11 +865,15 @@ TEST_CASE("XPU EXL3 public engine R09 prefix: joint native MTP3 cold warm state"
     if (!caching || req == 0 || (long_lifecycle && req == 3)) CHECK(first == 0);
     // A mutation at position1600 invalidates later snapshots, but the first
     // unchanged page may still be reused. It must never skip the mutation.
-    if (caching && req == 3 && !long_lifecycle) CHECK((first == 0 || first == 1600));
+    if (caching && req == 3 && !long_lifecycle) {
+      if (depth) CHECK(first == 0);
+      else CHECK((first == 0 || first == 1600));
+    }
     if (caching && (req == 1 || req == 2)) CHECK(first >= 1600);
+    if (pair_only && req == 1) CHECK(first == (caching ? 30400 : 0));
     if (long_lifecycle && req == 4) CHECK(first == 0);
     if (req >= 6) CHECK(first == 0);
-    if (req == 5) CHECK(first == (caching ? 1600 : 0));
+    if (req == 5) CHECK(first == (caching && !depth ? 1600 : 0));
     if (req == 1 || req == 4 || req == 9) CHECK(current["ids"] == result["requests"][0]["ids"]);
   }
   if (lifecycle || long_lifecycle) {
@@ -870,7 +892,7 @@ TEST_CASE("XPU EXL3 public engine R09 prefix: joint native MTP3 cold warm state"
     engine.abort_request("prefix-cancel");
     CHECK_FALSE(engine.has_unfinished_requests());
     engine.add_request("prefix-after-cancel", std::move(prompt), sampling);
-    for (int step = 0; engine.has_unfinished_requests() && step < (prompt_tokens + 1599) / 1600 + 32; ++step) {
+    for (int step = 0; engine.has_unfinished_requests() && step < (prompt_tokens + 1599) / 1600 + output_tokens + 8; ++step) {
       const auto outputs = engine.step();
       for (const auto& request : outputs) {
         CHECK(request.request_id != "prefix-cancel");
