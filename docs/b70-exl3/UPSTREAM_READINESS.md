@@ -147,8 +147,8 @@ model/oracle data. It builds and passes 289 assertions on the restored baseline.
 No event-lease runtime option remains in the product. Continue only the second
 F2 candidate: direct checked-preparation consumption, measured independently.
 
-F2's second and final candidate is now implemented behind
-`VT_XPU_W8A8_DIRECT_PREPARE=1` (default0). Only the model-owned certificate path
+F2's second and final candidate was initially measured with
+`VT_XPU_W8A8_DIRECT_PREPARE=1` (default0 at that checkpoint). Only the model-owned certificate path
 uses a compact workspace and reads the checked private activation buffer
 directly. Its ownership scope encloses every oneDNN GEMM and the output
 Hadamard; the existing completion fences and lock order remain. Public callers
@@ -180,7 +180,7 @@ versus2,287.442ms. Tracked peak falls from30,326,149,443 to30,307,785,027B
 and unchanged preparation capacity31,202,304B. Mixed-route operator processes
 retain high-water pools and cannot establish that memory reduction themselves.
 This single pair is a first signal, not a refreshed Python/U6 score. The route
-remains opt-in pending large QKVZ, broader lifecycle/integrated-state checks and
+remained opt-in pending large QKVZ, broader lifecycle/integrated-state checks and
 bounded repeat measurements; matching tokens alone does not qualify state.
 
 The subsequent projection qualification adds pinned original QKVZ M896/M1600
@@ -216,8 +216,42 @@ mixed prefill/speculation, EOS, cancellation-slot reuse and poisoned spares.
 Its short prefills useSmallM; the separate4K state runs establish real W8A8
 execution. The state receipt preserves both raw snapshot sets, frozen source,
 binary and commands, including the corrected initial test-setup compile error.
-F2 remains opt-in pending its bounded performance/retention decision. Q1's
+F2 remained opt-in pending its bounded performance/retention decision. Q1's
 integrated original state and default-reference gates remain separate.
+
+F2 is now complete: the first event candidate remains rejected; the second
+direct-consumption candidate is retained. Three fresh unprofiled C1 P4096/O1024
+trials per arm, using one binary and only the direct-preparation selector,
+preserve all1,024 IDs and all371 non-time cycles. Each passes1,900 assertions.
+The fixed180W,24-GiB/no-swap/two-CPU envelope and O32 warmup/prefix reset match.
+
+| Protected C1 median | Original publication | Direct consumption |
+|---|---:|---:|
+| TTFT ms | 2,325.617 | 2,293.791 |
+| Three-chunk prefill ms | 2,325.500 | 2,293.673 |
+| Decode emitted tokens/s | 51.8687 | 51.8060 |
+| End-to-end ms | 22,048.540 | 22,040.571 |
+| Tracked native device peak B | 30,326,149,443 | 30,307,785,027 |
+| Shared W8A8 workspace B | 148,387,904 | 130,023,488 |
+
+The retained benefit is1.37% lower TTFT and12.38% smaller shared workspace
+(18,364,416B). Total tracked peak falls0.061%; decode changes-0.12% within
+the observed trial ranges and end-to-end changes-0.036%. This is a modest
+prefill/memory improvement, not a material decode gain or refreshed Python
+parity score. Public semantics, panel1024, oneDNN3.13 and final-consumer fences
+remain; no further F2 variant or panel sweep is pursued.
+
+Direct preparation now defaultsON for eligible model-owned calls. Override0
+retains the previous publication path; unsupported preparation dimensions or
+budget refusal retain the checked fallback. Default activation builds5 steps
+and passes ownership/public guards/queues76, budget fallback/reuse17 and a
+P4096/O32 native smoke130 assertions. Without the selector, its32 IDs/all17
+non-time cycles and tracked peak match the preceding explicit1 smoke; trace
+also proves10 model direct calls while four public calls retain publication.
+The six full-score trials precede this default-only host-selector change;
+the default smoke is not a replacement for U6's remaining final matrix.
+Frozen binaries, commands, resource checks and the reproducible analysis are
+indexed in the performance receipt. Q1 and whole-backend admission remain open.
 
 A clean public contribution composition,
 ordinary-route admission and integrated original MTP state qualification remain

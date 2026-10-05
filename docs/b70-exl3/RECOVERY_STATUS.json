@@ -6663,7 +6663,7 @@
     "U2": "partial_atomic_cache_oneDNN_SmallM_notices_and_clean_CPU_build_complete_contribution_and_remaining_capability_hygiene_open",
     "Q1": "pending_preserve_default_controlled_reference_labels",
     "F1": "stopped_at_bounded_precondition_low_measured_producer_cost_no_fusion_variant",
-    "F2": "event_candidate_rejected_direct_candidate_opt_in_six_operator_cases_and_native4K_final_recurrent_states_pass_performance_retention_pending",
+    "F2": "completed_first_event_candidate_rejected_second_direct_candidate_retained_prefill_memory_default_model_only",
     "F3": "conditional_on_demonstrated_current_cost",
     "U6": "pending_bounded_final_comparison_and_review_handoff",
     "receipt": {
@@ -6675,7 +6675,7 @@
     "cpu_limit": "GCC16 now builds the CPU library and selected targets;5 focused CTest cases pass with5019 assertions and one existing registry test-case skip. GCC12 previous unchanged muse_glimmer_mm array-bounds failure retained; not rerun after the cache repair.",
     "other_backends": "Affected Vulkan source compiles and CUDA CUTLASS/Marlin host syntax checks pass. CUDA device build/link/runtime and HIP remain unverified.",
     "performance_scope": "One before/after C1 short native pair:43.61414->43.51202 decode TPS; TTFT2313.785->2318.430ms; request8160.513->8178.879ms. No repeat signal and no refreshed original score.",
-    "next_step": "F2 second/final candidate: bounded fixed-workload repeated unprofiled performance and peak-memory retention decision, preserving opt-in/default0 until decision. Six operator cases and native actual4K completed-request recurrent-state/reuse checks now pass. Q1 per-token integrated original/FP8KV/default-reference gates, remaining contribution hygiene, conditional F3 and U6 remain open.",
+    "next_step": "Continue Q1 bounded integrated same-input original/native MTP state qualification while preserving controlled/default labels and frozen D27/D29 failures. Gather actual executed shape/time (including graph replays) in current C4long/mixed for conditional F3; only a demonstrated expensive form permits its bounded variants. Remaining U2 contribution hygiene and U6 fixed matrix/Pro handoff remain open. F2 is closed after two named candidates; no lease revival or panel sweep.",
     "U0_tests": "23 host tests in4 CTest cases pass, including8 generated artifact tests; no GPU arithmetic changed.",
     "U0_receipt": {
       "artifact": "upstream-u1-integration-v1/u0-receipt-v1.json",
@@ -6735,6 +6735,12 @@
       "artifact": "upstream-f2-direct-prepare-v1/receipt-v3.json",
       "sha256": "3e7daa8ece59bade119aa3e514916da310e5583c59104d92b48eb55e146f5af2",
       "bytes": 67011
+    },
+    "F2_direct_performance_tests": "Three fresh unprofiled native C1P4096/O1024 trials per explicit0/1 mode, same frozen binary/workload,180W,24GiB/no swap/two CPUs,O32 warmup/prefix reset:1900/1900 each, all1024 IDs/all371 non-time cycles exact acrossall6. Median baseline->direct TTFT2325.617->2293.791ms (-1.3685%),3chunk2325.500->2293.673ms,decode51.8687->51.8060TPS (-0.1208% within trial ranges),E2E22048.540->22040.571ms (-0.0361%). Native tracked peak30326149443->30307785027B (-18364416B/-0.06056%); shared workspace148387904->130023488B (-12.376%), preparation31202304B unchanged. Retain modest prefill/private-scratch benefit, no material decode/Python parity claim. Model-only direct consumption now default1; explicit0 diagnostic, public scratch and checked fallbacks unchanged. Default build5 steps, ownership/public guards/queues76, budget fallback17, no-selector P4096/O32 smoke130 passes with all32 IDs/all17 non-time cycles/peak exact prior explicit1. Trace10 model direct/four public publication calls. Initial6scores explicit flags precede host default-only activation, not full U6 final matrix. First event lease variant remains absent/rejected. Q1/default-reference and whole-backend qualification unchanged.",
+    "F2_direct_performance_receipt": {
+      "artifact": "upstream-f2-direct-performance-v1/receipt-v1.json",
+      "sha256": "aa9814b0b04a4c66f74462124906561a477502b3dab61f82047168792321f321",
+      "bytes": 10853
     }
   }
 }

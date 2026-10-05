@@ -188,7 +188,7 @@ void DispatchW8A8(Queue& q, Tensor& out, const Tensor& in, const Tensor& tr,
     VT_CHECK(plan.weight_panel_bytes <= SIZE_MAX - plan.workspace_bytes,
              "EXL3 W8A8 shared scratch size overflow");
     const char* direct_setting = std::getenv("VT_XPU_W8A8_DIRECT_PREPARE");
-    const std::string_view direct_mode = direct_setting ? direct_setting : "0";
+    const std::string_view direct_mode = direct_setting ? direct_setting : "1";
     VT_CHECK(!args.model_map || direct_mode == "0" || direct_mode == "1",
              "Invalid VT_XPU_W8A8_DIRECT_PREPARE");
     const char* prepare_setting = std::getenv("VT_XPU_W8A8_PREPARE");
