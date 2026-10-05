@@ -2218,7 +2218,7 @@
     },
     {
       "task": "P7",
-      "status": "in_progress_direct_mixed_core_outputs_retained_final_candidate_qualification_open",
+      "status": "in_progress_final_candidate_quality_refreshed_primary_C1_pairs_running",
       "complete": false,
       "C1_repetitions_per_engine": 3,
       "actual_native_primary_assertions_each": 1895,
@@ -5519,9 +5519,78 @@
         "scope": "One quiet mixed trial per same binary flag arm; C4 one affected default candidate vs frozen prior. Separate profiles never scored as serving speed. Original multi-request traces have no matching fully overlapping interval. No primaryC1 decode gain or full-quality claim; old final matrix/quality not silently promoted to current source.",
         "qualification_promoted": false,
         "P7_complete": false
+      },
+      "final_candidate_quality_046ece2df": {
+        "product_source": "046ece2dfde4d5326b44a6f36f82047a9ad4aeb2",
+        "receipt": {
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p7-candidate-quality-v3/receipt-v1.json",
+          "bytes": 53058,
+          "sha256": "855648c8baafaa97234b79031901fe9cb0d05887c048ae97b10e99fde487c636"
+        },
+        "verified_identities": 141,
+        "product_changed": false,
+        "practical": {
+          "tasks_passed": 8,
+          "assertions": 392,
+          "actual_exit": 0,
+          "all_prompts_IDs_text_finishes_MTP_counters_exact_prior": true,
+          "device_peak_bytes": 30380296507,
+          "scope": "Current-source eight unchanged held-out tasks,4codefunctions/20executed cases,2actual60872-token retrievals,2structured/tool tasks; sequential C4 capacity, not concurrent C4 quality or timing score."
+        },
+        "compact_draft": {
+          "assertions": 131644,
+          "actual_exit": 0,
+          "all655360_hidden_and65536_compact_plus65536_identical_input_head_exact_widened_F32": true,
+          "scope": "Same-input original P128 isolated compact draft and65536 head; not every autonomous MTP iteration."
+        },
+        "default_target": {
+          "actual_exit": 1,
+          "assertions": [
+            808,
+            804,
+            4
+          ],
+          "failures": [
+            {
+              "phase": "d27",
+              "TV": 0.0305754,
+              "KL": 0.00212581,
+              "top10": 10
+            },
+            {
+              "phase": "d29",
+              "TV": 0.212752,
+              "KL": 0.163144,
+              "top10": 9
+            }
+          ],
+          "min_top10": 9,
+          "all65_full_rows_exact_prior": true,
+          "thresholds": {
+            "TV": 0.02,
+            "KL": 0.002,
+            "top10": 9
+          },
+          "scope": "Native-evolving P128+D64 teacher-forced recurrent/FP8KV state and full target head; no original state/logit injection. Four failures remain failures."
+        },
+        "controlled_target": {
+          "rows": 65,
+          "values": 16140800,
+          "all_F32_bytes_exact": true,
+          "TV": 0,
+          "KL": 0,
+          "default_reference_promoted": false,
+          "scope": "Separately named deterministic-BA original, never a replacement for default frozen reference or all-layer-state proof."
+        },
+        "actual_current_source_lifecycle_already_executed_assertions": 483,
+        "actual_current_source_lifecycle_exit": 0,
+        "all_swap_peaks_and_memory_limit_OOM_events_zero": true,
+        "all_three_worker_CPU_throttled_periods_zero": true,
+        "qualification_promoted": false,
+        "P7_complete": false
       }
     }
   ],
   "performance_baseline": "7536aededc049b2157f12eadb0f4cc6bbf29b7b7",
-  "performance_next": "Pin retained direct-output candidate and refresh its final affected primary/C4 and practical/draft/target evidence. No broad sweep or repeats of unchanged-source jobs merely for reporting. DefaultD64 four failures, all-layer/reference/default admission remain open; current mixed and C4-32K speed improvements alone do not complete P7."
+  "performance_next": "Current product046ece2df practical/draft/default-controlled qualification refreshed; source-current lifecycle already483/483. Run planned primary C1 original/native3each in candidate-matrix-v2, then primary C4 and remaining current native sentinels; reuse current same-source mixed/C4-32K/lifecycle. DefaultD64 four failures, full-all-layer/reference/P1 automatic-admission gates remain open."
 }
