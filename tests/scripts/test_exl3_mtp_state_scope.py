@@ -6,9 +6,30 @@ import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tools/exl3_reference"))
 from mtp_state_scope import initialized_kv_addresses, speculative_state_reads
+from capture_integrated_mtp import observe_prepared_batch
 
 
 class MtpStateScopeTest(unittest.TestCase):
+    def test_batch_observer_preserves_call_and_result_identity(self):
+        calls, observed = [], []
+        result = object()
+        def original(*args, **kwargs):
+            calls.append((args, kwargs))
+            return result
+        wrapper = observe_prepared_batch(original, observed.append)
+        argument = object()
+        self.assertIs(wrapper(argument, mode="live"), result)
+        self.assertEqual(calls, [((argument,), {"mode": "live"})])
+        self.assertEqual(observed, [result])
+
+    def test_batch_observer_does_not_observe_failed_producer(self):
+        observed = []
+        def original():
+            raise RuntimeError("producer failed")
+        with self.assertRaisesRegex(RuntimeError, "producer failed"):
+            observe_prepared_batch(original, observed.append)()
+        self.assertEqual(observed, [])
+
     def test_first_q4_reads_only_completed_prefill_seed(self):
         plan = speculative_state_reads([0, 4], [[7, 8, 9, 10]], [1],
                                        12, {7: 3}, {7})[0]
