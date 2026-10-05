@@ -155,7 +155,7 @@ struct Context {
   // retired owner (whose Free deleter re-enters mutex). Replay is unaffected.
   std::mutex graph_owner_lifetime;
   Workspace exl3, gdn, attention, sampling, native_gdn, w8a8, w8a8_preparation;
-  ImmutableTable fp16_silu;
+  ImmutableTable fp16_silu, gated_silu;
   std::unordered_map<sycl::queue*, std::unique_ptr<sycl::queue>> queues;
   std::vector<PendingProfileEvent> profile_events;
   std::vector<HostProfileRecord> host_profile_records;
@@ -403,9 +403,10 @@ class XpuBackend final : public Backend {
 #endif
     if (default_graph) DestroyGraph(default_graph);
     auto& c = ctx();
-    std::lock_guard table_lock(c.fp16_silu.mutex);
+    std::scoped_lock table_lock(c.fp16_silu.mutex, c.gated_silu.mutex);
     std::lock_guard<std::mutex> lock(c.mutex);
     c.fp16_silu.joined.erase(native);
+    c.gated_silu.joined.erase(native);
     c.queues.erase(static_cast<sycl::queue*>(q.handle));
     q.handle = nullptr;
   }
@@ -862,6 +863,7 @@ MemoryInfo GetMemoryInfo(int index) {
   info.w8a8_workspace_bytes = c.w8a8.bytes;
   info.w8a8_preparation_bytes = c.w8a8_preparation.bytes;
   info.fp16_silu_table_bytes = c.fp16_silu.data ? 65536 * sizeof(uint16_t) : 0;
+  info.gated_silu_table_bytes = c.gated_silu.data ? 65536 * sizeof(float) : 0;
   info.peak_allocated_bytes = c.peak_allocated;
   info.graph_count = c.graphs.size(); info.graph_nodes = c.graph_nodes;
   info.graph_device_bytes = c.graph_bytes;
@@ -996,12 +998,13 @@ bool WithAttentionWorkspace(Queue& q, size_t bytes, const std::function<void(voi
   return WithWorkspace(q, GetContext(q.device.index).attention, 4,
                        "workspace_wait_attention", bytes, launch);
 }
-bool WithFp16SiluTable(Queue& q,
+namespace {
+bool WithImmutableSiluTable(Queue& q, ImmutableTable& table, size_t bytes,
+    const char* cold_message, const char* allocation_message,
     const std::function<sycl::event(void*)>& initialize,
     const std::function<void(const void*)>& launch) {
   auto& native = NativeQueue(q);
   auto& c = GetContext(q.device.index);
-  auto& table = c.fp16_silu;
   std::lock_guard execution(table.mutex);
   bool capturing;
   {
@@ -1011,14 +1014,13 @@ bool WithFp16SiluTable(Queue& q,
   // BeginCapture completes this queue. A prior eager join guarantees that the
   // immutable producer has completed too, including when it used another queue.
   VT_CHECK(!capturing || (table.data && table.joined.count(&native)),
-           "XPU FP16 SiLU table must be warmed on the capture queue");
+           cold_message);
   if (!table.data) {
-    constexpr size_t bytes = 65536 * sizeof(uint16_t);
     {
       std::lock_guard lock(c.mutex);
       if (bytes > c.budget - c.allocated - c.graph_bytes) return false;
       void* storage = sycl::aligned_alloc_device(64, bytes, c.device, c.context);
-      VT_CHECK(storage, "XPU FP16 SiLU table allocation failed");
+      VT_CHECK(storage, allocation_message);
       try { c.allocations.emplace(storage, bytes); }
       catch (...) { sycl::free(storage, c.context); throw; }
       c.allocated += bytes;
@@ -1043,6 +1045,23 @@ bool WithFp16SiluTable(Queue& q,
   // completes every owned queue, destroys graphs, then frees accounted storage.
   launch(table.data);
   return true;
+}
+}  // namespace
+bool WithFp16SiluTable(Queue& q,
+    const std::function<sycl::event(void*)>& initialize,
+    const std::function<void(const void*)>& launch) {
+  return WithImmutableSiluTable(q, GetContext(q.device.index).fp16_silu,
+      65536 * sizeof(uint16_t), "XPU FP16 SiLU table must be warmed on the capture queue",
+      "XPU FP16 SiLU table allocation failed",
+      initialize, launch);
+}
+bool WithGatedSiluTable(Queue& q,
+    const std::function<sycl::event(void*)>& initialize,
+    const std::function<void(const void*)>& launch) {
+  return WithImmutableSiluTable(q, GetContext(q.device.index).gated_silu,
+      65536 * sizeof(float), "XPU gated SiLU table must be warmed on the capture queue",
+      "XPU gated SiLU table allocation failed",
+      initialize, launch);
 }
 bool WithSamplingWorkspace(Queue& q, size_t bytes, const std::function<void(void*)>& launch) {
   VT_CHECK(bytes > 0 && bytes <= 16 * 1024 * 1024, "XPU sampling workspace exceeds 16 MiB budget");

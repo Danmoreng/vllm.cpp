@@ -2915,7 +2915,7 @@
           "sha256": "3da49f66c6730614433e01fb429bc9c4e89d00c1f88a01982534334261bf9c7e"
         }
       },
-      "next": "Try exact FP32 SiLU activation reuse in F16-gate producer gated norm, preserving F32 exp/fdiv_rn before weighted multiply; existing FP16 output table cannot be reused. Require exhaustive gate/output/graph/lifetime/original and complete-path measurements before retention. Preserve rejected-P5 stop and remaining final matrix/default-D64/state/reference/P1 admission gates.",
+      "next": "Investigate coalesced FP32 state-snapshot reads/writes in speculative GDN, preserving ordered scalar prediction/output accumulation and every native FP32 snapshot. This is a fresh dataflow hypothesis, not another rejected P5 GRF geometry sweep. Require paired C1/ragged-C4 complete-operator/full-state and serving evidence. Final current practical/draft/defaultD64/state/reference/P1-admission/matrix gates remain open.",
       "current_quality": {
         "practical_tasks": 8,
         "practical_passed": 8,
@@ -2939,7 +2939,8 @@
           "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p7-current-quality-v1/receipt-v1.json",
           "bytes": 35613,
           "sha256": "b278c9b33f935135356b42ebe026565c7f4861374b674b244a2f099c2c3a5ff7"
-        }
+        },
+        "post_gated_silu_table_rerun": false
       },
       "mixed_token_views": {
         "default": "scoped_XPU_F16_EXL3_contiguous_model_owned_maps_only",
@@ -3444,9 +3445,375 @@
           "bytes": 24077,
           "sha256": "b88c38f1a57d260ed15146e839184e31eefc4733a430d0bf93b21d34e4e710f4"
         }
+      },
+      "exact_F32_gated_silu_table": {
+        "status": "retained_default1_F16_gate_F32_activation_before_final_materialization",
+        "control": "VT_XPU_GDN_GATED_SILU_TABLE=0",
+        "table_GPU_bytes": 262144,
+        "normal_host_readiness_wait_or_poll": false,
+        "gate_patterns": 65536,
+        "finite_F32_activation_and_F16_F32_outputs_exact": true,
+        "Inf_NaN_expression_and_classification_preserved": true,
+        "reduction_and_recurrent_state_arithmetic_changed": false,
+        "focused_final_GPU": {
+          "gate_and_lifetime": {
+            "total": 284,
+            "passed": 284,
+            "failed": 0
+          },
+          "exhaustive_F32_SiLU_intermediate": true,
+          "default_unset_standalone_probe": {
+            "total": 12,
+            "passed": 12,
+            "failed": 0
+          },
+          "default_unset_MTP3_lifecycle": {
+            "total": 483,
+            "passed": 483,
+            "failed": 0
+          },
+          "legacy_FP16_table": {
+            "total": 57,
+            "passed": 57,
+            "failed": 0
+          }
+        },
+        "operator": [
+          {
+            "file": "operator-v1.json",
+            "assertions": {
+              "total": 208,
+              "passed": 208,
+              "failed": 0
+            },
+            "rows": [
+              {
+                "tokens": 4,
+                "heads": 48,
+                "D": 128,
+                "off_on_samples_ms": [
+                  [
+                    0.09671,
+                    0.09403,
+                    0.09361,
+                    0.09308
+                  ],
+                  [
+                    0.01715,
+                    0.01659,
+                    0.01655,
+                    0.01631
+                  ]
+                ],
+                "off_on_medians_ms": [
+                  0.09382,
+                  0.01657
+                ],
+                "elapsed_change_percent": -82.33852057130674,
+                "output_input_bits_exact": true
+              },
+              {
+                "tokens": 896,
+                "heads": 48,
+                "D": 128,
+                "off_on_samples_ms": [
+                  [
+                    1.424849,
+                    0.84815,
+                    0.843309,
+                    0.840709
+                  ],
+                  [
+                    0.0905,
+                    0.074,
+                    0.08749,
+                    0.0855
+                  ]
+                ],
+                "off_on_medians_ms": [
+                  0.8457295,
+                  0.086495
+                ],
+                "elapsed_change_percent": -89.77273466279702,
+                "output_input_bits_exact": true
+              },
+              {
+                "tokens": 1600,
+                "heads": 48,
+                "D": 128,
+                "off_on_samples_ms": [
+                  [
+                    1.488718,
+                    1.481269,
+                    1.484649,
+                    1.481729
+                  ],
+                  [
+                    0.15472,
+                    0.14783,
+                    0.15299,
+                    0.1564
+                  ]
+                ],
+                "off_on_medians_ms": [
+                  1.483189,
+                  0.153855
+                ],
+                "elapsed_change_percent": -89.62674345616102,
+                "output_input_bits_exact": true
+              }
+            ]
+          },
+          {
+            "file": "operator-v2.json",
+            "assertions": {
+              "total": 208,
+              "passed": 208,
+              "failed": 0
+            },
+            "rows": [
+              {
+                "tokens": 4,
+                "heads": 48,
+                "D": 128,
+                "off_on_samples_ms": [
+                  [
+                    0.097029,
+                    0.09385,
+                    0.096739,
+                    0.09433
+                  ],
+                  [
+                    0.01704,
+                    0.01672,
+                    0.01627,
+                    0.01598
+                  ]
+                ],
+                "off_on_medians_ms": [
+                  0.0955345,
+                  0.016495
+                ],
+                "elapsed_change_percent": -82.73398615159968,
+                "output_input_bits_exact": true
+              },
+              {
+                "tokens": 896,
+                "heads": 48,
+                "D": 128,
+                "off_on_samples_ms": [
+                  [
+                    1.269877,
+                    0.839918,
+                    0.844597,
+                    0.841467
+                  ],
+                  [
+                    0.090129,
+                    0.074549,
+                    0.08879,
+                    0.08562
+                  ]
+                ],
+                "off_on_medians_ms": [
+                  0.843032,
+                  0.087205
+                ],
+                "elapsed_change_percent": -89.65579005304663,
+                "output_input_bits_exact": true
+              },
+              {
+                "tokens": 1600,
+                "heads": 48,
+                "D": 128,
+                "off_on_samples_ms": [
+                  [
+                    1.488366,
+                    1.488685,
+                    1.485066,
+                    1.484156
+                  ],
+                  [
+                    0.15785,
+                    0.149839,
+                    0.162529,
+                    0.154649
+                  ]
+                ],
+                "off_on_medians_ms": [
+                  1.486716,
+                  0.15624949999999999
+                ],
+                "elapsed_change_percent": -89.49029269880731,
+                "output_input_bits_exact": true
+              }
+            ]
+          }
+        ],
+        "serving": {
+          "off": {
+            "report": {
+              "schema": "b70-exl3-r11-serving-report-v1",
+              "case": "c1-p4096-o1024",
+              "mtp_depth": 3,
+              "profiled": false,
+              "unprofiled_serving_measurement": true,
+              "startup_state": "request_warmup_o32_then_prefix_reset",
+              "warmup": {
+                "cycles": 17,
+                "enabled": true,
+                "output_tokens_per_request": 32
+              },
+              "per_request": {
+                "request-0": {
+                  "prompt_tokens": 4096,
+                  "emitted_tokens": 1024,
+                  "ttft_ms": 2481.2604840000004,
+                  "tpot_ms": 21.322166919843596,
+                  "longest_observed_streaming_pause_ms": 65.48038600000083,
+                  "end_to_end_ms": 24293.837242999998,
+                  "token_timestamp_granularity": "one timestamp per emitted MTP chunk"
+                }
+              },
+              "common_decode_overlap": {
+                "start_s": 2.481280384,
+                "end_s": 24.293857143,
+                "emitted_tokens": 1023,
+                "aggregate_emitted_tokens_per_s": 46.899548425790826,
+                "boundary_policy": "exclude start, include end; whole emitted chunks only"
+              },
+              "end_to_end_wall_s": 24.293864803,
+              "end_to_end_emitted_tokens_per_s": 42.150559752581984,
+              "target_qualified": false,
+              "serving_qualified": false,
+              "cycles": 371,
+              "decode_cycles": 368,
+              "mean_decode_cycle_ms": 59.26703660326096,
+              "mean_emitted_tokens_per_decode_cycle": 2.779891304347826,
+              "accepted": 656,
+              "proposed": 1104,
+              "draft_acceptance": 0.5942028985507246,
+              "graph_captures": 2,
+              "graph_replays": 366,
+              "profile_spans": {},
+              "emitted_decode_tokens_per_s": 46.899548425790826
+            },
+            "assertions": {
+              "total": 1900,
+              "passed": 1900,
+              "failed": 0
+            },
+            "device_peak_bytes": 30325887299,
+            "retired_graph_bytes": 0
+          },
+          "on": {
+            "report": {
+              "schema": "b70-exl3-r11-serving-report-v1",
+              "case": "c1-p4096-o1024",
+              "mtp_depth": 3,
+              "profiled": false,
+              "unprofiled_serving_measurement": true,
+              "startup_state": "request_warmup_o32_then_prefix_reset",
+              "warmup": {
+                "cycles": 17,
+                "enabled": true,
+                "output_tokens_per_request": 32
+              },
+              "per_request": {
+                "request-0": {
+                  "prompt_tokens": 4096,
+                  "emitted_tokens": 1024,
+                  "ttft_ms": 2322.413808,
+                  "tpot_ms": 20.911281481915932,
+                  "longest_observed_streaming_pause_ms": 64.30120599999967,
+                  "end_to_end_ms": 23714.654764,
+                  "token_timestamp_granularity": "one timestamp per emitted MTP chunk"
+                }
+              },
+              "common_decode_overlap": {
+                "start_s": 2.322433898,
+                "end_s": 23.714674854,
+                "emitted_tokens": 1023,
+                "aggregate_emitted_tokens_per_s": 47.82107690840466,
+                "boundary_policy": "exclude start, include end; whole emitted chunks only"
+              },
+              "end_to_end_wall_s": 23.714682304,
+              "end_to_end_emitted_tokens_per_s": 43.18000076380024,
+              "target_qualified": false,
+              "serving_qualified": false,
+              "cycles": 371,
+              "decode_cycles": 368,
+              "mean_decode_cycle_ms": 58.12488708695645,
+              "mean_emitted_tokens_per_decode_cycle": 2.779891304347826,
+              "accepted": 656,
+              "proposed": 1104,
+              "draft_acceptance": 0.5942028985507246,
+              "graph_captures": 2,
+              "graph_replays": 366,
+              "profile_spans": {},
+              "emitted_decode_tokens_per_s": 47.82107690840466
+            },
+            "assertions": {
+              "total": 1900,
+              "passed": 1900,
+              "failed": 0
+            },
+            "device_peak_bytes": 30326149443,
+            "retired_graph_bytes": 0
+          }
+        },
+        "comparison": {
+          "all1024_IDs_exact": true,
+          "all371_non_timing_cycles_exact": true,
+          "both_arms_exact_prior_committed_trajectory": true,
+          "E2E_change_percent": -2.38406899724114,
+          "TTFT_change_percent": -6.401854098926618,
+          "emitted_decode_gain_percent": 1.9648984127682345,
+          "prior_original_median_decode_tps": 63.915754,
+          "gap_to_prior_original_percent": -25.181079912779147,
+          "scope": "One quiet warmed unprofiled frozen same-binary trial per arm, explicit0/1. Prior original median is descriptive, not a fresh matched-continuation/final3repeat qualification."
+        },
+        "GDN21_original": {
+          "assertions": {
+            "total": 230,
+            "passed": 230,
+            "failed": 0
+          },
+          "six_active_original_states_exact": true,
+          "fifteen_observed_original_stages_exact": true,
+          "missing_observation": "d1/gdn_core",
+          "scope": "Separate controlled selected-layer original contract; not full-all-layer/defaultD64 promotion."
+        },
+        "separate_final_default_profile": {
+          "profiled": true,
+          "excluded_from_serving_scores": true,
+          "assertions": {
+            "total": 130,
+            "passed": 130,
+            "failed": 0
+          },
+          "all32_IDs_exact_unprofiled_prefix": true,
+          "actual_final_default_model_consumer": true,
+          "table_producer_events": 144,
+          "direct_producer_events": 0,
+          "prefill_table_events": 144,
+          "prefill_table_ms_per_chunk": 6.979130666666666,
+          "target_graph_stream_mean_ms": 52.260647142857145,
+          "dynamic_graph_D2H_checks": 14,
+          "note": "Readiness initialization occurs in excluded O32 warmup; original dynamic state/KV guards remain. Graph internals not individually resolved; stream spans/nested host waits overlap."
+        },
+        "successful_GPU_workers": 12,
+        "failed_wrapper_GPU_workers": 1,
+        "latest_D64_draft_practical_final_matrix_rerun": false,
+        "qualification_promoted": false,
+        "receipt": {
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p7-gated-silu-table-v1/receipt-v1.json",
+          "bytes": 68729,
+          "sha256": "8262f8c9330168b8ffa5579d3b1e08398cc637507b4f4d1800d3fe1838d9680e"
+        }
       }
     }
   ],
   "performance_baseline": "7536aededc049b2157f12eadb0f4cc6bbf29b7b7",
-  "performance_next": "Try exact FP32 SiLU activation reuse in F16-gate producer gated norm, preserving F32 exp/fdiv_rn before weighted multiply; existing FP16 output table cannot be reused. Require exhaustive gate/output/graph/lifetime/original and complete-path measurements before retention. Preserve rejected-P5 stop and remaining final matrix/default-D64/state/reference/P1 admission gates."
+  "performance_next": "Investigate coalesced FP32 state-snapshot reads/writes in speculative GDN, preserving ordered scalar prediction/output accumulation and every native FP32 snapshot. This is a fresh dataflow hypothesis, not another rejected P5 GRF geometry sweep. Require paired C1/ragged-C4 complete-operator/full-state and serving evidence. Final current practical/draft/defaultD64/state/reference/P1-admission/matrix gates remain open."
 }

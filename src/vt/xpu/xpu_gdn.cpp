@@ -671,43 +671,68 @@ void RmsNormGatedKernel(Queue& q, Tensor& out, const Tensor& x, const Tensor& ga
       // dtype and reciprocal-sqrt alternatives.
       const auto* input = static_cast<const sycl::half*>(src.data);
       const auto* gate_data = static_cast<const sycl::half*>(z.data);
-      constexpr int lanes = 16, workgroup = 128;
-      const auto global = ((rows * lanes + workgroup - 1) / workgroup) * workgroup;
-      const auto event = NativeQueue(q).parallel_for(
-          sycl::nd_range<1>(global, workgroup),
-          [=](sycl::nd_item<1> item) [[sycl::reqd_sub_group_size(16)]] {
+      const char* table_setting = std::getenv("VT_XPU_GDN_GATED_SILU_TABLE");
+      // Exact F32 SiLU intermediate for F16 gates, without the separate
+      // SwiGLU table's F16 rounding. Setting0 retains the producer expression.
+      const std::string_view table_mode = table_setting ? table_setting : "1";
+      VT_CHECK(table_mode == "0" || table_mode == "1", "Invalid VT_XPU_GDN_GATED_SILU_TABLE");
+      auto launch = [&]<bool cached>(const float* table) {
+        constexpr int lanes = 16, workgroup = 128;
+        const auto global = ((rows * lanes + workgroup - 1) / workgroup) * workgroup;
+        const auto event = NativeQueue(q).parallel_for(
+            sycl::nd_range<1>(global, workgroup),
+            [=](sycl::nd_item<1> item) [[sycl::reqd_sub_group_size(16)]] {
 #pragma clang fp contract(off)
-        const int64_t row = item.get_global_linear_id() / lanes;
-        if (row >= rows) return;
-        const int lane = item.get_local_linear_id() % lanes;
-        auto sg = item.get_sub_group();
-        float halves[2];
-        for (int half = 0; half < 2; ++half) {
-          float partial = 0.0f;
-          for (int j = 0; j < 4; ++j) {
-            const float value = input[row * 128 + lane + half * lanes + 32 * j];
-            partial += value * value;
+          const int64_t row = item.get_global_linear_id() / lanes;
+          if (row >= rows) return;
+          const int lane = item.get_local_linear_id() % lanes;
+          auto sg = item.get_sub_group();
+          float halves[2];
+          for (int half = 0; half < 2; ++half) {
+            float partial = 0.0f;
+            for (int j = 0; j < 4; ++j) {
+              const float value = input[row * 128 + lane + half * lanes + 32 * j];
+              partial += value * value;
+            }
+            halves[half] = partial;
           }
-          halves[half] = partial;
-        }
-        for (int offset = 1; offset < lanes; offset *= 2) {
-          halves[0] += sycl::shift_group_left(sg, halves[0], offset);
-          halves[1] += sycl::shift_group_left(sg, halves[1], offset);
-        }
-        const float mean = sycl::group_broadcast(sg, halves[0] + halves[1], 0) / 128.0f;
-        const float inverse = sycl::rsqrt(mean + eps);
-        const auto gbase = (row / group) * z.stride[0] + (row % group) * 128;
-        for (int j = 0; j < 8; ++j) {
-          const int col = lane + lanes * j;
-          const float value = input[row * 128 + col];
-          const float g = gate_data[gbase + col];
-          const float act = sycl::ext::intel::math::fdiv_rn(g, 1.0f + sycl::exp(-g));
-          const float normalized = value * inverse;
-          const float weighted = normalized * Load(w, col);
-          Store(dst, row * 128 + col, weighted * act);
-        }
-      });
-      RecordProfileEvent(q, "gdn_gated_norm_fp16_producer", event);
+          for (int offset = 1; offset < lanes; offset *= 2) {
+            halves[0] += sycl::shift_group_left(sg, halves[0], offset);
+            halves[1] += sycl::shift_group_left(sg, halves[1], offset);
+          }
+          const float mean = sycl::group_broadcast(sg, halves[0] + halves[1], 0) / 128.0f;
+          const float inverse = sycl::rsqrt(mean + eps);
+          const auto gbase = (row / group) * z.stride[0] + (row % group) * 128;
+          for (int j = 0; j < 8; ++j) {
+            const int col = lane + lanes * j;
+            const float value = input[row * 128 + col];
+            const float g = gate_data[gbase + col];
+            float act;
+            if constexpr (cached) {
+              const auto bits = sycl::bit_cast<uint16_t>(gate_data[gbase + col]);
+              act = (bits & 0x7c00) != 0x7c00 ? table[bits]
+                  : sycl::ext::intel::math::fdiv_rn(g, 1.0f + sycl::exp(-g));
+            } else act = sycl::ext::intel::math::fdiv_rn(g, 1.0f + sycl::exp(-g));
+            const float normalized = value * inverse;
+            const float weighted = normalized * Load(w, col);
+            Store(dst, row * 128 + col, weighted * act);
+          }
+        });
+        RecordProfileEvent(q, cached ? "gdn_gated_norm_fp16_producer_table" : "gdn_gated_norm_fp16_producer", event);
+      };
+      if (table_mode == "1" && WithGatedSiluTable(q, [&](void* storage) {
+        auto* table = static_cast<float*>(storage);
+        const auto event = NativeQueue(q).parallel_for(sycl::nd_range<1>(65536, 128),
+            [=](sycl::nd_item<1> item) [[sycl::reqd_sub_group_size(16)]] {
+#pragma clang fp contract(off)
+          const auto bits = uint16_t(item.get_global_linear_id());
+          const float g = float(sycl::bit_cast<sycl::half>(bits));
+          table[bits] = sycl::ext::intel::math::fdiv_rn(g, 1.0f + sycl::exp(-g));
+        });
+        RecordProfileEvent(q, "gdn_gated_silu_table_build", event);
+        return event;
+      }, [&](const void* storage) { launch.template operator()<true>(static_cast<const float*>(storage)); })) return;
+      launch.template operator()<false>(nullptr);
       return;
     }
     if (subgroup) {
