@@ -63,7 +63,17 @@ The corrected dense case also passes with its preceding packed diagnostic
 (1,232 assertions together). No performance or qualification gate is promoted.
 See [XPU build options](../XPU.md#shared-onednn-capability) for the interface.
 
-Test separation, a clean public contribution composition, licensing review,
+The SmallM test split preserves all 140 original assertion expressions. Its
+three synthetic cases pass 288 assertions without external inputs; the isolated
+context-exit sentinel passes two assertions and completes worker teardown.
+Six external CTest cases separately skip missing optional data and fail in the
+required mode (actual CTest exit8). Corrupt present payloads remain failures.
+The generated host admission test passes five methods without oneAPI/GPU.
+The real Gate/Up case passes 112 assertions with unchanged complete byte checks;
+other external cases are not newly numerically qualified. See
+[SmallM input/outcome controls](../XPU.md#smallm-test-inputs-and-outcomes).
+
+A clean public contribution composition, licensing review,
 ordinary-route admission and integrated original MTP state qualification remain
 separate work. Preserve the frozen default D27/D29 failures and controlled-oracle
 label; no verifier default or full-backend qualification has been promoted.

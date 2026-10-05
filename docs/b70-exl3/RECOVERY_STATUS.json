@@ -6633,7 +6633,7 @@
     }
   ],
   "performance_baseline": "7536aededc049b2157f12eadb0f4cc6bbf29b7b7",
-  "performance_next": "Follow the active upstream readiness/performance plan; U2 hermetic/external test separation next, then minimal hygiene and bounded F1/F2. The old P0-P7 work period remains closed.",
+  "performance_next": "Follow active upstream readiness/performance plan: minimal remaining U2 provenance/build/capability work, then bounded F1/F2. Do not migrate every optional historical test before performance work. Old P0-P7 remains closed.",
   "closed_performance_plan": "docs/B70_EXL3_NATIVE_PERFORMANCE_IMPLEMENTATION_PLAN_7536aeded_EN.md",
   "performance_plan_closure": {
     "status": "closed_by_developer_after_last_approved_optimization",
@@ -6660,7 +6660,7 @@
     "integration_commit": "3dfa3c3193c5950bf284229441e81f26b99d499c",
     "integration_status": "native_merge_regression_pass_GCC16_CPU_build_pass_remaining_portability_open",
     "U0": "complete_portable_projection_identity_slice",
-    "U2": "partial_atomic_cache_and_oneDNN_capability_complete_test_hygiene_pending",
+    "U2": "partial_atomic_cache_oneDNN_and_SmallM_test_split_complete_remaining_hygiene_open",
     "Q1": "pending_preserve_default_controlled_reference_labels",
     "F1": "pending_one_fusion_and_at_most_one_smaller_fallback",
     "F2": "pending_at_most_two_named_changes",
@@ -6675,7 +6675,7 @@
     "cpu_limit": "GCC16 now builds the CPU library and selected targets;5 focused CTest cases pass with5019 assertions and one existing registry test-case skip. GCC12 previous unchanged muse_glimmer_mm array-bounds failure retained; not rerun after the cache repair.",
     "other_backends": "Affected Vulkan source compiles and CUDA CUTLASS/Marlin host syntax checks pass. CUDA device build/link/runtime and HIP remain unverified.",
     "performance_scope": "One before/after C1 short native pair:43.61414->43.51202 decode TPS; TTFT2313.785->2318.430ms; request8160.513->8178.879ms. No repeat signal and no refreshed original score.",
-    "next_step": "U2 isolate hermetic SmallM tests from external-model/oracle cases, with explicit optional skips and required-artifact failures; avoid migrating every historical test before F1/F2.",
+    "next_step": "Bound remaining U2 work to notices/provenance, current capability/dependency documentation and reproducible supported build; then new F1/F2 candidates without historical campaign restart.",
     "U0_tests": "23 host tests in4 CTest cases pass, including8 generated artifact tests; no GPU arithmetic changed.",
     "U0_receipt": {
       "artifact": "upstream-u1-integration-v1/u0-receipt-v1.json",
@@ -6693,6 +6693,12 @@
       "artifact": "upstream-u2-onednn-capability-v1/receipt-v1.json",
       "sha256": "53e8fb5ab1128fba57465e79ed1da53d25fac3c25971960fdddce9f44c162358",
       "bytes": 16321
+    },
+    "U2_smallm_tests": "CPU admission5 methods pass, no oneAPI/GPU; native split builds pass. Unfiltered synthetic3 cases288/288 no skips; isolated context-exit2/2 actualworkerexit0; six optional external cases independently Skipped, required flagON makesall6 Failed/actualCTestexit8. Required config without tests orXPU correctly actualexit1; corrupt present payload actualexit1 evenoptional. Real Gate/Up112/112 atM1/4/12/16/128 with unchanged full byte checks. All140 source assertion expressions preserved. Final attention preflight detects missing second-family input before GPU work. Other external cases unavailable/not newly numerically qualified. Required flag resetOFF; no inference/kernel/threshold/admission or performance change.",
+    "U2_smallm_receipt": {
+      "artifact": "upstream-u2-smallm-test-split-v1/receipt-v1.json",
+      "sha256": "3b29fb44f1ac95cd4c988fb4ca743b2fb7b0ba71bf8329a57306304014c6d05a",
+      "bytes": 11958
     }
   }
 }

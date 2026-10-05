@@ -75,6 +75,10 @@ endif()
 
 option(VLLM_CPP_BUILD_TESTS "Build tests" ON)
 option(VLLM_CPP_XPU "Build the native SYCL/Level Zero XPU backend (requires icpx)" OFF)
+option(VLLM_CPP_REQUIRE_EXL3_TEST_ARTIFACTS "Require external EXL3 SmallM qualification inputs instead of skipping" OFF)
+if(VLLM_CPP_REQUIRE_EXL3_TEST_ARTIFACTS AND (NOT VLLM_CPP_BUILD_TESTS OR NOT VLLM_CPP_XPU))
+  message(FATAL_ERROR "Required EXL3 tests need VLLM_CPP_BUILD_TESTS=ON and VLLM_CPP_XPU=ON")
+endif()
 option(VLLM_CPP_XPU_ONEDNN "Enable pinned oneDNN XPU EXL3 W8A8, attention and dense F16 operators" OFF)
 option(VLLM_CPP_XPU_GPTQ4 "Compatibility alias enabling VLLM_CPP_XPU_ONEDNN (GPTQ remains diagnostic)" OFF)
 # Derived capability: either option enables the same implementation. Preserve
