@@ -479,3 +479,33 @@ SHA256ab7a0ccfcced0afe014b5a6f95412654350fb8c1250144efd2046740c5823903.
 Together with the actual long/mixed shape profiles this closes the bounded F3
 investigation. Continue remaining U2 contribution composition and U6; Q1 and
 the original/default qualification failures remain open, not reclassified.
+
+U2 now has a first independently reviewable portable infrastructure patch at
+the integrated upstream pin. Its five paths contain only external-artifact
+admission, the host probe/test, public usage documentation and the matching
+CTest registration. The8,693-byte patch applies cleanly to pristine upstream
+files; its five resulting files are byte-exact to the separately tested source
+tree. The archived upstream `AGENTS.md` remains unchanged. No development
+policy, historical receipts, GPTQ experiments, weights or binaries enter this
+selected diff. Personal `/home/`/`/opt/` literals and a narrow set of known
+credential markers are absent; this is not a comprehensive credential audit.
+
+That clean archived upstream source, without `.git`, `.env`, model inputs or
+oneAPI, configures with ordinary GCC16.2.1, builds only the host probe in two
+steps and passes the single focused CTest containing five generated-input
+methods. It checks availability/exit semantics only, not tensor payloads or
+native model inference. The development GPU cases already call this helper;
+they are not pulled into the independent host patch or newly qualified here.
+See [external test admission](../EXL3_TEST_ARTIFACTS.md).
+
+Pinned upstream contribution, agent, workflow and CI rules are retained as
+reference in the external capsule. No checkers, upstream policy or workflow
+are changed; no protocol compliance/commit signatures are retroactively
+claimed. Public admission/attribution records and maintainer discussion of the
+larger dependency split remain necessary before publication. No contribution
+branch/PR/contact is created. This is a small infrastructure slice, not a
+finished clean native XPU/EXL3/MTP contribution or a backend qualification.
+The patch, source identities, actual apply/build/test results and rules are
+indexed in recovery/upstream-u2-contribution-surface-v1/receipt-v1.json,3832
+bytes,SHA2565937c05476c42f6cd8eb5781919ed627369490a7a5419c4b558b6b54d09f0ec0.
+Remaining feature composition must not delay U6's bounded final matrix.
