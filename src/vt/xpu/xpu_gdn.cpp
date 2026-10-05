@@ -576,6 +576,88 @@ void GdnSpecDecodeKernel(Queue& q, Tensor& out, const Tensor& qi,
     const float scale = args.scale;
     const int64_t items = requests * hv * dv;
     if (!items) return;
+    const char* slm_setting = std::getenv("VT_XPU_GDN_SPEC_SLM");
+    const std::string_view slm_mode = slm_setting ? slm_setting : "1";
+    VT_CHECK(slm_mode == "0" || slm_mode == "1", "Invalid VT_XPU_GDN_SPEC_SLM");
+    bool slm_selected = slm_mode == "1" && requests <= 4 && cols <= 4 && hk == 16 && hv == 48 &&
+        dk == 128 && dv == 128 && qi.dtype == DType::kF16 && ki.dtype == DType::kF16 &&
+        vi.dtype == DType::kF16 && g.dtype == DType::kF32 && beta.dtype == DType::kF32 &&
+        std::getenv("VT_XPU_GDN_SPEC_WG") == nullptr;
+    if (slm_selected) {
+      const auto device = NativeQueue(q).get_device();
+      const auto sizes = device.get_info<sycl::info::device::sub_group_sizes>();
+      slm_selected = device.get_info<sycl::info::device::local_mem_size>() >= 32768 &&
+          device.get_info<sycl::info::device::max_work_group_size>() >= 64 &&
+          std::find(sizes.begin(), sizes.end(), 32) != sizes.end();
+    }
+    if (slm_selected) {
+      // Each WG owns 64 independent value rows within one head/request.
+      // Contiguous transfers use [K,value xor low K bits] SLM so both transfer
+      // and value-row accesses spread over the local addresses. Each
+      // value owner retains the original ascending-K scalar accumulation.
+      // No private128-element state, parallel-K reduction or precision change.
+      constexpr int values = 64, keys = 128;
+      const auto event = NativeQueue(q).submit([&](sycl::handler& h) {
+        sycl::local_accessor<float, 1> s(sycl::range<1>(values * keys), h);
+        h.parallel_for(sycl::nd_range<1>(items, values),
+            [=](sycl::nd_item<1> item) [[sycl::reqd_sub_group_size(32)]] {
+#pragma clang fp contract(off)
+          const int64_t index = item.get_group_linear_id() * values;
+          const int lane = item.get_local_linear_id();
+          const int64_t request = index / (hv * dv), head = (index / dv) % hv;
+          const int64_t first_value = index % dv, value = first_value + lane;
+          const int64_t first = offsets[request], last = offsets[request + 1];
+          const int32_t initial = ids[request * cols + nat[request] - 1];
+          const int64_t out_channel = head * dv + value;
+          if (initial < 0) {
+            for (int64_t token = first; token < last; ++token)
+              Store(dst, token * hv * dv + out_channel, 0.0f);
+            return;  // Entire WG has the same request and initial slot.
+          }
+          if (first == last) return;
+          const int64_t initial_base = ((int64_t(initial) * hv + head) * dv + first_value) * keys;
+          for (int pos = lane; pos < values * keys; pos += values)
+            s[(pos % keys) * values + ((pos / keys) ^ (pos % values))] = cache[initial_base + pos];
+          item.barrier(sycl::access::fence_space::local_space);
+          const int64_t key_head = head / (hv / hk);
+          for (int64_t token = first; token < last; ++token) {
+            const int64_t key_base = (token * hk + key_head) * keys;
+            const float decay = sycl::exp(Load(gs, token * hv + head));
+            float prediction = 0.0f;
+#pragma unroll 1
+            for (int j = 0; j < keys; ++j) {
+              const int address = j * values + (lane ^ (j % values));
+              const float decayed = s[address] * decay;
+              s[address] = decayed;
+              prediction += decayed * Load(ks, key_base + j);
+            }
+            const float delta = (Load(vs, token * hv * dv + out_channel) - prediction) *
+                                Load(bs, token * hv + head);
+            float output = 0.0f;
+#pragma unroll 1
+            for (int j = 0; j < keys; ++j) {
+              const int address = j * values + (lane ^ (j % values));
+              const float updated = s[address] + delta * Load(ks, key_base + j);
+              s[address] = updated;
+              output += updated * (Load(qs, key_base + j) * scale);
+            }
+            Store(dst, token * hv * dv + out_channel, output);
+            // A different lane transfers this owner's state row. Complete all
+            // updates first, then all snapshot reads before the next token.
+            item.barrier(sycl::access::fence_space::local_space);
+            const int32_t snapshot = ids[request * cols + token - first];
+            if (snapshot >= 0) {
+              const int64_t base = ((int64_t(snapshot) * hv + head) * dv + first_value) * keys;
+              for (int pos = lane; pos < values * keys; pos += values)
+                cache[base + pos] = s[(pos % keys) * values + ((pos / keys) ^ (pos % values))];
+            }
+            item.barrier(sycl::access::fence_space::global_and_local);
+          }
+        });
+      });
+      RecordProfileEvent(q, "gdn_spec_decode_slm", event);
+      return;
+    }
     const auto work = [=](int64_t index) {
       const int64_t request = index / (hv * dv);
       const int64_t head = (index / dv) % hv, value = index % dv;
