@@ -2770,7 +2770,32 @@
           "sha256": "3da49f66c6730614433e01fb429bc9c4e89d00c1f88a01982534334261bf9c7e"
         }
       },
-      "next": "Current practical/default-controlled/compact-draft qualification, then actual mixed-path source/event diagnosis and arithmetic-preserving work where justified."
+      "next": "Bounded actual mixed-path source/event diagnosis, then arithmetic-preserving dataflow work where justified; keep default/full-state/reference-contract gates explicit.",
+      "current_quality": {
+        "practical_tasks": 8,
+        "practical_passed": 8,
+        "practical_assertions": 391,
+        "practical_exit": 0,
+        "default_D64_assertions": 808,
+        "default_D64_passed": 804,
+        "default_D64_failed": 4,
+        "default_D64_actual_exit": 1,
+        "default_failure_phases": [
+          "D27",
+          "D29"
+        ],
+        "controlled_D64_bit_exact_full_vocab_rows": 65,
+        "controlled_D64_default_promoted": false,
+        "compact_draft_assertions": 131644,
+        "compact_draft_exit": 0,
+        "compact_draft_raw_original_bit_exact": true,
+        "qualification_promoted": false,
+        "receipt": {
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p7-current-quality-v1/receipt-v1.json",
+          "bytes": 35613,
+          "sha256": "b278c9b33f935135356b42ebe026565c7f4861374b674b244a2f099c2c3a5ff7"
+        }
+      }
     }
   ],
   "performance_baseline": "7536aededc049b2157f12eadb0f4cc6bbf29b7b7",
