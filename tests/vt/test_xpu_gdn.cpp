@@ -1,5 +1,6 @@
 #include "xpu_test_helpers.h"
 #include "vt/xpu.h"
+#include "vt/breakable_graph.h"
 #include <cstdlib>
 #include <string>
 #include <chrono>
@@ -950,4 +951,186 @@ TEST_CASE("XPU compressed conv: direct BF16 cache equals the F32 working-copy pa
       SameBytes(out.download(), reference.download()); SameBytes(state.download(), stored.download());
     }
   }
+}
+
+namespace {
+struct P7GatedTableEnv {
+  const bool had = std::getenv("VT_XPU_GDN_GATED_SILU_TABLE") != nullptr;
+  const std::string old = had ? std::getenv("VT_XPU_GDN_GATED_SILU_TABLE") : "";
+  ~P7GatedTableEnv() {
+    if (had) setenv("VT_XPU_GDN_GATED_SILU_TABLE", old.c_str(), 1);
+    else unsetenv("VT_XPU_GDN_GATED_SILU_TABLE");
+  }
+  void Select(bool on) { REQUIRE(setenv("VT_XPU_GDN_GATED_SILU_TABLE", on ? "1" : "0", 1) == 0); }
+};
+void P7GatedSame(const Buffer& actual, const std::vector<unsigned char>& expected) {
+  auto bytes = actual.download(); REQUIRE(bytes.size() == expected.size());
+  size_t mismatch = 0, dual_nan = 0;
+  const size_t width = vt::SizeOf(actual.tensor.dtype);
+  for (size_t i = 0; i < bytes.size(); i += width) {
+    if (std::memcmp(bytes.data() + i, expected.data() + i, width) == 0) continue;
+    bool a_nan, b_nan;
+    if (width == 2) {
+      uint16_t a, b; std::memcpy(&a, bytes.data() + i, 2); std::memcpy(&b, expected.data() + i, 2);
+      a_nan = (a & 0x7c00) == 0x7c00 && (a & 1023); b_nan = (b & 0x7c00) == 0x7c00 && (b & 1023);
+    } else {
+      float a, b; std::memcpy(&a, bytes.data() + i, 4); std::memcpy(&b, expected.data() + i, 4);
+      a_nan = std::isnan(a); b_nan = std::isnan(b);
+    }
+    if (a_nan && b_nan) ++dual_nan; else ++mismatch;
+  }
+  CAPTURE(mismatch);
+  CAPTURE(dual_nan); CHECK(mismatch == 0);
+}
+}
+
+TEST_CASE("XPU P7 gated SiLU table: queue readiness cold capture and graph lifetime") {
+  Queue gpu(vt::DeviceType::kXPU); P7GatedTableEnv mode;
+  Buffer x(gpu.q, DType::kF16, {1, 48, 128}), gate(gpu.q, DType::kF16, {1, 49, 128});
+  Buffer weight(gpu.q, DType::kF32, {128}), direct(gpu.q, DType::kF16, {1, 48, 128});
+  Buffer table(gpu.q, DType::kF16, {1, 48, 128}), other_out(gpu.q, DType::kF16, {1, 48, 128});
+  x.put(Values(48 * 128, 2)); gate.put(Values(49 * 128, 7)); gate.tensor.shape[1] = 48;
+  weight.put(Values(128, 3, 0.1f)); table.put(std::vector<float>(48 * 128, -7));
+  const auto unchanged = table.download(); auto& backend = vt::GetBackend(gpu.q.device);
+  mode.Select(true);
+  if (backend.SupportsGraphCapture()) {
+    vt::BreakableGraph cold;
+    CHECK_THROWS_WITH_AS(([&] {
+      vt::GraphCaptureScope scope(backend, gpu.q, cold, vt::GraphCaptureMode::kFull);
+      vt::RmsNormGated(gpu.q, table.tensor, x.tensor, gate.tensor, weight.tensor, {1e-6f, false});
+    }()), doctest::Contains("XPU gated SiLU table must be warmed on the capture queue"), std::runtime_error);
+    SameBytes(table.download(), unchanged);
+  }
+  mode.Select(false); vt::RmsNormGated(gpu.q, direct.tensor, x.tensor, gate.tensor, weight.tensor, {1e-6f, false});
+  const auto expected = direct.download(); mode.Select(true);
+  auto other = vt::CreateQueue(gpu.q.device);
+  vt::RmsNormGated(gpu.q, table.tensor, x.tensor, gate.tensor, weight.tensor, {1e-6f, false});
+  // No producer synchronization before the other queue joins initialization.
+  vt::RmsNormGated(other, other_out.tensor, x.tensor, gate.tensor, weight.tensor, {1e-6f, false});
+  backend.Synchronize(other);  // Download uses gpu.q; complete its other-queue producer first.
+  SameBytes(other_out.download(), expected); SameBytes(table.download(), expected);
+  CHECK(vt::xpu::GetMemoryInfo().gated_silu_table_bytes == 262144);
+  if (backend.SupportsGraphCapture()) {
+    vt::BreakableGraph graph;
+    { vt::GraphCaptureScope scope(backend, other, graph, vt::GraphCaptureMode::kFull);
+      vt::RmsNormGated(other, other_out.tensor, x.tensor, gate.tensor, weight.tensor, {1e-6f, false}); }
+    REQUIRE(graph.captured());
+    for (int salt : {9, 17}) {
+      x.put(Values(48 * 128, salt)); mode.Select(false);
+      vt::RmsNormGated(gpu.q, direct.tensor, x.tensor, gate.tensor, weight.tensor, {1e-6f, false});
+      const auto wanted = direct.download(); graph.Replay(other); backend.Synchronize(other);
+      SameBytes(other_out.download(), wanted);
+    }
+    graph.Reset(); CHECK(vt::xpu::GetMemoryInfo().graph_device_bytes == 0);
+  }
+  vt::DestroyQueue(other); other = vt::CreateQueue(gpu.q.device); mode.Select(true);
+  if (backend.SupportsGraphCapture()) {
+    vt::BreakableGraph cold;
+    CHECK_THROWS_WITH_AS(([&] {
+      vt::GraphCaptureScope scope(backend, other, cold, vt::GraphCaptureMode::kFull);
+      vt::RmsNormGated(other, other_out.tensor, x.tensor, gate.tensor, weight.tensor, {1e-6f, false});
+    }()), doctest::Contains("XPU gated SiLU table must be warmed on the capture queue"), std::runtime_error);
+  }
+  vt::RmsNormGated(other, other_out.tensor, x.tensor, gate.tensor, weight.tensor, {1e-6f, false});
+  backend.Synchronize(other); SameBytes(other_out.download(), direct.download()); vt::DestroyQueue(other);
+}
+
+TEST_CASE("XPU P7 gated SiLU table: all gate bits FP32 boundary tails aliases and guards") {
+  Queue gpu(vt::DeviceType::kXPU); P7GatedTableEnv mode;
+  constexpr int rows = 512, width = 128, n = rows * width;
+  Buffer x(gpu.q, DType::kF16, {rows, width}), gate(gpu.q, DType::kF16, {rows, width});
+  std::vector<uint16_t> bits(n); for (int i = 0; i < n; ++i) bits[i] = uint16_t(i);
+  gate.upload(bits.data()); const auto preserved_gate = gate.download();
+  {
+    // x=1, eps=0 and w=1 make F32 output exactly the SiLU intermediate.
+    // Verify all actual F16 input bitpatterns before any output narrowing.
+    x.put(std::vector<float>(n, 1.0f));
+    Buffer weight(gpu.q, DType::kF32, {width}), direct(gpu.q, DType::kF32, {rows, width});
+    Buffer table(gpu.q, DType::kF32, {rows, width}); weight.put(std::vector<float>(width, 1.0f));
+    mode.Select(false); vt::RmsNormGated(gpu.q, direct.tensor, x.tensor, gate.tensor, weight.tensor, {0.0f, false});
+    const auto expected = direct.download(); mode.Select(true);
+    vt::RmsNormGated(gpu.q, table.tensor, x.tensor, gate.tensor, weight.tensor, {0.0f, false});
+    P7GatedSame(table, expected);
+  }
+  for (auto weight_type : {DType::kF32, DType::kF16}) for (auto out_type : {DType::kF32, DType::kF16}) {
+    CAPTURE(weight_type);
+    CAPTURE(out_type);
+    Buffer weight(gpu.q, weight_type, {width}), direct(gpu.q, out_type, {rows, width}), table(gpu.q, out_type, {rows, width});
+    weight.put(Values(width, 19, 0.03125f));
+    for (int salt : {0, 11, 29}) {
+      CAPTURE(salt); x.put(Values(n, salt, 0.03125f)); const auto preserved_x = x.download(), preserved_w = weight.download();
+      mode.Select(false); vt::RmsNormGated(gpu.q, direct.tensor, x.tensor, gate.tensor, weight.tensor, {1e-6f, false});
+      const auto expected = direct.download(); mode.Select(true);
+      vt::RmsNormGated(gpu.q, table.tensor, x.tensor, gate.tensor, weight.tensor, {1e-6f, false});
+      P7GatedSame(table, expected); SameBytes(x.download(), preserved_x); SameBytes(weight.download(), preserved_w);
+    }
+  }
+  SameBytes(gate.download(), preserved_gate);
+  for (int count : {1, 31, 32, 33, 48, 192}) for (bool sigmoid : {false, true}) {
+    CAPTURE(count);
+    CAPTURE(sigmoid);
+    Buffer input(gpu.q, DType::kF16, {count, width}), g(gpu.q, DType::kF16, {count, width});
+    Buffer w(gpu.q, DType::kF32, {width}), direct(gpu.q, DType::kF16, {count, width});
+    input.put(Values(count * width, 3)); g.put(Values(count * width, 8)); w.put(Values(width, 9));
+    mode.Select(false); vt::RmsNormGated(gpu.q, direct.tensor, input.tensor, g.tensor, w.tensor, {1e-6f, sigmoid});
+    const auto expected = direct.download(); mode.Select(true);
+    vt::RmsNormGated(gpu.q, input.tensor, input.tensor, g.tensor, w.tensor, {1e-6f, sigmoid});
+    SameBytes(input.download(), expected);
+  }
+  Buffer w(gpu.q, DType::kF32, {width}), out(gpu.q, DType::kF16, {rows, width}); w.put(Values(width));
+  out.put(std::vector<float>(n, -7)); const auto before = out.download();
+  mode.Select(true); setenv("VT_XPU_GDN_GATED_SILU_TABLE", "invalid", 1);
+  CHECK_THROWS_WITH_AS(vt::RmsNormGated(gpu.q, out.tensor, x.tensor, gate.tensor, w.tensor, {1e-6f, false}),
+      doctest::Contains("Invalid VT_XPU_GDN_GATED_SILU_TABLE"), std::runtime_error);
+  SameBytes(out.download(), before);
+  std::cout << "P7_GATED_SILU_TABLE gate_patterns=65536 activation_F32_exhaustive=1 weights=F16,F32 outputs=F16,F32 table_bytes=262144" << std::endl;
+}
+
+TEST_CASE("XPU P7 gated SiLU table: default model consumer probe") {
+  if (!std::getenv("VT_B70_GATED_SILU_DEFAULT_PROBE")) {
+    MESSAGE("set VT_B70_GATED_SILU_DEFAULT_PROBE in a fresh worker"); return;
+  }
+  Queue gpu(vt::DeviceType::kXPU); P7GatedTableEnv mode;
+  REQUIRE(vt::xpu::GetMemoryInfo().gated_silu_table_bytes == 0);
+  Buffer x(gpu.q, DType::kF16, {1, 48, 128}), gate(gpu.q, DType::kF16, {1, 48, 128});
+  Buffer w(gpu.q, DType::kF32, {128}), direct(gpu.q, DType::kF16, {1, 48, 128}), out(gpu.q, DType::kF16, {1, 48, 128});
+  x.put(Values(48 * 128, 1)); gate.put(Values(48 * 128, 5)); w.put(Values(128, 6));
+  mode.Select(false); vt::RmsNormGated(gpu.q, direct.tensor, x.tensor, gate.tensor, w.tensor, {1e-6f, false});
+  const auto expected = direct.download(); REQUIRE(vt::xpu::GetMemoryInfo().gated_silu_table_bytes == 0);
+  REQUIRE(unsetenv("VT_XPU_GDN_GATED_SILU_TABLE") == 0);
+  vt::RmsNormGated(gpu.q, out.tensor, x.tensor, gate.tensor, w.tensor, {1e-6f, false});
+  SameBytes(out.download(), expected); CHECK(vt::xpu::GetMemoryInfo().gated_silu_table_bytes == 262144);
+}
+
+TEST_CASE("XPU P7 gated SiLU table: complete operator balanced timing") {
+  const char* output = std::getenv("VT_B70_GATED_SILU_OUTPUT");
+  if (!output) { MESSAGE("set VT_B70_GATED_SILU_OUTPUT for focused operator timing"); return; }
+  Queue gpu(vt::DeviceType::kXPU); P7GatedTableEnv mode;
+  nlohmann::json report = {{"schema", "b70-exl3-p7-gated-silu-operator-v1"}, {"cases", nlohmann::json::array()}};
+  for (int tokens : {4, 896, 1600}) {
+    const int count = tokens * 48;
+    Buffer x(gpu.q, DType::kF16, {tokens, 48, 128}), gate(gpu.q, DType::kF16, {tokens, 49, 128});
+    Buffer w(gpu.q, DType::kF32, {128}), direct(gpu.q, DType::kF16, {tokens, 48, 128});
+    Buffer table(gpu.q, DType::kF16, {tokens, 48, 128});
+    x.put(Values(count * 128, 3)); gate.put(Values(tokens * 49 * 128, 19, 0.125f)); gate.tensor.shape[1] = 48;
+    w.put(Values(128, 6, 0.1f)); const auto input = x.download(), gates = gate.download(), weights = w.download();
+    auto call = [&](bool on) { mode.Select(on); vt::RmsNormGated(gpu.q, on ? table.tensor : direct.tensor,
+        x.tensor, gate.tensor, w.tensor, {1e-6f, false}); vt::GetBackend(gpu.q.device).Synchronize(gpu.q); };
+    for (int i = 0; i < 32; ++i) call(i % 2);
+    const auto expected = direct.download(); SameBytes(table.download(), expected);
+    nlohmann::json trials = nlohmann::json::array();
+    for (bool on : {false, true, true, false, true, false, false, true}) {
+      mode.Select(on); auto start = std::chrono::steady_clock::now();
+      vt::RmsNormGated(gpu.q, on ? table.tensor : direct.tensor, x.tensor, gate.tensor, w.tensor, {1e-6f, false});
+      vt::GetBackend(gpu.q.device).Synchronize(gpu.q);
+      const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+      trials.push_back({{"table", on}, {"complete_operator_ms", ms}});
+      SameBytes((on ? table : direct).download(), expected);
+    }
+    SameBytes(x.download(), input); SameBytes(gate.download(), gates); SameBytes(w.download(), weights);
+    report["cases"].push_back({{"tokens", tokens}, {"heads", 48}, {"width", 128}, {"gate_token_stride", 49 * 128},
+        {"warmups", 32}, {"trials", trials}, {"all_output_input_bits_exact", true}});
+  }
+  report["table_bytes"] = vt::xpu::GetMemoryInfo().gated_silu_table_bytes;
+  std::ofstream f(output); REQUIRE(f.good()); f << report.dump(2) << std::endl;
 }
