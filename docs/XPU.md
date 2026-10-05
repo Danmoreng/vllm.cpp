@@ -72,6 +72,66 @@ This dependency selection does not promote the experimental B70 verifier or
 change any numerical/admission guards. See the scoped capability and unresolved
 qualification results in [UPSTREAM_READINESS.md](b70-exl3/UPSTREAM_READINESS.md).
 
+## Current source dependencies and Xe2 scope
+
+The current 4-bpw FP16 checkpoint uses these source pins. They identify source
+dependencies, not a proof that a Python wheel was built from those sources.
+
+| Component | Source revision and notices |
+|---|---|
+| EXL3 ESIMD | `c59d9442aba8610188837e37724600f1517d7335`; MIT in `third_party/exl3xpu/LICENSE`; adaptations are marked in the native sources. |
+| Xe2 attention donor | `6d92b1bfbf32767ecda8e819613eb151e70030ad`; Apache-2.0 directory licenses and individual BSD-3-Clause headers in `third_party/b70_xe2_{prefill,verify}`. Verification also includes the pinned deployment's shared-KV adaptation described in its README. |
+| Xe2 GDN donor | `ddf336d86e3c8602888572a3502f951abd51df12`; Apache-2.0 in `third_party/b70_gdn_xe2/LICENSE`; `gemm.hpp` retains its separate Intel BSD-3-Clause notice. |
+| External SYCL-TLA | `87f6850680a580654b9ea2c80dbc01aeb36ad231`; BSD-3-Clause `LICENSE.txt`, including Intel/NVIDIA notices. The copied verification helpers retain their notices. |
+| External oneDNN 3.13.0 | `0e2a5bfeef1bfbffc3137464606540233086ce9b`; Apache-2.0 `LICENSE` and component notices in its source distribution. |
+
+Provide the external source checkouts explicitly; routine configuration and
+tests do not obtain them or model weights. In a oneAPI compiler environment,
+the existing oneDNN source configuration can be reproduced as follows. These
+are build instructions, not a claim of a newly executed clean dependency build.
+
+```sh
+cmake -S /path/to/onednn-source -B build-onednn -G Ninja \
+  -DCMAKE_CXX_COMPILER=icpx -DCMAKE_C_COMPILER=icx \
+  -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/path/to/onednn-install \
+  -DONEDNN_LIBRARY_TYPE=SHARED -DONEDNN_CPU_RUNTIME=NONE \
+  -DONEDNN_GPU_RUNTIME=SYCL -DONEDNN_GPU_VENDOR=INTEL \
+  -DONEDNN_BUILD_TESTS=OFF -DONEDNN_BUILD_EXAMPLES=OFF \
+  -DONEDNN_BUILD_GRAPH=ON
+cmake --build build-onednn -j1
+cmake --install build-onednn
+```
+
+For the current native source build, add the following to the XPU configuration
+above (and use `VLLM_CPP_BUILD_TESTS=ON` for the focused test targets):
+
+```sh
+-DVLLM_CPP_XPU_ONEDNN=ON -DVLLM_CPP_XPU_GPTQ4=OFF \
+-Ddnnl_DIR=/path/to/onednn-install/lib/cmake/dnnl \
+-DVLLM_CPP_SYCL_TLA_DIR=/path/to/sycl-tla \
+-DVLLM_CPP_XPU_XE2_GDN=ON -DVLLM_CPP_XPU_XE2_PREFILL=OFF \
+-DVLLM_CPP_WITH_DIARIZATION=OFF
+```
+
+The current measured configuration enables the GDN donor build and disables the
+separate prefill donor option; its shared attention decode/verification sources
+are still built. These options must not be inferred from historical recipes.
+CMake checks the exact SYCL-TLA Git revision. oneDNN lookup checks the exact
+package version; callers must separately preserve its source/build identity.
+Distributing dependencies requires carrying their licenses; root `NOTICE`
+indexes the additions without replacing their individual source notices.
+
+Build capability and runtime admission are separate. Xe2 route predicates live
+in `xpu_attention_{prefill,verify_xe2,decode_xe2}.cpp`, `xpu_attention.cpp`,
+`xpu_gdn.cpp` and the GDN donor wrappers. They check route-specific device,
+compiler/driver, shape, dtype, page/layout and metadata contracts. Their guards
+are intentionally not presented as a universal claim of support for other
+Intel devices or software versions. Existing fallbacks remain applicable;
+explicit diagnostic routes can reject unsupported inputs. Packed verification
+still requires the experimental runtime opt-in. Neither these dependency
+instructions nor a successful synthetic test closes the default-reference or
+integrated state gates in `b70-exl3/RECOVERY_STATUS.json`.
+
 ## SmallM test inputs and outcomes
 
 `test_xpu_exl3_smallm` runs three synthetic GPU cases without a model or oracle

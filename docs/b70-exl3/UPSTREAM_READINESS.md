@@ -73,7 +73,15 @@ The real Gate/Up case passes 112 assertions with unchanged complete byte checks;
 other external cases are not newly numerically qualified. See
 [SmallM input/outcome controls](../XPU.md#smallm-test-inputs-and-outcomes).
 
-A clean public contribution composition, licensing review,
+Root `NOTICE` now indexes the B70 donor adaptations and external SYCL-TLA/oneDNN
+dependencies. The GDN directory carries the unchanged Apache-2.0 donor license;
+individual BSD notices remain in their headers. Current source pins, dependency
+build commands and route-specific admission scope are in
+[XPU source dependencies](../XPU.md#current-source-dependencies-and-xe2-scope).
+This documentation step changes no GPU code and needs no automatic test. A fresh
+build from these declared inputs remains separate from the existing cached builds.
+
+A clean public contribution composition,
 ordinary-route admission and integrated original MTP state qualification remain
 separate work. Preserve the frozen default D27/D29 failures and controlled-oracle
 label; no verifier default or full-backend qualification has been promoted.
