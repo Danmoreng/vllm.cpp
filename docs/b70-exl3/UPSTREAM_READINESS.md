@@ -289,3 +289,34 @@ observed. These eager observed runs are not serving-performance scores.
 Native replay against the actual tokens/accepted lengths and C4->C2->C1 remain
 next. Controlled/default labels and frozen D27/D29 failures remain separate;
 no ordinary verifier admission or whole-backend state parity is claimed.
+
+The first native C1 target replay is now complete and actually fails the exact
+integrated-state gate:8237 assertions,7566 passed/671 failed. Native caches start
+cold with finite poison and evolve independently; only the original observed
+tokens, positions and previous accepted lengths are replayed. Snapshot order
+maps original13/12/11/10 to native3/2/1/0; no original states enter inference.
+All931 arrays are exported/compared, including every full FP32 token snapshot
+and only valid Conv windows/initialized FP8 KV. Independent raw-file SHA checks
+confirm260 byte-exact arrays and671 differing arrays; all values are finite.
+
+Prefill129/129 arrays and all128 consumed Conv/SSM/KV arrays before the firstQ4
+forward are exact. The first difference is layer0 ssm_after_t0:1355510 changed
+bytes,max_abs0.0031609535217285156, while layer0 Convafter is exact. The firstQ4
+step differs in272/401 arrays; the next differs in399/401, including propagated
+initial-state differences. This proves the first consumed seeds agree; it does
+not locate the difference within Conv arithmetic, BA/post-conv preparation or
+recurrence. The next bounded attribution should observe those layer0 boundaries.
+Actual trace records16 prefillM128 and32 xe2_verifyM4 calls under the explicit
+experimental selector. No verifier default/reference policy or kernel changed.
+
+The two-step focused native build passes after correcting a same-line doctest
+CAPTURE redefinition; the initial compile failure/source are retained. The
+native worker uses24GiB/no swap/twoCPUs,actualexit1,noOOM. Full native exports
+total1704280064 bytes. Capsule receipt-v2.json in the same Q1 directory is6530
+bytes,SHA256b2a5c536eab06b12cc75c0df443f65aae60ddd6d040af00f7deba6fdf552851c.
+It preserves the binary/source, commands/resources, all failed comparisons and
+the reproducible native-payload identity analysis. This is a full-target replay
+of original MTP inputs, not an autonomous native drafter/rejection comparison.
+C4->C2->C1 and ordinary qualification remain open. The experimental fast route,
+controlled/default labels and oldD27/D29 failures remain; independent F3/U2/U6
+work is not blocked by this failed qualification gate.

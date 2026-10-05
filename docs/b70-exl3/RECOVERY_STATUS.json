@@ -6661,7 +6661,7 @@
     "integration_status": "native_merge_regression_pass_GCC16_CPU_build_pass_remaining_portability_open",
     "U0": "complete_portable_projection_identity_slice",
     "U2": "partial_atomic_cache_oneDNN_SmallM_notices_and_clean_CPU_build_complete_contribution_and_remaining_capability_hygiene_open",
-    "Q1": "partial_original_integrated_C1_Q4_controlled_capture_pass_default_repeatability_fail_native_and_transition_pending",
+    "Q1": "partial_original_C1_Q4_controlled_capture_pass_native_integrated_exact_state_fail_default_repeatability_fail_C4_pending",
     "F1": "stopped_at_bounded_precondition_low_measured_producer_cost_no_fusion_variant",
     "F2": "completed_first_event_candidate_rejected_second_direct_candidate_retained_prefill_memory_default_model_only",
     "F3": "conditional_on_demonstrated_current_cost",
@@ -6675,7 +6675,7 @@
     "cpu_limit": "GCC16 now builds the CPU library and selected targets;5 focused CTest cases pass with5019 assertions and one existing registry test-case skip. GCC12 previous unchanged muse_glimmer_mm array-bounds failure retained; not rerun after the cache repair.",
     "other_backends": "Affected Vulkan source compiles and CUDA CUTLASS/Marlin host syntax checks pass. CUDA device build/link/runtime and HIP remain unverified.",
     "performance_scope": "One before/after C1 short native pair:43.61414->43.51202 decode TPS; TTFT2313.785->2318.430ms; request8160.513->8178.879ms. No repeat signal and no refreshed original score.",
-    "next_step": "Replay Q1 native target MTP forwards against the newly frozen original C1 P128/twoQ4 actual tokens, previous accepted lengths and initialized Conv/SSM/KV scopes, then small C4->C2->C1. Original controlled capture passes; default repeatability fails and labels/frozen D27/D29 failures remain separate. Gather actual executed shape/time (including graph replays) in current C4long/mixed for conditional F3; only a demonstrated expensive form permits its bounded variants. Remaining U2 contribution hygiene and U6 fixed matrix/Pro handoff remain open. F2 is closed after two named candidates; no lease revival or panel sweep.",
+    "next_step": "Q1 native C1 full-target replay fails exact state parity after identical cold prefill/firstQ4 consumed seeds; first divergence l0_ssm_after_t0 while Convafter matches. Bound first-layer Conv/BA/post-conv/recurrence attribution before small C4->C2->C1; no original state injection, default-reference correction or verifier admission. Original controlled capture passes; default repeatability fails and frozen D27/D29 remain. Independent F3 current C4long/mixed executed shape/time including graph replays, U2 contribution hygiene and U6 fixed matrix/Pro handoff remain authorized/open. F2 is closed; no lease revival or panel sweep.",
     "U0_tests": "23 host tests in4 CTest cases pass, including8 generated artifact tests; no GPU arithmetic changed.",
     "U0_receipt": {
       "artifact": "upstream-u1-integration-v1/u0-receipt-v1.json",
@@ -6747,6 +6747,12 @@
       "artifact": "upstream-q1-integrated-mtp-v1/receipt-v1.json",
       "sha256": "9ee24b4d13679ef172f7e6e94347ae3a6d9d2dee54d681949502007dbcf10817",
       "bytes": 11377
+    },
+    "Q1_native_integrated_tests": "Focused native build2 steps passes after fixing same-line doctest CAPTURE redefinition; initial compile failure retained. Native cold-cache C1 full-target P128/twoQ4 replay of frozen original inputs/previous accepted lengths, original snapshot order13/12/11/10 mapsnative3/2/1/0; no original-state injection. Actualexit1,8237 assertions/7566pass/671fail. All931 arrays/full432 produced F32SSM snapshots/96 consumed seeds/validConv/initializedFP8KV/targethidden exported; independent SHA check260 exact/671 differ,allfinite. Prefill129/129 andall128 firstQ4 consumed state/KV arrays exact. First difference l0_ssm_after_t0 1355510changedbytes/max_abs0.0031609535217285156,Convafterexact. Step1 272/401 differ;step2 399/401 including propagated seeds. Actual16prefillM128/32xe2_verifyM4 calls, explicitexperimental selector.24GiB/no swap/twoCPUs,noOOM;1704280064 native rawbytes. No math/reference/threshold/default/performance change. First-layer producer/recurrence attribution andC4->C2->C1 remain pending;not autonomous native draft/rejection equivalence. OldD27/D29/defaultrepeatabilityfail preserved;wholebackendqualification open.",
+    "Q1_native_integrated_receipt": {
+      "artifact": "upstream-q1-integrated-mtp-v1/receipt-v2.json",
+      "sha256": "b2a5c536eab06b12cc75c0df443f65aae60ddd6d040af00f7deba6fdf552851c",
+      "bytes": 6530
     }
   }
 }
