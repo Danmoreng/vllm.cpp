@@ -1,5 +1,8 @@
 #include "vt/exl3_grouped.h"
 #include "vt/backend.h"
+#ifdef VLLM_CPP_XPU
+#include "vt/xpu_graph_metadata.h"
+#endif
 #include "vt/exl3_w8a8_panel_plan.h"
 #include <algorithm>
 #include <atomic>
@@ -202,9 +205,10 @@ Exl3SmallMPlan PlanExl3SmallM(int64_t m, int64_t k, int64_t n, int bits) {
   return {vector, mb, blocks * mb, nt, (tk + rps - 1) / rps, rps};
 }
 
-void Exl3GroupedLinear(Queue& q, Tensor& out, const Tensor& in, const Tensor& trellis,
+namespace {
+void ValidateSmallMOperands(Queue& q, const Tensor& out, const Tensor& in, const Tensor& trellis,
     const Tensor& suh, const Tensor& svh, const Tensor& shard,
-    Tensor& in_had, Tensor& partials, const Exl3GroupedLinearArgs& args) {
+    const Tensor& in_had, const Tensor& partials, const Exl3GroupedLinearArgs& args) {
   VT_CHECK(in.rank == 2 && out.rank == 2, "EXL3 grouped linear requires rank-2 input/output");
   const int64_t m = in.shape[0], k = in.shape[1], n = out.shape[1];
   const auto plan = PlanExl3SmallM(m, k, n, args.bits);
@@ -237,7 +241,52 @@ void Exl3GroupedLinear(Queue& q, Tensor& out, const Tensor& in, const Tensor& tr
     VT_CHECK(t->IsContiguous(), "EXL3 grouped linear requires contiguous tensors");
     VT_CHECK(t->device == q.device, "EXL3 grouped linear device mismatch");
   }
+}
+}  // namespace
+
+void Exl3GroupedLinear(Queue& q, Tensor& out, const Tensor& in, const Tensor& trellis,
+    const Tensor& suh, const Tensor& svh, const Tensor& shard,
+    Tensor& in_had, Tensor& partials, const Exl3GroupedLinearArgs& args) {
+  ValidateSmallMOperands(q, out, in, trellis, suh, svh, shard, in_had, partials, args);
   reinterpret_cast<Exl3GroupedLinearFn>(GetOp(OpId::kExl3GroupedLinear, q.device.type))(
-      q, out, in, trellis, suh, svh, shard, in_had, partials, args);
+      q, out, in, trellis, suh, svh, shard, in_had, partials,
+      {args.bits, args.codebook, args.debug_name, args.w8a8_panel_columns});
+}
+
+void detail::Exl3GroupedLinearModel(Queue& q, Tensor& out, const Tensor& in,
+    const Tensor& trellis, const Tensor& suh, const Tensor& svh, const Tensor& shard,
+    Tensor& in_had, Tensor& partials, const Exl3GroupedLinearArgs& args,
+    const std::shared_ptr<void>& resident_owner,
+    std::shared_ptr<const Exl3W8A8ModelMap>& cache) {
+  ValidateSmallMOperands(q, out, in, trellis, suh, svh, shard, in_had, partials, args);
+  VT_CHECK(q.device.type == DeviceType::kXPU, "EXL3 model SmallM requires XPU");
+  const char* setting = std::getenv("VT_XPU_SMALLM_MODEL_MAP");
+  const std::string_view mode = setting ? setting : "1";
+  VT_CHECK(mode == "0" || mode == "1", "Invalid VT_XPU_SMALLM_MODEL_MAP");
+  auto owned_args = args;
+  owned_args.model_map = nullptr;
+  std::shared_ptr<const Exl3W8A8ModelMap> metadata;
+  if (mode == "1") {
+    metadata = std::atomic_load(&cache);
+    if (!metadata || !metadata->Matches(shard, int(suh.shape[0]), resident_owner)) {
+      bool capturing = false;
+#ifdef VLLM_CPP_XPU
+      capturing = xpu::IsGraphCapturing(q);
+#endif
+      if (capturing) {
+        metadata.reset();  // No readback/certificate construction inside capture.
+#ifdef VLLM_CPP_XPU
+        xpu::RecordGraphImmutableRead(q, shard.data, shard.Bytes(), resident_owner,
+                                     "EXL3 SmallM cold model source map");
+#endif
+      } else {
+        metadata = std::make_shared<const Exl3W8A8ModelMap>(q, shard, int(suh.shape[0]), resident_owner);
+        std::atomic_store(&cache, metadata);
+      }
+    }
+    owned_args.model_map = metadata.get();
+  }
+  reinterpret_cast<Exl3GroupedLinearFn>(GetOp(OpId::kExl3GroupedLinear, q.device.type))(
+      q, out, in, trellis, suh, svh, shard, in_had, partials, owned_args);
 }
 }  // namespace vt

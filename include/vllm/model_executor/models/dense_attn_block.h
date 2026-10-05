@@ -380,8 +380,9 @@ inline DBuf Exl3GroupedMatmulD(Dev d, const vt::Tensor& x,
   const auto plan = vt::PlanExl3SmallM(M, K, N, bits);
   DBuf had(d, vt::DType::kF16, {w.suh.shape[0], K / 16, plan.padded_rows, 16});
   DBuf parts(d, vt::DType::kF32, {plan.splits, M, N});
-  vt::Exl3GroupedLinear(d.q, out.t(), x, trellis, suh, svh, map,
-                       had.t(), parts.t(), {bits, w.codebook, w.name.c_str()});
+  vt::detail::Exl3GroupedLinearModel(d.q, out.t(), x, trellis, suh, svh, map,
+      had.t(), parts.t(), {bits, w.codebook, w.name.c_str()},
+      w.source_map.d_dev, w.w8a8_model_map);
   return out;
 }
 
@@ -429,8 +430,9 @@ inline DBuf Exl3MatmulD(Dev d, const vt::Tensor& x, const Exl3Weight& w,
     const auto plan = vt::PlanExl3SmallM(M, K, N, w.Bits());
     DBuf had(d, vt::DType::kF16, {1, K / 16, plan.padded_rows, 16});
     DBuf parts(d, vt::DType::kF32, {plan.splits, M, N});
-    vt::Exl3GroupedLinear(d.q, out.t(), x, trellis, suh, svh, shard,
-                         had.t(), parts.t(), {w.Bits(), w.codebook, w.name.c_str()});
+    vt::detail::Exl3GroupedLinearModel(d.q, out.t(), x, trellis, suh, svh, shard,
+        had.t(), parts.t(), {w.Bits(), w.codebook, w.name.c_str()},
+        w.single_source_map.d_dev, w.w8a8_model_map);
     return out;
   }
 

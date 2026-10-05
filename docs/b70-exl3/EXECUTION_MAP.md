@@ -2918,3 +2918,37 @@ Mixed mean across these two orders differs-0.10048%, not a demonstrated serving 
 All22GPU workers sequential, swap0/noOOM/limit. Three actual failed focused builds (missing include, wrong profile field names, wrong added test-local names) retained; corrected final build succeeds. Receipt analysis path/log-identity errors retained and corrected before final verification, without changing inference gates. Exact frozen sources/patches/binaries/build/math flags/commands/exits/input identities/raw operator/order/serving/profile/resource evidence: /home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p7-model-map-v1/receipt-v2.json (73433B,SHA256a18ee71ec5da427989829f3c07672230d1c027cdff117c26a701d35ebf86e35d); all167declared artifacts and7related identities independently verified.
 
 Retain the small complete-M1600 operator improvement and elimination of repeated immutable-map readbacks, commit/immediatepush under standing authorization. P7incomplete,goalactive. Next narrow consumer: native SmallM performs a separate static source-map check unlike the inspected pinned Python donor. Qualify model-owned reuse there with cold-capture fallback, graph read-only/ownership protection and untrusted replay guards before measuring decode. Frozen defaultD64 four failures, full-state/reference/P1 default admission and final matrix remain open.
+
+## 155. P4/P7 SmallM immutable model map reuse retained; bounded C1 decode gain
+
+Follow the actual pinned Python donor organization: model-owned immutable source maps need not repeat native-only range-check kernels. Default VT_XPU_SMALLM_MODEL_MAP=1 reuses the projection's checked allocation/generation certificate; =0 restores actual range checks. Both grouped and single-source model consumers use this seam. Public Exl3GroupedLinear always discards an injected private payload and checks actual map values. Existing layout, scratch, alignment, alias and output-preservation contracts remain. Donor Hadamard/Gemv/DPAS/split-K/FP32 parts/scales/FP16 materialization, target/draft/GDN/KV arithmetic and checkpoint/subset stay unchanged.
+
+Cold/stale eager use validates actual GPU map bytes once. Cold/stale capture constructs no certificate/readback: retains actual per-replay range guards and pins its allocation. Warm capture skips only immutable-map checks, pins the actual allocation, and rejects any captured overlapping write. Old graph/map generation and a newly loaded generation may coexist. Executables retire before last owner release outside the context mutex. If another queue records, map owners defer until the last capture ends in a bounded65536-reference host retirement array; no new GPU scratch or host polling. A capture/retirement-only lifetime mutex closes the two-hostthread interval between context unlock and last-owner deletion, preventing a new capture from forbidding that deletion. Ordinary ReplayGraph is unaffected. Context teardown detaches recordings/graphs before their final owners free allocations.
+
+Final focused build actualexit0. Final source ownership/reload/invalid-map/alias/cold-and-warm-capture/read-only/cross-queue/deferred-retirement/concurrent-new-capture tests199/199 (2cases), legacy graph metadata/two-slot guards154/154 (2cases), isolated context-shutdown marker2/2 and actual workerexit0, default-unset MTP3 lifecycle483/483, each actualexit0. Lifecycle exercises4simultaneous requests, ordered1/4/2/1, mixed prefill/spec, EOS/cancel/replacement with reused compact state base, poisoned spare rows, graph/eager/graph, standalone IDs and graph release0. Context test deliberately leaves one owned graph alive to test real process teardown; opt-in VT_B70_SMALLM_MAP_CONTEXT_TEARDOWN=1 avoids contaminating ordinary multi-case workers.
+
+Bounded different-weight operator comparison:13actual model weight families,27actual shapes,1661337600B packed GPU weights, frozen synthetic inputs. Eight alternating complete warmups, ABBA/BAAB four complete sequence samples per arm, separately eager and graph. Original control Hadamard, full FP32 parts, output and untouched input bytes checked after every sequence;4318/4318. No same-weight replay substituted for the different-weight workload.
+
+| Complete27-shape sequence | Actual guards median ms | Immutable model map median ms | Elapsed change |
+|---|---|---|---|
+|Eager|9.2875415|8.308827|-10.53793%|
+|Graph|8.207627|8.076577|-1.59669%|
+
+Graph nodes121→94. Separate observer4318/4318:108eager static-map checks/D2H→0, pure-SmallM graph validationD2H4→0. These operator-sequence gains are not full-model throughput gains.
+
+Quiet same-frozen-binary explicit0/1 P4096/O1024 C1/MTP3 full-engine pair, each1900/1900 and unprofiled:
+
+| Metric | Actual guards | Model map reuse |
+|---|---|---|
+|TTFT ms|2483.899009|2486.018669|
+|Emitted-token decode tok/s|46.417763|46.909076|
+|End-to-end s|24.522904|24.294193|
+|Mean decode cycle ms|59.882350|59.255101|
+
+Decode+1.05846%, E2E-0.93264%; no TTFT gain. All1024IDs/all371non-timingcycles exact, accepted656/proposed1104 in both. Devicepeak30325887299B both, graph release0. One quiet trial each, not final three-repeat qualification. Candidate46.9091tok/s is descriptively26.6080% below the prior original median63.915754; no fresh same-continuation original claim.
+
+Separate full-model host-only P4096/O8 observers80/80each:114static SmallM guards→0, metadataD2H1148→1034, full-model graph validationD2H4→4. Actual mutable state/KV guards still exist; no claim of entirely GPU-only serving. All8IDs exact, graphrelease0. Profiled latencies excluded from score. Operator score uses frozen source-v2; C1 score uses explicit0/1 frozen source-v3. Final default/capture-retirement changes have current final source/binary identities and focused tests; they do not alter ordinary replay math or submissions.
+
+All23GPU workers sequential, actualexit0, swap0/noOOM/limit; production inactive, onlychatui afterward. Initial focused build failed because two doctest CAPTURE macros shared a line; split lines, all subsequent focused builds pass. No numerical/reference threshold changed. Exact sources (including new host-only graph metadata header), frozen binaries, six affected translation-unit compile commands/math flags, actual commands/exits, per-arm raw operator/serving/profile/resource results and independently verified202artifacts+7related identities: /home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p7-smallm-map-v1/receipt-v2.json (71748B,SHA256a302d8724e75129f15d188b1b47266b2809d4f5fe2d6dbb5ec5b982a23663c2c).
+
+Retain this measured static-map reuse; commit/immediatepush under standing authorization. P7incomplete,goalactive. Next use remaining actual dynamic state/KV validation and arithmetic timeline to select a narrow cause-supported change. Frozen defaultD64 four failures, full-state/reference/P1 automatic admission and final refreshed matrix remain explicitly open; no broad parity or qualification promotion.
