@@ -2218,7 +2218,7 @@
     },
     {
       "task": "P7",
-      "status": "in_progress_partial_verifier_retained_current_mixed_prefill_profile_next",
+      "status": "in_progress_direct_mixed_core_outputs_retained_final_candidate_qualification_open",
       "complete": false,
       "C1_repetitions_per_engine": 3,
       "actual_native_primary_assertions_each": 1895,
@@ -2263,7 +2263,7 @@
         "bytes": 484222,
         "sha256": "4ef94808be5009536b9e1976410b821ce96d0b958338216b2f29ed18bd87f2ac"
       },
-      "remaining": "All eight serving/prefix matrix cases executed on prior7feb; primary three repeats each. New34bfd partialC2/C3 candidate lifecycle483/483, mixed1216/1216 and C4-32K2447/2447, actualexit0. Mixed E2E37.270828s(+22.07% original); C4-32K127.538209s(+33.52% original), improved21.19%/6.78% vs prior. C1 prior primary decode-21.86% and C1-32K-22.53% unchanged-route evidence, not fresh candidate repeats. No transfer of old final source quality. DefaultD64 four failures, full-all-layer state/reference and P1 default admission still open.",
+      "remaining": "Retained current mixed output placement preserves full native operator state/output and autonomous model trajectories, improves mixed1.69% and C4-32K2.46%. Current quiet gaps: mixed E2E+19.99%,C4-32K+30.24% vs original; prior C1 decode-21.86%/C1-32K-22.53% not new measurements. Final-candidate primary/C4/practical/default-controlled/draft/state/reference and automatic verifier admission remain distinct open qualification.",
       "C4_repetitions_per_engine": 3,
       "C4_native_assertions_each": 7781,
       "C4_native_all4096_ids_and419_non_timing_cycles_exact_repeats": true,
@@ -5458,9 +5458,70 @@
         "long_mixed_prefill_index_validation_host_sum_ms": 1518.102,
         "long_mixed_prefill_index_validation_events": 2037,
         "scope": "Separate diagnostic; nested host/device sums are not additive critical path. Decode graph replay hides internal events. Failed Docker launch125 retained; corrected actual GPU worker exit0."
+      },
+      "mixed_core_output_views": {
+        "status": "retained_exact_same_input_output_state_and_model_trajectory_with_measured_mixed_C4_gain",
+        "source_parent": "a75bc65b642ebe2347c14bb729f8e1665be16b98",
+        "receipt": {
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p7-mixed-output-views-v1/receipt-v1.json",
+          "bytes": 41455,
+          "sha256": "6e73e121f2fd934ead34d84ac694b367446bf9005d1689bf40e3c0ece1f5cd51"
+        },
+        "verified_artifact_identities": 70,
+        "host_cases": 2,
+        "host_assertions": 71,
+        "GPU_full_output_state_assertions": 177,
+        "lifecycle_assertions": 483,
+        "mixed_assertions_each": 1216,
+        "C4_32K_assertions": 2447,
+        "all_successful_actual_exits": 0,
+        "retained_build_failures": [
+          "v1 unqualified vt::Tensor in helper namespace",
+          "v2 two doctest CAPTURE macros on same source line"
+        ],
+        "mixed_quiet_same_binary_flag_AB_trials_each": 1,
+        "mixed_E2E_s": {
+          "off": 37.265337898,
+          "on": 36.634665247,
+          "original": 30.532208916003583
+        },
+        "mixed_elapsed_change_percent": -1.692384093567667,
+        "mixed_elapsed_change_vs_original_percent": 19.986946728239463,
+        "C4_32K_E2E_s": {
+          "prior": 127.538209012,
+          "on": 124.398819477,
+          "original": 95.51823456399143
+        },
+        "C4_32K_elapsed_change_percent": -2.461528634689081,
+        "C4_32K_elapsed_change_vs_original_percent": 30.235677035739528,
+        "mixed_all512_IDs_and135_cycles_exact_AB_and_prior": true,
+        "C4_all1024_IDs_and187_cycles_exact_prior": true,
+        "lifecycle_full_raw_exact_prior": true,
+        "profile_eliminated_copies_status_D2H_and_allocations_each": 2016,
+        "profile_target_stream_span_change_percent": -3.7344480340055997,
+        "memory": {
+          "mixed-off-v1": {
+            "backend_peak_device_bytes": 30466812248,
+            "host_peak_rss_bytes": 13581021184,
+            "after_release_graph_bytes": 0
+          },
+          "mixed-on-v1": {
+            "backend_peak_device_bytes": 30466812248,
+            "host_peak_rss_bytes": 13580804096,
+            "after_release_graph_bytes": 0
+          },
+          "c4-long-on-v1": {
+            "backend_peak_device_bytes": 30559898802,
+            "host_peak_rss_bytes": 13584314368,
+            "after_release_graph_bytes": 0
+          }
+        },
+        "scope": "One quiet mixed trial per same binary flag arm; C4 one affected default candidate vs frozen prior. Separate profiles never scored as serving speed. Original multi-request traces have no matching fully overlapping interval. No primaryC1 decode gain or full-quality claim; old final matrix/quality not silently promoted to current source.",
+        "qualification_promoted": false,
+        "P7_complete": false
       }
     }
   ],
   "performance_baseline": "7536aededc049b2157f12eadb0f4cc6bbf29b7b7",
-  "performance_next": "Implement focused arithmetic-equivalent direct GDN mixed output views for disjoint contiguous model-owned spec/prefill token intervals; keep checked scatter fallback. Current profile and affected prior product full-model receipts complete; final-current practical/default-controlled/draft/state qualification and P7 remain open."
+  "performance_next": "Pin retained direct-output candidate and refresh its final affected primary/C4 and practical/draft/target evidence. No broad sweep or repeats of unchanged-source jobs merely for reporting. DefaultD64 four failures, all-layer/reference/default admission remain open; current mixed and C4-32K speed improvements alone do not complete P7."
 }

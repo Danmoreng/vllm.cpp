@@ -1249,6 +1249,53 @@ TEST_CASE("Qwen3.5 GDN mixed token views preserve padded producer rows and refus
   CHECK(storage == before);
 }
 
+TEST_CASE("Qwen3.5 GDN mixed output views cover disjoint rows and preserve guards") {
+  std::array<uint16_t, 56> storage;
+  storage.fill(0x7e00);
+  vt::Tensor output = vt::Tensor::Contiguous(storage.data() + 8, vt::DType::kF16,
+      vt::Device{}, {10, 4});
+  for (bool spec_first : {true, false}) {
+    storage.fill(0x7e00);
+    std::array<std::vector<int32_t>, 2> maps = spec_first
+        ? std::array<std::vector<int32_t>, 2>{{{0, 1, 2, 3}, {4, 5, 6, 7, 8, 9}}}
+        : std::array<std::vector<int32_t>, 2>{{{6, 7, 8, 9}, {0, 1, 2, 3, 4, 5}}};
+    auto views = vllm::detail::GdnContiguousTokenOutputViews(output, maps[0], maps[1]);
+    REQUIRE(views.has_value());
+    auto expected = storage;
+    for (size_t group = 0; group < 2; ++group) {
+      auto& view = (*views)[group];
+      REQUIRE(view.IsContiguous());
+      CHECK(view.shape[0] == int64_t(maps[group].size()));
+      auto* target = static_cast<uint16_t*>(view.data);
+      for (size_t row = 0; row < maps[group].size(); ++row)
+        for (int col = 0; col < 4; ++col) {
+          const uint16_t value = uint16_t(0x3000 + group * 256 + row * 4 + col);
+          target[row * 4 + col] = value;
+          expected[8 + maps[group][row] * 4 + col] = value;
+        }
+    }
+    CHECK(storage == expected);  // Complete output and both outside guards.
+  }
+  const auto before = storage;
+  for (const auto& maps : {
+      std::array<std::vector<int32_t>, 2>{{{}, {0, 1, 2, 3, 4, 5, 6, 7, 8, 9}}},
+      {{{0, 1, 2, 3}, {3, 4, 5, 6, 7, 8}}},  // Overlap, even with total count10.
+      {{{0, 1, 2, 3}, {5, 6, 7, 8, 9}}},     // Gap.
+      {{{3, 2, 1, 0}, {4, 5, 6, 7, 8, 9}}}, // Permuted first group.
+      {{{0, 1, 2, 3}, {4, 5, 6, 6, 8, 9}}}, // Duplicate in second group.
+      {{{-1, 0, 1, 2}, {3, 4, 5, 6, 7, 8}}},
+      {{{0, 1, 2, 3}, {4, 5, 6, 7, 8, 10}}}})
+    CHECK_FALSE(vllm::detail::GdnContiguousTokenOutputViews(
+        output, maps[0], maps[1]).has_value());
+  output.stride[0] = 8;
+  CHECK_FALSE(vllm::detail::GdnContiguousTokenOutputViews(
+      output, {0, 1, 2, 3}, {4, 5, 6, 7, 8, 9}).has_value());
+  output.stride[0] = 4; output.data = nullptr;
+  CHECK_FALSE(vllm::detail::GdnContiguousTokenOutputViews(
+      output, {0, 1, 2, 3}, {4, 5, 6, 7, 8, 9}).has_value());
+  CHECK(storage == before);
+}
+
 TEST_CASE("Qwen3.5 KV-cache spec: shared EXL3 MTP prefix recomputes the future-dependent draft page") {
   using namespace vllm::v1;
   init_none_hash(sha256_cbor);
