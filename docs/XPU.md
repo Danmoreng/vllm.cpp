@@ -72,6 +72,15 @@ This dependency selection does not promote the experimental B70 verifier or
 change any numerical/admission guards. See the scoped capability and unresolved
 qualification results in [UPSTREAM_READINESS.md](b70-exl3/UPSTREAM_READINESS.md).
 
+Eligible model-owned EXL3 W8A8 calls consume checked private activation storage
+directly by default. `VT_XPU_W8A8_DIRECT_PREPARE=0` restores publication into the
+full private workspace for diagnostics;1 selects direct consumption. Eligibility
+requires the model's owned map certificate, enabled checked preparation,
+K/128<=144 and at most64MiB of preparation storage. Budget refusal uses the
+existing checked fallback. Explicit public workspaces retain their full published
+layout. Preparation ownership extends through all oneDNN and output-Hadamard
+consumers. This changes neither panel1024 nor arithmetic/reference admission.
+
 ## Current source dependencies and Xe2 scope
 
 The current 4-bpw FP16 checkpoint uses these source pins. They identify source
