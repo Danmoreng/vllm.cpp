@@ -2218,7 +2218,7 @@
     },
     {
       "task": "P7",
-      "status": "in_progress_current_quality_primary_no_MTP_32K_and_mixed_matrix_delivered_prefix_and_qualification_open",
+      "status": "in_progress_current_quality_and_bounded_serving_prefix_matrix_executed_performance_state_reference_and_admission_gates_open",
       "complete": false,
       "C1_repetitions_per_engine": 3,
       "actual_native_primary_assertions_each": 1895,
@@ -2263,7 +2263,7 @@
         "bytes": 484222,
         "sha256": "4ef94808be5009536b9e1976410b821ce96d0b958338216b2f29ed18bd87f2ac"
       },
-      "remaining": "Final PREFIX-32K current native plus unchanged original fixture check pending; commands prepared, not executed. Current primary C1 median49.901433 vs original63.864529TPS (-21.86%); C1-32K38.831207 vs50.122609TPS (-22.53%). C4-4K E2E native-36.09%, but C4-32K native+43.24% and proper4K/32K mixed+54.89%; original serial/no matched overlapping decode score. Preserve all defaultD64 four failures, full-all-layer state/reference and P1 automatic-admission gates. No performance/serving completion promotion.",
+      "remaining": "All eight planned serving/prefix matrix rows executed on unchanged7feb68781, primaryC1/C4 three repetitions each and other sentinels once; current bounded lifecycle483/483 in SLM package, not full supported-mode qualification. Current primary C1 decode-21.86%, C1-32K-22.53%; native C4-4K E2E-36.09%, C4-32K+43.24%, proper4K/32K mixed+54.89%, with differing continuations and original serial/no matched overlapping score. Preserve defaultD64 four failures, full-all-layer state/reference and P1 automatic-admission gates. No performance/serving completion promotion.",
       "C4_repetitions_per_engine": 3,
       "C4_native_assertions_each": 7781,
       "C4_native_all4096_ids_and419_non_timing_cycles_exact_repeats": true,
@@ -2916,7 +2916,7 @@
           "sha256": "3da49f66c6730614433e01fb429bc9c4e89d00c1f88a01982534334261bf9c7e"
         }
       },
-      "next": "Execute prepared current PREFIX-32K native pair plus unchanged original fixture check at24GiB/no swap. Then isolate same-input C2/C3 uniformQ4 verifier operator/route gap before admission or code promotion: current32K C4 tail means397.149ms C3/291.351ms C2 versus117.359ms C4/63.207ms C1, mostly graph replays; current source deliberately admits onlyC1/C4. These mixed-state/shape cycle observations justify a focused hypothesis, not isolated attention causality or speedup. Preserve defaultD64/state/reference/P1 default gates and primary C1 gap.",
+      "next": "Obtain focused identical-input original C2/C3 uniformQ4 verifier proof and complete-operator baseline, then extend bounded native admission only if arithmetic/masking/output/state/graph-owner gates pass and complete path gains. Current32K tail means397.149ms C3/291.351ms C2 versus117.359ms C4/63.207ms C1, mostly graph replays; source admits onlyC1/C4. This is a measured partial-batch cost hypothesis, not isolated attention causality. Keep defaultD64/state/reference/P1 automatic-admission and primary/long/mixed gaps explicit; no repeat of completed matrix without a new change/noise/regression.",
       "current_quality": {
         "practical_tasks": 8,
         "practical_passed": 8,
@@ -5102,9 +5102,63 @@
         "verified_identities": 253,
         "qualification_promoted": false,
         "P7_complete": false
-      }
+      },
+      "final_current_prefix_32K": {
+        "product_source": "7feb68781cf2722e4550d45a49a1764b4812aea6",
+        "receipt": {
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p7-final-matrix-v1/prefix-comparison-v1.json",
+          "bytes": 175823,
+          "sha256": "89b58255c6089edd276bed57fad57c51abc3e0c5d817d6d42d38dd224d841a6c"
+        },
+        "GPU_workers": 2,
+        "actual_worker_exits_each": 0,
+        "native_assertions": {
+          "total": 363,
+          "passed": 363,
+          "failed": 0
+        },
+        "native_cold_repeat_all64IDs_exact": true,
+        "native_all128IDs_exact_prior": true,
+        "native_first_positions": [
+          0,
+          30400
+        ],
+        "native_prompt_tokens_computed": [
+          32768,
+          2368
+        ],
+        "original_checks": {
+          "cold_repeat_ids_exact": true,
+          "repeat_cached_tokens": 30400,
+          "expected_aligned_cached_tokens": 30400
+        },
+        "original_native_first_ID_difference": {
+          "index": 51,
+          "native": 10345,
+          "original": 7854
+        },
+        "native_graph_captures": 2,
+        "native_graph_replays": 56,
+        "native_graph_release_bytes": 0,
+        "native_backend_peak_device_bytes": 30403660867,
+        "all_swap_peaks_zero_and_memory_limit_OOM_events_zero": true,
+        "verified_identities": 229,
+        "native_functional_driver_has_no_like_for_like_serving_score": true,
+        "qualification_promoted": false,
+        "P7_complete": false
+      },
+      "final_serving_prefix_matrix_cases_executed": [
+        "C1-4K-M3",
+        "C4-4K-M3",
+        "C1-4K-M0",
+        "C4-4K-M0",
+        "C1-32K-M3",
+        "C4-32K-M3",
+        "MIXED-4K-32K",
+        "PREFIX-32K"
+      ]
     }
   ],
   "performance_baseline": "7536aededc049b2157f12eadb0f4cc6bbf29b7b7",
-  "performance_next": "Execute prepared current PREFIX-32K native pair plus unchanged original fixture check at24GiB/no swap. Then isolate same-input C2/C3 uniformQ4 verifier operator/route gap before admission or code promotion: current32K C4 tail means397.149ms C3/291.351ms C2 versus117.359ms C4/63.207ms C1, mostly graph replays; current source deliberately admits onlyC1/C4. These mixed-state/shape cycle observations justify a focused hypothesis, not isolated attention causality or speedup. Preserve defaultD64/state/reference/P1 default gates and primary C1 gap."
+  "performance_next": "Obtain focused identical-input original C2/C3 uniformQ4 verifier proof and complete-operator baseline, then extend bounded native admission only if arithmetic/masking/output/state/graph-owner gates pass and complete path gains. Current32K tail means397.149ms C3/291.351ms C2 versus117.359ms C4/63.207ms C1, mostly graph replays; source admits onlyC1/C4. This is a measured partial-batch cost hypothesis, not isolated attention causality. Keep defaultD64/state/reference/P1 automatic-admission and primary/long/mixed gaps explicit; no repeat of completed matrix without a new change/noise/regression."
 }
