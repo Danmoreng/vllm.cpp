@@ -17,6 +17,7 @@
 #include <vector>
 
 namespace vt::xpu {
+#ifdef VLLM_CPP_XPU_ONEDNN
 namespace {
 template<class Kernel>
 void Launch(Queue& q, int64_t count, int local, Kernel kernel, const char* stage) {
@@ -169,9 +170,6 @@ void Reconstruct(Queue& q, const Tensor& tr, Tensor& panel, int k, int n,
 void Exl3GroupedW8A8Kernel(Queue& q, Tensor& out, const Tensor& in, const Tensor& tr,
     const Tensor& suh, const Tensor& svh, const Tensor& shard,
     Tensor& workspace, Tensor& panel, const Exl3GroupedLinearArgs& args) {
-#ifndef VLLM_CPP_XPU_GPTQ4
-  VT_CHECK(false, "EXL3 W8A8 requires the pinned oneDNN 3.13 build");
-#else
   const int m = int(in.shape[0]), k = int(in.shape[1]), n = int(out.shape[1]);
   const int groups = int(suh.shape[0]);
   const auto plan = PlanExl3W8A8(m, k, n, groups, args.bits, args.w8a8_panel_columns);
@@ -337,6 +335,12 @@ void Exl3GroupedW8A8Kernel(Queue& q, Tensor& out, const Tensor& in, const Tensor
         {"input_dtype", Name(in.dtype)}, {"output_dtype", Name(out.dtype)}};
     std::fprintf(stderr, "EXL3_W8A8_DISPATCH %s\n", event.dump().c_str());
   }
-#endif
 }
+#else
+void Exl3GroupedW8A8Kernel(Queue&, Tensor&, const Tensor&, const Tensor&,
+    const Tensor&, const Tensor&, const Tensor&, Tensor&, Tensor&,
+    const Exl3GroupedLinearArgs&) {
+  VT_CHECK(false, "EXL3 W8A8 requires VLLM_CPP_XPU_ONEDNN=ON (oneDNN 3.13.0)");
+}
+#endif
 }  // namespace vt::xpu

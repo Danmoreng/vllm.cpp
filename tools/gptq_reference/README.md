@@ -70,7 +70,8 @@ needed. The current captured fixture is local and is not part of this branch.
 ## Native GPTQ-01 adapter
 
 The optional native adapter is built with `VLLM_CPP_XPU=ON` and
-`VLLM_CPP_XPU_GPTQ4=ON`. It requires oneDNN 3.13.0 at configure time and checks
+`VLLM_CPP_XPU_ONEDNN=ON` (`VLLM_CPP_XPU_GPTQ4=ON` remains a compatibility
+alias). It requires oneDNN 3.13.0 at configure time and checks
 the runtime source hash `0e2a5bfeef1bfbffc3137464606540233086ce9b` when the
 XPU runtime is created. The option is off by default and is rejected for a
 non-XPU build.

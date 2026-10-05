@@ -2,8 +2,8 @@
 
 The optional SYCL/Level Zero backend includes EXL3, Conv/GDN, attention,
 GPTQ and text-engine development. The active local work is the
-[B70 EXL3 migration and parity plan](B70-EXL3-Migration-and-Parity-Plan.md),
-starting with S0a on the merged branch.
+[B70 upstream readiness and performance plan](B70_EXL3_UPSTREAM_READINESS_AND_PERFORMANCE_PLAN_3803ad4_EN.md).
+The earlier migration and performance plans below remain historical references.
 
 The setup and inventory examples below describe the earlier Mia-AiLab
 3.5-bpw EXL3/BF16 path. They are historical build/operator references, not a
@@ -44,6 +44,33 @@ ctest --test-dir build-xpu --output-on-failure \
 The no-GPU check masks Level Zero devices with `ONEAPI_DEVICE_SELECTOR=opencl:cpu`.
 The backend check uses an 8 MiB process allocation budget and a tiny F32 matrix
 kernel, not model weights or a long benchmark.
+
+## Shared oneDNN capability
+
+`VLLM_CPP_XPU_ONEDNN=ON` enables the shared XPU oneDNN implementation for
+EXL3 W8A8, EXL3 attention and dense FP16 projections. Configure with XPU enabled
+and an installed SYCL/GPU build of exactly oneDNN **3.13.0**; set `dnnl_DIR` to
+its CMake package directory when it is not on the default search path. This
+option does not download or upgrade oneDNN. Both XPU and oneDNN default to OFF;
+CPU builds require neither dependency.
+
+`VLLM_CPP_XPU_GPTQ4=ON` remains a compatibility alias. Either option enables
+the same source files, compile definition `VLLM_CPP_XPU_ONEDNN`, runtime and
+diagnostic tests. Their effective OR is the internal CMake variable
+`VLLM_CPP_XPU_ONEDNN_ENABLED`; neither cache option rewrites the other. Turning
+both options OFF removes the oneDNN capability. Enabling either without XPU
+fails configuration. GPTQ operators remain diagnostic.
+
+For a new EXL3 configuration, add these options to the XPU build command above:
+
+```sh
+-DVLLM_CPP_XPU_ONEDNN=ON -DVLLM_CPP_XPU_GPTQ4=OFF \
+  -Ddnnl_DIR=/path/to/onednn/lib/cmake/dnnl
+```
+
+This dependency selection does not promote the experimental B70 verifier or
+change any numerical/admission guards. See the scoped capability and unresolved
+qualification results in [UPSTREAM_READINESS.md](b70-exl3/UPSTREAM_READINESS.md).
 
 ## Checkpoint inventory
 

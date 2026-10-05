@@ -6633,7 +6633,7 @@
     }
   ],
   "performance_baseline": "7536aededc049b2157f12eadb0f4cc6bbf29b7b7",
-  "performance_next": "Follow the active upstream readiness/performance plan; U2 oneDNN capability naming and focused test separation next. The old P0-P7 work period remains closed.",
+  "performance_next": "Follow the active upstream readiness/performance plan; U2 hermetic/external test separation next, then minimal hygiene and bounded F1/F2. The old P0-P7 work period remains closed.",
   "closed_performance_plan": "docs/B70_EXL3_NATIVE_PERFORMANCE_IMPLEMENTATION_PLAN_7536aeded_EN.md",
   "performance_plan_closure": {
     "status": "closed_by_developer_after_last_approved_optimization",
@@ -6660,7 +6660,7 @@
     "integration_commit": "3dfa3c3193c5950bf284229441e81f26b99d499c",
     "integration_status": "native_merge_regression_pass_GCC16_CPU_build_pass_remaining_portability_open",
     "U0": "complete_portable_projection_identity_slice",
-    "U2": "partial_atomic_cache_portability_complete_oneDNN_test_hygiene_pending",
+    "U2": "partial_atomic_cache_and_oneDNN_capability_complete_test_hygiene_pending",
     "Q1": "pending_preserve_default_controlled_reference_labels",
     "F1": "pending_one_fusion_and_at_most_one_smaller_fallback",
     "F2": "pending_at_most_two_named_changes",
@@ -6675,7 +6675,7 @@
     "cpu_limit": "GCC16 now builds the CPU library and selected targets;5 focused CTest cases pass with5019 assertions and one existing registry test-case skip. GCC12 previous unchanged muse_glimmer_mm array-bounds failure retained; not rerun after the cache repair.",
     "other_backends": "Affected Vulkan source compiles and CUDA CUTLASS/Marlin host syntax checks pass. CUDA device build/link/runtime and HIP remain unverified.",
     "performance_scope": "One before/after C1 short native pair:43.61414->43.51202 decode TPS; TTFT2313.785->2318.430ms; request8160.513->8178.879ms. No repeat signal and no refreshed original score.",
-    "next_step": "U2 accurately named optional oneDNN capability with compatibility alias, then isolate hermetic and external EXL3 tests; preserve numerical and lifetime contracts.",
+    "next_step": "U2 isolate hermetic SmallM tests from external-model/oracle cases, with explicit optional skips and required-artifact failures; avoid migrating every historical test before F1/F2.",
     "U0_tests": "23 host tests in4 CTest cases pass, including8 generated artifact tests; no GPU arithmetic changed.",
     "U0_receipt": {
       "artifact": "upstream-u1-integration-v1/u0-receipt-v1.json",
@@ -6687,6 +6687,12 @@
       "artifact": "upstream-u2-atomic-cache-v1/receipt-v1.json",
       "sha256": "e44d1d000f0434e66493cd2552a7befdf8e84bb0a57b278f884ed836b65e9723",
       "bytes": 7414
+    },
+    "U2_oneDNN_tests": "CPU857/857;all3 enabled-without-XPU combinations correctly actualexit1. XPU withoutoneDNN backend GPU smoke and operator compile pass after fixing disabled stub. Modern option only builds with legacyOFF: W8A8 ownership76/76, oneDNN attention74/74, denseF16 isolated199/199 and packed+dense1232/1232, MTP lifecycle483/483 full payload exact. All compile commands identical modern vslegacy; bothOFF removes macro and oneDNN sources; modernON/legacyOFF restored. Retain initial disabled-stub compile and dense test order-dependence failures. No numerical or admission/score promotion.",
+    "U2_oneDNN_receipt": {
+      "artifact": "upstream-u2-onednn-capability-v1/receipt-v1.json",
+      "sha256": "53e8fb5ab1128fba57465e79ed1da53d25fac3c25971960fdddce9f44c162358",
+      "bytes": 16321
     }
   }
 }

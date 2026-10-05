@@ -107,7 +107,7 @@ if(VLLM_CPP_XPU)
   target_compile_options(test_xpu_exl3_prefill PRIVATE -fsycl)
   target_link_options(test_xpu_exl3_prefill PRIVATE -fsycl)
   vllm_cpp_add_test(test_xpu_exl3_checkpoint vt/test_xpu_exl3_checkpoint.cpp)
-  if(VLLM_CPP_XPU_GPTQ4)
+  if(VLLM_CPP_XPU_ONEDNN_ENABLED)
     vllm_cpp_add_test(test_xpu_gptq4 vt/test_xpu_gptq4.cpp)
     target_include_directories(test_xpu_gptq4 PRIVATE ${CMAKE_SOURCE_DIR}/src)
     target_compile_options(test_xpu_gptq4 PRIVATE -fsycl)
@@ -120,8 +120,8 @@ if(VLLM_CPP_XPU)
   endif()
   vllm_cpp_add_test(test_xpu_attention vt/test_xpu_attention.cpp)
   vllm_cpp_add_test(test_xpu_attention_fast vt/test_xpu_attention_fast.cpp)
-  if(VLLM_CPP_XPU_GPTQ4)
-    target_compile_definitions(test_xpu_attention_fast PRIVATE VLLM_CPP_XPU_GPTQ4)
+  if(VLLM_CPP_XPU_ONEDNN_ENABLED)
+    target_compile_definitions(test_xpu_attention_fast PRIVATE VLLM_CPP_XPU_ONEDNN)
   endif()
   vllm_cpp_add_test(test_xpu_qwen_checkpoint vllm/models/test_xpu_qwen_checkpoint.cpp)
   vllm_cpp_add_test(test_xpu_qwen_exl3_fp16 vllm/models/test_xpu_qwen_exl3_fp16.cpp)
@@ -4312,7 +4312,7 @@ vllm_cpp_add_test(test_qwen3_5_dense_load_residency
 
 vllm_cpp_add_test(test_gptq4_weight
   vllm/models/test_gptq4_weight.cpp)
-if(VLLM_CPP_XPU AND VLLM_CPP_XPU_GPTQ4)
+if(VLLM_CPP_XPU AND VLLM_CPP_XPU_ONEDNN_ENABLED)
   execute_process(COMMAND git -c safe.directory=${CMAKE_SOURCE_DIR} rev-parse HEAD
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
     OUTPUT_VARIABLE GPTQ4_BENCH_BASE_COMMIT OUTPUT_STRIP_TRAILING_WHITESPACE)
