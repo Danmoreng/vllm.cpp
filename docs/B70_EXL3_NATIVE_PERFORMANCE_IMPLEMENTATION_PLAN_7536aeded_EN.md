@@ -1,5 +1,14 @@
 # B70 EXL3 native performance: implementation plan after 7536aeded
 
+> **Closed by the developer on 2026-10-05.** The last approved optimization is
+> the typed-memory speculative GDN SLM change, product commit `0ea34de4e`.
+> The final checkpoint and review handoff are recorded in
+> `docs/b70-exl3/PRO_PERFORMANCE_REVIEW_2026-10-05.txt` and `RECOVERY_STATUS.json`.
+> This closes the agreed optimization work period; it does not declare Python
+> speed parity, resolve the four default D64 failures, promote the controlled
+> reference, or qualify every supported MTP/batch/context mode. The original
+> plan below is retained for audit. A new plan requires the developer's request.
+
 **Review date:** 2026-10-04  
 **Native baseline:** `7536aededc049b2157f12eadb0f4cc6bbf29b7b7`  
 **Repository / branch:** `Danmoreng/vllm.cpp`, `b70-gptq-int4`  

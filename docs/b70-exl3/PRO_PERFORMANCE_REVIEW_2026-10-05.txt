@@ -1,0 +1,90 @@
+B70 EXL3 NATIVE PERFORMANCE: FINAL PRO REVIEW HANDOFF
+Date: 2026-10-05
+Product code: 0ea34de4e005688ebc80f28137c93c83b9c461c3
+Branch: b70-gptq-int4. The archive MANIFEST identifies the later pushed documentation/closure commit.
+Previous performance-plan baseline: 7536aededc049b2157f12eadb0f4cc6bbf29b7b7.
+
+DECISION AND REVIEW REQUEST
+
+The developer explicitly ended this P0-P7 optimization period after the final typed-memory speculative GDN SLM optimization. No additional optimization is authorized under the old plan. Final checks and this handoff are complete; the next work should follow a new Pro-reviewed implementation plan. Closure means the agreed work period is finished, not that every original qualification gate or the Python-performance objective was achieved. Preserve the unresolved gates below. Do not restart the old plan from P0.
+
+Please produce a bounded implementation-first plan to close the remaining real prefill and decode gap. Inspect the included code and original sources. Distinguish GPU arithmetic/memory/compiled-route costs from host submission, state snapshots, proposal yield and scheduling. Deliver a practical first code assignment, a ranked short sequence, exact correctness/state/lifetime invariants and a stop rule for each attempt. Do not propose more receipt-only loops or repeat rejected variants without new causal evidence.
+
+FIXED CONTRACT AND ENVIRONMENT
+
+Intel Arc Pro B70, one32GB card and32GB host, existing180W; no driver/power/library changes. Exclusive native/original GPU execution, production b70-qwen38-vllm.service stopped. Only the tested instance uses the card. No resource leases or GPU lock files. One assistant, current branch, focused checks, regular commit/push.
+
+Checkpoint turboderp/Qwen3.8-27B-exl3 revision113cf7ab958054860e43fb7f3063b1af19171095. Body4.00bpw; full248320-token6bpw EXL3 target head; exact65536-token block-aligned compact draft/global map; MTP3. Large-M is rotated EXL3 W8A8, not GPTQ W4A8. FP16 materialization, FP32 recurrent state, FP8 KV, page1600,262144 configured context objective. Native target/draft/MTP, graphs, prefix caching and lifecycle are implemented. Full262K generation is not tested; the final matrix uses4K/32K and practical retrievals actually60872 tokens long. No whole-model FP16 expansion or reference tensors in product inference.
+
+Builder image sha256:ae6950731b3c031f812a95c0eb615a572239426440bf67fd1b3c9c9cbfce9eca.
+Original image sha256:8d0e1dbe1e6a3a31e79b5ddcc1c050589c08721360af9374b9acd01236f97918.
+Compiler icpx2026.1.1, IGC2.41.5; driver1.17.39758+10. GPU workers24GiB cgroup/no-swap/CPU2. Startup/loading excluded consistently, O32request warmup then cold-prefix reset. Keep native tracking and original Torch allocation/reservation accounting separate.
+
+PLAN EXECUTION
+
+P0: bounded measurement/readiness identities and resource/lifecycle evidence delivered.
+P1: page1600 packed native verifier, C1Q4 then boundaries/Q2/Q3/Q5/C4/ragged and owner tests delivered with measured serving gain. P1 automatic/default promotion and integrated original full-state qualification remain open. Benchmarks explicitly set attention=auto and VT_XPU_XE2_VERIFY=1; do not claim arbitrary ordinary defaults have the same performance. PartialC2/C3 original-FP16 verifier handling was subsequently delivered and measured.
+P2: wider group-correct W8A8 panels, bounded workspace/planning and real grouped/operator/model proof delivered. Preserved int8/S32/scales and FP16 boundaries; previous128 route retained as control.
+P3: typed FP16 SiLU and later mathematical lookup paths delivered with exact finite/Inf/signed-zero outputs. Two-NaN payload differences remain explicitly scoped, not universal NaN-bit equality.
+P4: checked preparation, immutable model map certificates and completion-owned reuse delivered. Dynamic/public guards preserved. Cached SmallM model maps remove repeated eager map readbacks; no unsafe pointer-only certificate.
+P5: two runnable private-register GDN variants rejected (C1 slower; second also uniformC4 slower). This register package is closed, not a missing optimization. Later profile-driven coalesced SLM recurrence and the final typed-memory extension succeeded; keep the rejected package identities.
+P6: same-input donor comparison on13real weight families/27shapes, native/donor packed/intermediate bytes and largely equivalent DPAS ISA. Weighted core costs were within the declared10% band. One isolated FA-outM4 gap remained unexplained; absolute SmallM cost is not proof of a missing donor port. No new global tile search.
+P7: additional exact norms/gated SiLU, map/guard reuse, no-MTP aligned capacity, mixed token/output views, partial verifier and coalesced speculative GDN retained only after scoped proof/gain checks. Final current practical/draft/target, native primary three-repeat matrix and one-shot long/mixed/no-MTP/prefix evidence refreshed. Developer now closes the optimization period, with incomplete numerical/product qualification visible.
+
+FINAL PRIMARY PERFORMANCE
+
+C1 coldP4096/O1024,MTP3. Native three trials use the exact final default binary; trial1 explicitly reuses the same-source default run from the typed-GDN package, trials2/3 freshly executed. Original three immutable previously executed trials are reused from candidate-matrix-v2; no new original measurement is claimed. Same workload bytes, image/checkpoint/subset/configuration. This is an autonomous-serving comparison, not fixed identical continuation across engines.
+
+                       Native median       Original median
+Emitted decode tok/s   51.781375             63.863406
+TTFT ms                2330.728736          1951.990905
+E2E s                  22.086893             17.970134
+Native changes: decode -18.918551%, TTFT +19.402643%, E2E +22.908895%.
+
+All1024 native IDs and371non-timing cycles exact across repetitions; accepted656/proposed1104. Original third trial changes continuation at48 and is slower; it remains in the three-trial median. Cross-engine IDs differ; stable native output is not evidence that Python is less correct. Per-request chunk-observed TPOT/stream pauses and all cycle counts are in the raw/derived reports. MTP chunks have shared timestamps, not individual token arrivals.
+
+Initial plan excerpt had a single native graph trial34.731260tok/s, TTFT4841.378ms andE2E34.296143s. The final result is descriptively about49.09% more decode throughput. This is not a same-trajectory cumulative causal claim: planned attention arithmetic and acceptance changed during the work; initial native accepted642/proposed1152 versus final656/1104.
+
+C4 coldP4096/O1024each,MTP3. Three new final native trials, median E2E44.467989s, common four-way emitted decode129.524802tok/s. Reused original medianE2E76.083842s, but original overlap is1 versus native4. E2E difference-41.553966% is a real serving/scheduling result, NOT like-for-like four-way GPU parity. Native4096IDs/419non-timecycles repeat exactly, accepted2571/proposed4572.
+
+OTHER FINAL BOUNDED CASES
+
+c1-m0: native/original E2E 12.085057/10.553061s (+14.517%). Native common decode 26.051950 tok/s; original decode overlap 1. C1 decode gap -11.673%.
+c4-m0: native/original E2E 35.526633/42.498134s (-16.404%). Native common decode 65.862062 tok/s; original decode overlap 1.
+c1-long: native/original E2E 28.191304/23.488429s (+20.022%). Native common decode 39.667422 tok/s; original decode overlap 1. C1 decode gap -20.859%.
+c4-long: native/original E2E 123.776012/95.518235s (+29.584%). Native common decode 86.287191 tok/s; original decode overlap 1.
+mixed: native/original E2E 36.376662/30.532209s (+19.142%). Native common decode 64.965862 tok/s; original decode overlap 1.
+
+Prefix32K/O64: cold/repeated64IDs exact; starts0/30400, prompt actually computed32768/2368. Graph retirement0. Native functional prefix driver is not a matched timing instrument; no cached-prefill TFLOPS or Python speed ratio invented. Current final R08 lifecycle483/483 already executed on the same default binary: entire payload exact prior, ordered1/4/2/1, EOS/cancel/reused state, poisoned spare slots and graph/eager/graph. Current native device peak maximum tracked in the final matrix: 30593988791 bytes. Original Torch accounting is separate; resource records preserve cgroup peaks, CPU-throttling periods, swap and OOM/limit counters. Whole-worker original CPU throttle includes startup and is not a proven cause of serving-interval slowdown.
+
+LAST APPROVED OPTIMIZATION: TYPED MEMORY IN EXISTING SPECULATIVE GDN SLM
+
+src/vt/xpu/xpu_gdn.cpp::GdnSpecDecodeKernel: direct typed F16/F32 loads/stores under existing contiguous F16 output/qkv, F32g/beta/state, C<=4/Q<=4/Hk16/Hv48/D128 contract. Same WG64/SG32,32768B SLM xor layout, ascending-K scalar arithmetic, full FP32 per-token snapshots and ownership/barriers. No new workspace, state precision change, private128-state retry or host polling. Default1; VT_XPU_GDN_SPEC_SLM_TYPED=0 returns to the prior dynamic SLM branch. Unsupported contracts fall back; existing WG override wins.
+
+Focused exact snapshots/alias/metadata/F16graph case495/495; complete operator321/321; final default route probe38/38; default C1model1900/1900 and lifecycle483/483. Full outputs/state arrays exact, not only selected FP16 final rows. Complete-operator medians improved29.46%C1Q4/14.89%C4Q4/23.09%ragged. One paired native unprofiled pilot gave C1decode+3.36% and C4shortP4096/O256 common decode+8.66%; E2E-2.88%/-3.86%. All IDs/non-timecycles exact and device memory unchanged. These are pilot native A/B gains, not refreshed Python parity percentages.
+
+Separate identical native C1P4096/O32 profile: target decode queue48.954836->46.685796ms, draft5.223043->5.238103ms, graph-validation readback0.028711->0.028199ms. Graph-internal kernels are not exposed by this receipt. Different/nested clocks must not be summed. This points to remaining target GPU work; it does not justify removing a required wait or claiming the residual gap is host-only. Profile throughput is not used as the serving score.
+
+NUMERICAL/STATE/QUALIFICATION LEDGER
+
+Final practical screen392/392, semantic8/8: four code functions20executed cases, two actual60872-token retrievals, two structured/tool tasks. Prompts/IDs/text/finishes/MTP counters exact previous candidate. Sequential tasks with C4 capacity; not concurrent C4 semantic coverage.
+Final isolated compact draft131644/131644: all655360hidden and65536compact logits plus independent identical-input head outputs exact after widening originalF16 toF32. Not every evolving MTP iteration.
+Final P128+D64 full248320 head: actual exit1,808assertions/804pass/4fail against UNCHANGED frozen default reference. D27TV0.0305754/KL0.00212581 andD29TV0.212752/KL0.163144, top10minimum9. All65complete rows (16140800F32values) byte-exact prior and separately controlled deterministic-BA original. No default-reference promotion or gate relaxation.
+Two held-out eager no-MTP P128/D1 prefixes: complete48GDN Conv/SSM and16initialized FP8attention-KV layers byte-exact after the prior signed-zero repair. Initially a single layer43negative-zero key byte differed; actual norm/RoPE preimages identified the cause, then generic signed-zero-preserving F32 products repaired it. Each prefix5711/5711. Nonzero arithmetic unchanged; bounded complete-preamble cost about+0.6%. This is scoped eager hybrid proof, not integrated original MTP/C4/long-context state qualification. The typed GDN same-input full snapshot proof and native model continuity are separate evidence.
+P1 automatic/default admission, independently justified default-reference contract, integrated original MTP/C4/long states, full262K generation and stochastic-RNG equivalence remain unqualified. Do not convert test assertion fractions into model accuracy. Do not claim the C++ engine is more accurate than Python from these observations.
+
+RETAINED FAILURES / TEST PREPARATION
+
+Final draft-v1 failed while writing a missing diagnostic directory: actualexit1,131086assertions/1failure. Directory preparation was corrected and unchanged binary rerun asdraft-v2,131644/131644. Both receipts/logs are retained. First raw-analysis attempt lacked copied b70_inventory.py; corrected by copying the existing helper and rerunning analysis only. Earlier rejected kernels and expected default failures remain actual failures in the evidence; no forged zero exits.
+
+REVIEW SOURCES AND EVIDENCE
+
+code/ is every tracked source blob at the final pushed archive commit, including tests/plans/fixtures/third-party files. Read EXECUTION_MAP sections169-176 plus the final closure section and RECOVERY_STATUS. reference/image-8d0e1dbe-source includes49installed Python/FLA files read directly from the pinned original image with noGPU/inference; source hashes and image identity are recorded. reference/pinned-donor-c59d9442 includes complete selected Python/DPAS/FA donor sources and shared_kv_verify.py (efb06f59250cbf4efb16f3eb6eb119bbd4c24c9ff086459b4afb85cc21adacb2). Historical live-runtime sources preserve their previous identities. Source availability alone does not prove the measured compiled route; execution receipts remain authoritative.
+
+Final matrix: {'path': '/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p7-candidate-matrix-v3/receipt-v1.json', 'bytes': 120168, 'sha256': '6e5eb27e27ec606b6758c99fff45899c5120bdc2c82ae5f664980ff2897e6db4'}
+Final quality: {'path': '/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p7-candidate-quality-v4/receipt-v1.json', 'bytes': 67137, 'sha256': 'e31d4c6c5fee948fb93b07cefb0f9c75656f506b46b0962b7120eb1cf1de01c7'}
+Last optimization: {'path': '/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p7-gdn-slm-typed-v1/receipt-v1.json', 'bytes': 57562, 'sha256': '49ad614a5c23c4c7af235b23cb087800a9cb2d13412957c345d0b276aed75891'}
+
+Selected external receipts, commands, logs, final native and reused original request traces are included. Large external27B weights, ELF binaries, safetensors/full state/logit arrays and raw long profiles are not included; identities and derived checks are included. Pro cannot independently recompare omitted tensor arrays from this archive alone. MANIFEST maps packaged files to original locations and records every payload hash/Git blob ID plus omissions. Do not interpret missing external artifacts as passing tests.
+
+The next plan should address the remaining measured primary C1 prefill/decode gap with concrete native changes and exact arithmetic/state ownership. Preserve functional coverage and declared open gates. Keep investigation bounded, with complete request gains and reject/stop rules; no new power/library/model/draft search or broad benchmark campaign.
