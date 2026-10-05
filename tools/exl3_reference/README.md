@@ -1,13 +1,33 @@
 # EXL3 projection fixtures and replay
 
-These tools implement the active B70 plan's S0b projection check. They use the
+These tools support the B70 S0b standalone projection check. They use the
 explicit reference manifest and current checkpoint, with no legacy model pins,
 weight download, dense full-model expansion, server or Torch-linked native code.
 
 `extract_projection.py` preserves real trellis/scale/marker bits and adds exact
 synthetic FP16 inputs at M1/M4. It accepts only whole 128-column Hadamard blocks,
 checks metadata/header/revision identity and refuses overwrites. The current
-fixture root is `/home/sebastian/LocalLLM/b70-exl3-fixtures/s0b`.
+fixture location is supplied by the caller.
+
+Validate a fixture and its adjacent JSON manifest without a model, Torch or GPU:
+
+```sh
+python3 tools/exl3_reference/capture_projection.py \
+  --artifact-root "/path/to/artifacts" --fixture head_first.safetensors --check-only
+```
+
+`--artifact-root` overrides `EXL3_ARTIFACT_ROOT`; otherwise relative names use
+the working directory. A configured root constrains absolute names and symlink
+targets too. Parent traversal is rejected. Existing absolute input filenames
+remain supported when no root is configured. Capture outputs use the explicit
+`--output` destination. Moving unchanged payloads/manifests keeps their content
+digests and comparisons unchanged; recorded historical locations are metadata.
+
+Missing payloads or manifests exit 1. An explicitly optional external check may
+use `--optional-artifacts` to exit 77 for missing files; CTest can classify that
+external invocation as skipped. Corrupt payloads, unsupported declared schemas
+and malformed tensor metadata still fail. The generated host tests always run
+and verify these outcomes; an identity-only check does not qualify GPU arithmetic.
 
 `capture_projection.py` runs in production image
 `sha256:8d0e1dbe1e6a3a31e79b5ddcc1c050589c08721360af9374b9acd01236f97918`.
@@ -56,15 +76,16 @@ sequentially, using `--rm --pull=never --network none`, `/dev/dri`, its render
 group, an 8 GiB host-memory limit and four CPUs. Compilation needs no GPU.
 No power/driver change or resource-controller lease is used.
 
-Compare on the host (standard library only), adjusting the three capture paths:
+Compare on the host (standard library only). Set `EXL3_ARTIFACT_ROOT` to your
+artifact directory first; choose a new report name for each comparison:
 
 ```sh
 PYTHONDONTWRITEBYTECODE=1 python3 tools/exl3_reference/compare_projection.py \
-  --fixture /home/sebastian/LocalLLM/b70-exl3-fixtures/s0b/head_first.safetensors \
-  --oracle /home/sebastian/LocalLLM/b70-exl3-fixtures/s0b/head_first_oracle_v2.safetensors \
-  --native /home/sebastian/LocalLLM/b70-exl3-fixtures/s0b/head_first_native_v2.safetensors \
-  --binary /home/sebastian/LocalLLM/b70-exl3-fixtures/s0b/native-build/exl3_projection_replay \
-  --report /home/sebastian/LocalLLM/b70-exl3-fixtures/s0b/head_first_comparison_v2.json
+  --fixture "$EXL3_ARTIFACT_ROOT/head_first.safetensors" \
+  --oracle "$EXL3_ARTIFACT_ROOT/head_first_oracle_v2.safetensors" \
+  --native "$EXL3_ARTIFACT_ROOT/head_first_native_v2.safetensors" \
+  --binary "$EXL3_ARTIFACT_ROOT/native-build/exl3_projection_replay" \
+  --report "$EXL3_ARTIFACT_ROOT/head_first_comparison_v2.json"
 ```
 
 Exit 0 means the local projection gate passed; exit 1 records a numerical failure

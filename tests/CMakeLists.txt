@@ -15,6 +15,8 @@ add_test(NAME test_exl3_projection_extract COMMAND ${Python3_EXECUTABLE}
   "${CMAKE_SOURCE_DIR}/tests/scripts/test_exl3_projection_extract.py")
 add_test(NAME test_exl3_projection_capture COMMAND ${Python3_EXECUTABLE}
   "${CMAKE_SOURCE_DIR}/tests/scripts/test_exl3_projection_capture.py")
+add_test(NAME test_exl3_artifacts COMMAND ${Python3_EXECUTABLE}
+  "${CMAKE_SOURCE_DIR}/tests/scripts/test_exl3_artifacts.py")
 add_test(NAME test_exl3_projection_compare COMMAND ${Python3_EXECUTABLE}
   "${CMAKE_SOURCE_DIR}/tests/scripts/test_exl3_projection_compare.py")
 add_test(NAME test_exl3_runtime_layout COMMAND ${Python3_EXECUTABLE}
