@@ -332,9 +332,22 @@ TEST_CASE("XPU EXL3 public engine: autonomous fixed MTP depth and request reuse"
   const int k = std::stoi(depth);
   REQUIRE((k == 0 || k == 1 || k == 3));
   REQUIRE_FALSE(std::filesystem::exists(output));
+  // Optional F2 qualification uses exactly the frozen serving prompt, with
+  // three real W8A8 prefill chunks. Ordinary short reuse remains unchanged.
+  const char* prefill_workload = std::getenv("VT_B70_EXL3_ENGINE_PREFILL_WORKLOAD");
+  std::vector<int32_t> prefill_ids;
+  if (prefill_workload) {
+    std::ifstream file(prefill_workload);
+    REQUIRE(file.good());
+    const auto task = nlohmann::json::parse(file);
+    REQUIRE(task.at("schema") == "b70-f2-fixed-prefill-prompt-v1");
+    prefill_ids = task.at("prompt_ids").get<std::vector<int32_t>>();
+    REQUIRE(prefill_ids.size() == 4096);
+    REQUIRE(k == 3);
+  }
   vllm::entrypoints::EngineParams params;
   params.max_model_len = 4352;
-  params.max_num_batched_tokens = 4096;
+  params.max_num_batched_tokens = prefill_workload ? 1600 : 4096;
   params.max_num_seqs = 1;
   params.num_blocks = 24;
   params.kv_cache_dtype = "fp8";
@@ -348,16 +361,34 @@ TEST_CASE("XPU EXL3 public engine: autonomous fixed MTP depth and request reuse"
     REQUIRE(std::string(std::getenv("VT_ASYNC_RUNNER") ? std::getenv("VT_ASYNC_RUNNER") : "") == "0");
     state_probe = std::make_unique<xpu_test::Queue>(vt::DeviceType::kXPU);
   }
+  REQUIRE((!prefill_workload || state_probe));
   auto engine = vllm::entrypoints::LoadedEngine::FromModelDir(model, params);
+  if (prefill_workload) {
+    // Deterministically initialize every allocated row, including spare and
+    // provisional slots. Full snapshot comparison never reads uninitialized
+    // bytes. First-use reset and subsequent request reuse still run normally.
+    auto& backend = vt::GetBackend(state_probe->q.device);
+    for (const auto& state : engine->runner().gdn_state()) {
+      backend.Memset(state_probe->q, state.conv_state.data, 0x35, state.conv_state.Bytes());
+      backend.Memset(state_probe->q, state.ssm_state.data, 0x29, state.ssm_state.Bytes());
+    }
+    backend.Synchronize(state_probe->q);
+  }
   vllm::SamplingParams sampling;
   sampling.temperature = 0;
   sampling.max_tokens = 64;
+  if (prefill_workload) sampling.ignore_eos = true;
   sampling.output_kind = vllm::RequestOutputKind::kCumulative;
   const std::string prompt =
       "A gardener plants 12 tomato plants in each of 3 rows. "
       "How many tomato plants are there? Explain briefly.";
   nlohmann::json result = {{"depth", k}, {"prompt", prompt},
                           {"requests", nlohmann::json::array()}};
+  if (prefill_workload) {
+    result["prompt_ids"] = prefill_ids;
+    result["prefill_chunk_tokens"] = 1600;
+    result["all_recurrent_rows_initialized"] = true;
+  }
   const char* graph_setting = std::getenv("VT_B70_EXL3_ENGINE_GRAPH");
   const bool graph_requested = graph_setting && std::stoi(graph_setting) == 1;
   result["graph_requested"] = graph_requested;
@@ -370,8 +401,10 @@ TEST_CASE("XPU EXL3 public engine: autonomous fixed MTP depth and request reuse"
     const int64_t varied = runner.spec_mtp_proposals_with_varied_drafts();
     const int64_t proposed = runner.spec_drafts_proposed();
     const int64_t accepted = runner.spec_drafts_accepted();
-    const auto out = engine->engine().generate(prompt, sampling,
-                                               "native-reuse-" + std::to_string(request));
+    const std::string request_id = "native-reuse-" + std::to_string(request);
+    const auto out = prefill_workload
+        ? engine->engine().generate(prefill_ids, sampling, request_id)
+        : engine->engine().generate(prompt, sampling, request_id);
     REQUIRE(out.finished);
     REQUIRE(out.outputs.size() == 1);
     const auto& ids = out.outputs.front().token_ids;

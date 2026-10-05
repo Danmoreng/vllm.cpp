@@ -193,6 +193,32 @@ The new capture, frozen tool/binary and commands are indexed in the projection
 receipt. This closes the large-QKVZ operator check; integrated model-state,
 lifecycle and repeat-performance qualification still remain.
 
+F2 now also has a native integrated recurrent-state comparison after real4K
+prefill and MTP. The optional reuse-test mode reads
+`VT_B70_EXL3_ENGINE_PREFILL_WORKLOAD`, containing schema
+`b70-f2-fixed-prefill-prompt-v1` and exactly4,096 `prompt_ids`; those IDs are the
+consumed input in this mode. It requires MTP3 and the existing state-prefix
+output, uses1600/1600/896 prefill chunks, and deterministically initializes all
+four recurrent slots before first use. Ordinary short reuse is unchanged.
+
+Two requests each emit64 IDs. Baseline/direct pass1,186/3,106 assertions, with
+all192 Conv/SSM arrays (627,572,736B per completed request) byte-exact across
+all48 layers and all four active/provisional slots. All non-snapshot result
+fields match, including proposal/acceptance counters and two graph captures
+with26/54 cumulative replays. Actual W8A8 traces show1,044 M1600 and522 M896
+dispatches in each arm; all1,566 direct-arm dispatches use the prepared view.
+These are completed-request native state checks, not per-token Python or
+initialized FP8KV comparisons, and traced state runs are not serving scores.
+
+The existing short lifecycle regression also passes483 assertions and its
+complete payload remains exact to the U2 control: ordered1/4/2/1 turnover,
+mixed prefill/speculation, EOS, cancellation-slot reuse and poisoned spares.
+Its short prefills useSmallM; the separate4K state runs establish real W8A8
+execution. The state receipt preserves both raw snapshot sets, frozen source,
+binary and commands, including the corrected initial test-setup compile error.
+F2 remains opt-in pending its bounded performance/retention decision. Q1's
+integrated original state and default-reference gates remain separate.
+
 A clean public contribution composition,
 ordinary-route admission and integrated original MTP state qualification remain
 separate work. Preserve the frozen default D27/D29 failures and controlled-oracle
