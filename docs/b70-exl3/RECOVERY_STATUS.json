@@ -2218,7 +2218,7 @@
     },
     {
       "task": "P7",
-      "status": "in_progress_current_C1_primary_complete_C4_primary_workers_running",
+      "status": "in_progress_current_C1_C4_primary_complete_remaining_sentinels_running",
       "complete": false,
       "C1_repetitions_per_engine": 3,
       "actual_native_primary_assertions_each": 1895,
@@ -5731,9 +5731,254 @@
         "scope": "Same frozen P4096/O1024,MTP3,checkpoint/subset/full6bpw head,page1600,FP8KV,O32warmup/reset and24GiB/no-swap/CPU2. Fresh original/native three trials, never concurrent. Actual emitted chunks, not forward-rate proxy. Independent autonomous continuations may differ; no ideal target-distribution/all-layer/state qualification inferred from speeds or repeats.",
         "qualification_promoted": false,
         "P7_complete": false
+      },
+      "final_candidate_primary_C4_046ece2df": {
+        "stats": {
+          "native": {
+            "E2E_s": [
+              46.478184175,
+              46.990111746,
+              47.01423474
+            ],
+            "E2E_emitted_tps": [
+              88.12736712298636,
+              87.16727515228072,
+              87.12254964165349
+            ],
+            "common_fourway_decode_tps": [
+              121.23005947530234,
+              119.93190074499951,
+              119.92514764536755
+            ],
+            "worst_TTFT_ms": [
+              11779.10666,
+              11925.327248999998,
+              11951.790855000001
+            ],
+            "mean_MTP_decode_cycle_ms": [
+              85.03619810049018,
+              85.93270236764718,
+              85.92702440196089
+            ],
+            "accepted": [
+              2571,
+              2571,
+              2571
+            ],
+            "proposed": [
+              4572,
+              4572,
+              4572
+            ],
+            "maximum_overlapping_decode_requests": [
+              4,
+              4,
+              4
+            ],
+            "median": {
+              "E2E_s": 46.990111746,
+              "E2E_emitted_tps": 87.16727515228072,
+              "common_fourway_decode_tps": 119.93190074499951,
+              "worst_TTFT_ms": 11925.327248999998
+            }
+          },
+          "original": {
+            "E2E_s": [
+              76.08384238899453,
+              73.39073715399718,
+              76.44668391798041
+            ],
+            "E2E_emitted_tps": [
+              53.83534626259206,
+              55.8108578662357,
+              53.57982570433788
+            ],
+            "common_fourway_decode_tps": [
+              null,
+              null,
+              null
+            ],
+            "worst_TTFT_ms": [
+              59409.39214199898,
+              56801.68406799203,
+              59665.214489999926
+            ],
+            "mean_MTP_decode_cycle_ms": [
+              null,
+              null,
+              null
+            ],
+            "accepted": [
+              2572,
+              2635,
+              2572
+            ],
+            "proposed": [
+              4572,
+              4380,
+              4572
+            ],
+            "maximum_overlapping_decode_requests": [
+              1,
+              1,
+              1
+            ],
+            "median": {
+              "E2E_s": 76.08384238899453,
+              "E2E_emitted_tps": 53.83534626259206,
+              "common_fourway_decode_tps": null,
+              "worst_TTFT_ms": 59409.39214199898
+            }
+          }
+        },
+        "native_median_change_percent": {
+          "E2E_s": -38.23903962978994,
+          "E2E_emitted_tps": 61.914580668072404,
+          "worst_TTFT_ms": -79.92686540118716
+        },
+        "continuity": {
+          "native_all4096_IDs_and_non_timing_cycles_exact_repeats": true,
+          "native_cycle_count": 419,
+          "native_prior_ID_first_differences": {
+            "request-0": null,
+            "request-1": null,
+            "request-2": null,
+            "request-3": null
+          },
+          "native_prior_non_timing_cycles_exact": false,
+          "native_prior_cycle_counts": [
+            419,
+            419
+          ],
+          "native_prior_changed_cycles": 1,
+          "original_repeat_first_differences": {
+            "2": {
+              "request-0": {
+                "index": 98,
+                "first": 15740,
+                "second": 680
+              },
+              "request-1": {
+                "index": 3,
+                "first": 13159,
+                "second": 6353
+              },
+              "request-2": {
+                "index": 174,
+                "first": 804,
+                "second": 21099
+              },
+              "request-3": {
+                "index": 3,
+                "first": 13159,
+                "second": 6353
+              }
+            },
+            "3": {
+              "request-0": null,
+              "request-1": null,
+              "request-2": null,
+              "request-3": null
+            }
+          },
+          "original_native_first_difference_each": {
+            "1": {
+              "request-0": {
+                "index": 53,
+                "first": 2838,
+                "second": 561
+              },
+              "request-1": {
+                "index": 3,
+                "first": 13159,
+                "second": 6353
+              },
+              "request-2": {
+                "index": 124,
+                "first": 50558,
+                "second": 7578
+              },
+              "request-3": {
+                "index": 12,
+                "first": 264,
+                "second": 85624
+              }
+            },
+            "2": {
+              "request-0": {
+                "index": 53,
+                "first": 2838,
+                "second": 561
+              },
+              "request-1": {
+                "index": 41,
+                "first": 2919,
+                "second": 1024
+              },
+              "request-2": {
+                "index": 124,
+                "first": 50558,
+                "second": 7578
+              },
+              "request-3": {
+                "index": 3,
+                "first": 6353,
+                "second": 13159
+              }
+            },
+            "3": {
+              "request-0": {
+                "index": 53,
+                "first": 2838,
+                "second": 561
+              },
+              "request-1": {
+                "index": 3,
+                "first": 13159,
+                "second": 6353
+              },
+              "request-2": {
+                "index": 124,
+                "first": 50558,
+                "second": 7578
+              },
+              "request-3": {
+                "index": 12,
+                "first": 264,
+                "second": 85624
+              }
+            }
+          }
+        },
+        "scope": "Same frozen four distinct P4096/O1024each,MTP3,checkpoint/subset/full6bpw head,page1600,FP8KV,O32warmup/reset and24GiB/no-swap/CPU2. Fresh original/native three trials, never concurrent. Actual emission interval overlap, not sum of independent request rates. Original frontend batches are not GPU MTP cycles. Autonomous continuations differ. Arithmetic intentional originalF16 partialC2/C3 switch means no assumed prior-native trajectory identity. No ideal target-distribution/all-layer/state qualification inferred.",
+        "qualification_promoted": false,
+        "P7_complete": false,
+        "product_source": "046ece2dfde4d5326b44a6f36f82047a9ad4aeb2",
+        "receipt": {
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p7-candidate-matrix-v2/primary-C4-comparison-v1.json",
+          "bytes": 71793,
+          "sha256": "6a31516061faa73d49bca1ae24d53599498ed353fd95ae2a67c7cfc59801ad61"
+        },
+        "verified_identities": 167,
+        "repetitions_each_engine": 3,
+        "actual_GPU_worker_exits_each": 0,
+        "native_assertions_each": 7786,
+        "native_device_peak_bytes_each": 30593988791,
+        "original_Torch_peak_allocated_bytes_each": 27960091648,
+        "all_swap_peaks_and_memory_limit_OOM_events_zero": true,
+        "native_whole_worker_CPU_throttled_periods": [
+          0,
+          0,
+          0
+        ],
+        "original_whole_worker_CPU_throttled_periods": [
+          69,
+          75,
+          78
+        ]
       }
     }
   ],
   "performance_baseline": "7536aededc049b2157f12eadb0f4cc6bbf29b7b7",
-  "performance_next": "Current046ece2df practical/draft/default-controlled and primaryC1 original/native3each refreshed. Primary C4 native/original3each now live sequentially in candidate-matrix-v2 (run-primary-C4-v1.py); never restart a live worker. Then current no-MTP/C1-32K/prefix sentinels once and bounded separate current primary target profile. Reuse already executed same-source mixed/C4-32K/lifecycle. Default-reference four failures/full-all-layer/P1 admission gates remain open."
+  "performance_next": "Current046ece2df primary C1/C4 original/native3each complete. Remaining current native no-MTP/C1-32K/prefix sentinels and separate short primary profile running sequentially (run-remaining-native-v1.py); never restart a live worker. Unchanged original sentinel source/workloads/resources may reuse fixed prior executed receipts; current mixed/C4-32K/lifecycle already executed. Default-reference four failures/full-all-layer/P1 admission gates remain open."
 }
