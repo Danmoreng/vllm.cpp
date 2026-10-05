@@ -2848,3 +2848,44 @@ Separate before/after observer captures each1216/1216 actualexit0, IDs unchanged
 All6GPU resources swap0/noOOM/limit; device peaks30451821656B/30466419032B, below32GiB, no memory-reduction claim. Productioninactive, onlychatui afterwards. Source/binary/actual commands/exits/inputs/raw timing/observer events/strided tests/lifecycle/resources/recomputable comparisons: /home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p7-mixed-diagnosis-v1/receipt-v2.json (25842B,SHA25674e9461cd3c2ecf48fbf78a50bbf8cdd90a5ca3e445d1b4c8685118978d6d52c), all58 declared artifact identities independently verified. V1 retains the pre-lifecycle snapshot; V2 adds lifecycle and independently recomputes profile counts from raw events.
 
 P7incomplete,goalactive. Retain and commit/immediatepush this measured dataflow optimization under standing authorization. Continue from remaining actual operator costs and pinned original execution; frozen defaultD64/full-state/reference-contract and P1 default-admission gates remain explicit. No benchmark-wide completion/parity promotion.
+
+## 153. P7 optional exact FP16 SiLU table retained after operator and full-model gain
+
+The actual post-view mixed profile still attributed3767.985ms to typed SiLU across21mixed steps. Implement the previously untried optional P3 finite-domain variant: one128KiB immutable table per device/context, GPU-generated from the same exp/fdiv_rn expression and FP16 materialization. The existing contiguous F16 M>=64 route now defaults to the table; VT_XPU_SILU_FP16_TABLE=0 restores the typed expression. Small decode rows and generic types, layout validation and WithOutput alias handling retain their routes. No reference activations/logits in product inference, approximate reciprocal or changed math flags.
+
+The context accounts the table in allocated/peak bytes and the explicit fp16_silu_table_bytes field. First eager use initializes on its GPU queue; other queues join that event on-device. Capture requires this queue's prior eager use. Queue destruction removes its readiness admission; a newly created queue cannot inherit an old queue's join. Read-only readers need no serialization against each other. The table remains stable until context teardown drains queues, destroys graphs and frees its registered allocations. No normal-path host readiness wait or polling loop; initialization-error cleanup retains the single completion wait needed before freeing storage. Budget shortage retains the typed eager expression.
+
+Final focused compile actualexit0 and four GPU cases300/300: all65536gate bitpatterns ×10up patterns, finite/Inf/signedzero exactness and NaN classification, midpoint, poisoned guards, M1/3/4/16/63/64/65 tails/aliases/stride rejection, cross-queue initialization without an intervening producer completion wait, first cold capture rejection without output mutation, warmed graph/fresh input replay/retirement and queue recreation. Dual-NaN payload-only2047differences remain under the previously explicit IEEE contract; no finite tolerance changed. Final default binary MTP3 R08 lifecycle483/483 actualexit0: mixed-prefill/spec, ordered1/4/2/1, EOS, cancel/replacement with reused compact state base, poisoned spare rows, graph/eager/graph and standalone IDs.
+
+Separate unchanged original P128 MLP20 fixture:42/42 and five projection/activation/down stages byte-exact. Full selected GDN21 P128/D1 worker230/230; direct comparison to the separate controlled original fixture finds all6saved active Conv/FP32SSM states and15observed stages exact. d1/gdn_core is unobserved, not inferred. This selected-layer proof does not promote full-all-layer/defaultD64 qualification.
+
+Three warmed complete-operator samples per arm, actual original P128 gate/up rows cyclically reused at larger M/I17408, exact original output bytes:
+
+| M | Preserved typed median ms | Table median ms |
+|---|---|---|
+|128|0.475890|0.052160|
+|896|1.440622|0.259631|
+|1600|2.557564|0.454950|
+
+M1600 elapsed-82.2116%; M896-81.9779%. These are complete operator times including completion, not lookup-only timings or fresh M1600 model trajectories. M4 retains its generic decode path. Separate observer run65/65 confirms the table route/device events; profiled timings are excluded from the serving score.
+
+Quiet same-binary warmed unprofiled off/on full-engine pair, unchanged checkpoint/FP16/FP32GDN/FP8KV/full2483206bpwhead/exact65536compactMTP3/page1600/262144context/1600tokenbudget/180blocks:
+
+| Metric | Typed expression (off) | Exact table (on) |
+|---|---|---|
+| Mixed4K/32K O256each E2E s |52.955204|49.757959|
+|21mixed complete-cycle wall s |31.365737|28.512465|
+| Mixed long TTFT ms |31366.869247|28513.592625|
+| Mixed short maximum streaming pause ms |1694.558581|1547.907920|
+| Common mixed emitted-token decode tok/s |23.974491|23.951030|
+| Primary4K/O1024 TTFT ms |2895.612789|2518.403540|
+| Primary4K/O1024 E2E s |25.128693|24.830642|
+| Primary4K/O1024 emitted-token decode tok/s |46.012579|45.849330|
+
+Mixed E2E-6.03764%, mixed-cycle wall-9.09678%; primary TTFT-13.02692%, E2E-1.18610%. All512mixed IDs/all135non-timingcycles and all1024primary IDs/all371non-timingcycles exact, including acceptance/proposals/emission/scheduling/graph transitions. Mixed1216/1216 and primary1900/1900 per arm, actualexit0, graphretirement0. No pure decode gain; small-row code unchanged. Current primary45.8493tok/s remains-28.2660% versus prior original median63.9158. Prior actual original mixed30.578586s, native candidate+62.7216%elapsed; original trajectory differs and has no common mixed overlap. No fresh-original or broad parity claim.
+
+Initial mixed-off-v1 overlaps a CPU-only focused test compilation and is retained as functional evidence; quiet off-v2 supplies the reported baseline. First exhaustive GPU48/49 failure was an error-message matcher omitting VT file/line prefix; all numeric checks passed. Corrected contains matcher, not math/reference/tolerance. Docker argument construction failure and a frozen-binary-copy path failure also retained as non-inference wrapper failures. Final builds/tests succeed.
+
+All14successful GPU resources sequential, swap0/noOOM/limit; one earlier failed matcher worker separately retained. Mixed device peaks30466419032B/30466550104B differ by exactly131072B, below32GiB. Productioninactive, onlychatui afterwards. Exact source versions/patches, compiled binaries, four changed translation-unit build commands/math options, actual commands/exits, raw timing/resources, original fixture identities, state comparisons and recomputable results: /home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p7-silu-table-v1/receipt-v3.json (63665B,SHA2565a0a9fab9d9d3124d101a1e50c64cc400f2904abd3c49f32ef30d027371cdaaf), all179declared artifacts independently verified. V1/V2 retain the earlier snapshots and build inventory; V3 explicitly includes both historical resource-prefix MLP/GDN files in the successful resource summary (14workers, previously12), with their actual exits/swap/OOM/limit counters checked. The failed initial MLP wrapper left an empty reserved resource file; no inference/resource pass inferred.
+
+Retain this measured arithmetic-preserving optimization and commit/immediatepush under standing authorization. P7incomplete,goalactive; remaining actual W8A8/GDN/model-owned metadata costs and final matrix/full-state/reference/P1-admission gates remain explicit. Frozen defaultD64 four failures unchanged; no new defaultD64 pass claimed. Do not repeat rejected geometry variants or replace materialization/reduction semantics with different Python kernel arithmetic.

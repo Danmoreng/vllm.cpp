@@ -1933,6 +1933,7 @@ TEST_CASE("XPU EXL3 public engine R11: frozen serving timing workload") {
   result["graph_device_bytes"] = memory.graph_device_bytes;
   result["w8a8_workspace_bytes"] = memory.w8a8_workspace_bytes;
   result["w8a8_preparation_bytes"] = memory.w8a8_preparation_bytes;
+  result["fp16_silu_table_bytes"] = memory.fp16_silu_table_bytes;
   result["w8a8_panel_columns"] = vt::Exl3W8A8ModelPanelColumns();
   CHECK(result["backend_peak_device_bytes"].get<uint64_t>() <= (uint64_t(32) << 30));
   struct rusage usage{};

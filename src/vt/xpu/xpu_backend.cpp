@@ -18,6 +18,7 @@
 #include <mutex>
 #include <optional>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 #include <nlohmann/json.hpp>
 
@@ -122,6 +123,12 @@ struct Workspace {
   size_t bytes = 0;
   std::optional<sycl::event> last;
 };
+struct ImmutableTable {
+  std::mutex mutex;
+  void* data = nullptr;
+  std::optional<sycl::event> ready;
+  std::unordered_set<sycl::queue*> joined;
+};
 struct PendingProfileEvent {
   const char* stage;
   std::string matrix;
@@ -135,6 +142,7 @@ struct Context {
   sycl::context context;
   std::mutex mutex;
   Workspace exl3, gdn, attention, sampling, native_gdn, w8a8, w8a8_preparation;
+  ImmutableTable fp16_silu;
   std::unordered_map<sycl::queue*, std::unique_ptr<sycl::queue>> queues;
   std::vector<PendingProfileEvent> profile_events;
   std::vector<HostProfileRecord> host_profile_records;
@@ -375,7 +383,9 @@ class XpuBackend final : public Backend {
 #endif
     if (default_graph) DestroyGraph(default_graph);
     auto& c = ctx();
+    std::lock_guard table_lock(c.fp16_silu.mutex);
     std::lock_guard<std::mutex> lock(c.mutex);
+    c.fp16_silu.joined.erase(native);
     c.queues.erase(static_cast<sycl::queue*>(q.handle));
     q.handle = nullptr;
   }
@@ -771,6 +781,7 @@ MemoryInfo GetMemoryInfo(int index) {
   info.sampling_workspace_bytes = c.sampling.bytes;
   info.w8a8_workspace_bytes = c.w8a8.bytes;
   info.w8a8_preparation_bytes = c.w8a8_preparation.bytes;
+  info.fp16_silu_table_bytes = c.fp16_silu.data ? 65536 * sizeof(uint16_t) : 0;
   info.peak_allocated_bytes = c.peak_allocated;
   info.graph_count = c.graphs.size(); info.graph_nodes = c.graph_nodes;
   info.graph_device_bytes = c.graph_bytes;
@@ -904,6 +915,54 @@ bool WithAttentionWorkspace(Queue& q, size_t bytes, const std::function<void(voi
   VT_CHECK(bytes > 0 && bytes <= 16 * 1024 * 1024, "XPU attention workspace exceeds 16 MiB budget");
   return WithWorkspace(q, GetContext(q.device.index).attention, 4,
                        "workspace_wait_attention", bytes, launch);
+}
+bool WithFp16SiluTable(Queue& q,
+    const std::function<sycl::event(void*)>& initialize,
+    const std::function<void(const void*)>& launch) {
+  auto& native = NativeQueue(q);
+  auto& c = GetContext(q.device.index);
+  auto& table = c.fp16_silu;
+  std::lock_guard execution(table.mutex);
+  bool capturing;
+  {
+    std::lock_guard lock(c.mutex);
+    capturing = c.recordings.count(&native) != 0;
+  }
+  // BeginCapture completes this queue. A prior eager join guarantees that the
+  // immutable producer has completed too, including when it used another queue.
+  VT_CHECK(!capturing || (table.data && table.joined.count(&native)),
+           "XPU FP16 SiLU table must be warmed on the capture queue");
+  if (!table.data) {
+    constexpr size_t bytes = 65536 * sizeof(uint16_t);
+    {
+      std::lock_guard lock(c.mutex);
+      if (bytes > c.budget - c.allocated - c.graph_bytes) return false;
+      void* storage = sycl::aligned_alloc_device(64, bytes, c.device, c.context);
+      VT_CHECK(storage, "XPU FP16 SiLU table allocation failed");
+      try { c.allocations.emplace(storage, bytes); }
+      catch (...) { sycl::free(storage, c.context); throw; }
+      c.allocated += bytes;
+      c.peak_allocated = std::max(c.peak_allocated, c.allocated);
+      table.data = storage;
+    }
+    try { table.ready = initialize(table.data); }
+    catch (...) {
+      // Finish any submitted initializer work before reclaiming its storage.
+      try { native.wait_and_throw(); } catch (...) {}
+      std::lock_guard lock(c.mutex);
+      c.allocations.erase(table.data); c.allocated -= bytes;
+      sycl::free(table.data, c.context); table.data = nullptr;
+      throw;
+    }
+    table.joined.insert(&native);  // initialization is ordered on this queue
+  } else if (!capturing && !table.joined.count(&native)) {
+    native.ext_oneapi_submit_barrier({*table.ready});
+    table.joined.insert(&native);
+  }
+  // No reader serialization: the table is never overwritten. Context teardown
+  // completes every owned queue, destroys graphs, then frees accounted storage.
+  launch(table.data);
+  return true;
 }
 bool WithSamplingWorkspace(Queue& q, size_t bytes, const std::function<void(void*)>& launch) {
   VT_CHECK(bytes > 0 && bytes <= 16 * 1024 * 1024, "XPU sampling workspace exceeds 16 MiB budget");

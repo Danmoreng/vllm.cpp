@@ -2072,7 +2072,7 @@
     },
     {
       "task": "P7",
-      "status": "in_progress_mixed_token_views_retained_prefix_and_current_quality_refreshed",
+      "status": "in_progress_exact_fp16_silu_table_retained_mixed_and_primary_checked",
       "complete": false,
       "C1_repetitions_per_engine": 3,
       "actual_native_primary_assertions_each": 1895,
@@ -2117,7 +2117,7 @@
         "bytes": 484222,
         "sha256": "4ef94808be5009536b9e1976410b821ce96d0b958338216b2f29ed18bd87f2ac"
       },
-      "remaining": "P7 incomplete. Actual4K no-MTP262K capacity/state/lifecycle and actual32K C1/C4 plus proper4K/32K mixed-after16 measured. Native32K C1 decode -27.6003%, C4 E2E+73.3346%, mixed E2E+84.7226% and short streaming pause1.856s vsoriginal.05385s. Next32K-prefixO64/native plus original fixture, current practical/default-controlled/compact-draft qualification and source/event diagnosis of mixed prefill/decode cost. Original stability/P1/default/full-state gates remain open; originalC4/mixed no common overlap and trajectories differ, no parity or completion promotion. Do not repeat rejected GRF sweeps or blindly transplant alternate arithmetic.",
+      "remaining": "P7 incomplete. Current exact FP16 table improves mixed4K/32K E2E52.9552->49.7580s (-6.0376%) and primary4K/MTP3 TTFT2895.61->2518.40ms (-13.0269%), with unchanged native IDs/cycles. Primary decode45.8493tok/s remains -28.2660% versus prior original median63.9158; prior original mixed30.5786s, current native+62.7216% elapsed, distinct trajectories/no original common overlap. Prefix32K, practical/default-controlled/compact-draft and lifecycle evidence delivered in their stated scopes; frozen defaultD64 four failures, full-state/reference-contract/P1 default admission and final refreshed matrix remain open. No parity/completion promotion.",
       "C4_repetitions_per_engine": 3,
       "C4_native_assertions_each": 7781,
       "C4_native_all4096_ids_and419_non_timing_cycles_exact_repeats": true,
@@ -2770,7 +2770,7 @@
           "sha256": "3da49f66c6730614433e01fb429bc9c4e89d00c1f88a01982534334261bf9c7e"
         }
       },
-      "next": "Continue from remaining measured mixed W8A8/SiLU/GDN costs against pinned original execution; preserve arithmetic/ownership and explicit default/full-state/reference/P1-admission gaps. Do not repeat rejected variants.",
+      "next": "Continue from actual remaining W8A8/GDN and model-owned immutable metadata costs against pinned original execution. Preserve public validation, GPU completion ownership, numerical materialization and explicit default/full-state/reference/P1-admission gaps; no repeated rejected GRF/panel sweeps.",
       "current_quality": {
         "practical_tasks": 8,
         "practical_passed": 8,
@@ -2823,9 +2823,93 @@
           "bytes": 25842,
           "sha256": "74e9461cd3c2ecf48fbf78a50bbf8cdd90a5ca3e445d1b4c8685118978d6d52c"
         }
+      },
+      "exact_fp16_silu_table": {
+        "status": "retained_default1_in_existing_typed_contiguous_F16_M_ge_64_route",
+        "table_bytes": 131072,
+        "diagnostic_rollback": "VT_XPU_SILU_FP16_TABLE=0",
+        "normal_path_host_polling_or_readiness_wait": false,
+        "finite_Inf_signedzero_bits_and_nan_classification_exact": true,
+        "dual_nan_payload_differences_under_existing_contract": 2047,
+        "gate_patterns": 65536,
+        "up_patterns": 10,
+        "final_focused_GPU_assertions": 300,
+        "final_default_MTP3_lifecycle_assertions": 483,
+        "MLP20_original_stage_assertions": 42,
+        "GDN21_assertions": 230,
+        "GDN21_controlled_original_exact_states": 6,
+        "GDN21_controlled_original_exact_observed_stages": 15,
+        "GDN21_missing_observation": "d1/gdn_core",
+        "unprofiled_operator_medians": [
+          {
+            "rows": 4,
+            "width": 17408,
+            "old_typed_ms": 0.04092,
+            "table_ms": 0.04149,
+            "elapsed_change_percent": 1.3929618768328433,
+            "samples_each": 3,
+            "scope": "Cyclic frozen actual original P128 rows, not a fresh M1600 model trajectory."
+          },
+          {
+            "rows": 128,
+            "width": 17408,
+            "old_typed_ms": 0.47589,
+            "table_ms": 0.05216,
+            "elapsed_change_percent": -89.03948391434996,
+            "samples_each": 3,
+            "scope": "Cyclic frozen actual original P128 rows, not a fresh M1600 model trajectory."
+          },
+          {
+            "rows": 896,
+            "width": 17408,
+            "old_typed_ms": 1.440622,
+            "table_ms": 0.259631,
+            "elapsed_change_percent": -81.97785401028167,
+            "samples_each": 3,
+            "scope": "Cyclic frozen actual original P128 rows, not a fresh M1600 model trajectory."
+          },
+          {
+            "rows": 1600,
+            "width": 17408,
+            "old_typed_ms": 2.557564,
+            "table_ms": 0.45495,
+            "elapsed_change_percent": -82.21158884000556,
+            "samples_each": 3,
+            "scope": "Cyclic frozen actual original P128 rows, not a fresh M1600 model trajectory."
+          }
+        ],
+        "mixed": {
+          "IDs_exact": true,
+          "emitted_IDs": 512,
+          "all_non_timing_cycles_exact": true,
+          "cycles": 135,
+          "E2E_elapsed_change_percent": -6.037640079325291,
+          "mixed_cycle_elapsed_change_percent": -9.096781400720166
+        },
+        "primary4K_MTP3": {
+          "IDs_exact": true,
+          "emitted_IDs": 1024,
+          "all_non_timing_cycles_exact": true,
+          "cycles": 371,
+          "E2E_elapsed_change_percent": -1.1860972163491135,
+          "TTFT_change_percent": -13.02692302068017
+        },
+        "pure_decode_gain_claim": false,
+        "peak_device_bytes_off_on": [
+          30466419032,
+          30466550104
+        ],
+        "GPU_success_resources": 14,
+        "retained_actual_GPU_failure": "First error-message matcher check48/49, actualexit1; finite/Inf/signedzero checks passed. Final contains matcher300/300, no numerical gate relaxation.",
+        "qualification_promoted": false,
+        "receipt": {
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p7-silu-table-v1/receipt-v3.json",
+          "bytes": 63665,
+          "sha256": "5a0a9fab9d9d3124d101a1e50c64cc400f2904abd3c49f32ef30d027371cdaaf"
+        }
       }
     }
   ],
   "performance_baseline": "7536aededc049b2157f12eadb0f4cc6bbf29b7b7",
-  "performance_next": "P7 next one small EXL3 target-only Mamba align-policy implementation, with focused capacity/state/prefix/graph-owner tests and exact native output proof; preserve262K objective and all capacity guards. Current no-MTP measurements explicitly32768context in both engines and do not qualify262K mode. Then remaining32K/mixed/prefix/practical/default-controlled/compact-draft/lifecycle matrix; further GDN dataflow only with paired arithmetic/state evidence, never repeat rejected P5 register geometry. Original C4 admission/stability/compiled norm/P1/defaultD64 four failures/full-state qualification stay open."
+  "performance_next": "Continue from actual remaining W8A8/GDN and model-owned immutable metadata costs against pinned original execution. Preserve public validation, GPU completion ownership, numerical materialization and explicit default/full-state/reference/P1-admission gaps; no repeated rejected GRF/panel sweeps."
 }

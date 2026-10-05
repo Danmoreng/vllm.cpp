@@ -86,6 +86,43 @@ void SiluAndMulKernel(Queue& q, Tensor& out, const Tensor& in) {
       auto* output = static_cast<sycl::half*>(target.data);
       constexpr size_t local = 256;
       const size_t columns = (size_t(width) + local - 1) / local * local;
+      const char* table_setting = std::getenv("VT_XPU_SILU_FP16_TABLE");
+      // Exact device-generated FP16 materialization; small-row decode retains
+      // its original route. Setting0 preserves the typed expression for A/B.
+      const std::string_view table_mode = table_setting ? table_setting : "1";
+      VT_CHECK(table_mode == "0" || table_mode == "1", "Invalid VT_XPU_SILU_FP16_TABLE");
+      if (table_mode == "1" && WithFp16SiluTable(q, [&](void* storage) {
+        auto* table = static_cast<sycl::half*>(storage);
+        const auto event = NativeQueue(q).parallel_for(
+            sycl::nd_range<1>(65536, local), [=](sycl::nd_item<1> item) {
+          const auto bits = uint16_t(item.get_global_linear_id());
+          const float gate = float(sycl::bit_cast<sycl::half>(bits));
+          const float denominator = 1.0f + sycl::exp(-gate);
+          table[bits] = sycl::half(sycl::ext::intel::math::fdiv_rn(gate, denominator));
+        });
+        RecordProfileEvent(q, "silu_fp16_table_build", event);
+        return event;
+      }, [&](const void* storage) {
+        const auto* table = static_cast<const sycl::half*>(storage);
+        const auto event = NativeQueue(q).parallel_for(
+            sycl::nd_range<2>(sycl::range<2>(size_t(out.shape[0]), columns),
+                              sycl::range<2>(1, local)),
+            [=](sycl::nd_item<2> item) {
+          const int64_t row = item.get_global_id(0), col = item.get_global_id(1);
+          if (col >= width) return;
+          const int64_t offset = row * (2 * width) + col;
+          const auto bits = sycl::bit_cast<uint16_t>(input[offset]);
+          float rounded;
+          if ((bits & 0x7c00) == 0x7c00) {
+            // Preserve the original expression for Inf/NaN gate operands.
+            const float gate = float(input[offset]);
+            const float denominator = 1.0f + sycl::exp(-gate);
+            rounded = float(sycl::half(sycl::ext::intel::math::fdiv_rn(gate, denominator)));
+          } else rounded = float(table[bits]);
+          output[row * width + col] = sycl::half(rounded * float(input[offset + width]));
+        });
+        RecordProfileEvent(q, "silu_and_mul_fp16_table", event);
+      })) return;
       const auto event = NativeQueue(q).parallel_for(
           sycl::nd_range<2>(sycl::range<2>(size_t(out.shape[0]), columns),
                             sycl::range<2>(1, local)),

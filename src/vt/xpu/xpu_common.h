@@ -38,6 +38,12 @@ bool WithGdnWorkspace(Queue& q, size_t bytes, const std::function<void(void*)>& 
 bool WithGdnNativeWorkspace(Queue& q, size_t bytes, const std::function<void(void*)>& launch);
 bool WithAttentionWorkspace(Queue& q, size_t bytes, const std::function<void(void*)>& launch);
 bool WithSamplingWorkspace(Queue& q, size_t bytes, const std::function<void(void*)>& launch);
+// Immutable finite-domain SiLU table, owned/accounted by this device context.
+// Initialization/readiness stays on the GPU; capture must be warmed on its
+// queue. Readers may overlap and the context drains all queues before freeing.
+bool WithFp16SiluTable(Queue& q,
+    const std::function<sycl::event(void*)>& initialize,
+    const std::function<void(const void*)>& launch);
 // Captured metadata checks run in a separate graph before the mutating graph.
 // False means eager execution; the caller performs its ordinary checked readback.
 bool CaptureMetadataCheck(Queue& q, const std::function<void(sycl::handler&, int*)>& submit, const char* message,
