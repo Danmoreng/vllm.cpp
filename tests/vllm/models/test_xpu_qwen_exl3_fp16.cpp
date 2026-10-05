@@ -554,6 +554,108 @@ TEST_CASE("XPU EXL3 attention RoPE: actual FP16 operands and coefficients") {
   CHECK(vt::GetReferenceTierHits() == 0);
 }
 
+TEST_CASE("XPU EXL3 QK norm: IEEE signed-zero products") {
+  xpu_test::Queue gpu(vt::DeviceType::kXPU);
+  constexpr int rows = 2, dim = 256;
+  std::vector<float> values(rows * dim);
+  const float pattern[] = {-0.5f, 0.5f, -0.0f, 0.0f};
+  std::vector<uint16_t> expected(values.size());
+  for (size_t i = 0; i < values.size(); ++i) {
+    values[i] = pattern[(i + i / 32) % 4];
+    expected[i] = vt::F32ToF16(values[i]) & 0x8000u;
+  }
+  xpu_test::Buffer input(gpu.q, DType::kF16, {rows, dim}); input.put(values);
+  xpu_test::Buffer weight(gpu.q, DType::kF32, {dim});
+  weight.put(std::vector<float>(dim, -1.0f));
+  xpu_test::Buffer output(gpu.q, DType::kF16, {rows, dim});
+  vt::RmsNorm(gpu.q, output.tensor, input.tensor, weight.tensor,
+              vt::RmsNormArgs{1e-6f, true, true});
+  std::vector<uint8_t> expected_bytes(expected.size() * 2);
+  std::memcpy(expected_bytes.data(), expected.data(), expected_bytes.size());
+  xpu_test::SameBytes(output.download(), expected_bytes);
+}
+
+TEST_CASE("XPU EXL3 attention layer43: actual KV signed-zero preimage") {
+  const char* fixtures = std::getenv("VT_B70_EXL3_S1_FIXTURES");
+  const char* model = std::getenv("VT_B70_EXL3_MODEL");
+  if (!fixtures || !model) std::exit(77);
+  const auto oracle = vllm::SafetensorsFile::Open(
+      (std::filesystem::path(fixtures) / "target-repeats/repeat-0.safetensors").string());
+  std::vector<vllm::SafetensorsFile> shards;
+  for (const char* name : {"model-00001-of-00002.safetensors", "model-00002-of-00002.safetensors"})
+    shards.push_back(vllm::SafetensorsFile::Open((std::filesystem::path(model) / name).string()));
+  const auto has = [&](const std::string& name) {
+    for (const auto& shard : shards)
+      if (std::find(shard.Names().begin(), shard.Names().end(), name) != shard.Names().end()) return true;
+    return false;
+  };
+  const auto get = [&](const std::string& name) -> const vllm::StTensor& {
+    for (const auto& shard : shards)
+      if (std::find(shard.Names().begin(), shard.Names().end(), name) != shard.Names().end()) return shard.Get(name);
+    throw std::runtime_error("missing layer43 weight: " + name);
+  };
+  const auto layer = vllm::LoadQwen3_5DenseLayer(get, has, "full_attention", 43, "model.language_model.");
+  xpu_test::Queue gpu(vt::DeviceType::kXPU);
+  vllm::dense_attn::Dev d{vt::GetBackend(gpu.q.device.type), gpu.q, DType::kF16};
+  const auto qw = vllm::dense_attn::ResidentWeightF32(d, layer.attn.q_norm, {256});
+  const auto kw = vllm::dense_attn::ResidentWeightF32(d, layer.attn.k_norm, {256});
+  const auto compare = [&](const std::string& stage, const xpu_test::Buffer& buffer,
+                           const vllm::StTensor& expected) {
+    const auto actual = buffer.download();
+    REQUIRE(expected.dtype == "F16");
+    REQUIRE(actual.size() == expected.nbytes);
+    size_t different = 0;
+    for (size_t i = 0; i < actual.size(); i += 2)
+      different += std::memcmp(actual.data() + i, expected.data + i, 2) != 0;
+    std::cout << "KV_PREIMAGE stage=" << stage << " half_differences=" << different << '\n';
+    if (const char* output_dir = std::getenv("VT_B70_EXL3_DIAGNOSTIC_OUTPUT")) {
+      std::filesystem::create_directories(output_dir);
+      const auto path = std::filesystem::path(output_dir) / (stage + ".f16");
+      REQUIRE_FALSE(std::filesystem::exists(path));
+      std::ofstream output(path, std::ios::binary);
+      output.write(reinterpret_cast<const char*>(actual.data()), actual.size());
+      output.close(); REQUIRE(output.good());
+    }
+    CHECK(different == 0);
+  };
+  vt::RopeArgs rope{10000000.0f, 64};
+  rope.fp16_intermediates = true;
+  for (const std::string phase : {"p128", "d1"}) {
+    const auto captured = [&](const char* stage) -> const vllm::StTensor& {
+      return oracle.Get(phase + "_l43_preimage_" + stage);
+    };
+    const int64_t rows = phase == "p128" ? 128 : 1;
+    xpu_test::Buffer raw_key(gpu.q, DType::kF16, {rows * 4, 256});
+    xpu_test::Buffer normalized(gpu.q, DType::kF16, {rows * 4, 256});
+    raw_key.upload(captured("k_norm_input").data);
+    vt::RmsNorm(gpu.q, normalized.tensor, raw_key.tensor, kw,
+                vt::RmsNormArgs{1e-6f, true, true});
+    compare(phase + ".standalone_norm", normalized, captured("k_norm_output"));
+
+    xpu_test::Buffer query(gpu.q, DType::kF16, {rows, 24, 256});
+    query.put(std::vector<float>(rows * 24 * 256, 0.0f));
+    xpu_test::Buffer key(gpu.q, DType::kF16, {rows, 4, 256});
+    key.upload(captured("rope_k_input").data);
+    xpu_test::Buffer positions(gpu.q, DType::kI32, {rows});
+    std::vector<int32_t> ids(rows); std::iota(ids.begin(), ids.end(), 0);
+    positions.upload(ids.data());
+    xpu_test::Buffer cache(gpu.q, DType::kF32, {rows, 64});
+    cache.put(CapturedFloats(captured("rope_cos_sin")));
+    vt::RopeFromCache(gpu.q, query.tensor, &key.tensor, positions.tensor, cache.tensor, rope);
+    compare(phase + ".standalone_rope", key, captured("k_rope"));
+
+    xpu_test::Buffer merged(gpu.q, DType::kF16, {rows, 14336});
+    merged.upload(captured("qkv_output").data);
+    const auto qgate = merged.tensor.Slice(1, 0, 12288);
+    const auto input_key = merged.tensor.Slice(1, 12288, 13312);
+    xpu_test::Buffer gates(gpu.q, DType::kF32, {rows, 24, 256});
+    vt::AttnQkNormRopeGate(gpu.q, query.tensor, key.tensor, gates.tensor, qgate, input_key,
+                          qw, kw, cache.tensor, vt::RmsNormArgs{1e-6f, true}, rope);
+    compare(phase + ".fused_norm_rope", key, captured("k_rope"));
+  }
+  CHECK(vt::GetReferenceTierHits() == 0);
+}
+
 TEST_CASE("XPU EXL3 real attention mixer: own cache P128 D1 from original hidden") {
   const char* model = std::getenv("VT_B70_EXL3_MODEL");
   const char* fixtures = std::getenv("VT_B70_EXL3_S1_FIXTURES");
@@ -1740,6 +1842,8 @@ static void RunRealEagerTarget(int decode_steps, int diagnostic_stop = -1,
   if (gdn_history) { REQUIRE(diagnostic_stop == 1); REQUIRE(gdn_detail_layer == 21); }
   const vllm::actdump::StepSelectionScope dump_selection(
       diagnostic && diagnostic_stop != 1 ? diagnostic_stop : -1);
+  const vllm::actdump::StageLayerSelectionScope kv_preimage_selection(
+      held_out_kv ? 43 : vllm::actdump::SelectedStageLayer());
   const char* diagnostic_output = std::getenv("VT_B70_EXL3_DIAGNOSTIC_OUTPUT");
   if (diagnostic && !diagnostic_output) std::exit(77);
   // Full D64 qualification can keep immutable reference fixtures read-only

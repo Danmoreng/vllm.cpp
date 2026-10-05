@@ -266,9 +266,70 @@ class TargetCapture(BlockCapture):
                     with_kwargs=True))
         self._all_attention_kv = all_attention_kv
         self._all_attention_kv_records = {}
+        self._kv_preimage_originals = []
         if all_attention_kv:
-            from capture_attention import active_cache_addresses
+            from capture_attention import active_cache_addresses, observe_projection
             from runtime_layout import initialized_values
+
+            # Causal probe for the observed layer43 signed-zero key mismatch.
+            # Observe actual operands/results; do not recompute or replace them.
+            probe_block = modules[installed["layer"].rsplit(".", 1)[0] + ".43"]
+            headers.require(probe_block.layer_type == "full_attention", "missing KV preimage layer43")
+            probe_mixer = probe_block.self_attn
+            self._kv_preimage_active = False
+
+            def begin_preimage(module, args, kwargs):
+                self._kv_preimage_active = True
+
+            def end_preimage(module, args, kwargs, result):
+                self._kv_preimage_active = False
+
+            self._target_hooks.append(probe_block.register_forward_pre_hook(begin_preimage, with_kwargs=True))
+            self._target_hooks.append(probe_block.register_forward_hook(end_preimage, with_kwargs=True))
+
+            def save_preimage(label, value):
+                context = get_forward_context().attn_metadata
+                if not self._kv_preimage_active or not context or not getattr(
+                        self.model_runner.req_states, "req_id_to_index", {}):
+                    return
+                step = len(self._target_phases)
+                headers.require(step in (0, 1), "extra KV preimage step")
+                phase = "p128" if step == 0 else "d1"
+                key = f"{phase}_l43_preimage_{label}"
+                headers.require(key not in self._block_tensors and value.numel() <= 5_000_000 and
+                                value.dtype == torch.float16, "duplicate/unbounded KV preimage: " + key)
+                host = value.detach().cpu().contiguous()
+                headers.require(torch.isfinite(host).all().item(), "nonfinite KV preimage")
+                self._block_tensors[key] = ("F16", list(host.shape), host.numpy().tobytes())
+
+            for label, module in (("input_norm_output", probe_block.input_layernorm),
+                                  ("qkv_output", probe_mixer.qkv_proj),
+                                  ("k_norm_output", probe_mixer.k_norm)):
+                self._target_hooks.append(module.register_forward_hook(
+                    lambda module, args, kwargs, result, label=label: save_preimage(
+                        label, result[0] if isinstance(result, tuple) else result), with_kwargs=True))
+            self._target_hooks.append(probe_mixer.k_norm.register_forward_pre_hook(
+                lambda module, args, kwargs: save_preimage("k_norm_input", args[0] if args else kwargs["x"]),
+                with_kwargs=True))
+
+            def rope_preimage(module, args, kwargs):
+                context = get_forward_context().attn_metadata
+                if not self._kv_preimage_active or not context or not getattr(
+                        self.model_runner.req_states, "req_id_to_index", {}):
+                    return
+                values = dict(zip(("positions", "query", "key", "offsets"), args)) | kwargs
+                self._kv_preimage_positions = values["positions"][0]
+                save_preimage("rope_k_input", values["key"])
+            self._target_hooks.append(probe_mixer.rotary_emb.register_forward_pre_hook(
+                rope_preimage, with_kwargs=True))
+            for module, name, save_result in (
+                    (probe_mixer, "_project_qkv_gate", lambda result: save_preimage("k_rope", result[1])),
+                    (probe_mixer.rotary_emb, "_match_cos_sin_cache_dtype",
+                     lambda result: save_preimage("rope_cos_sin", result[self._kv_preimage_positions])
+                     if self._kv_preimage_active else None)):
+                original = getattr(module, name)
+                self._kv_preimage_originals.append((module, name, original))
+                setattr(module, name, observe_projection(original, save_result))
 
             def save_kv(index, attn, args, kwargs, stage):
                 context = get_forward_context().attn_metadata
@@ -502,6 +563,8 @@ class TargetCapture(BlockCapture):
             hook.remove()
         for hook in self._selected_block_hooks:
             hook.remove()
+        for module, name, original in self._kv_preimage_originals:
+            setattr(module, name, original)
         if self._selected_block_step >= 0:
             headers.require(self._selected_block_counts == dict.fromkeys(range(64), 1),
                             "missing, repeated or reordered D29 block observations")
@@ -512,6 +575,11 @@ class TargetCapture(BlockCapture):
             headers.require(set(self._all_gdn_state_records) == expected,
                             "missing all-GDN-state boundaries")
         if self._all_attention_kv:
+            for phase in ("p128", "d1"):
+                for stage in ("input_norm_output", "qkv_output", "k_norm_input", "k_norm_output",
+                              "rope_k_input", "rope_cos_sin", "k_rope"):
+                    headers.require(f"{phase}_l43_preimage_{stage}" in self._block_tensors,
+                                    "missing actual KV preimage boundary")
             expected = {f"{phase}_l{i}_{stage}" for phase in ("p128", "d1")
                         for i in range(3, 64, 4) for stage in ("before", "after")}
             headers.require(set(self._all_attention_kv_records) == expected,
