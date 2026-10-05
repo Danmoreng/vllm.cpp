@@ -136,6 +136,30 @@ if(VLLM_CPP_XPU)
     endif()
   endforeach()
   vllm_cpp_add_test(test_xpu_exl3_w8a8 vt/test_xpu_exl3_w8a8.cpp)
+  add_executable(test_xpu_exl3_direct_prepare vt/test_xpu_exl3_direct_prepare.cpp)
+  target_include_directories(test_xpu_exl3_direct_prepare PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/src)
+  if(TARGET vllm::sanitize_test_shared)
+    target_link_libraries(test_xpu_exl3_direct_prepare PRIVATE vllm::sanitize_test_shared vllm_test_main)
+  else()
+    target_link_libraries(test_xpu_exl3_direct_prepare PRIVATE vllm::vllm vllm_test_main)
+  endif()
+  vllm_cpp_set_warnings(test_xpu_exl3_direct_prepare)
+  target_compile_options(test_xpu_exl3_direct_prepare PRIVATE -fsycl)
+  target_link_options(test_xpu_exl3_direct_prepare PRIVATE -fsycl)
+  add_test(NAME test_xpu_exl3_direct_prepare COMMAND test_xpu_exl3_direct_prepare
+    "--test-case=*F2: direct preparation complete calls*")
+  set_tests_properties(test_xpu_exl3_direct_prepare PROPERTIES
+    SKIP_RETURN_CODE 77 RUN_SERIAL TRUE LABELS "xpu;external")
+  add_test(NAME test_xpu_exl3_direct_prepare_budget COMMAND test_xpu_exl3_direct_prepare
+    "--test-case=*F2: direct preparation budget*")
+  set_tests_properties(test_xpu_exl3_direct_prepare_budget PROPERTIES
+    SKIP_RETURN_CODE 77 RUN_SERIAL TRUE LABELS "xpu;external"
+    ENVIRONMENT "VT_XPU_MEMORY_BUDGET_BYTES=268435456")
+  if(VLLM_CPP_REQUIRE_EXL3_TEST_ARTIFACTS)
+    set_tests_properties(test_xpu_exl3_direct_prepare PROPERTIES ENVIRONMENT "EXL3_REQUIRE_ARTIFACTS=1")
+    set_property(TEST test_xpu_exl3_direct_prepare_budget APPEND PROPERTY ENVIRONMENT "EXL3_REQUIRE_ARTIFACTS=1")
+  endif()
   vllm_cpp_add_test(test_xpu_w8a8_workspaces vt/test_xpu_w8a8_workspaces.cpp)
   target_include_directories(test_xpu_w8a8_workspaces PRIVATE ${CMAKE_SOURCE_DIR}/src)
   target_compile_options(test_xpu_w8a8_workspaces PRIVATE -fsycl)

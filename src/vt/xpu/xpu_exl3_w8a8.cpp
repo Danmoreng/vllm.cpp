@@ -165,17 +165,57 @@ void Reconstruct(Queue& q, const Tensor& tr, Tensor& panel, int k, int n,
   Launch(q, int64_t(k / 16) * (columns / 128), 8, kernel,
          "exl3_w8a8_weight_reconstruct");
 }
-}  // namespace
+struct PreparedActivation {
+  void* storage;
+  size_t bytes;
+};
 
-void Exl3GroupedW8A8Kernel(Queue& q, Tensor& out, const Tensor& in, const Tensor& tr,
+void DispatchW8A8(Queue& q, Tensor& out, const Tensor& in, const Tensor& tr,
     const Tensor& suh, const Tensor& svh, const Tensor& shard,
-    Tensor& workspace, Tensor& panel, const Exl3GroupedLinearArgs& args) {
+    Tensor& workspace, Tensor& panel, const Exl3GroupedLinearArgs& args,
+    const PreparedActivation* activation = nullptr) {
   const int m = int(in.shape[0]), k = int(in.shape[1]), n = int(out.shape[1]);
   const int groups = int(suh.shape[0]);
-  const auto plan = PlanExl3W8A8(m, k, n, groups, args.bits, args.w8a8_panel_columns);
+  auto plan = PlanExl3W8A8(m, k, n, groups, args.bits, args.w8a8_panel_columns);
+  if (activation) {
+    // Only the private model descriptor omits published xq/sx storage. Keep
+    // the identical padded F16 Y, weight scale/status region and panel layout.
+    plan.workspace_bytes -= plan.intermediate_offset;
+    plan.weight_scale_offset -= plan.intermediate_offset;
+    plan.intermediate_offset = 0;
+  }
   if (workspace.rank == 0 && panel.rank == 0) {
     VT_CHECK(plan.weight_panel_bytes <= SIZE_MAX - plan.workspace_bytes,
              "EXL3 W8A8 shared scratch size overflow");
+    const char* direct_setting = std::getenv("VT_XPU_W8A8_DIRECT_PREPARE");
+    const std::string_view direct_mode = direct_setting ? direct_setting : "0";
+    VT_CHECK(!args.model_map || direct_mode == "0" || direct_mode == "1",
+             "Invalid VT_XPU_W8A8_DIRECT_PREPARE");
+    const char* prepare_setting = std::getenv("VT_XPU_W8A8_PREPARE");
+    if (args.model_map && direct_mode == "1" && k / 128 <= 144 &&
+        (!prepare_setting || std::string_view(prepare_setting) == "1") &&
+        plan.intermediate_offset <= 64 * 1024 * 1024) {
+      const size_t compact_bytes = plan.workspace_bytes - plan.intermediate_offset;
+      bool consumed = false;
+      // Retain the existing workspace -> preparation lock order on all queues.
+      // The preparation callback now encloses every oneDNN and tail consumer;
+      // its completion fence retires the direct view before reuse or growth.
+      (void)WithExl3W8A8Workspace(q, compact_bytes + plan.weight_panel_bytes,
+          [&](void* storage) {
+        consumed = WithExl3W8A8Preparation(q, plan.intermediate_offset,
+            [&](void* prepared) {
+          auto scratch = Tensor::Contiguous(storage, DType::kI8, q.device,
+                                             {int64_t(compact_bytes)});
+          auto weights = Tensor::Contiguous(static_cast<uint8_t*>(storage) + compact_bytes,
+              DType::kI8, q.device, {k, plan.weight_panel_columns});
+          const PreparedActivation view{prepared, plan.intermediate_offset};
+          DispatchW8A8(q, out, in, tr, suh, svh, shard, scratch, weights, args, &view);
+        });
+      });
+      if (consumed) return;
+      // Insufficient preparation budget retains the original checked path.
+      // The compact attempt has not written output, scratch or panel data.
+    }
     const bool acquired = WithExl3W8A8Workspace(q, plan.workspace_bytes + plan.weight_panel_bytes,
         [&](void* storage) {
           auto scratch = Tensor::Contiguous(storage, DType::kI8, q.device,
@@ -186,7 +226,7 @@ void Exl3GroupedW8A8Kernel(Queue& q, Tensor& out, const Tensor& in, const Tensor
           // These exact plan-sized private descriptors satisfy scratch layout;
           // the recursive kernel retains all alignment/overlap/arithmetic checks.
           // Keep the model certificate across this private workspace recursion.
-          Exl3GroupedW8A8Kernel(q, out, in, tr, suh, svh, shard, scratch, weights, args);
+          DispatchW8A8(q, out, in, tr, suh, svh, shard, scratch, weights, args);
         });
     VT_CHECK(acquired, "EXL3 W8A8 shared scratch exceeds device memory budget");
     return;
@@ -202,6 +242,15 @@ void Exl3GroupedW8A8Kernel(Queue& q, Tensor& out, const Tensor& in, const Tensor
       VT_CHECK(!Overlap(*dst, *src), "EXL3 W8A8 writable storage may not overlap operands");
   VT_CHECK(!Overlap(out, workspace) && !Overlap(out, panel) && !Overlap(workspace, panel),
            "EXL3 W8A8 output and scratch may not overlap");
+  if (activation) {
+    const auto storage = Tensor::Contiguous(activation->storage, DType::kI8, q.device,
+                                            {int64_t(activation->bytes)});
+    VT_CHECK(reinterpret_cast<uintptr_t>(storage.data) % 16 == 0,
+             "EXL3 W8A8 storage requires 16-byte alignment");
+    for (const Tensor* t : std::initializer_list<const Tensor*>{
+             &out, &in, &tr, &suh, &svh, &shard, &workspace, &panel})
+      VT_CHECK(!Overlap(storage, *t), "EXL3 W8A8 prepared storage may not overlap operands");
+  }
 
   // Eager initial implementation: mapping is small, and the completion wait
   // also ensures that the panel's previous use has retired before reuse.
@@ -222,8 +271,11 @@ void Exl3GroupedW8A8Kernel(Queue& q, Tensor& out, const Tensor& in, const Tensor
   const auto* sv_bits = static_cast<const uint16_t*>(svh.data);
 
   auto* bytes = static_cast<uint8_t*>(workspace.data);
-  auto* xq = reinterpret_cast<int8_t*>(bytes + plan.activation_offset);
-  auto* sx = reinterpret_cast<float*>(bytes + plan.row_scale_offset);
+  auto* xq = activation ? static_cast<int8_t*>(activation->storage)
+                       : reinterpret_cast<int8_t*>(bytes + plan.activation_offset);
+  auto* sx = activation
+      ? reinterpret_cast<float*>(static_cast<uint8_t*>(activation->storage) + size_t(groups) * plan.padded_rows * k)
+      : reinterpret_cast<float*>(bytes + plan.row_scale_offset);
   auto* y = reinterpret_cast<sycl::half*>(bytes + plan.intermediate_offset);
   auto* sw = reinterpret_cast<float*>(bytes + plan.weight_scale_offset);
   // Both GPU checks use spare words in the existing 64-byte scale region.
@@ -245,25 +297,33 @@ void Exl3GroupedW8A8Kernel(Queue& q, Tensor& out, const Tensor& in, const Tensor
   };
   const char* prepare_setting = std::getenv("VT_XPU_W8A8_PREPARE");
   bool prepared = false;
+  const size_t qbytes = size_t(groups) * plan.padded_rows * k;
+  const size_t sbytes = size_t(groups) * plan.padded_rows * sizeof(float);
+  const auto prepare_checked = [&](void* storage) {
+    auto candidate = input;
+    candidate.xq = static_cast<int8_t*>(storage);
+    candidate.sx = reinterpret_cast<float*>(static_cast<uint8_t*>(storage) + qbytes);
+    NativeQueue(q).memset(candidate.xq, 0, qbytes);
+    NativeQueue(q).parallel_for(sycl::range<1>(size_t(groups) * plan.padded_rows),
+        [=](sycl::id<1> i) { candidate.sx[i[0]] = 1.0f; });
+    if (k / 128 <= 48)
+      Launch(q, int64_t(groups) * m * 8, 8, PrepareRows<8, 6>{candidate, valid},
+             "exl3_w8a8_prepare_checked");
+    else
+      Launch(q, int64_t(groups) * m * 16, 16, PrepareRows<16, 9>{candidate, valid},
+             "exl3_w8a8_prepare_checked");
+    check_status();
+    return candidate;
+  };
   // Exact checked preparation is the default;0 restores the original route.
   // Unsupported K or insufficient private budget keeps the existing checks.
-  if ((!prepare_setting || std::string_view(prepare_setting) == "1") && k / 128 <= 144) {
-    const size_t qbytes = size_t(groups) * plan.padded_rows * k;
-    const size_t sbytes = size_t(groups) * plan.padded_rows * sizeof(float);
+  if (activation) {
+    VT_CHECK(activation->bytes >= qbytes + sbytes, "EXL3 W8A8 prepared storage too small");
+    (void)prepare_checked(activation->storage);
+    prepared = true;
+  } else if ((!prepare_setting || std::string_view(prepare_setting) == "1") && k / 128 <= 144) {
     prepared = WithExl3W8A8Preparation(q, qbytes + sbytes, [&](void* storage) {
-      auto candidate = input;
-      candidate.xq = static_cast<int8_t*>(storage);
-      candidate.sx = reinterpret_cast<float*>(static_cast<uint8_t*>(storage) + qbytes);
-      NativeQueue(q).memset(candidate.xq, 0, qbytes);
-      NativeQueue(q).parallel_for(sycl::range<1>(size_t(groups) * plan.padded_rows),
-          [=](sycl::id<1> i) { candidate.sx[i[0]] = 1.0f; });
-      if (k / 128 <= 48)
-        Launch(q, int64_t(groups) * m * 8, 8, PrepareRows<8, 6>{candidate, valid},
-               "exl3_w8a8_prepare_checked");
-      else
-        Launch(q, int64_t(groups) * m * 16, 16, PrepareRows<16, 9>{candidate, valid},
-               "exl3_w8a8_prepare_checked");
-      check_status();
+      const auto candidate = prepare_checked(storage);
       // Public preparation stays untouched on either validation failure.
       RecordGraphWrite(q, workspace.data, Span(workspace));
       const auto qe = NativeQueue(q).memcpy(xq, candidate.xq, qbytes);
@@ -332,9 +392,17 @@ void Exl3GroupedW8A8Kernel(Queue& q, Tensor& out, const Tensor& in, const Tensor
         {"leaf", "signed_int8_onednn_f16_hadamard"}, {"intermediate_stride", n},
         {"weight_panel_bytes", plan.weight_panel_bytes}, {"workspace_bytes", plan.workspace_bytes},
         {"weight_panel_columns", plan.weight_panel_columns}, {"panel_submissions", panels.size()},
+        {"direct_preparation", activation != nullptr},
         {"input_dtype", Name(in.dtype)}, {"output_dtype", Name(out.dtype)}};
     std::fprintf(stderr, "EXL3_W8A8_DISPATCH %s\n", event.dump().c_str());
   }
+}
+}  // namespace
+
+void Exl3GroupedW8A8Kernel(Queue& q, Tensor& out, const Tensor& in, const Tensor& tr,
+    const Tensor& suh, const Tensor& svh, const Tensor& shard,
+    Tensor& workspace, Tensor& panel, const Exl3GroupedLinearArgs& args) {
+  DispatchW8A8(q, out, in, tr, suh, svh, shard, workspace, panel, args);
 }
 #else
 void Exl3GroupedW8A8Kernel(Queue&, Tensor&, const Tensor&, const Tensor&,
