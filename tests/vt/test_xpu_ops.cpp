@@ -358,6 +358,15 @@ struct P3SiluEnv {
   }
   void Select(bool typed) { REQUIRE(setenv("VT_XPU_SILU_FP16_TYPED", typed ? "1" : "0", 1) == 0); }
 };
+struct P7SiluTableEnv {
+  bool present = std::getenv("VT_XPU_SILU_FP16_TABLE") != nullptr;
+  std::string value = present ? std::getenv("VT_XPU_SILU_FP16_TABLE") : "";
+  ~P7SiluTableEnv() {
+    if (present) setenv("VT_XPU_SILU_FP16_TABLE", value.c_str(), 1);
+    else unsetenv("VT_XPU_SILU_FP16_TABLE");
+  }
+  void Select(bool table) { REQUIRE(setenv("VT_XPU_SILU_FP16_TABLE", table ? "1" : "0", 1) == 0); }
+};
 void P3SameBits(const std::vector<unsigned char>& actual, const std::vector<unsigned char>& expected) {
   REQUIRE(actual.size() == expected.size());
   const auto mismatch = std::mismatch(actual.begin(), actual.end(), expected.begin());
@@ -387,6 +396,7 @@ void P3SameFp16Behavior(const std::vector<unsigned char>& actual,
 
 TEST_CASE("XPU P3 FP16 SiLU: exhaustive gate bits preserve generic materialization and graph replay") {
   Queues qs; P3SiluEnv route;
+  P7SiluTableEnv table_mode; table_mode.Select(false);
   constexpr int rows = 512, width = 128, n = 65536;
   Buffer input(qs.gpu, DType::kF16, {rows, 2 * width});
   Buffer generic(qs.gpu, DType::kF16, {rows, width});
@@ -439,6 +449,111 @@ TEST_CASE("XPU P3 FP16 SiLU: exhaustive gate bits preserve generic materializati
   std::cout << "P3_SILU_EXHAUSTIVE gate_patterns=65536 up_patterns=10 products=655360 finite_inf_signed_zero_exact=1 nan_classification_exact=1" << std::endl;
 }
 
+TEST_CASE("XPU P7 FP16 SiLU table: exhaustive bytes queue joins and graph lifetime") {
+  Queues qs; P3SiluEnv typed;
+  P7SiluTableEnv table_mode;
+  constexpr int rows = 64, width = 1024, n = rows * width;
+  Buffer input(qs.gpu, DType::kF16, {rows, 2 * width});
+  Buffer direct(qs.gpu, DType::kF16, {rows, width});
+  Buffer lookup(qs.gpu, DType::kF16, {rows, width});
+  Buffer joined(qs.gpu, DType::kF16, {rows, width});
+  auto other = vt::CreateQueue(qs.gpu.device);
+  lookup.upload(std::vector<uint16_t>(n, 0x7e35).data());
+  std::vector<uint16_t> data(2 * n);
+  const auto fill = [&](uint16_t up, int shift = 0) {
+    for (int i = 0; i < n; ++i) {
+      data[(i / width) * 2 * width + i % width] = uint16_t(i + shift);
+      data[(i / width) * 2 * width + width + i % width] = up;
+    }
+    input.upload(data.data());
+  };
+  typed.Select(true);
+  // First capture cannot allocate/initialize the table or partially write out.
+  fill(0x3c00);
+  if (vt::GetBackend(qs.gpu.device).SupportsGraphCapture() &&
+      vt::xpu::GetMemoryInfo().fp16_silu_table_bytes == 0) {
+    setenv("VT_XPU_SILU_FP16_TABLE", "1", 1);
+    const auto before = lookup.raw();
+    vt::BreakableGraph graph;
+    CHECK_THROWS_WITH_AS(([&] {
+      vt::GraphCaptureScope scope(vt::GetBackend(qs.gpu.device), qs.gpu, graph,
+                                  vt::GraphCaptureMode::kFull);
+      vt::SiluAndMul(qs.gpu, lookup.t, input.t);
+    }()), doctest::Contains("XPU FP16 SiLU table must be warmed on the capture queue"), std::runtime_error);
+    P3SameBits(lookup.raw(), before);
+    CHECK(vt::xpu::GetMemoryInfo().fp16_silu_table_bytes == 0);
+    CHECK(vt::xpu::GetMemoryInfo().graph_device_bytes == 0);
+  }
+  for (uint16_t up : {uint16_t(0x3c00), uint16_t(0), uint16_t(0x8000),
+                     uint16_t(1), uint16_t(0x7bff), uint16_t(0xfbff),
+                     vt::F32ToF16(-0.346923828125f), uint16_t(0x7c00),
+                     uint16_t(0xfc00), uint16_t(0x7e35)}) {
+    CAPTURE(up); fill(up); const auto before = input.raw();
+    setenv("VT_XPU_SILU_FP16_TABLE", "0", 1);
+    vt::SiluAndMul(qs.gpu, direct.t, input.t); const auto expected = direct.raw();
+    setenv("VT_XPU_SILU_FP16_TABLE", "1", 1);
+    vt::SiluAndMul(qs.gpu, lookup.t, input.t);
+    if (up == 0x3c00) {
+      // Input is ready, but no completion wait occurs between initialization on
+      // the producer and this first reader. The backend must join its event.
+      vt::SiluAndMul(other, joined.t, input.t);
+      vt::GetBackend(other.device).Synchronize(other);
+      P3SameFp16Behavior(joined.raw(), expected);
+    }
+    P3SameFp16Behavior(lookup.raw(), expected);
+    CHECK(input.raw() == before);
+  }
+  CHECK(vt::xpu::GetMemoryInfo().fp16_silu_table_bytes == 131072);
+  // Reuse immutable storage from another queue without a host readiness wait.
+  fill(vt::F32ToF16(-0.346923828125f), 17);
+  setenv("VT_XPU_SILU_FP16_TABLE", "0", 1);
+  vt::SiluAndMul(qs.gpu, direct.t, input.t); const auto expected = direct.raw();
+  setenv("VT_XPU_SILU_FP16_TABLE", "1", 1);
+  vt::SiluAndMul(other, lookup.t, input.t);
+  vt::GetBackend(other.device).Synchronize(other);
+  P3SameBits(lookup.raw(), expected);
+  if (vt::GetBackend(other.device).SupportsGraphCapture()) {
+    vt::BreakableGraph graph;
+    {
+      vt::GraphCaptureScope scope(vt::GetBackend(other.device), other, graph,
+                                  vt::GraphCaptureMode::kFull);
+      vt::SiluAndMul(other, lookup.t, input.t);
+    }
+    REQUIRE(graph.captured());
+    for (int shift : {0, 4097, 33521}) {
+      fill(vt::F32ToF16(-0.346923828125f), shift);
+      setenv("VT_XPU_SILU_FP16_TABLE", "0", 1);
+      vt::SiluAndMul(qs.gpu, direct.t, input.t); const auto wanted = direct.raw();
+      graph.Replay(other); vt::GetBackend(other.device).Synchronize(other);
+      P3SameBits(lookup.raw(), wanted);
+    }
+    graph.Reset(); CHECK(vt::xpu::GetMemoryInfo().graph_device_bytes == 0);
+  }
+  vt::DestroyQueue(other);
+  // A new queue must acquire readiness itself even if an old native queue's
+  // address is recycled. Its first capture cannot inherit the old join.
+  other = vt::CreateQueue(qs.gpu.device);
+  setenv("VT_XPU_SILU_FP16_TABLE", "1", 1);
+  const auto wanted = direct.raw(), preserved = lookup.raw();
+  if (vt::GetBackend(other.device).SupportsGraphCapture()) {
+    vt::BreakableGraph cold;
+    CHECK_THROWS_WITH_AS(([&] {
+      vt::GraphCaptureScope scope(vt::GetBackend(other.device), other, cold,
+                                  vt::GraphCaptureMode::kFull);
+      vt::SiluAndMul(other, lookup.t, input.t);
+    }()), doctest::Contains("XPU FP16 SiLU table must be warmed on the capture queue"), std::runtime_error);
+    P3SameBits(lookup.raw(), preserved);
+    CHECK(vt::xpu::GetMemoryInfo().graph_device_bytes == 0);
+  }
+  vt::SiluAndMul(other, lookup.t, input.t);
+  vt::GetBackend(other.device).Synchronize(other);
+  P3SameBits(lookup.raw(), wanted);
+  vt::DestroyQueue(other);
+  CHECK(vt::xpu::GetMemoryInfo().fp16_silu_table_bytes == 131072);
+  CHECK(vt::GetReferenceTierHits() == 0);
+  std::cout << "P7_SILU_TABLE_EXHAUSTIVE gate_patterns=65536 up_patterns=10 table_bytes=131072 other_queue=1" << std::endl;
+}
+
 TEST_CASE("XPU P3 FP16 SiLU: threshold rows tail guards and shifted aliases") {
   Queues qs; P3SiluEnv route;
   constexpr int guard = 32;
@@ -481,7 +596,7 @@ TEST_CASE("XPU P3 FP16 SiLU: threshold rows tail guards and shifted aliases") {
 TEST_CASE("XPU P3 FP16 SiLU: real MLP operands complete operator gain") {
   const char* fixture = std::getenv("VT_B70_EXL3_SILU_OPERANDS");
   if (!fixture) { MESSAGE("Set VT_B70_EXL3_SILU_OPERANDS for the bounded real-row benchmark"); return; }
-  Queues qs; P3SiluEnv route;
+  Queues qs; P3SiluEnv route; P7SiluTableEnv table_mode;
   const auto original = vllm::SafetensorsFile::Open(fixture);
   const auto& gu = original.Get("p128_l20_detail_gate_up");
   const auto& act = original.Get("p128_l20_detail_swiglu");
@@ -508,8 +623,9 @@ TEST_CASE("XPU P3 FP16 SiLU: real MLP operands complete operator gain") {
     auto target = vt::Tensor::Contiguous(static_cast<uint16_t*>(result.t.data) + guard,
         DType::kF16, qs.gpu.device, {rows, width});
     const auto wanted = result.raw(), before = input.raw();
-    for (bool typed : {false, true}) {
-      route.Select(typed);
+    for (int variant : {0, 1, 2}) {
+      const bool typed = variant != 0, table = variant == 2;
+      route.Select(typed); table_mode.Select(table);
       for (int warm = 0; warm < 2; ++warm) vt::SiluAndMul(qs.gpu, target, source);
       vt::GetBackend(qs.gpu.device).Synchronize(qs.gpu);
       (void)vt::xpu::DrainProfileEvents();
@@ -522,6 +638,7 @@ TEST_CASE("XPU P3 FP16 SiLU: real MLP operands complete operator gain") {
       }
       P3SameBits(result.raw(), wanted); CHECK(input.raw() == before);
       nlohmann::json event = {{"rows", rows}, {"width", width}, {"typed_requested", typed},
+          {"table_requested", table}, {"table_bytes", vt::xpu::GetMemoryInfo().fp16_silu_table_bytes},
           {"profiled", profile}, {"complete_operator_wall_ms", times}, {"exact_original_bytes", true}};
       event["device_events"] = nlohmann::json::array();
       for (const auto& e : vt::xpu::DrainProfileEvents())
