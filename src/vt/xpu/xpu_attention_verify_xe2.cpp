@@ -20,10 +20,11 @@ constexpr size_t Align(size_t bytes) { return (bytes + 63) & ~size_t{63}; }
 int64_t PagedAttentionXe2VerifyQueryLength(int64_t tokens, int64_t requests,
                                          const int32_t* host_offsets) {
   if (requests == 1) return tokens >= 2 && tokens <= 5 ? tokens : 0;
-  // Initially qualify only the actual C4/Q4 family, not shape-only inference
-  // or the unrelated speculative routing hint. Missing/ragged host metadata
+  // Original C2/C3/C4 Q4 fixtures qualify uniform partial batches as requests
+  // finish. Do not infer uniformity from shape or the speculative routing hint.
+  // Missing/ragged host metadata
   // leaves the generic route available without an extra D2H readback.
-  if (requests != 4 || tokens != 16 || !host_offsets) return 0;
+  if (requests < 2 || requests > 4 || tokens != requests * 4 || !host_offsets) return 0;
   for (int64_t r = 0; r <= requests; ++r)
     if (host_offsets[r] != r * 4) return 0;
   return 4;

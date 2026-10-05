@@ -374,7 +374,7 @@ struct XpuAttentionGraphPolicy {
 XpuAttentionGraphPolicy BuildXpuAttentionGraphPolicy(
     int64_t requests, int64_t query_rows, int32_t max_seq_len, bool causal,
     const std::vector<PagedKvCache>& kv);
-int32_t XpuC4VerifyContextBound(const PagedKvCache& kv, bool fp16,
+int32_t XpuBatchedVerifyContextBound(const PagedKvCache& kv, bool fp16,
     int64_t query_heads, int64_t tokens, const v1::CommonAttentionMetadata& meta);
 
 bool ActF32FlagIsOn(const char* env_value);

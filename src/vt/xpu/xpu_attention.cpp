@@ -455,7 +455,7 @@ void PagedAttentionKernel(Queue& q, Tensor& out, const Tensor& query, const Tens
     for (int64_t r = 0; r < requests; ++r) {
       const int64_t first = offsets[r], end = offsets[r + 1], length = lengths[r];
       if (first < 0 || end < first || end > tokens) return false;
-      // A uniform host hint selects the packed C4 layout. Prove it against
+      // A uniform host hint selects the packed batched layout. Prove it against
       // fresh device offsets inside the existing eager/graph metadata check;
       // never trust total-token division or add a per-layer host readback.
       if (packed_verify_rows && (first != r * packed_verify_rows ||

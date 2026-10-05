@@ -1353,6 +1353,158 @@ TEST_CASE("XPU FP8 attention P1: original true C4 verifier isolation and output 
   CHECK(vt::GetReferenceTierHits() == 0);
 }
 
+TEST_CASE("XPU FP8 attention P7: original C2 C3 Q4 partial batches and graph guards"
+          * doctest::skip(!std::getenv("VT_B70_EXL3_VERIFY_PARTIAL"))) {
+  const std::filesystem::path path = std::getenv("VT_B70_EXL3_VERIFY_PARTIAL");
+  const auto fixture = vllm::SafetensorsFile::Open(path.string());
+  auto sidecar = path; sidecar.replace_extension(".json");
+  std::ifstream input(sidecar); REQUIRE(input.good());
+  const auto meta = nlohmann::json::parse(input);
+  REQUIRE(meta.at("schema") == "b70-exl3-C2-C3-Q4-original-v1");
+  REQUIRE(meta.at("source_sha256") == "5b203e2397f7db9c87a2fba041eac31975d96d13d3287244c09186aaedab2a38");
+  REQUIRE(meta.at("physical_blocks") == 63); REQUIRE(meta.at("page") == 1600);
+  REQUIRE(meta.at("columns") == 164); REQUIRE(meta.at("cases").size() == 12);
+  const auto& keys = fixture.Get("base_keys"); const auto& values = fixture.Get("base_values");
+  REQUIRE(keys.dtype == "U8"); REQUIRE(values.dtype == "U8");
+  REQUIRE((keys.shape == std::vector<int64_t>{4100, 4, 256})); REQUIRE(values.shape == keys.shape);
+  Queue gpu(vt::DeviceType::kXPU); auto& backend = vt::GetBackend(gpu.q.device);
+  struct RestoreMode {
+    std::string old; bool had;
+    ~RestoreMode() { if (had) setenv("VT_XPU_ATTENTION", old.c_str(), 1); else unsetenv("VT_XPU_ATTENTION"); }
+  } restore{std::getenv("VT_XPU_ATTENTION") ? std::getenv("VT_XPU_ATTENTION") : "",
+            std::getenv("VT_XPU_ATTENTION") != nullptr};
+  struct Graph {
+    vt::Backend& backend; void* handle = nullptr;
+    ~Graph() { if (handle) { try { backend.DestroyGraph(handle); } catch (...) {} } }
+  } graph{backend};
+  for (const auto& record : meta.at("cases")) {
+    const auto id = record.at("id").get<std::string>(); CAPTURE(id);
+    const auto order = record.at("request_ids").get<std::vector<int32_t>>();
+    const int n = int(order.size()), rows = n * 4;
+    REQUIRE((n == 2 || n == 3)); auto sorted = order; std::sort(sorted.begin(), sorted.end());
+    for (int r = 0; r < n; ++r) REQUIRE(sorted[r] == r);
+    const auto base = record.at("base_lengths").get<std::vector<int32_t>>();
+    const auto lens = record.at("lengths").get<std::vector<int32_t>>();
+    REQUIRE(base.size() == 3); REQUIRE(lens.size() == size_t(n));
+    const auto logical = record.at("logical_offsets").get<std::vector<int32_t>>();
+    REQUIRE(logical.size() == size_t(n + 1));
+    for (int r = 0; r <= n; ++r) REQUIRE(logical[r] == r * 4);
+    REQUIRE(record.at("route").at("packed_query_shape") == nlohmann::json::array({n, 96, 256}));
+    REQUIRE(record.at("route").at("splits") == 16); REQUIRE(record.at("route").at("tile") == 8);
+    const auto prefix = record.at("prefix").get<std::string>();
+    const auto& qr = fixture.Get(prefix + "_query"); const auto& yr = fixture.Get(prefix + "_output");
+    REQUIRE(qr.dtype == "F16"); REQUIRE(yr.dtype == "F16");
+    REQUIRE((qr.shape == std::vector<int64_t>{rows, 24, 256})); REQUIRE(yr.shape == qr.shape);
+    const std::vector<unsigned char> expected(yr.data, yr.data + yr.nbytes);
+    for (uint8_t poison : {uint8_t{0}, uint8_t{0x7f}}) {
+      CAPTURE(int(poison));
+      Buffer cache(gpu.q, DType::kI8, {63 * 1600 * 2048});
+      Buffer query(gpu.q, DType::kF16, {rows, 24, 256}), out(gpu.q, DType::kF16, {rows, 24, 256});
+      Buffer table(gpu.q, DType::kI32, {n, 164}), lengths(gpu.q, DType::kI32, {n});
+      Buffer offsets(gpu.q, DType::kI32, {n + 1});
+      std::vector<unsigned char> state(cache.bytes, poison);
+      for (int r = 0; r < 3; ++r) for (int row = 0; row < base[r]; ++row) for (int h = 0; h < 4; ++h) {
+        const size_t src = size_t(((row + r * 337) % 4100) * 4 + h) * 256;
+        const size_t dst = size_t(r * 21 + row / 1600) * 1600 * 2048 + (row % 1600) * 2048 + h * 512;
+        std::memcpy(state.data() + dst, keys.data + src, 256);
+        if (!record.at("mutate_request").is_null() && record.at("mutate_request") == r && row >= base[r] - 3)
+          std::memset(state.data() + dst + 256, 0x38, 256);
+        else std::memcpy(state.data() + dst + 256, values.data + src, 256);
+      }
+      std::vector<int32_t> bt(n * 164, -1);
+      for (int r = 0; r < n; ++r) {
+        REQUIRE(lens[r] == base[order[r]]);
+        for (int b = 0; b < 21; ++b) bt[r * 164 + b] = order[r] * 21 + b;
+      }
+      cache.upload(state.data()); query.upload(qr.data); table.upload(bt.data());
+      lengths.upload(lens.data()); offsets.upload(logical.data());
+      auto key = vt::Tensor::Contiguous(cache.tensor.data, DType::kI8, gpu.q.device, {63, 1600, 4, 256});
+      key.stride[0] = 1600 * 2048; key.stride[1] = 2048; key.stride[2] = 512;
+      auto value = key; value.data = static_cast<unsigned char*>(key.data) + 256;
+      vt::PagedAttentionArgs args;
+      args.scale = 0.0625f; args.max_seq_len = record.at("max_keys").get<int32_t>();
+      REQUIRE(record.at("route").at("max_keys") == args.max_seq_len);
+      args.kv_cache_dtype = vt::Fp8KVCacheDataType::kFp8E4M3; args.query_start_loc_host = logical.data();
+      const auto submit = [&](vt::Tensor& target) {
+        vt::PagedAttention(gpu.q, target, query.tensor, key, value, table.tensor, lengths.tensor, offsets.tensor, args);
+      };
+      const auto run = [&](const char* mode) {
+        REQUIRE(setenv("VT_XPU_ATTENTION", mode, 1) == 0);
+        submit(out.tensor); backend.Synchronize(gpu.q);
+      };
+      if (std::getenv("VT_XPU_PROFILE")) (void)vt::xpu::DrainProfileEvents();
+      run("verify"); xpu_test::SameBytes(out.download(), expected);
+      if (std::getenv("VT_XPU_PROFILE")) {
+        int packs = 0, generic = 0;
+        for (const auto& e : vt::xpu::DrainProfileEvents()) {
+          packs += e.stage == "attention_verify_pack"; generic += e.stage == "attention_split_partial";
+        }
+        CHECK(packs == 1); CHECK(generic == 0);
+      }
+      // With the stable model bound, capture shorter metadata then grow to the
+      // exact original full operands within the page, without stale host lengths.
+      const bool rounded = id.ends_with("rounded");
+      if (rounded) {
+        auto shorter = lens; for (auto& length : shorter) --length;
+        lengths.upload(shorter.data()); run("verify");
+      }
+      backend.BeginCapture(gpu.q); submit(out.tensor); graph.handle = backend.EndCaptureGraph(gpu.q);
+      lengths.upload(lens.data());
+      backend.ReplayGraph(gpu.q, graph.handle); backend.Synchronize(gpu.q);
+      xpu_test::SameBytes(out.download(), expected);
+      auto disagreement = logical; disagreement[1] = 3; offsets.upload(disagreement.data());
+      const auto before = out.download();
+      CHECK_THROWS(backend.ReplayGraph(gpu.q, graph.handle)); xpu_test::SameBytes(out.download(), before);
+      CHECK_THROWS(run("verify")); xpu_test::SameBytes(out.download(), before);
+      offsets.upload(logical.data()); backend.ReplayGraph(gpu.q, graph.handle); backend.Synchronize(gpu.q);
+      xpu_test::SameBytes(out.download(), expected);
+      backend.DestroyGraph(graph.handle); graph.handle = nullptr;
+      CHECK(vt::xpu::GetMemoryInfo().graph_device_bytes == 0);
+      const auto bound = args.max_seq_len;
+      args.max_seq_len = *std::max_element(lens.begin(), lens.end()) - 1;
+      CHECK_THROWS(run("verify")); xpu_test::SameBytes(out.download(), expected);
+      args.max_seq_len = bound;
+      // No shape-only admission; ragged and missing hints retain the generic control.
+      args.query_start_loc_host = nullptr; args.uniform_spec_query_len = 4;
+      run("split"); const auto generic = out.download(); run("verify");
+      xpu_test::SameBytes(out.download(), generic);
+      auto ragged = logical; ragged[1] = 3; args.query_start_loc_host = ragged.data(); offsets.upload(ragged.data());
+      run("split"); const auto generic_ragged = out.download(); run("verify");
+      xpu_test::SameBytes(out.download(), generic_ragged);
+      args.query_start_loc_host = logical.data(); offsets.upload(logical.data()); run("verify");
+      xpu_test::SameBytes(out.download(), expected);
+      Buffer padded(gpu.q, DType::kF16, {rows, 24, 264});
+      std::vector<unsigned char> guards(padded.bytes, 0xa5); padded.upload(guards.data());
+      auto view = padded.tensor; view.shape[2] = 256; submit(view); backend.Synchronize(gpu.q);
+      const auto copied = padded.download(); bool exact = true, untouched = true;
+      for (int row = 0; row < rows * 24; ++row) {
+        exact &= std::memcmp(copied.data() + row * 528, expected.data() + row * 512, 512) == 0;
+        untouched &= std::memcmp(copied.data() + row * 528 + 512, guards.data() + row * 528 + 512, 16) == 0;
+      }
+      CHECK(exact); CHECK(untouched);
+      submit(query.tensor); backend.Synchronize(gpu.q); xpu_test::SameBytes(query.download(), expected);
+      query.upload(qr.data);
+      xpu_test::SameBytes(cache.download(), state);
+      if (std::getenv("VT_B70_EXL3_VERIFY_PARTIAL_BENCH") && poison == 0 && rounded) {
+        REQUIRE(std::getenv("VT_XPU_PROFILE") == nullptr);
+        for (const char* mode : {"split", "verify"}) {
+          run(mode); std::vector<double> samples;
+          for (int repeat = 0; repeat < 3; ++repeat) {
+            const auto start = std::chrono::steady_clock::now(); run(mode);
+            samples.push_back(std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count());
+          }
+          auto sorted_samples = samples; std::sort(sorted_samples.begin(), sorted_samples.end());
+          std::cout << nlohmann::json{{"event", "partial_Q4_complete_operator"}, {"case", id},
+              {"mode", mode}, {"samples_ms", samples}, {"median_ms", sorted_samples[1]}}.dump() << '\n';
+        }
+        xpu_test::SameBytes(out.download(), expected);
+      }
+      std::cout << nlohmann::json{{"event", "partial_Q4_original_exact"}, {"case", id}, {"poison", int(poison)}}.dump() << '\n';
+    }
+  }
+  CHECK(vt::GetReferenceTierHits() == 0);
+}
+
 TEST_CASE("XPU FP8 attention P1: C4 uniform metadata proof and ragged generic remainder"
           * doctest::skip(!std::getenv("VT_XPU_PROFILE"))) {
   Queue gpu(vt::DeviceType::kXPU); auto& backend = vt::GetBackend(gpu.q.device);

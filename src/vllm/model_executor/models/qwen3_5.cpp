@@ -288,16 +288,16 @@ detail::XpuAttentionGraphPolicy detail::BuildXpuAttentionGraphPolicy(
   return key;
 }
 
-int32_t detail::XpuC4VerifyContextBound(const PagedKvCache& kv, bool fp16,
+int32_t detail::XpuBatchedVerifyContextBound(const PagedKvCache& kv, bool fp16,
     int64_t query_heads, int64_t tokens, const v1::CommonAttentionMetadata& meta) {
-  if (!fp16 || tokens != 16 || meta.num_reqs != 4 || query_heads != 24 ||
-      !meta.causal || meta.max_query_len != 4 || meta.query_start_loc.size() != 5 ||
+  if (!fp16 || meta.num_reqs < 2 || meta.num_reqs > 4 || tokens != meta.num_reqs * 4 || query_heads != 24 ||
+      !meta.causal || meta.max_query_len != 4 || meta.query_start_loc.size() != size_t(meta.num_reqs + 1) ||
       kv.dtype != vt::DType::kI8 || kv.fp8_kind != vt::Fp8KVCacheDataType::kFp8E4M3 ||
       kv.num_kv_heads != 4 || kv.head_size != 256 ||
       (kv.head_size_v != 0 && kv.head_size_v != 256) ||
       (kv.block_size != 1600 && kv.block_size != 1664) ||
       kv.k_scale != 1.0f || kv.v_scale != 1.0f) return meta.max_seq_len;
-  for (int r = 0; r <= 4; ++r)
+  for (int r = 0; r <= meta.num_reqs; ++r)
     if (meta.query_start_loc[r] != r * 4) return meta.max_seq_len;
   const char* setting = std::getenv("VT_XPU_ATTENTION");
   const std::string_view mode = setting ? setting : "auto";
@@ -6588,7 +6588,7 @@ DBuf FullAttnBlockPaged(Dev d, const FullAttnLayerWeights& w, const HfConfig& cf
   vt::PagedAttentionArgs pa_args{scale, meta.causal};
   pa_args.query_start_loc_host = meta.query_start_loc.data();
   pa_args.max_seq_len = d.q.device.type == vt::DeviceType::kXPU
-      ? detail::XpuC4VerifyContextBound(kv, ActDType(d) == DType::kF16, Hq, T, meta)
+      ? detail::XpuBatchedVerifyContextBound(kv, ActDType(d) == DType::kF16, Hq, T, meta)
       : meta.max_seq_len;
   // SPEC-DFLASH2 W10 (#1857): the runner's spec-as-decode classification — a
   // uniform-qlen verify stays on the FA-2 split-KV DECODE lane instead of the
