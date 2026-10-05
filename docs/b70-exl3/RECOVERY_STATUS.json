@@ -6663,7 +6663,7 @@
     "U2": "partial_atomic_cache_oneDNN_SmallM_notices_and_clean_CPU_build_complete_contribution_and_remaining_capability_hygiene_open",
     "Q1": "pending_preserve_default_controlled_reference_labels",
     "F1": "stopped_at_bounded_precondition_low_measured_producer_cost_no_fusion_variant",
-    "F2": "first_event_candidate_rejected_second_direct_preparation_implemented_opt_in_focused_checks_pass_broader_qualification_pending",
+    "F2": "event_candidate_rejected_direct_candidate_opt_in_six_operator_cases_and_native4K_final_recurrent_states_pass_performance_retention_pending",
     "F3": "conditional_on_demonstrated_current_cost",
     "U6": "pending_bounded_final_comparison_and_review_handoff",
     "receipt": {
@@ -6675,7 +6675,7 @@
     "cpu_limit": "GCC16 now builds the CPU library and selected targets;5 focused CTest cases pass with5019 assertions and one existing registry test-case skip. GCC12 previous unchanged muse_glimmer_mm array-bounds failure retained; not rerun after the cache repair.",
     "other_backends": "Affected Vulkan source compiles and CUDA CUTLASS/Marlin host syntax checks pass. CUDA device build/link/runtime and HIP remain unverified.",
     "performance_scope": "One before/after C1 short native pair:43.61414->43.51202 decode TPS; TTFT2313.785->2318.430ms; request8160.513->8178.879ms. No repeat signal and no refreshed original score.",
-    "next_step": "F2 second/final candidate: qualify model states after real4K prefill/MTP and affected lifecycle, then bounded complete-path/memory decision and repeats. Large QKVZ operator gate now passes. Keep direct route opt-in/default0 pending decision; Q1, remaining contribution hygiene, conditional F3 and U6 remain open.",
+    "next_step": "F2 second/final candidate: bounded fixed-workload repeated unprofiled performance and peak-memory retention decision, preserving opt-in/default0 until decision. Six operator cases and native actual4K completed-request recurrent-state/reuse checks now pass. Q1 per-token integrated original/FP8KV/default-reference gates, remaining contribution hygiene, conditional F3 and U6 remain open.",
     "U0_tests": "23 host tests in4 CTest cases pass, including8 generated artifact tests; no GPU arithmetic changed.",
     "U0_receipt": {
       "artifact": "upstream-u1-integration-v1/u0-receipt-v1.json",
@@ -6729,6 +6729,12 @@
       "artifact": "upstream-f2-direct-prepare-v1/receipt-v2.json",
       "sha256": "b00c8dff9ad70ca255fefb0028d9f12e42f13c298f44b33fd36ff5d2541e29b7",
       "bytes": 11264
+    },
+    "F2_direct_model_state_tests": "Optional frozen4096 token prompt in autonomous reuse test, two native C1 requests each64 output tokens, MTP3, three1600/1600/896 prefill chunks, prefix cacheOFF and graphsON,4 recurrent slots deterministically initialized including spares/provisional rows. Baseline1186/direct3106 assertions pass. All192 completed-request Conv/SSM arrays (627572736B per request,1255145472B per arm) byte-exact across48 layers/all4 slots. Complete non-snapshot JSON payload exact including64 IDs each, proposal/acceptance counters and2 captures with26/54 cumulative graph replays. Actual1566 W8A8 dispatches per arm:1044 M1600/522 M896; all direct-arm dispatches consume checked private view. Existing short lifecycle483/483, full JSON exact U2 control (16 steps,1/4/2/1,mixed,EOS,cancel/reuse,poisoned spares); short lifecycle alone usesSmallM, not direct W8A8. Corrected focused build passes2 steps; initial misplaced-setup compile failure preserved. Native completed-request state checks are not per-token Python/FP8KV or score/ordinary-reference admission. Candidate stays opt-in/default0 pending bounded performance/retention decision.",
+    "F2_direct_model_state_receipt": {
+      "artifact": "upstream-f2-direct-prepare-v1/receipt-v3.json",
+      "sha256": "3e7daa8ece59bade119aa3e514916da310e5583c59104d92b48eb55e146f5af2",
+      "bytes": 67011
     }
   }
 }
