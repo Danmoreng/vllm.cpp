@@ -96,7 +96,7 @@ TEST_CASE("XPU P6 SmallM: same original packed weights and complete operator") {
           map(q, DType::kI32, {n / 128}) {}
   };
   std::vector<std::shared_ptr<Weight>> weights;
-  std::vector<std::shared_ptr<const vt::Exl3W8A8ModelMap>> model_maps;
+  std::vector<vt::SharedPtrCache<const vt::Exl3W8A8ModelMap>> model_maps;
   const bool compare_model_map = std::getenv("VT_B70_SMALLM_MODEL_MAP_COMPARE") &&
       std::string_view(std::getenv("VT_B70_SMALLM_MODEL_MAP_COMPARE")) == "1";
   size_t packed_bytes = 0;
@@ -363,7 +363,7 @@ TEST_CASE("XPU EXL3 SmallM P7: immutable model maps preserve guards graph owners
     scales.upload(su.data()); svh.upload(f.svh.data());
     auto owner = resident_map();
     auto map = vt::Tensor::Contiguous(owner.get(), DType::kI32, first.q.device, {n / 128});
-    std::shared_ptr<const vt::Exl3W8A8ModelMap> cache;
+    vt::SharedPtrCache<const vt::Exl3W8A8ModelMap> cache;
     const vt::Exl3GroupedLinearArgs args{bits, 2, "P7_SMALLM_MODEL_MAP"};
     auto run_public = [&](const vt::Tensor& routing, const vt::Exl3GroupedLinearArgs& a) {
       vt::Exl3GroupedLinear(first.q, output.tensor, input.tensor, packed.tensor, scales.tensor,
@@ -375,15 +375,18 @@ TEST_CASE("XPU EXL3 SmallM P7: immutable model maps preserve guards graph owners
     };
     run_public(map, args);
     const auto expected = output.download(), had = scratch.had.download(), parts = scratch.parts.download();
-    run_owned(first.q); REQUIRE(cache); CHECK(cache->Matches(map, groups, owner));
+    run_owned(first.q); REQUIRE(cache.Load()); CHECK(cache.Load()->Matches(map, groups, owner));
     xpu_test::SameBytes(output.download(), expected); xpu_test::SameBytes(scratch.had.download(), had);
     xpu_test::SameBytes(scratch.parts.download(), parts);
     run_owned(second.q); backend.Synchronize(second.q);
     xpu_test::SameBytes(output.download(), expected); xpu_test::SameBytes(scratch.parts.download(), parts);
     Buffer bad_map(first.q, DType::kI32, {n / 128});
     const int32_t bad[] = {1, groups, 0}; bad_map.upload(bad);
-    auto injected = args; injected.model_map = cache.get();
-    CHECK_THROWS_WITH_AS(run_public(bad_map.tensor, injected), doctest::Contains("group out of range"), std::runtime_error);
+    {
+      const auto injected_map = cache.Load();
+      auto injected = args; injected.model_map = injected_map.get();
+      CHECK_THROWS_WITH_AS(run_public(bad_map.tensor, injected), doctest::Contains("group out of range"), std::runtime_error);
+    }
     xpu_test::SameBytes(output.download(), expected); xpu_test::SameBytes(scratch.had.download(), had);
     xpu_test::SameBytes(scratch.parts.download(), parts);
     auto alias = scratch.parts.tensor; alias.data = output.tensor.data;
@@ -409,14 +412,14 @@ TEST_CASE("XPU EXL3 SmallM P7: immutable model maps preserve guards graph owners
     // it under the context lock would deadlock its ordinary VT Free deleter.
     auto temporary = resident_map(); std::weak_ptr<void> failed_lifetime = temporary;
     auto temporary_map = map; temporary_map.data = temporary.get();
-    std::shared_ptr<const vt::Exl3W8A8ModelMap> temporary_cache;
+    vt::SharedPtrCache<const vt::Exl3W8A8ModelMap> temporary_cache;
     auto temporary_run = [&] { vt::detail::Exl3GroupedLinearModel(first.q, output.tensor,
         input.tensor, packed.tensor, scales.tensor, svh.tensor, temporary_map,
         scratch.had.tensor, scratch.parts.tensor, args, temporary, temporary_cache); };
     temporary_run(); backend.Synchronize(first.q);
     backend.BeginCapture(second.q); backend.BeginCapture(first.q); temporary_run();
     backend.Memset(first.q, temporary_map.data, 0, temporary_map.Bytes());
-    temporary.reset(); temporary_cache.reset(); CHECK_FALSE(failed_lifetime.expired());
+    temporary.reset(); temporary_cache.Reset(); CHECK_FALSE(failed_lifetime.expired());
     CHECK_THROWS_AS(backend.EndCaptureGraph(first.q), std::runtime_error);
     CHECK_FALSE(failed_lifetime.expired());
     void* other_capture = backend.EndCaptureGraph(second.q);
@@ -424,12 +427,12 @@ TEST_CASE("XPU EXL3 SmallM P7: immutable model maps preserve guards graph owners
     // A cold model capture uses the actual replay guard, while still pinning
     // its supplied map owner. No CPU/device readback is attempted in capture.
     auto cold_owner = resident_map(); auto cold_map = map; cold_map.data = cold_owner.get();
-    std::shared_ptr<const vt::Exl3W8A8ModelMap> cold_cache;
+    vt::SharedPtrCache<const vt::Exl3W8A8ModelMap> cold_cache;
     backend.BeginCapture(first.q);
     vt::detail::Exl3GroupedLinearModel(first.q, output.tensor, input.tensor, packed.tensor,
         scales.tensor, svh.tensor, cold_map, scratch.had.tensor, scratch.parts.tensor,
         args, cold_owner, cold_cache);
-    void* cold_graph = backend.EndCaptureGraph(first.q); CHECK_FALSE(cold_cache);
+    void* cold_graph = backend.EndCaptureGraph(first.q); CHECK_FALSE(cold_cache.Load());
     const auto cold_nodes = vt::xpu::GetMemoryInfo().graph_nodes - initial.graph_nodes - warm_nodes;
     CHECK(cold_nodes == warm_nodes + 1);
     backend.ReplayGraph(first.q, cold_graph); xpu_test::SameBytes(output.download(), expected);
@@ -444,12 +447,12 @@ TEST_CASE("XPU EXL3 SmallM P7: immutable model maps preserve guards graph owners
     CHECK(cold_lifetime.expired());
     // A new valid generation may coexist with an old captured graph. The old
     // graph keeps its exact map allocation despite the model cache being reset.
-    std::weak_ptr<void> old_lifetime = owner; cache.reset(); owner.reset();
+    std::weak_ptr<void> old_lifetime = owner; cache.Reset(); owner.reset();
     CHECK_FALSE(old_lifetime.expired());
     owner = resident_map(); map.data = owner.get();
     const int32_t changed[] = {0, 1, 0}; backend.Copy(first.q, map.data, changed, map.Bytes());
     backend.Synchronize(first.q); run_public(map, args); const auto changed_expected = output.download();
-    run_owned(first.q); REQUIRE(cache); CHECK(cache->Matches(map, groups, owner));
+    run_owned(first.q); REQUIRE(cache.Load()); CHECK(cache.Load()->Matches(map, groups, owner));
     xpu_test::SameBytes(output.download(), changed_expected);
     backend.ReplayGraph(first.q, warm_graph); xpu_test::SameBytes(output.download(), expected);
     backend.BeginCapture(second.q); backend.DestroyGraph(warm_graph);
@@ -457,8 +460,8 @@ TEST_CASE("XPU EXL3 SmallM P7: immutable model maps preserve guards graph owners
     other_capture = backend.EndCaptureGraph(second.q);
     CHECK(old_lifetime.expired()); backend.DestroyGraph(other_capture);
     CHECK(vt::xpu::GetMemoryInfo().graph_device_bytes == initial.graph_device_bytes);
-    unsetenv(name); cache.reset(); run_owned(first.q);
-    REQUIRE(cache); CHECK(cache->Matches(map, groups, owner));
+    unsetenv(name); cache.Reset(); run_owned(first.q);
+    REQUIRE(cache.Load()); CHECK(cache.Load()->Matches(map, groups, owner));
     xpu_test::SameBytes(output.download(), changed_expected);
     setenv(name, "1", 1);
     std::cout << "P7_SMALLM_MODEL_MAP warm_nodes=" << warm_nodes << " cold_nodes=" << cold_nodes

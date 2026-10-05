@@ -3,6 +3,7 @@
 #include <array>
 #include <memory>
 #include "vt/ops.h"
+#include "vt/shared_ptr_cache.h"
 #include "vt/exl3_w8a8_panel_plan.h"
 
 namespace vt {
@@ -106,13 +107,13 @@ void Exl3GroupedLinearModel(Queue&, Tensor& out, const Tensor& in,
     const Tensor& trellis, const Tensor& suh, const Tensor& svh, const Tensor& map,
     Tensor& in_had, Tensor& partials, const Exl3GroupedLinearArgs&,
     const std::shared_ptr<void>& resident_owner,
-    std::shared_ptr<const Exl3W8A8ModelMap>& cache);
+    SharedPtrCache<const Exl3W8A8ModelMap>& cache);
 // Only model-resident immutable maps may use this seam. All ordinary operand,
 // activation, scale, alias and workspace checks still execute. The cache owns
 // its map allocation, is bounded by its projection owner and is never global.
 void Exl3GroupedW8A8Model(Queue&, Tensor& out, const Tensor& in,
     const Tensor& trellis, const Tensor& suh, const Tensor& svh, const Tensor& map,
     const Exl3GroupedLinearArgs&, const std::shared_ptr<void>& resident_owner,
-    std::shared_ptr<const Exl3W8A8ModelMap>& cache);
+    SharedPtrCache<const Exl3W8A8ModelMap>& cache);
 }
 }  // namespace vt

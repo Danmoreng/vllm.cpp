@@ -6633,7 +6633,7 @@
     }
   ],
   "performance_baseline": "7536aededc049b2157f12eadb0f4cc6bbf29b7b7",
-  "performance_next": "Wait for developer-provided new Pro plan; no further optimization authorized under old plan.",
+  "performance_next": "Follow the active upstream readiness/performance plan; U2 oneDNN capability naming and focused test separation next. The old P0-P7 work period remains closed.",
   "closed_performance_plan": "docs/B70_EXL3_NATIVE_PERFORMANCE_IMPLEMENTATION_PLAN_7536aeded_EN.md",
   "performance_plan_closure": {
     "status": "closed_by_developer_after_last_approved_optimization",
@@ -6658,9 +6658,9 @@
     "baseline_ref": "3803ad4a6b9974f4afd1b6c9ad3e333d5e9b6ff8",
     "upstream_ref": "e67a071a649814e102a91145a0b1b424884f16da",
     "integration_commit": "3dfa3c3193c5950bf284229441e81f26b99d499c",
-    "integration_status": "native_merge_regression_pass_cpu_portability_open",
+    "integration_status": "native_merge_regression_pass_GCC16_CPU_build_pass_remaining_portability_open",
     "U0": "complete_portable_projection_identity_slice",
-    "U2": "pending_including_preexisting_CPU_build_errors",
+    "U2": "partial_atomic_cache_portability_complete_oneDNN_test_hygiene_pending",
     "Q1": "pending_preserve_default_controlled_reference_labels",
     "F1": "pending_one_fusion_and_at_most_one_smaller_fallback",
     "F2": "pending_at_most_two_named_changes",
@@ -6672,15 +6672,21 @@
       "bytes": 14972
     },
     "native_checks": "Build pass; C1 P4096/O256 MTP3 610/610 with exact256 IDs/113 non-time cycles and unchanged GPU peak; lifecycle483/483 complete payload exact; GDN990/990; route38/38; host load206/206, vision56/56, registry3900/3900.",
-    "cpu_limit": "GCC16 full CPU build fails on unchanged shared_ptr atomic deprecations; GCC12 full CPU build fails on unchanged muse_glimmer_mm array-bounds diagnostics. Configurations and affected shared source compiles pass; full CPU build not passed.",
+    "cpu_limit": "GCC16 now builds the CPU library and selected targets;5 focused CTest cases pass with5019 assertions and one existing registry test-case skip. GCC12 previous unchanged muse_glimmer_mm array-bounds failure retained; not rerun after the cache repair.",
     "other_backends": "Affected Vulkan source compiles and CUDA CUTLASS/Marlin host syntax checks pass. CUDA device build/link/runtime and HIP remain unverified.",
     "performance_scope": "One before/after C1 short native pair:43.61414->43.51202 decode TPS; TTFT2313.785->2318.430ms; request8160.513->8178.879ms. No repeat signal and no refreshed original score.",
-    "next_step": "U2 first CPU/compiler and oneDNN capability portability slice; preserve existing numerical and lifetime contracts.",
+    "next_step": "U2 accurately named optional oneDNN capability with compatibility alias, then isolate hermetic and external EXL3 tests; preserve numerical and lifetime contracts.",
     "U0_tests": "23 host tests in4 CTest cases pass, including8 generated artifact tests; no GPU arithmetic changed.",
     "U0_receipt": {
       "artifact": "upstream-u1-integration-v1/u0-receipt-v1.json",
       "sha256": "bc83f0a1aed2af155b473cb0b88c79f201e358b8a1f0ef948dbb72813d796422",
       "bytes": 839
+    },
+    "U2_cache_tests": "C++20 copyable atomic publication: CPU5019/5019; Intel host cache14/14; XPU SmallM199/199, W8A8 cross-queue76/76; MTP lifecycle483/483 with complete JSON payload exact merge baseline. SYCL build and affected CUDA Qwen dense host syntax pass. No new performance score or qualification promotion.",
+    "U2_cache_receipt": {
+      "artifact": "upstream-u2-atomic-cache-v1/receipt-v1.json",
+      "sha256": "e44d1d000f0434e66493cd2552a7befdf8e84bb0a57b278f884ed836b65e9723",
+      "bytes": 7414
     }
   }
 }
