@@ -2916,7 +2916,7 @@
           "sha256": "3da49f66c6730614433e01fb429bc9c4e89d00c1f88a01982534334261bf9c7e"
         }
       },
-      "next": "Run final bounded original/native C1/C4 4K MTP3 comparisons (three quiet repeats each), then remaining32K/mixed/no-MTP/prefix sentinels with plan-scoped counts. Practical/isolated draft/default-controlled target refreshed on7feb68781; defaultD64 four failures, full-all-layer state/reference/P1 automatic admission remain open. Preserve actual cold/warmup, original/native trajectories, overlap, resources and separate profile clocks.",
+      "next": "Continue final C4 primary4K MTP3 original/native comparisons (three quiet repeats each), then remaining32K/mixed/no-MTP/prefix sentinels. Current C1 median49.9014 versus original63.8645 TPS (-21.8636%); originalR2 continuation differs fromR1/R3 at index3, all results retained. Current practical/draft/default-controlled target refreshed; defaultD64 four failures, full-all-layer state/reference/P1 automatic admission remain open.",
       "current_quality": {
         "practical_tasks": 8,
         "practical_passed": 8,
@@ -4138,9 +4138,190 @@
         },
         "successful_GPU_workers": 16,
         "resources": "All actual exits0, swap0/no memory-limit or OOM events; quiet scores CPU throttling0. R07 correctness worker has6 CPU throttled periods, not scored. 308artifacts+4related identities verified."
+      },
+      "final_current_C1_primary": {
+        "scores": {
+          "native": {
+            "decode_tps": {
+              "samples": [
+                50.00852976133998,
+                49.88962069432132,
+                49.901432775386525
+              ],
+              "median": 49.901432775386525,
+              "min": 49.88962069432132,
+              "max": 50.00852976133998
+            },
+            "TTFT_ms": {
+              "samples": [
+                2322.5418210000003,
+                2336.028857,
+                2335.299602
+              ],
+              "median": 2335.299602,
+              "min": 2322.5418210000003,
+              "max": 2336.028857
+            },
+            "E2E_s": {
+              "samples": [
+                22.779080448,
+                22.84132465,
+                22.835741319
+              ],
+              "median": 22.835741319,
+              "min": 22.779080448,
+              "max": 22.84132465
+            },
+            "TPOT_ms": {
+              "samples": [
+                19.996588677419357,
+                20.04424940664712,
+                20.039504767350927
+              ],
+              "median": 20.039504767350927,
+              "min": 19.996588677419357,
+              "max": 20.04424940664712
+            },
+            "longest_chunk_pause_ms": {
+              "samples": [
+                61.5958550000002,
+                61.963693999999236,
+                61.80106099999705
+              ],
+              "median": 61.80106099999705,
+              "min": 61.5958550000002,
+              "max": 61.963693999999236
+            }
+          },
+          "original": {
+            "decode_tps": {
+              "samples": [
+                64.37075117896717,
+                56.22897860773448,
+                63.864529414456456
+              ],
+              "median": 63.864529414456456,
+              "min": 56.22897860773448,
+              "max": 64.37075117896717
+            },
+            "TTFT_ms": {
+              "samples": [
+                1944.8794139898382,
+                1954.6392959891818,
+                1948.8430279889144
+              ],
+              "median": 1948.8430279889144,
+              "min": 1944.8794139898382,
+              "max": 1954.6392959891818
+            },
+            "E2E_s": {
+              "samples": [
+                17.837203200004296,
+                20.1481244690076,
+                17.967142781009898
+              ],
+              "median": 17.967142781009898,
+              "min": 17.837203200004296,
+              "max": 20.1481244690076
+            },
+            "TPOT_ms": {
+              "samples": [
+                15.535005910056011,
+                17.784424059633313,
+                15.658144030317379
+              ],
+              "median": 15.658144030317379,
+              "min": 15.535005910056011,
+              "max": 17.784424059633313
+            },
+            "longest_chunk_pause_ms": {
+              "samples": [
+                53.008963994216174,
+                53.242321009747684,
+                52.80145999859087
+              ],
+              "median": 53.008963994216174,
+              "min": 52.80145999859087,
+              "max": 53.242321009747684
+            }
+          }
+        },
+        "native_all1024_IDs_all371_semantic_cycles_exact_repeats_and_prior": true,
+        "original_repeat_first_differences": [
+          null,
+          {
+            "index": 3,
+            "left": 13159,
+            "right": 55287
+          },
+          null
+        ],
+        "original_native_first_differences": [
+          {
+            "index": 68,
+            "left": 279,
+            "right": 1396
+          },
+          {
+            "index": 3,
+            "left": 55287,
+            "right": 13159
+          },
+          {
+            "index": 68,
+            "left": 279,
+            "right": 1396
+          }
+        ],
+        "native_median_decode_gap_percent": -21.863617828379756,
+        "native_median_TTFT_change_percent": 19.8300513925888,
+        "native_median_E2E_change_percent": 27.097232973157514,
+        "scope": "Three quiet separate warmed engines each, fixed P4096/O1024 MTP3 page1600 full6bpw248320/compact65536, O32 warmup then cold-prefix reset; same24GiB memory/no swap/2CPUs. Alternating sequence O1N1N2O2O3N3. Original frontend chunks are not GPU MTP cycles. Retain all continuations/noise/counters/CPU throttling. Native Xe2 verifier remains explicit opt-in, no automatic-admission or reference/state/quality promotion. Different original/native trajectories do not establish numerical parity.",
+        "C1_primary_repetitions_complete": true,
+        "C4_primary_complete": false,
+        "P7_complete": false,
+        "qualification_promoted": false,
+        "receipt": {
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p7-final-matrix-v1/C1-comparison-v1.json",
+          "bytes": 423539,
+          "sha256": "3a01c2901a5e3568dba6af40d90a0cd570e2186eefa1c808fbaaa5825e8abc6c"
+        },
+        "product_checkpoint": "7feb68781cf2722e4550d45a49a1764b4812aea6",
+        "host_limits": "Both24GiB memory, swap0, CPU2; all6 actual exits0/no memory-limit/OOM. Original whole-worker CPU throttled periods85/76/66 including startup, native0; score-interval-only CPU counters unavailable.",
+        "native_peak_device_bytes": 30326149443,
+        "original_peak_allocated_bytes": 27960091648,
+        "accepted_proposed_native": [
+          [
+            656,
+            1104
+          ],
+          [
+            656,
+            1104
+          ],
+          [
+            656,
+            1104
+          ]
+        ],
+        "accepted_proposed_original": [
+          [
+            666,
+            1074
+          ],
+          [
+            617,
+            1221
+          ],
+          [
+            666,
+            1074
+          ]
+        ],
+        "accuracy_scope": "Native repeat determinism is observed; higher numerical accuracy than original is not proved. Identical controlled65-row original proof and differing default/protocol/serving continuations stay separate. Cause of original R2 difference unproved; no speed-versus-accuracy causal claim."
       }
     }
   ],
   "performance_baseline": "7536aededc049b2157f12eadb0f4cc6bbf29b7b7",
-  "performance_next": "Run final bounded original/native C1/C4 4K MTP3 comparisons (three quiet repeats each), then remaining32K/mixed/no-MTP/prefix sentinels with plan-scoped counts. Practical/isolated draft/default-controlled target refreshed on7feb68781; defaultD64 four failures, full-all-layer state/reference/P1 automatic admission remain open. Preserve actual cold/warmup, original/native trajectories, overlap, resources and separate profile clocks."
+  "performance_next": "Continue final C4 primary4K MTP3 original/native comparisons (three quiet repeats each), then remaining32K/mixed/no-MTP/prefix sentinels. Current C1 median49.9014 versus original63.8645 TPS (-21.8636%); originalR2 continuation differs fromR1/R3 at index3, all results retained. Current practical/draft/default-controlled target refreshed; defaultD64 four failures, full-all-layer state/reference/P1 automatic admission remain open."
 }
