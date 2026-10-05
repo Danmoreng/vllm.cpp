@@ -48,6 +48,11 @@ def prepare(p4k, p32k, c4_prompts):
         {"id": "long", "prompt_ids": long, "output_tokens": 256,
          "after_emitted": {"request": "short", "tokens": 16}},
     ]})
+    for concurrency in (1, 4):
+        cases.append({"id": f"c{concurrency}-p4096-o256-m0", "cache_state": "cold",
+                      "mtp_depth": 0, "max_model_len": 32768, "requests": [
+            {"id": f"request-{i}", "prompt_ids": distinct[i] if concurrency == 4 else four,
+             "output_tokens": 256} for i in range(concurrency)]})
     return {"schema": "b70-exl3-r11-serving-workload-v1",
             "sources": [identity(p4k), identity(p32k), identity(c4_prompts)],
             "sampling": {"temperature": 0.0, "ignore_eos": True},
@@ -67,6 +72,14 @@ def summarize(raw, case):
     assert native or raw["schema"] == "b70-exl3-r11-producer-serving-output-v1"
     assert raw["case"] == case["id"] and raw["cache_state"] == case["cache_state"] == "cold"
     assert raw["sampling"] == {"temperature": 0.0, "ignore_eos": True}
+    depth = case.get("mtp_depth", 3)
+    assert type(depth) is int and depth in (0, 3)
+    actual_depth = raw.get("launch", {}).get("mtp_depth", 3) if native else raw.get("mtp_depth", 3)
+    assert actual_depth == depth, "actual engine speculation differs from workload"
+    if "max_model_len" in case:
+        limit = case["max_model_len"]
+        actual_limit = raw["launch"]["max_model_len"] if native else raw["requested_engine_args"]["max_model_len"]
+        assert actual_limit == limit, "actual context limit differs from workload"
     requested = {spec["id"]: spec for spec in case["requests"]}
     assert set(raw["requests"]) == set(requested)
     traces = raw["requests"]
@@ -98,7 +111,8 @@ def summarize(raw, case):
             "ttft_ms": 1000 * positive(first - trace["admitted_at_s"]),
             "tpot_ms": 1000 * (last - first) / (count - 1) if count > 1 else None,
             "end_to_end_ms": 1000 * positive(trace["finished_at_s"] - trace["admitted_at_s"]),
-            "token_timestamp_granularity": "one timestamp per emitted MTP chunk",
+            "token_timestamp_granularity": "one timestamp per emitted MTP chunk" if depth else
+                                           "one timestamp per emitted frontend chunk",
         }
     # Use the SAME common interval for every request; never add individual tok/s.
     overlap_start = max(t["observations"][0]["at_s"] for t in traces.values())
@@ -112,6 +126,7 @@ def summarize(raw, case):
     }
     duration = positive(raw["end_to_end_wall_s"])
     common = {"schema": "b70-exl3-r11-serving-report-v1", "case": case["id"],
+              "mtp_depth": depth,
               "profiled": raw["profiled"], "unprofiled_serving_measurement": not raw["profiled"],
               "startup_state": raw.get("startup_state", "constructor_only_native_lazy_work_in_first_request"),
               "warmup": raw.get("warmup"), "per_request": per_request,
@@ -132,16 +147,19 @@ def summarize(raw, case):
             previous_end = b["end_s"]
             if b["spec_stats"] is not None:
                 stat = b["spec_stats"]
-                assert stat["num_spec_tokens"] == 3
+                assert stat["num_spec_tokens"] == depth
                 assert 0 <= stat["accepted"] <= stat["proposed"]
                 supplied.append(stat)
         assert duration >= previous_end
         proposed = sum(s["proposed"] for s in supplied)
         accepted = sum(s["accepted"] for s in supplied)
-        assert proposed > 0, "producer MTP statistics missing"
+        if depth:
+            assert proposed > 0, "producer MTP statistics missing"
+        else:
+            assert proposed == accepted == 0, "target-only run reported speculative tokens"
         return dict(common, cycles=None, decode_cycles=None, mean_decode_cycle_ms=None,
                     mean_emitted_tokens_per_decode_cycle=None, graph_captures=None, graph_replays=None,
-                    proposed=proposed, accepted=accepted, draft_acceptance=accepted / proposed,
+                    proposed=proposed, accepted=accepted, draft_acceptance=accepted / proposed if proposed else None,
                     frontend_batches=len(batches), spec_statistics_batches=len(supplied),
                     mean_frontend_batch_ms=1000 * statistics.mean(b["frontend_wall_s"] for b in batches),
                     profile_spans={}, accounting_note="Producer frontend batches are not target forwards or GPU MTP cycles. "
@@ -162,10 +180,15 @@ def summarize(raw, case):
     assert duration >= previous_end
     proposed = sum(c["proposed"] for c in cycles)
     accepted = sum(c["accepted"] for c in cycles)
+    if not depth:
+        assert proposed == accepted == 0, "target-only run reported speculative tokens"
     profile = {}
     if raw["profiled"]:
         if raw["device_profile"]:
-            for stage in ("runner_target_forward", "runner_mtp_draft"):
+            stages = ("runner_target_forward", "runner_mtp_draft") if depth else ("runner_target_forward",)
+            if not depth:
+                assert not any(r["stage"] == "runner_mtp_draft" for r in raw["device_profile_records"])
+            for stage in stages:
                 spans = [r for r in raw["device_profile_records"] if r["stage"] == stage]
                 assert len(spans) == len(cycles), (stage, len(spans), len(cycles))
                 assert all(r["stream_span"] and r["end_ns"] >= r["start_ns"] for r in spans)
@@ -219,6 +242,40 @@ def self_check():
     assert producer_report["common_decode_overlap"] == report["common_decode_overlap"]
     assert producer_report["cycles"] is None and producer_report["mean_decode_cycle_ms"] is None
     assert producer_report["accepted"] == 4 and producer_report["proposed"] == 12
+    # No-MTP needs an explicit runtime witness and zero proposal counters;
+    # absent producer speculative stats are expected in this mode only.
+    no_mtp_case = dict(case, mtp_depth=0)
+    target_only = json.loads(json.dumps(raw))
+    target_only["launch"] = {"mtp_depth": 0}
+    target_report = summarize(target_only, no_mtp_case)
+    assert target_report["mtp_depth"] == 0 and target_report["draft_acceptance"] is None
+    producer_only = json.loads(json.dumps(producer))
+    producer_only["mtp_depth"] = 0
+    for batch in producer_only["frontend_batches"]:
+        batch["spec_stats"] = None
+    producer_only_report = summarize(producer_only, no_mtp_case)
+    assert producer_only_report["per_request"] == target_report["per_request"]
+    assert producer_only_report["common_decode_overlap"] == target_report["common_decode_overlap"]
+    assert producer_only_report["accepted"] == producer_only_report["proposed"] == 0
+    for invalid in (producer, dict(target_only, launch={"mtp_depth": 3})):
+        try:
+            summarize(invalid, no_mtp_case)
+        except AssertionError:
+            pass
+        else:
+            raise AssertionError("MTP runtime must not be scored as no-MTP")
+    bounded_case = dict(no_mtp_case, max_model_len=32768)
+    target_only["launch"]["max_model_len"] = 32768
+    producer_only["requested_engine_args"] = {"max_model_len": 32768}
+    assert summarize(target_only, bounded_case)["mtp_depth"] == 0
+    assert summarize(producer_only, bounded_case)["mtp_depth"] == 0
+    target_only["launch"]["max_model_len"] = 262144
+    try:
+        summarize(target_only, bounded_case)
+    except AssertionError:
+        pass
+    else:
+        raise AssertionError("different context limits must not be scored together")
     producer["requests"]["a"]["num_cached_tokens"] = 16
     try:
         summarize(producer, case)

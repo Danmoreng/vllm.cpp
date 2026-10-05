@@ -1684,20 +1684,28 @@ TEST_CASE("XPU EXL3 public engine R11: frozen serving timing workload") {
     if (candidate.at("id") == selected) task = candidate;
   REQUIRE_FALSE(task.is_null());
   REQUIRE(task.at("cache_state") == "cold");
+  const int depth = task.value("mtp_depth", 3);
+  REQUIRE((depth == 0 || depth == 3));
+  const int context_limit = task.value("max_model_len", 262144);
+  REQUIRE(context_limit > 0);
+  REQUIRE(context_limit <= 262144);
   const auto& specs = task.at("requests");
   REQUIRE(specs.size() >= 1);
   REQUIRE(specs.size() <= 4);
   vllm::entrypoints::EngineParams params;
-  params.max_model_len = 262144;
+  params.max_model_len = context_limit;
   params.max_num_batched_tokens = 1600;
   params.max_num_seqs = 4;
   params.num_blocks = 180;
+  if (!depth) params.block_size = 1600;  // fixed primary page, target-only isolation
   params.kv_cache_dtype = "fp8";
   params.enable_prefix_caching = true;
-  params.speculative_config = vllm::ParseSpeculativeConfigJson(
+  if (depth) params.speculative_config = vllm::ParseSpeculativeConfigJson(
       "{\"method\":\"mtp\",\"num_speculative_tokens\":3}");
   auto loaded = vllm::entrypoints::LoadedEngine::FromModelDir(model, params);
   REQUIRE_FALSE(loaded->runner().use_async_scheduling());
+  REQUIRE(loaded->speculative_config().has_value() == (depth != 0));
+  REQUIRE(loaded->block_size() == 1600);
   if (profile) (void)vt::xpu::DrainProfileEvents();
   if (host_profile) (void)vt::xpu::DrainHostProfileRecords();
   const char* warmup_env = std::getenv("VT_B70_EXL3_SERVING_WARMUP");
@@ -1753,9 +1761,9 @@ TEST_CASE("XPU EXL3 public engine R11: frozen serving timing workload") {
   nlohmann::json result = {{"schema", "b70-exl3-r11-serving-output-v1"},
       {"case", task.at("id")}, {"cache_state", "cold"},
       {"profiled", profile || host_profile}, {"device_profile", profile},
-      {"launch", {{"max_model_len", 262144}, {"max_num_batched_tokens", 1600},
+      {"launch", {{"max_model_len", context_limit}, {"max_num_batched_tokens", 1600},
         {"max_num_seqs", 4}, {"num_blocks", 180}, {"kv_cache_dtype", "fp8"},
-        {"prefix_caching", true}, {"mtp_depth", 3}}},
+        {"prefix_caching", true}, {"mtp_depth", depth}, {"attention_page_tokens", loaded->block_size()}}},
       {"sampling", {{"temperature", 0.}, {"ignore_eos", true}}},
       {"startup_state", warmup ? "request_warmup_o32_then_prefix_reset" :
                                 "constructor_only_native_lazy_work_in_first_request"},
@@ -1797,7 +1805,7 @@ TEST_CASE("XPU EXL3 public engine R11: frozen serving timing workload") {
       const auto prompt = spec.at("prompt_ids").get<std::vector<int32_t>>();
       const int cap = spec.at("output_tokens");
       REQUIRE_FALSE(prompt.empty());
-      REQUIRE(prompt.size() + cap <= size_t(262144));
+      REQUIRE(prompt.size() + cap <= size_t(context_limit));
       vllm::SamplingParams sampling;
       sampling.temperature = 0.; sampling.ignore_eos = true;
       sampling.max_tokens = cap;
@@ -1885,6 +1893,10 @@ TEST_CASE("XPU EXL3 public engine R11: frozen serving timing workload") {
   result["host_peak_rss_bytes"] = uint64_t(usage.ru_maxrss) * 1024;
   CHECK(result["host_peak_rss_bytes"].get<uint64_t>() <= (uint64_t(32) << 30));
   CHECK(vt::GetReferenceTierHits() == 0);
+  if (!depth) {
+    CHECK(loaded->runner().spec_drafts_proposed() == 0);
+    CHECK(loaded->runner().spec_drafts_accepted() == 0);
+  }
   loaded.reset();
   result["after_release_graph_bytes"] = vt::xpu::GetMemoryInfo().graph_device_bytes;
   CHECK(result["after_release_graph_bytes"] == 0);

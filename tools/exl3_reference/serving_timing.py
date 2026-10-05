@@ -105,7 +105,7 @@ class ServingTimingWorker:
         spec = runner.speculative_config
         return {"model_dtype": str(runner.dtype), "kv_dtype": str(runner.kv_cache_dtype),
                 "cache_dtype_policy": runner.cache_config.cache_dtype,
-                "speculation": {"method": spec.method, "tokens": spec.num_speculative_tokens,
+                "speculation": None if spec is None else {"method": spec.method, "tokens": spec.num_speculative_tokens,
                     "draft_sample_method": spec.draft_sample_method,
                     "rejection_sample_method": spec.rejection_sample_method},
                 "kv_cache_config": describe(runner.kv_cache_config),
@@ -211,6 +211,12 @@ def capture(args):
     assert workload["sampling"] == {"temperature": 0.0, "ignore_eos": True}
     task = next(c for c in workload["cases"] if c["id"] == args.case)
     assert task["cache_state"] == "cold" and 1 <= len(task["requests"]) <= 4
+    depth = task.get("mtp_depth", 3)
+    assert type(depth) is int and depth in (0, 3)
+    context_limit = task.get("max_model_len", 262144)
+    assert type(context_limit) is int and 0 < context_limit <= 262144
+    assert all(len(r["prompt_ids"]) + r["output_tokens"] <= context_limit for r in task["requests"])
+    assert not args.timeline_cycles or depth == 3, "Q4/MTP timeline requires MTP3"
     assert not args.timeline_eager or args.timeline_cycles, "eager diagnostic needs timeline cycles"
     reference = verify_inputs(args.reference_manifest, args.model_dir, args.image_identity)
     import yaml
@@ -234,20 +240,25 @@ def capture(args):
     kwargs = {k: v for k, v in profile["vllm"].items() if k in allowed}
     if isinstance(kwargs.get("reasoning_config"), dict):
         kwargs["reasoning_config"] = ReasoningConfig(**kwargs["reasoning_config"])
-    overrides = {"max_model_len": 262144, "max_num_seqs": 4,
+    overrides = {"max_model_len": context_limit, "max_num_seqs": 4,
                  "max_num_batched_tokens": 1600, "num_gpu_blocks_override": 180,
                  "async_scheduling": False, "disable_log_stats": False,
                  "compilation_config": {"cudagraph_mode": "FULL_DECODE_ONLY",
                                         "cudagraph_capture_sizes": [1, 2, 4, 8, 12, 16]}}
     if args.timeline_eager:
         overrides.update(enforce_eager=True, compilation_config={"cudagraph_mode": "NONE"})
+    if depth == 0:
+        overrides["speculative_config"] = None
+        # Keep the primary physical attention page for target-only isolation;
+        # without speculation the automatic Mamba-derived page would shrink.
+        overrides["block_size"] = 1600
     kwargs.update(overrides, model=str(args.model_dir),
                   worker_extension_cls="serving_timing.ServingTimingWorker")
     assert kwargs["dtype"] == "float16" and kwargs["kv_cache_dtype"] == "fp8"
-    assert kwargs["speculative_config"] == {"method": "mtp", "num_speculative_tokens": 3}
+    assert kwargs["speculative_config"] == ({"method": "mtp", "num_speculative_tokens": 3} if depth else None)
     config = EngineArgs(**kwargs).create_engine_config()
     result = {"schema": "b70-exl3-r11-producer-serving-output-v1", "case": args.case,
-              "cache_state": "cold", "profiled": bool(args.timeline_cycles),
+              "cache_state": "cold", "profiled": bool(args.timeline_cycles), "mtp_depth": depth,
               "startup_state": "request_warmup_o32_then_prefix_reset",
               "sampling": {"temperature": 0.0, "ignore_eos": True},
               "image": args.image_identity, "checkpoint": reference["checkpoint"]["identity"],
@@ -285,7 +296,10 @@ def capture(args):
         worker = result["initialized_worker"][0]
         assert worker["model_dtype"] == "torch.float16"
         assert worker["cache_dtype_policy"] == "fp8" and worker["kv_dtype"] == "torch.uint8"
-        assert worker["speculation"]["method"] == "mtp" and worker["speculation"]["tokens"] == 3
+        if depth:
+            assert worker["speculation"]["method"] == "mtp" and worker["speculation"]["tokens"] == 3
+        else:
+            assert worker["speculation"] is None and worker["speculative_config"] is None
         assert worker["kv_cache_config"]["fields"]["num_blocks"] == 180
         if args.timeline_cycles:
             result["timeline_install"] = llm.collective_rpc(
@@ -302,8 +316,14 @@ def capture(args):
         final = result["finished_worker"][0]
         assert final["peak_allocated_bytes"] <= 32 << 30
         assert final["host_peak_rss_bytes"] + result["frontend_host_peak_rss_bytes"] <= 32 << 30
-        assert any(b["spec_stats"] and b["spec_stats"]["proposed"] > 0
-                   for b in result["frontend_batches"]), "MTP proposal witness missing"
+        if depth:
+            assert any(b["spec_stats"] and b["spec_stats"]["proposed"] > 0
+                       for b in result["frontend_batches"]), "MTP proposal witness missing"
+        else:
+            assert all(b["spec_stats"] is None or
+                       (b["spec_stats"]["num_spec_tokens"] == 0 and
+                        b["spec_stats"]["proposed"] == b["spec_stats"]["accepted"] == 0)
+                       for b in result["frontend_batches"]), "target-only speculative statistics"
         with args.output.open("x") as f:
             json.dump(result, f, indent=2, allow_nan=False); f.write("\n")
         print("PRODUCER_SERVING_PASS", args.output, result["end_to_end_wall_s"], flush=True)
@@ -322,7 +342,7 @@ def main():
     p.add_argument("--timeline-cycles", type=int, choices=range(5), default=0,
                    help="Separate profiler diagnostic for up to four actual pure-Q4 target/MTP calls")
     p.add_argument("--timeline-eager", action="store_true",
-                   help="Disable graphs only for the explicitly separate timeline diagnostic")
+                   help="Disable compilation and graphs for the explicitly separate timeline diagnostic")
     capture(p.parse_args())
 
 
