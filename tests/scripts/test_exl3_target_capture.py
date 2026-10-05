@@ -17,9 +17,17 @@ from capture_block import select_gdn_layer
 from capture_gdn import block_layer_index
 from capture_target import validate_gdn_history, selected_boundary_phase
 from capture_target import load_prompt, validate_all_gdn_states, all_target_gdn_layers
+from capture_target import validate_all_attention_kv
 
 
 class TargetCaptureTest(unittest.TestCase):
+    def test_all_attention_kv_requires_bounded_all_gdn_state_mode(self):
+        validate_all_attention_kv(True, True)
+        validate_all_attention_kv(True, False)
+        validate_all_attention_kv(False, False)
+        for gdn, kv in [(False, True), (1, True), (True, 1), (True, "true")]:
+            with self.assertRaises(ValueError): validate_all_attention_kv(gdn, kv)
+
     def test_held_out_prompt_preserves_legacy_and_rejects_unbounded_inputs(self):
         self.assertEqual(load_prompt(None), [1000 + (i * 37) % 4096 for i in range(128)])
         with tempfile.TemporaryDirectory() as directory:

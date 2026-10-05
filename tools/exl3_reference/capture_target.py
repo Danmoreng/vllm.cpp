@@ -106,6 +106,11 @@ def validate_all_gdn_states(decode_steps, block_step, detail_layer, gdn_history,
                     "all-GDN-state observation supports standalone P128/D1 only")
 
 
+def validate_all_attention_kv(all_gdn_states, enabled):
+    headers.require(type(enabled) is bool and (not enabled or all_gdn_states is True),
+                    "all-attention KV observation requires standalone all-GDN-state capture")
+
+
 def all_target_gdn_layers(modules, first_layer):
     layers = selected_block_layers(modules, first_layer)
     expected = [i for i in range(64) if i % 4 != 3]
@@ -179,7 +184,7 @@ class TargetCapture(BlockCapture):
         return {"restored_modules": 48}
 
     def install_target_capture(self, output, decode_steps=1, block_step=-1, detail_layer=-1,
-                               gdn_history=False, all_gdn_states=False):
+                               gdn_history=False, all_gdn_states=False, all_attention_kv=False):
         import torch
         headers.require(block_step == -1 or (decode_steps == 29 and block_step == 29),
                         "selected block observation is bounded to D29")
@@ -187,6 +192,7 @@ class TargetCapture(BlockCapture):
         validate_gdn_history(block_step, detail_layer, gdn_history)
         validate_all_gdn_states(decode_steps, block_step, detail_layer, gdn_history,
                                 all_gdn_states)
+        validate_all_attention_kv(all_gdn_states, all_attention_kv)
         installed = self.install_block_capture(output)
         self._gdn_history_capture = None
         if gdn_history:
@@ -257,6 +263,68 @@ class TargetCapture(BlockCapture):
                     with_kwargs=True))
                 self._target_hooks.append(block.register_forward_hook(
                     lambda module, args, kwargs, result, i=index, m=mixer: save_state(i, m, "after"),
+                    with_kwargs=True))
+        self._all_attention_kv = all_attention_kv
+        self._all_attention_kv_records = {}
+        if all_attention_kv:
+            from capture_attention import active_cache_addresses
+            from runtime_layout import initialized_values
+
+            def save_kv(index, attn, args, kwargs, stage):
+                context = get_forward_context().attn_metadata
+                if not context or not getattr(self.model_runner.req_states, "req_id_to_index", {}):
+                    return
+                step = len(self._target_phases)
+                headers.require(step in (0, 1), "extra all-KV target step")
+                phase, rows, seq = ("p128", 128, 128) if step == 0 else ("d1", 1, 129)
+                meta = context[attn.layer_name]
+                values = dict(zip(("positions", "hidden_states", "residual"), args)) | kwargs
+                positions = values["positions"].detach().cpu().tolist()
+                headers.require(meta.num_actual_tokens == rows and
+                                positions == [list(range(seq - rows, seq))] * 3 and
+                                meta.seq_lens.numel() == 1 and int(meta.seq_lens[:1].cpu().item()) == seq and
+                                tuple(meta.query_start_loc.shape) == (2,) and
+                                meta.query_start_loc.cpu().tolist() == [0, rows],
+                                "unexpected active all-KV positions/metadata")
+                kv = attn.kv_cache
+                headers.require(kv.dtype == torch.uint8 and kv.ndim == 4 and
+                                kv.shape[1] == 4 and kv.shape[3] == 512 and kv.shape[2] > 0,
+                                "unexpected original FP8 KV layout")
+                page = int(kv.shape[2])
+                blocks = meta.block_table[0, :(seq + page - 1) // page].cpu().tolist()
+                slots = meta.slot_mapping[:rows].cpu().tolist()
+                addresses = active_cache_addresses(page, int(kv.shape[0]), seq, blocks, slots, positions[0])
+                length = seq if stage == "after" else seq - rows
+                key = f"{phase}_l{index}_{stage}"
+                headers.require(key not in self._all_attention_kv_records, "duplicate all-KV boundary")
+                record = {"phase": phase, "layer": index, "stage": stage,
+                          "written_logical_length": length, "copied": length > 0,
+                          "page_size": page, "logical_addresses": addresses[:length],
+                          "cache_layout": tensor_layout(kv),
+                          "scales": {name: initialized_values(getattr(attn, name), 1)
+                                     for name in ("_k_scale", "_v_scale")}}
+                if length:
+                    selected = addresses[:length]
+                    bi = torch.tensor([a[0] for a in selected], dtype=torch.int64, device=kv.device)
+                    pi = torch.tensor([a[1] for a in selected], dtype=torch.int64, device=kv.device)
+                    active = kv.transpose(1, 2)[bi, pi]
+                    for label, value in (("key", active[..., :256]), ("value", active[..., 256:])):
+                        host = value.detach().cpu().contiguous()
+                        headers.require(tuple(host.shape) == (length, 4, 256), "unbounded active KV copy")
+                        tensor_key = key + "_" + label
+                        headers.require(tensor_key not in self._block_tensors, "duplicate active KV tensor")
+                        self._block_tensors[tensor_key] = ("U8", list(host.shape), host.numpy().tobytes())
+                self._all_attention_kv_records[key] = record
+
+            for index, block in selected_block_layers(modules, installed["layer"]):
+                if index % 4 != 3:
+                    continue
+                attn = block.self_attn.attn
+                self._target_hooks.append(block.register_forward_pre_hook(
+                    lambda module, args, kwargs, i=index, a=attn: save_kv(i, a, args, kwargs, "before"),
+                    with_kwargs=True))
+                self._target_hooks.append(block.register_forward_hook(
+                    lambda module, args, kwargs, result, i=index, a=attn: save_kv(i, a, args, kwargs, "after"),
                     with_kwargs=True))
         self._selected_block_hooks = []
         self._selected_block_counts = {}
@@ -443,11 +511,24 @@ class TargetCapture(BlockCapture):
                         for i in range(64) if i % 4 != 3 for stage in ("before", "after")}
             headers.require(set(self._all_gdn_state_records) == expected,
                             "missing all-GDN-state boundaries")
+        if self._all_attention_kv:
+            expected = {f"{phase}_l{i}_{stage}" for phase in ("p128", "d1")
+                        for i in range(3, 64, 4) for stage in ("before", "after")}
+            headers.require(set(self._all_attention_kv_records) == expected,
+                            "missing all-attention KV boundaries")
+            for i in range(3, 64, 4):
+                for label in ("key", "value"):
+                    prefill = self._block_tensors[f"p128_l{i}_after_{label}"][2]
+                    before = self._block_tensors[f"d1_l{i}_before_{label}"][2]
+                    after = self._block_tensors[f"d1_l{i}_after_{label}"][2]
+                    headers.require(prefill == before and after[:len(before)] == before,
+                                    "original KV continuation overwrote initialized rows")
         return self.finish_block_capture() | {"selected_block_step": self._selected_block_step,
                                               "selected_attention_record": attention_record,
                                               "selected_detail_record": self._selected_detail_record,
                                               "gdn_history_record": history_record,
                                               "all_gdn_state_records": self._all_gdn_state_records,
+                                              "all_attention_kv_records": self._all_attention_kv_records,
                                               "selected_block_counts": self._selected_block_counts,
                                               "target_layouts": self._target_layouts,
                                               "actual_input_witnesses": self._target_witnesses}
@@ -487,6 +568,7 @@ def capture(args):
     target_phases(args.decode_steps)
     validate_all_gdn_states(args.decode_steps, args.block_step, args.detail_layer,
                             args.gdn_history, args.all_gdn_states)
+    validate_all_attention_kv(args.all_gdn_states, args.all_attention_kv)
     tokens = load_prompt(args.prompt_ids)
     headers.require(1 <= args.repeats <= 3, "repeat count must be bounded by three")
     headers.require(not args.output_dir.exists(), "refusing to overwrite target repeats")
@@ -531,7 +613,8 @@ def capture(args):
             path = args.output_dir / f"repeat-{repeat}.safetensors"
             llm.collective_rpc("install_target_capture", timeout=60,
                                args=(str(path), args.decode_steps, args.block_step,
-                                     args.detail_layer, args.gdn_history, args.all_gdn_states))
+                                     args.detail_layer, args.gdn_history, args.all_gdn_states,
+                                     args.all_attention_kv))
             observed = llm.generate({"prompt_token_ids": tokens}, params, use_tqdm=False)
             ids = [list(o.outputs[0].token_ids) for o in observed]
             result = llm.collective_rpc("finish_target_capture", timeout=60)
@@ -575,8 +658,9 @@ def capture(args):
               "selected_detail_layer": args.detail_layer,
               "selected_gdn_history": args.gdn_history,
               "all_gdn_states": args.all_gdn_states,
+              "all_attention_kv": args.all_attention_kv,
               "diagnostic_deterministic_ba": bool(args.deterministic_ba), "ba_policy": ba_policy,
-              "scope": "Bounded original full-target capture; layer0 states P128/D1, optional read-only D29 block/norm boundaries or standalone all48GDN active P128/D1 states. Cold unconsumed seeds excluded. No native pass or new numerical envelope."}
+              "scope": "Bounded original full-target capture; layer0 states P128/D1, optional read-only D29 block/norm boundaries or standalone all48GDN active P128/D1 states and all16initialized attention KV. Cold unconsumed seeds and unwritten KV capacity excluded. No native pass or new numerical envelope."}
     with (args.output_dir / "comparison.json").open("x") as stream:
         json.dump(report, stream, indent=2); stream.write("\n")
     print("TARGET_REPEAT_CAPTURE_DONE", args.output_dir, flush=True)
@@ -601,4 +685,6 @@ if __name__ == "__main__":
                         help="frozen held-out JSON prompt_token_ids, exactly128 valid IDs")
     parser.add_argument("--all-gdn-states", action="store_true",
                         help="read-only all48GDN active Conv/SSM boundaries for standalone P128/D1")
+    parser.add_argument("--all-attention-kv", action="store_true",
+                        help="also copy only initialized active FP8 KV of all16attention layers")
     capture(parser.parse_args())
