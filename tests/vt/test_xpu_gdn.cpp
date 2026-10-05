@@ -1134,3 +1134,148 @@ TEST_CASE("XPU P7 gated SiLU table: complete operator balanced timing") {
   report["table_bytes"] = vt::xpu::GetMemoryInfo().gated_silu_table_bytes;
   std::ofstream f(output); REQUIRE(f.good()); f << report.dump(2) << std::endl;
 }
+
+namespace {
+struct P7SpecSlmEnv {
+  const bool had = std::getenv("VT_XPU_GDN_SPEC_SLM") != nullptr;
+  const std::string old = had ? std::getenv("VT_XPU_GDN_SPEC_SLM") : "";
+  ~P7SpecSlmEnv() { if (had) setenv("VT_XPU_GDN_SPEC_SLM", old.c_str(), 1); else unsetenv("VT_XPU_GDN_SPEC_SLM"); }
+  void Select(bool on) { REQUIRE(setenv("VT_XPU_GDN_SPEC_SLM", on ? "1" : "0", 1) == 0); }
+};
+struct P7SpecOperands {
+  static constexpr int hk = 16, hv = 48, D = 128, cols = 4;
+  vt::Queue& q;
+  int requests, tokens, slots;
+  Buffer query, key, value, gate, beta, output, state, cu, ids, accepted;
+  std::vector<int32_t> offsets, indices, counts;
+  std::vector<unsigned char> initial;
+  P7SpecOperands(vt::Queue& queue, const std::vector<int>& lengths, DType output_type)
+      : q(queue), requests(lengths.size()), tokens([&] { int n=0; for (int x:lengths) n+=x; return n; }()),
+        slots(requests * cols + 2), query(q,DType::kF16,{tokens,hk,D}), key(q,DType::kF16,{tokens,hk,D}),
+        value(q,DType::kF16,{tokens,hv,D}), gate(q,DType::kF32,{tokens,hv}), beta(q,DType::kF32,{tokens,hv}),
+        output(q,output_type,{tokens,hv,D}), state(q,DType::kF32,{slots,hv,D,D}),
+        cu(q,DType::kI32,{requests+1}), ids(q,DType::kI32,{requests,cols}), accepted(q,DType::kI32,{requests}),
+        offsets(requests+1), indices(requests*cols), counts(requests,1) {
+    query.put(Values(tokens*hk*D,31)); key.put(Values(tokens*hk*D,32)); value.put(Values(tokens*hv*D,33));
+    auto gs=Values(tokens*hv,34), bs=Values(tokens*hv,35);
+    for (auto& x:gs) x-=.3f;
+    for (auto& x:bs) x+=.5f;
+    gate.put(gs); beta.put(bs);
+    auto ss=Values(size_t(slots)*hv*D*D,36,.002f);
+    const uint32_t poison=0x7fc12345u; const size_t stride=size_t(hv)*D*D;
+    for (size_t i=0;i<stride;++i) {
+      std::memcpy(ss.data()+i,&poison,4); std::memcpy(ss.data()+size_t(slots-1)*stride+i,&poison,4);
+    }
+    state.put(ss); initial=state.download();
+    constexpr int perm[4]={2,0,3,1};
+    for (int r=0;r<requests;++r) {
+      offsets[r+1]=offsets[r]+lengths[r];
+      for (int c=0;c<cols;++c) indices[r*cols+c]=1+(requests-1-r)*cols+perm[c];
+    }
+    Stage();
+  }
+  void Stage() { cu.upload(offsets.data()); ids.upload(indices.data()); accepted.upload(counts.data()); }
+  void Reset() { state.upload(initial.data()); }
+  void Run(vt::Tensor* target=nullptr) { vt::GdnSpecDecode(q,target ? *target : output.tensor,query.tensor,key.tensor,
+      value.tensor,gate.tensor,beta.tensor,state.tensor,cu.tensor,ids.tensor,accepted.tensor,{.0883883476f}); }
+};
+}
+
+TEST_CASE("XPU P7 speculative GDN SLM: exact full snapshots selectors null alias and graphs") {
+  Queue gpu(vt::DeviceType::kXPU); P7SpecSlmEnv mode; auto& backend=vt::GetBackend(gpu.q.device);
+  for (const auto& lengths:std::vector<std::vector<int>>{{1},{4},{4,4,4,4},{4,2,1,0}}) {
+    for (auto type:{DType::kF32,DType::kF16}) {
+      P7SpecOperands c(gpu.q,lengths,type);
+      const auto qb=c.query.download(), kb=c.key.download(), vb=c.value.download(), gb=c.gate.download(), bb=c.beta.download();
+      for (int selector=1;selector<=4;++selector) {
+        CAPTURE(selector);
+        for (int r=0;r<c.requests;++r) c.counts[r]=1+(selector+r-1)%4;
+        c.Stage(); c.Reset(); mode.Select(false); c.Run();
+        const auto expected=c.output.download(), snapshots=c.state.download();
+        c.Reset(); mode.Select(true); c.Run();
+        SameBytes(c.output.download(),expected); SameBytes(c.state.download(),snapshots);
+      }
+      // Repeated slots within one request are allowed, including the starting
+      // slot also being a provisional output. Preserve that alias exactly.
+      for (int r=0;r<c.requests;++r) for (int j=1;j<4;++j) c.indices[r*4+j]=c.indices[r*4];
+      c.Stage(); c.Reset(); mode.Select(false); c.Run();
+      auto expected=c.output.download(), snapshots=c.state.download();
+      c.Reset(); mode.Select(true); c.Run(); SameBytes(c.output.download(),expected); SameBytes(c.state.download(),snapshots);
+      c.indices[0]=-1; c.counts[0]=1; c.Stage(); c.Reset(); mode.Select(false); c.Run();
+      expected=c.output.download(); snapshots=c.state.download();
+      c.Reset(); mode.Select(true); c.Run(); SameBytes(c.output.download(),expected); SameBytes(c.state.download(),snapshots);
+      SameBytes(c.query.download(),qb); SameBytes(c.key.download(),kb); SameBytes(c.value.download(),vb);
+      SameBytes(c.gate.download(),gb); SameBytes(c.beta.download(),bb);
+      if (c.requests==4 && type==DType::kF32 && backend.SupportsGraphCapture()) {
+        vt::BreakableGraph graph;
+        { vt::GraphCaptureScope scope(backend,gpu.q,graph,vt::GraphCaptureMode::kFull); c.Run(); }
+        REQUIRE(graph.captured());
+        c.Reset(); graph.Replay(gpu.q); SameBytes(c.output.download(),expected); SameBytes(c.state.download(),snapshots);
+        // A changed accepted selector is actual replay metadata, never a cached
+        // capture-time result. Rebuild native expected full state independently.
+        c.counts[0]=2; c.Stage(); c.Reset(); mode.Select(false); c.Run();
+        expected=c.output.download(); snapshots=c.state.download();
+        c.Reset(); graph.Replay(gpu.q); SameBytes(c.output.download(),expected); SameBytes(c.state.download(),snapshots);
+        const auto before=c.state.download(), out=c.output.download();
+        c.indices[4]=c.indices[1]; c.Stage();
+        CHECK_THROWS_WITH_AS(graph.Replay(gpu.q),doctest::Contains("invalid offsets, accepted count or state slot"),std::runtime_error);
+        SameBytes(c.state.download(),before); SameBytes(c.output.download(),out);
+        graph.Reset(); CHECK(vt::xpu::GetMemoryInfo().graph_device_bytes==0);
+      }
+    }
+  }
+  P7SpecOperands c(gpu.q,{4},DType::kF16); const auto values=c.value.download();
+  c.Reset(); mode.Select(false); c.Run(&c.value.tensor); const auto alias=c.value.download(), snapshots=c.state.download();
+  c.value.upload(values.data()); c.Reset(); mode.Select(true); c.Run(&c.value.tensor);
+  SameBytes(c.value.download(),alias); SameBytes(c.state.download(),snapshots);
+  c.output.put(std::vector<float>(c.tokens*48*128,-7.0f));
+  const auto before=c.state.download(), out=c.output.download();
+  setenv("VT_XPU_GDN_SPEC_SLM","invalid",1);
+  CHECK_THROWS_WITH_AS(c.Run(),doctest::Contains("Invalid VT_XPU_GDN_SPEC_SLM"),std::runtime_error);
+  SameBytes(c.state.download(),before); SameBytes(c.output.download(),out);
+  CHECK(vt::GetReferenceTierHits()==0);
+  std::cout << "P7_SPEC_SLM full_F32_snapshots=1 selectors=1,2,3,4 C1_Q1_Q4=1 C4_uniform_ragged=1 alias_null_guards_graph=1" << std::endl;
+}
+
+TEST_CASE("XPU P7 speculative GDN SLM: default selection and WG override probe") {
+  if (!std::getenv("VT_B70_GDN_SLM_DEFAULT_PROBE")) { MESSAGE("run default probe with device profiling"); return; }
+  REQUIRE(std::getenv("VT_XPU_GDN_SPEC_WG")==nullptr);
+  Queue gpu(vt::DeviceType::kXPU); P7SpecSlmEnv mode; P7SpecOperands c(gpu.q,{4},DType::kF32);
+  mode.Select(false); c.Run(); const auto expected=c.output.download(), snapshots=c.state.download();
+  (void)vt::xpu::DrainProfileEvents();
+  REQUIRE(unsetenv("VT_XPU_GDN_SPEC_SLM")==0); c.Reset(); c.Run();
+  SameBytes(c.output.download(),expected); SameBytes(c.state.download(),snapshots);
+  int selected=0; for (const auto& e:vt::xpu::DrainProfileEvents()) selected+=e.stage=="gdn_spec_decode_slm";
+  CHECK(selected==1);
+  REQUIRE(setenv("VT_XPU_GDN_SPEC_WG","64",1)==0); c.Reset(); c.Run();
+  SameBytes(c.output.download(),expected); SameBytes(c.state.download(),snapshots);
+  selected=0; for (const auto& e:vt::xpu::DrainProfileEvents()) selected+=e.stage=="gdn_spec_decode_slm";
+  CHECK(selected==0); REQUIRE(unsetenv("VT_XPU_GDN_SPEC_WG")==0);
+}
+
+TEST_CASE("XPU P7 speculative GDN SLM: paired complete operator timing") {
+  const char* path=std::getenv("VT_B70_GDN_SLM_OUTPUT");
+  if (!path) { MESSAGE("set VT_B70_GDN_SLM_OUTPUT for focused paired timing"); return; }
+  Queue gpu(vt::DeviceType::kXPU); P7SpecSlmEnv mode; auto& backend=vt::GetBackend(gpu.q.device);
+  nlohmann::json report={{"schema","b70-exl3-p7-gdn-slm-operator-v1"},{"cases",nlohmann::json::array()}};
+  for (const auto& lengths:std::vector<std::vector<int>>{{4},{4,4,4,4},{4,2,1,3}}) {
+    P7SpecOperands c(gpu.q,lengths,DType::kF32);
+    for (int r=0;r<c.requests;++r) c.counts[r]=r+1;
+    c.Stage(); mode.Select(false); c.Reset(); c.Run();
+    const auto expected=c.output.download(), snapshots=c.state.download();
+    for (int i=0;i<16;++i) { mode.Select(i%2); c.Reset(); c.Run(); backend.Synchronize(gpu.q); }
+    nlohmann::json trials=nlohmann::json::array();
+    for (bool on:{false,true,true,false,true,false,false,true,false,true,true,false,true,false,false,true}) {
+      mode.Select(on); c.Reset(); const auto start=std::chrono::steady_clock::now();
+      c.Run(); backend.Synchronize(gpu.q);
+      const double ms=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-start).count();
+      trials.push_back({{"SLM",on},{"complete_operator_ms",ms}});
+      SameBytes(c.output.download(),expected); SameBytes(c.state.download(),snapshots);
+    }
+    report["cases"].push_back({{"requests",c.requests},{"lengths",lengths},{"dtype","F32 output/state, F16 qkv, F32 gates"},
+        {"accepted_selectors",c.counts},{"state_bytes",c.state.bytes},{"trials",trials},{"all_output_snapshots_exact",true}});
+  }
+  report["SLM_per_WG_bytes"]=32768;
+  report["new_device_workspace_bytes"]=0;
+  std::ofstream f(path); REQUIRE(f.good()); f << report.dump(2) << std::endl;
+}

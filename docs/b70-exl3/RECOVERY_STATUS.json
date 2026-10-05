@@ -2182,7 +2182,8 @@
         "bytes": 297766,
         "sha256": "8578b04003dbc8432700d9fe0cdc49371a3df07968aff20b1f2c7b9e8974f3b9"
       },
-      "remaining": "No accepted GDN performance change. Both synthetic same-input variants preserve every FP32 snapshot/output; C1 slower and uniform C4 second variant slower. Graph/MTP/model admission not attempted for rejected operators. Original/all-layer state, current Python and lifecycle qualification remain open. Stop geometry package, proceed with independent P6."
+      "remaining": "No accepted GDN performance change. Both synthetic same-input variants preserve every FP32 snapshot/output; C1 slower and uniform C4 second variant slower. Graph/MTP/model admission not attempted for rejected operators. Original/all-layer state, current Python and lifecycle qualification remain open. Stop geometry package, proceed with independent P6.",
+      "coalesced_state_followup": "P7 measured SLM dataflow followup retained: C1 decode+4.31%, common four-way C4+5.23%; see P7.coalesced_spec_GDN_SLM. Prior typed private-state SG16/128-256GRF variants remain rejected; no full-state/original qualification promotion."
     },
     {
       "task": "P6",
@@ -2915,7 +2916,7 @@
           "sha256": "3da49f66c6730614433e01fb429bc9c4e89d00c1f88a01982534334261bf9c7e"
         }
       },
-      "next": "Investigate coalesced FP32 state-snapshot reads/writes in speculative GDN, preserving ordered scalar prediction/output accumulation and every native FP32 snapshot. This is a fresh dataflow hypothesis, not another rejected P5 GRF geometry sweep. Require paired C1/ragged-C4 complete-operator/full-state and serving evidence. Final current practical/draft/defaultD64/state/reference/P1-admission/matrix gates remain open.",
+      "next": "Refresh bounded practical/compact-draft current-checkpoint evidence, then the remaining final P7 original/native C1/C4 4K/32K/mixed/prefix/no-MTP/MTP3 matrix with plan-scoped repetitions. Default D64 four failures, full-all-layer state/reference and P1 automatic admission remain explicit. Further kernel work requires a fresh causal operand/dataflow comparison; do not repeat rejected private-state GRF geometries.",
       "current_quality": {
         "practical_tasks": 8,
         "practical_passed": 8,
@@ -2940,7 +2941,8 @@
           "bytes": 35613,
           "sha256": "b278c9b33f935135356b42ebe026565c7f4861374b674b244a2f099c2c3a5ff7"
         },
-        "post_gated_silu_table_rerun": false
+        "post_gated_silu_table_rerun": false,
+        "post_GDN_SLM_rerun": false
       },
       "mixed_token_views": {
         "default": "scoped_XPU_F16_EXL3_contiguous_model_owned_maps_only",
@@ -3811,9 +3813,323 @@
           "bytes": 68729,
           "sha256": "8262f8c9330168b8ffa5579d3b1e08398cc637507b4f4d1800d3fe1838d9680e"
         }
+      },
+      "coalesced_spec_GDN_SLM": {
+        "decision": "Retain bounded default1 cooperative/coalesced FP32 state/snapshot SLM dataflow. Flag0/WG override restore prior native route.",
+        "admission": "C<=4 Q<=4 Hk16 Hv48 D128 F16qkv F32gate/beta/state, device SLM>=32768/WG>=64/SG32. Other geometry/dtypes/device preserve prior route.",
+        "arithmetic": "Exact prior ordered ascending-K FP32 prediction/update/output and every snapshot; no parallel-K reduction, precision/norm/activation/model/reference change.",
+        "SLM_per_workgroup_bytes": 32768,
+        "new_USM_workspace_bytes": 0,
+        "operator": [
+          {
+            "stem": "operator-v1",
+            "assertions": {
+              "total": 319,
+              "passed": 319,
+              "failed": 0
+            },
+            "cases": [
+              {
+                "lengths": [
+                  4
+                ],
+                "medians_off_on_ms": [
+                  0.2390045,
+                  0.1819945
+                ],
+                "elapsed_change_percent": -23.85310736827131,
+                "all_output_and_full_cache_bits_exact": true
+              },
+              {
+                "lengths": [
+                  4,
+                  4,
+                  4,
+                  4
+                ],
+                "medians_off_on_ms": [
+                  0.6789245,
+                  0.635519
+                ],
+                "elapsed_change_percent": -6.393273478862538,
+                "all_output_and_full_cache_bits_exact": true
+              },
+              {
+                "lengths": [
+                  4,
+                  2,
+                  1,
+                  3
+                ],
+                "medians_off_on_ms": [
+                  0.6694789999999999,
+                  0.49438950000000004
+                ],
+                "elapsed_change_percent": -26.153098155431298,
+                "all_output_and_full_cache_bits_exact": true
+              }
+            ]
+          },
+          {
+            "stem": "operator-v2",
+            "assertions": {
+              "total": 319,
+              "passed": 319,
+              "failed": 0
+            },
+            "cases": [
+              {
+                "lengths": [
+                  4
+                ],
+                "medians_off_on_ms": [
+                  0.23871,
+                  0.18253999999999998
+                ],
+                "elapsed_change_percent": -23.530643877508282,
+                "all_output_and_full_cache_bits_exact": true
+              },
+              {
+                "lengths": [
+                  4,
+                  4,
+                  4,
+                  4
+                ],
+                "medians_off_on_ms": [
+                  0.661635,
+                  0.6284755
+                ],
+                "elapsed_change_percent": -5.011751192122549,
+                "all_output_and_full_cache_bits_exact": true
+              },
+              {
+                "lengths": [
+                  4,
+                  2,
+                  1,
+                  3
+                ],
+                "medians_off_on_ms": [
+                  0.61927,
+                  0.48450499999999996
+                ],
+                "elapsed_change_percent": -21.761913220404672,
+                "all_output_and_full_cache_bits_exact": true
+              }
+            ]
+          },
+          {
+            "stem": "operator-final-v1",
+            "assertions": {
+              "total": 319,
+              "passed": 319,
+              "failed": 0
+            },
+            "cases": [
+              {
+                "lengths": [
+                  4
+                ],
+                "medians_off_on_ms": [
+                  0.2408845,
+                  0.18427949999999998
+                ],
+                "elapsed_change_percent": -23.49881374683719,
+                "all_output_and_full_cache_bits_exact": true
+              },
+              {
+                "lengths": [
+                  4,
+                  4,
+                  4,
+                  4
+                ],
+                "medians_off_on_ms": [
+                  0.665475,
+                  0.6326695
+                ],
+                "elapsed_change_percent": -4.929636725647102,
+                "all_output_and_full_cache_bits_exact": true
+              },
+              {
+                "lengths": [
+                  4,
+                  2,
+                  1,
+                  3
+                ],
+                "medians_off_on_ms": [
+                  0.656145,
+                  0.472605
+                ],
+                "elapsed_change_percent": -27.97247559609537,
+                "all_output_and_full_cache_bits_exact": true
+              }
+            ]
+          }
+        ],
+        "serving": {
+          "c1-off-v1": {
+            "assertions": {
+              "total": 1900,
+              "passed": 1900,
+              "failed": 0
+            },
+            "device_peak_bytes": 30326149443,
+            "retired_graph_bytes": 0,
+            "end_to_end_wall_s": 23.64214719,
+            "accepted": 656,
+            "proposed": 1104,
+            "emitted_decode_tokens_per_s": 47.97108363626073,
+            "ttft_ms": 2316.7730939999997
+          },
+          "c1-on-v1": {
+            "assertions": {
+              "total": 1900,
+              "passed": 1900,
+              "failed": 0
+            },
+            "device_peak_bytes": 30326149443,
+            "retired_graph_bytes": 0,
+            "end_to_end_wall_s": 22.769828923,
+            "accepted": 656,
+            "proposed": 1104,
+            "emitted_decode_tokens_per_s": 50.03908629336313,
+            "ttft_ms": 2325.783921
+          },
+          "c4-off-v1": {
+            "assertions": {
+              "total": 7786,
+              "passed": 7786,
+              "failed": 0
+            },
+            "device_peak_bytes": 30594824375,
+            "retired_graph_bytes": 0,
+            "end_to_end_wall_s": 50.621915632,
+            "accepted": 2572,
+            "proposed": 4572,
+            "common_decode_overlap": {
+              "start_s": 12.224891095,
+              "end_s": 44.708777023,
+              "emitted_tokens": 3707,
+              "aggregate_emitted_tokens_per_s": 114.11812023402939,
+              "boundary_policy": "exclude start, include end; whole emitted chunks only"
+            }
+          },
+          "c4-on-v1": {
+            "assertions": {
+              "total": 7786,
+              "passed": 7786,
+              "failed": 0
+            },
+            "device_peak_bytes": 30594824375,
+            "retired_graph_bytes": 0,
+            "end_to_end_wall_s": 48.721341454,
+            "accepted": 2572,
+            "proposed": 4572,
+            "common_decode_overlap": {
+              "start_s": 12.260724111,
+              "end_s": 43.129767787,
+              "emitted_tokens": 3707,
+              "aggregate_emitted_tokens_per_s": 120.08794437911632,
+              "boundary_policy": "exclude start, include end; whole emitted chunks only"
+            }
+          },
+          "c1-default-v1": {
+            "assertions": {
+              "total": 1900,
+              "passed": 1900,
+              "failed": 0
+            },
+            "device_peak_bytes": 30326149443,
+            "retired_graph_bytes": 0,
+            "end_to_end_wall_s": 22.703675698,
+            "accepted": 656,
+            "proposed": 1104,
+            "emitted_decode_tokens_per_s": 50.17620506192374,
+            "ttft_ms": 2315.4959129999997
+          }
+        },
+        "paired_comparisons": [
+          {
+            "case": "c1-p4096-o1024",
+            "all_IDs_exact": true,
+            "ID_count": 1024,
+            "all_non_timing_cycles_exact": true,
+            "cycles": 371,
+            "E2E_change_percent": -3.689674461416803,
+            "emitted_decode_gain_percent": 4.310935881254974,
+            "scope": "One quiet source-v1 same-binary explicit0/1 trial per arm. C4 uses actual common four-way interval, not sum of independent TPS."
+          },
+          {
+            "case": "c4-p4096-o1024",
+            "all_IDs_exact": true,
+            "ID_count": 4096,
+            "all_non_timing_cycles_exact": true,
+            "cycles": 419,
+            "E2E_change_percent": -3.7544493413018465,
+            "emitted_decode_gain_percent": 5.2312675084765115,
+            "scope": "One quiet source-v1 same-binary explicit0/1 trial per arm. C4 uses actual common four-way interval, not sum of independent TPS."
+          }
+        ],
+        "final_default_C1_exact_explicit_on": true,
+        "all_C1_exact_prior_committed_trajectory": true,
+        "final_default_C1_scope": "One final default-unset sentinel; not paired with final-off or three-repeat qualification.",
+        "separate_final_default_profile": {
+          "assertions": {
+            "total": 130,
+            "passed": 130,
+            "failed": 0
+          },
+          "excluded_from_scores": true,
+          "final_default_model_consumer": true,
+          "actual_SLM_events": 672,
+          "target_Q4_cycles": 14,
+          "SLM_mean_ms_per_target_cycle": 9.177687,
+          "target_queue_stream_mean_ms": 49.30913692857143,
+          "all32_IDs_exact_quiet_prefix": true,
+          "retired_graph_bytes": 0,
+          "note": "Eager diagnostic, separate clocks and overlapping parent/child spans; not graph serving score or matched original speed."
+        },
+        "generated_resource_scope": "Actual source-v1 Xe2 SIMD32/128GRF: SLM1142instructions versus prior1615; old private16384 declaration absent in SLM; flag spills16/17 remain, not spill-free.",
+        "default_probe": {
+          "total": 24,
+          "passed": 24,
+          "failed": 0
+        },
+        "unit": {
+          "total": 495,
+          "passed": 495,
+          "failed": 0
+        },
+        "R07": {
+          "total": 136,
+          "passed": 136,
+          "failed": 0
+        },
+        "lifecycle": {
+          "total": 483,
+          "passed": 483,
+          "failed": 0
+        },
+        "prior_original_median_decode_tps": 63.915754,
+        "final_default_gap_to_prior_original_percent": -21.49634179090848,
+        "original_comparison_scope": "Descriptive prior median; no fresh matched original continuation/run or qualification.",
+        "P7_complete": false,
+        "qualification_promoted": false,
+        "latest_D64_draft_practical_final_matrix_rerun": false,
+        "remaining": "Default D64 four failures, full-all-layer state/reference/P1 automatic admission and final refreshed C1/C4 4K/32K/mixed/prefix/no-MTP/MTP3 matrix remain open.",
+        "receipt": {
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p7-gdn-slm-v1/receipt-v1.json",
+          "bytes": 131818,
+          "sha256": "99d165935300916984fc66a40829f0ec3555f28f4eebbc8ce5deb44be0d25efb"
+        },
+        "successful_GPU_workers": 16,
+        "resources": "All actual exits0, swap0/no memory-limit or OOM events; quiet scores CPU throttling0. R07 correctness worker has6 CPU throttled periods, not scored. 308artifacts+4related identities verified."
       }
     }
   ],
   "performance_baseline": "7536aededc049b2157f12eadb0f4cc6bbf29b7b7",
-  "performance_next": "Investigate coalesced FP32 state-snapshot reads/writes in speculative GDN, preserving ordered scalar prediction/output accumulation and every native FP32 snapshot. This is a fresh dataflow hypothesis, not another rejected P5 GRF geometry sweep. Require paired C1/ragged-C4 complete-operator/full-state and serving evidence. Final current practical/draft/defaultD64/state/reference/P1-admission/matrix gates remain open."
+  "performance_next": "Refresh bounded practical/compact-draft current-checkpoint evidence, then the remaining final P7 original/native C1/C4 4K/32K/mixed/prefix/no-MTP/MTP3 matrix with plan-scoped repetitions. Default D64 four failures, full-all-layer state/reference and P1 automatic admission remain explicit. Further kernel work requires a fresh causal operand/dataflow comparison; do not repeat rejected private-state GRF geometries."
 }

@@ -3001,3 +3001,42 @@ Separate final default full-engine P4096/O32 graph/device/host profile130/130, a
 All12successful GPU workers and one failed dump wrapper sequential, swap0/noOOM/limit, production inactive. Scores/original proof use frozen source-v1 explicit0/1; final source changes default selection, preserves the old FP16 allocation failure message, adds full F32 activation/default probes, and separately verifies current unit/lifecycle/model-consumer profile. Source/build/compile/math flags/binary/input identities, actual commands/exits, complete raw timings/resources and recomputable comparisons: /home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p7-gated-silu-table-v1/receipt-v1.json (68729B,SHA2568262f8c9330168b8ffa5579d3b1e08398cc637507b4f4d1800d3fe1838d9680e); all141artifacts+5related identities and all5final product/test source files independently verified.
 
 Retain and commit/immediatepush under standing authorization. P7incomplete,goalactive. New next dataflow hypothesis: spec GDN work-items own value rows, so simultaneous scalar state/snapshot accesses are separated by Dk128 rather than coalesced K segments. Evaluate cooperative/coalesced F32 state transfer with the exact existing ordered prediction/output accumulations and every snapshot preserved. This is not a retry of rejected128/256GRF variants; require paired C1/raggedC4/full-state and serving evidence. Current post-change practical/draft/defaultD64/full-state/reference/P1 admission and final matrix are still open; no older evidence silently transferred as current.
+
+
+## 158. P7 cooperative/coalesced FP32 speculative GDN state transfer retained
+
+One workgroup64 owns64 independent value rows within one request/head. Cooperative contiguous state reads and snapshot writes use32768B local memory per workgroup, XOR-swizzled [K,value] addresses. Preserve ascending-K ordered FP32 prediction/output accumulations, decay/delta/update operations, every accepted/intermediate snapshot and output materialization; no parallel-K reduction or activation/norm/precision change. Local barriers order row updates versus cooperative transfer; global-and-local barrier completes each snapshot before the next token. No new USM/global workspace, host polling or context lifetime object.
+
+Default VT_XPU_GDN_SPEC_SLM=1 is limited to C<=4/Q<=4/Hk16/Hv48/D128, F16qkv/F32gate/beta/state and actual device local memory>=32768B/WG>=64/SG32. Flag0 restores old private-state route; any VT_XPU_GDN_SPEC_WG override keeps priority. Other geometries/dtypes/devices retain the prior route. Existing layout/alias/actual GPU metadata guards remain, including capture/replay failure-before-write. Negative initial slot, empty requests, repeated same-request snapshots and aliases to the initial slot preserve the existing behavior.
+
+Two focused builds actualexit0. Final complete-output/full-F32-cache/input-byte tests495/495: C1/C4, uniform/ragged lengths, F16/F32output, all accepted selectors, same-request aliases, negative initialslot, empty request, poisoned untouched slots, graphs/fresh accepted metadata and cross-request replay refusal without mutation. Separate default-unset/WG override observer24/24 confirms actual route priority and exact output/state. Existing MTP1/MTP3 prefix rollback136/136 and final default MTP3 lifecycle483/483 pass; lifecycle includes EOS/cancel/replacement, C4 state reuse, poisoned spare rows, graph/eager/graph and retirement0.
+
+Complete synchronized operator, frozen synthetic operands at actual head/state geometry:16 alternating warmups, ABBA/BAAB twice,8 samples/arm; state restore and full result/cache checks outside each timer. Three unprofiled workers319/319 each, all full cache/output bytes exact. Final source includes device-capability admission; medians:
+
+| Geometry | Old private state ms | Coalesced SLM ms | Elapsed change |
+|---|---|---|---|
+|C1 Q4|0.2408845|0.1842795|-23.4988%|
+|C4 uniform Q4|0.665475|0.6326695|-4.9296%|
+|C4 ragged 4/2/1/3|0.656145|0.472605|-27.9725%|
+
+All samples retained, including slow first samples. Initial source-v1 repetitions show C1-23.85/-23.53%, C4uniform-6.39/-5.01%, C4ragged-26.15/-21.76%. Profiling/IGC worker excluded from score. Actual Xe2 SIMD32 generated SLM kernel128GRF/1142instructions versus old128GRF/1615instructions; old declared16384B private region absent in SLM. Flag spills16store/17load remain: not a spill-free claim.205generated IGC files retained. Prior rejected typed-private-state SG16/128-256GRF controls remain rejected; this is a different state-transfer dataflow.
+
+Quiet same-frozen source-v1 binary explicit0/1 full-model MTP3, P4096/O1024 per request, one unprofiled trial per arm:
+
+| Metric | Old private state | Coalesced SLM |
+|---|---|---|
+|C1 emitted decode tok/s|47.971084|50.039086|
+|C1 TTFT ms|2316.773094|2325.783921|
+|C1 end-to-end s|23.642147190|22.769828923|
+|C4 actual common four-way decode tok/s|114.118120|120.087944|
+|C4 end-to-end s|50.621915632|48.721341454|
+
+C1 decode+4.31094%, E2E-3.68967%; no TTFT/prefill gain. C4 common-interval decode+5.23127%, E2E-3.75445%;3707 emitted chunk tokens within each actual four-way interval. All1024/4096IDs and371/419 non-timing cycles exact between arms; C1 also exact prior committed trajectory. Actual assertions1900/7786 per arm. Device peaks30326149443B C1/30594824375B C4 unchanged between arms; graph release0. No sum of independent request TPS and no fresh original C4 score inferred.
+
+Final source default1 plus actual device-capability checks, same GPU math/dataflow: unprofiled flag-unset C1 sentinel1900/1900, all1024IDs/all371cycles exact explicit-on. Decode50.176205tok/s, TTFT2315.495913ms, E2E22.703675698s, peak30326149443B, release0. This final sentinel is not a new matched final-off pair. Descriptively21.49634% below prior original median63.915754; no fresh matched original continuation, three-repeat or broad parity claim.
+
+Separate final default eager P4096/O32 profile130/130 after excluded O32 warmup/reset:14 actual Q4 target cycles/672 SLM events (48 per cycle), all32IDs exact quiet prefix, release0. Individual GDN events average9.177687ms/target cycle; target queue stream49.309137ms. Earlier separate profile old GDN10.966696ms is diagnostic context, not a paired serving score. Parent/child stream and host spans overlap and clocks differ; do not sum them. Final full-model consumer actually uses SLM.
+
+All16 GPU workers sequential actualexit0, swap0/no memory limit/OOM events; quiet scoring workers CPU throttling0. R07 correctness worker has6 throttled periods, retained and not scored. Production inactive, onlychatui afterward. Initial host receipt analysis failed on a wrongly resolved compile-commands path; corrected without changing inference or gates. Exact frozen source-v1/final sources/patches, binaries, three affected translation-unit compile/math commands, actual commands/exits, raw operator/request/profile/resource results and generated ISA: /home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p7-gdn-slm-v1/receipt-v1.json (131818B,SHA25699d165935300916984fc66a40829f0ec3555f28f4eebbc8ce5deb44be0d25efb). All308artifacts+4related identities and both final source files independently verified.
+
+Retain, commit and immediately push under standing authorization. P7 incomplete, goal active. Next refresh bounded current practical/compact-draft evidence and remaining final matrix. DefaultD64 four failures, full-all-layer state/reference/P1 automatic admission remain open; no old quality proof transferred as current and no original/full-state qualification promotion.
