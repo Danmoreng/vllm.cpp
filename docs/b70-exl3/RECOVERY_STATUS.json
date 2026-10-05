@@ -2072,10 +2072,54 @@
     },
     {
       "task": "P7",
-      "status": "pending",
-      "complete": false
+      "status": "in_progress_primary_C1_refreshed_graph_eager_timeline",
+      "complete": false,
+      "C1_repetitions_per_engine": 3,
+      "actual_native_primary_assertions_each": 1895,
+      "actual_native_short_profile_assertions_each": 75,
+      "actual_GPU_worker_exits_each": 0,
+      "native_all_1024_ids_and_371_non_timing_cycles_exact_repeats_and_P4": true,
+      "original_all_1024_ids_exact_repeats": false,
+      "original_R3_first_repeat_difference": 48,
+      "C1_decode_tps": {
+        "original": [
+          64.41423542482048,
+          63.91575410279071,
+          55.403374118756574
+        ],
+        "native": [
+          45.65266988945834,
+          45.390083051937424,
+          45.416937209601265
+        ]
+      },
+      "native_median_decode_gap_percent": -28.942499627618012,
+      "C1_ttft_median_ms": {
+        "original": 1948.309158993652,
+        "native": 2877.654257
+      },
+      "C1_E2E_median_s": {
+        "original": 17.957570544996997,
+        "native": 25.402320522
+      },
+      "original_native_first_difference_R1": {
+        "index": 68,
+        "original": 279,
+        "native": 1396
+      },
+      "graph_validation_host_wait_ms_per_target_cycle": 0.276112,
+      "graph_target_stream_span_mean_ms": 54.38249975,
+      "eager_target_GDN_ms": 10.98408675,
+      "eager_target_RMSNorm_ms": 3.8749445,
+      "qualification_promoted": false,
+      "receipt": {
+        "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p7-primary-serving-v1/receipt-v1.json",
+        "bytes": 484222,
+        "sha256": "4ef94808be5009536b9e1976410b821ce96d0b958338216b2f29ed18bd87f2ac"
+      },
+      "remaining": "P7 partial only: C4 primary3 each, original short timeline/repeat-stability cause, remaining bounded matrix incl no-MTP, fresh practical/default-controlled/draft/lifecycle. OriginalR3 different trajectory retained, not excluded as noise. Actual graph removes eager metadata waits; do not remove guards. P1/full-state/default D64 remain open."
     }
   ],
   "performance_baseline": "7536aededc049b2157f12eadb0f4cc6bbf29b7b7",
-  "performance_next": "P7 refresh current primary C1/C4 P4096/O1024 MTP3 original/native three unprofiled repeats each, timeline separately, then bounded practical/default/controlled/draft/lifecycle and remaining matrix. P6 weighted actual SmallM within10% band, no donor kernel rewrite. P1 full-state/default admission and default D64 four failures remain open; P5 geometry package rejected."
+  "performance_next": "Continue P7 primary C4P4096/O1024 original/native3 each with prepared frozen script, sequential/exclusive. Inspect actual original short device timeline and unstableR3 trajectory before further GDN/norm/wait optimization. Complete remaining bounded matrix/practical/default-controlled/draft/lifecycle; source kernel flags/math unchanged. P6 weighted shared cost near donor; current native C1 median45.41694 vs original63.91575TPS, no parity/default/all-state promotion."
 }
