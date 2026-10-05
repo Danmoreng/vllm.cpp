@@ -2,7 +2,8 @@
 
 The native SYCL GDN kernel body and `gdn_attn_utils.h` are adapted from
 `vllm-project/vllm-xpu-kernels` release branch `release/0.1.15.4`, commit
-`ddf336d86e3c8602888572a3502f951abd51df12` (Apache-2.0). `gemm.hpp`
+`ddf336d86e3c8602888572a3502f951abd51df12` (Apache-2.0; the unchanged donor
+license is in `LICENSE`). `gemm.hpp`
 retains its Intel BSD-3-Clause notice. The donor branch pins Intel SYCL-TLA
 `87f6850680a580654b9ea2c80dbc01aeb36ad231`, which is also the local
 Xe2 attention dependency. This source is a version-matched reference branch;
