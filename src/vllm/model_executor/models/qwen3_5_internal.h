@@ -171,6 +171,12 @@ namespace vllm::detail {
 std::optional<vt::Tensor> GdnContiguousTokenRowsView(
     const vt::Tensor& source, const std::vector<int32_t>& indices);
 
+// Two writable views must exactly partition a contiguous model-owned output.
+// Any gap, overlap, permutation or unsupported layout keeps checked scatter.
+std::optional<std::array<vt::Tensor, 2>> GdnContiguousTokenOutputViews(
+    const vt::Tensor& output, const std::vector<int32_t>& spec_indices,
+    const std::vector<int32_t>& prefill_indices);
+
 struct GdnPackedDecodeEligibility {
   bool runtime_enabled = false;
   bool cuda = false;

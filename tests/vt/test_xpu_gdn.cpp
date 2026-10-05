@@ -922,6 +922,73 @@ TEST_CASE("XPU GDN SG16 decode continues irregular prefill chunks and preserves 
   }
 }
 
+TEST_CASE("XPU P7 mixed GDN output intervals match checked scatter and full FP32 states") {
+  using vt::Tensor;
+  Queue gpu(vt::DeviceType::kXPU);
+  constexpr int ts = 4, tp = 64, hk = 16, hv = 48, dim = 128;
+  constexpr int rows = ts + tp;
+  Buffer query(gpu.q, DType::kF16, {rows, hk, dim});
+  Buffer key(gpu.q, DType::kF16, {rows, hk, dim});
+  Buffer value(gpu.q, DType::kF16, {rows, hv, dim});
+  Buffer gate(gpu.q, DType::kF32, {rows, hv}), beta(gpu.q, DType::kF32, {rows, hv});
+  Buffer spec_offsets(gpu.q, DType::kI32, {2}), prefill_offsets(gpu.q, DType::kI32, {2});
+  Buffer slots(gpu.q, DType::kI32, {1, 4}), accepted(gpu.q, DType::kI32, {1});
+  Buffer spec_map(gpu.q, DType::kI32, {ts}), prefill_map(gpu.q, DType::kI32, {tp});
+  Buffer spec_out(gpu.q, DType::kF16, {ts, hv, dim}), prefill_out(gpu.q, DType::kF16, {tp, hv, dim});
+  Buffer scattered(gpu.q, DType::kF16, {rows + 2, hv, dim});
+  Buffer direct(gpu.q, DType::kF16, {rows + 2, hv, dim});
+  Buffer old_spec_state(gpu.q, DType::kF32, {4, hv, dim, dim});
+  Buffer new_spec_state(gpu.q, DType::kF32, {4, hv, dim, dim});
+  Buffer old_prefill_state(gpu.q, DType::kF32, {1, hv, dim, dim});
+  Buffer new_prefill_state(gpu.q, DType::kF32, {1, hv, dim, dim});
+  const int32_t so[] = {0, ts}, po[] = {0, tp}, ids[] = {0, 1, 2, 3};
+  spec_offsets.upload(so); prefill_offsets.upload(po); slots.upload(ids);
+  vt::GdnArgs prefill_args{1.0f / std::sqrt(float(dim))};
+  prefill_args.query_start_loc_host = po;
+  const auto initial_spec = Values(4 * hv * dim * dim, 13, 0.003f);
+  const auto initial_prefill = Values(hv * dim * dim, 17, 0.003f);
+  for (bool spec_first : {true, false}) for (int count : {1, 2, 3, 4}) {
+    CAPTURE(spec_first);
+    CAPTURE(count);
+    query.put(Normalized(rows * hk * dim, dim, count));
+    key.put(Normalized(rows * hk * dim, dim, count + 7));
+    value.put(Values(rows * hv * dim, count + 23));
+    gate.put(std::vector<float>(rows * hv, -0.03f));
+    beta.put(std::vector<float>(rows * hv, 0.4f)); accepted.upload(&count);
+    old_spec_state.put(initial_spec); new_spec_state.put(initial_spec);
+    old_prefill_state.put(initial_prefill); new_prefill_state.put(initial_prefill);
+    const std::vector<float> poison((rows + 2) * hv * dim, std::numeric_limits<float>::quiet_NaN());
+    scattered.put(poison); direct.put(poison);
+    Tensor merged_old = Rows(scattered.tensor, 1, rows), merged_new = Rows(direct.tensor, 1, rows);
+    const int sf = spec_first ? 0 : tp, pf = spec_first ? ts : 0;
+    std::vector<int32_t> si(ts), pi(tp);
+    for (int i = 0; i < ts; ++i) si[i] = sf + i;
+    for (int i = 0; i < tp; ++i) pi[i] = pf + i;
+    spec_map.upload(si.data()); prefill_map.upload(pi.data());
+    Tensor spec_view = Rows(merged_new, sf, ts), prefill_view = Rows(merged_new, pf, tp);
+    const auto spec = [&](Tensor& output, Tensor& state) {
+      const auto q = Rows(query.tensor, 0, ts), k = Rows(key.tensor, 0, ts);
+      const auto v = Rows(value.tensor, 0, ts), g = Rows(gate.tensor, 0, ts), b = Rows(beta.tensor, 0, ts);
+      vt::GdnSpecDecode(gpu.q, output, q, k, v, g, b, state, spec_offsets.tensor,
+          slots.tensor, accepted.tensor, {1.0f / std::sqrt(float(dim))});
+    };
+    const auto prefill = [&](Tensor& output, Tensor& state) {
+      const auto q = Rows(query.tensor, ts, tp), k = Rows(key.tensor, ts, tp);
+      const auto v = Rows(value.tensor, ts, tp), g = Rows(gate.tensor, ts, tp), b = Rows(beta.tensor, ts, tp);
+      vt::GdnPrefill(gpu.q, output, q, k, v, g, b, state, prefill_offsets.tensor, prefill_args);
+    };
+    spec(spec_out.tensor, old_spec_state.tensor);
+    vt::IndexCopy(gpu.q, merged_old, spec_out.tensor, spec_map.tensor);
+    prefill(prefill_out.tensor, old_prefill_state.tensor);
+    vt::IndexCopy(gpu.q, merged_old, prefill_out.tensor, prefill_map.tensor);
+    spec(spec_view, new_spec_state.tensor); prefill(prefill_view, new_prefill_state.tensor);
+    SameBytes(direct.download(), scattered.download());  // All rows and poisoned outside guards.
+    SameBytes(new_spec_state.download(), old_spec_state.download());  // Every provisional snapshot.
+    SameBytes(new_prefill_state.download(), old_prefill_state.download());
+  }
+  CHECK(vt::GetReferenceTierHits() == 0);
+}
+
 TEST_CASE("XPU compressed conv: direct BF16 cache equals the F32 working-copy path") {
   Queue gpu(vt::DeviceType::kXPU);
   for (bool prefill : {false, true}) {

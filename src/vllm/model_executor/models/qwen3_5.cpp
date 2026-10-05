@@ -120,6 +120,21 @@ std::optional<vt::Tensor> detail::GdnContiguousTokenRowsView(
   return view;
 }
 
+std::optional<std::array<vt::Tensor, 2>> detail::GdnContiguousTokenOutputViews(
+    const vt::Tensor& output, const std::vector<int32_t>& spec_indices,
+    const std::vector<int32_t>& prefill_indices) {
+  if (output.rank != 2 || !output.IsContiguous()) return std::nullopt;
+  auto spec = GdnContiguousTokenRowsView(output, spec_indices);
+  auto prefill = GdnContiguousTokenRowsView(output, prefill_indices);
+  if (!spec || !prefill ||
+      spec->shape[0] + prefill->shape[0] != output.shape[0]) return std::nullopt;
+  if (!((spec_indices.front() == 0 &&
+         int64_t(prefill_indices.front()) == spec->shape[0]) ||
+        (prefill_indices.front() == 0 &&
+         int64_t(spec_indices.front()) == prefill->shape[0]))) return std::nullopt;
+  return std::array<vt::Tensor, 2>{*spec, *prefill};
+}
+
 // GDN-MOE-BF16-OUT (#1168) Edit 2 dropped the `e.dense_model` term. It entered at
 // f344decf4 ("dispatch exact packed decode") as one of that change's "real-model
 // safety gates", was never revisited, and neither reference has an equivalent:
@@ -4881,6 +4896,7 @@ DBuf GdnBlock(Dev d, const GdnLayerWeights& w, const HfConfig& cfg,
   DBuf dssm(d, DType::kF32, {1, Hv, Dv, Dk});
   dssm.Zero(d);
   DBuf dcore(d, outdt, {T, Hv, Dv});
+
   const float scale = 1.0F / std::sqrt(SizeF(Dk));
   vt::GdnPrefill(d.q, dcore.t(), dql2.t(), dkl2.t(), vf.t(), g.t(), beta.t(),
                  dssm.t(), dqsl.t(), vt::GdnArgs{scale});
@@ -5407,6 +5423,25 @@ DBuf GdnBlockPagedMixedSpec(Dev d, const GdnLayerWeights& w, const HfConfig& cfg
 
   DBuf dcore(d, outdt, {T, Hv, Dv});
 
+  static const bool direct_outputs = [] {
+    const char* value = std::getenv("VT_XPU_GDN_MIXED_OUTPUT_VIEWS");
+    const std::string_view setting = value ? value : "1";
+    VT_CHECK(setting == "0" || setting == "1", "Invalid VT_XPU_GDN_MIXED_OUTPUT_VIEWS");
+    return setting == "1";
+  }();
+  std::optional<std::array<Tensor, 2>> core_views;
+  if (direct_outputs && borrow_rows && outdt == DType::kF16)
+    core_views = detail::GdnContiguousTokenOutputViews(
+        Reshape(dcore.t(), {T, Hv * Dv}), spec_host, ns_host);
+  // The checked host maps were uploaded by BuildStepDevInputs. Both intervals
+  // must cover the core exactly, with no overlap. Its owner survives both
+  // unchanged recurrences and the following gated norm/out projection.
+  const auto core_output = [&](size_t group, int64_t rows, DBuf& owner) {
+    if (core_views) return Reshape((*core_views)[group], {rows, Hv, Dv});
+    owner = DBuf(d, outdt, {rows, Hv, Dv});
+    return owner.t();
+  };
+
   // ── 4.1 spec recurrence (fused_sigmoid_gating_delta_rule_update, :1455-1475):
   // k+1 state slots per request, initial state selected by num_accepted. ──
   {
@@ -5417,14 +5452,15 @@ DBuf GdnBlockPagedMixedSpec(Dev d, const GdnLayerWeights& w, const HfConfig& cfg
     DBuf dbeta(d, DType::kF32, {ns_tok, Hv});
     post_conv(dconv_spec.t(), a_spec, b_spec, ns_tok, dql2, dkl2, vf, dg,
               dbeta);
-    DBuf dcore_spec(d, outdt, {ns_tok, Hv, Dv});
+    DBuf dcore_spec;
+    Tensor spec_output = core_output(0, ns_tok, dcore_spec);
     Tensor ssm_cache = state.ssm_state;
     Tensor spec_idx_2d =
         Reshape(sdi.gdn_spec_state_idx.t(), {ns, sdi.gdn_spec_num_cols});
-    vt::GdnSpecDecode(d.q, dcore_spec.t(), dql2.t(), dkl2.t(), vf.t(), dg.t(),
+    vt::GdnSpecDecode(d.q, spec_output, dql2.t(), dkl2.t(), vf.t(), dg.t(),
                       dbeta.t(), ssm_cache, sdi.gdn_spec_qsl.t(), spec_idx_2d,
                       sdi.gdn_num_accepted.t(), vt::GdnArgs{scale});
-    vt::IndexCopy(d.q, dcore.t(), dcore_spec.t(), spec_tok);  // :1570
+    if (!core_views) vt::IndexCopy(d.q, dcore.t(), spec_output, spec_tok);  // :1570
   }
 
   // ── 4.2 non-spec prefill recurrence (chunk_gated_delta_rule, :1504-1532):
@@ -5437,18 +5473,19 @@ DBuf GdnBlockPagedMixedSpec(Dev d, const GdnLayerWeights& w, const HfConfig& cfg
     DBuf dbeta(d, DType::kF32, {nns_tok, Hv});
     post_conv(dconv_ns.t(), a_ns, b_ns, nns_tok, dql2, dkl2, vf, dg,
               dbeta);
-    DBuf dcore_ns(d, outdt, {nns_tok, Hv, Dv});
+    DBuf dcore_ns;
+    Tensor prefill_output = core_output(1, nns_tok, dcore_ns);
     DBuf dss(d, DType::kF32, {np, Hv, Dv, Dk});
     vt::GdnStateGather(d.q, dss.t(), state.ssm_state,
                        sdi.gdn_prefill_state_idx.t(),
                        &sdi.gdn_prefill_has_initial.t());
     vt::GdnArgs gdn_args{scale};
     gdn_args.query_start_loc_host = meta.prefill_query_start_loc->data();
-    vt::GdnPrefill(d.q, dcore_ns.t(), dql2.t(), dkl2.t(), vf.t(), dg.t(),
+    vt::GdnPrefill(d.q, prefill_output, dql2.t(), dkl2.t(), vf.t(), dg.t(),
                    dbeta.t(), dss.t(), sdi.gdn_prefill_qsl.t(), gdn_args);
     Tensor ssm_cache = state.ssm_state;
     vt::GdnStateScatter(d.q, ssm_cache, dss.t(), sdi.gdn_prefill_state_idx.t());
-    vt::IndexCopy(d.q, dcore.t(), dcore_ns.t(), ns_tok_idx);  // :1571
+    if (!core_views) vt::IndexCopy(d.q, dcore.t(), prefill_output, ns_tok_idx);  // :1571
   }
 
   // ── 5. shared gated-RMSNorm(z) + out_proj over the merged [T,Hv,Dv] core.
