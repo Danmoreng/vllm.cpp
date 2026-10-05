@@ -90,6 +90,30 @@ dependency build, a full suite or GPU qualification. The previously executed
 required/optional SmallM input checks remain the separate GPU-test admission
 evidence. A model and oneAPI were not needed by this CPU slice.
 
+F1's separate eager C1/C4 profile now labels each device/host record with its
+engine cycle. The focused native target builds; C1/C4 pass 130/451 assertions.
+Adding labels preserves all 32/128 emitted IDs and 17/25 complete non-time cycle
+records against the preceding unlabeled runs. The executed geometry isolates
+672 C1/Q4 and 288 C4/Q4 producer/recurrence pairs across all 48 GDN layers,
+excluding mixed prefill/decode cycles. Graph captures/replays are zero.
+
+| Pure speculative chain | C1/Q4 | C4/Q4 |
+|---|---:|---:|
+| Median Post-Conv kernel | 4.271 us | 4.271 us |
+| Median typed-SLM recurrence | 136.667 us | 404.479 us |
+| Median queue gap | 15.729 us | 26.146 us |
+| Producer GPU work / profiled decode-cycle wall | 0.397% | 0.259% |
+
+The queue gap includes required metadata validation/readback; it is not a
+removable transfer measurement. These are eager diagnostic results, not graph
+attribution or a refreshed serving/Python score. F1 stops at its bounded
+precondition because the measured producer work offers little demonstrated
+complete-path potential. No fused variant was implemented or timed, and no
+graph speed upper bound is claimed. Existing typed-SLM arithmetic and state
+storage remain unchanged. The next independent candidate is F2's final-consumer
+event lease, followed separately by direct checked-preparation consumption.
+The immutable profile/binary/command receipt is indexed in `RECOVERY_STATUS.json`.
+
 A clean public contribution composition,
 ordinary-route admission and integrated original MTP state qualification remain
 separate work. Preserve the frozen default D27/D29 failures and controlled-oracle

@@ -6633,7 +6633,7 @@
     }
   ],
   "performance_baseline": "7536aededc049b2157f12eadb0f4cc6bbf29b7b7",
-  "performance_next": "Follow active upstream readiness/performance plan: minimal remaining U2 provenance/build/capability work, then bounded F1/F2. Do not migrate every optional historical test before performance work. Old P0-P7 remains closed.",
+  "performance_next": "Active upstream readiness/performance plan: Main/U0 and scoped U2 build/test/notices done; F1 stopped at bounded measured precondition. Continue F2 two separately measured ownership/preparation changes; keep Q1, remaining contribution hygiene, conditional F3 and U6 open. Old P0-P7 remains closed.",
   "closed_performance_plan": "docs/B70_EXL3_NATIVE_PERFORMANCE_IMPLEMENTATION_PLAN_7536aeded_EN.md",
   "performance_plan_closure": {
     "status": "closed_by_developer_after_last_approved_optimization",
@@ -6662,7 +6662,7 @@
     "U0": "complete_portable_projection_identity_slice",
     "U2": "partial_atomic_cache_oneDNN_SmallM_notices_and_clean_CPU_build_complete_contribution_and_remaining_capability_hygiene_open",
     "Q1": "pending_preserve_default_controlled_reference_labels",
-    "F1": "pending_one_fusion_and_at_most_one_smaller_fallback",
+    "F1": "stopped_at_bounded_precondition_low_measured_producer_cost_no_fusion_variant",
     "F2": "pending_at_most_two_named_changes",
     "F3": "conditional_on_demonstrated_current_cost",
     "U6": "pending_bounded_final_comparison_and_review_handoff",
@@ -6675,7 +6675,7 @@
     "cpu_limit": "GCC16 now builds the CPU library and selected targets;5 focused CTest cases pass with5019 assertions and one existing registry test-case skip. GCC12 previous unchanged muse_glimmer_mm array-bounds failure retained; not rerun after the cache repair.",
     "other_backends": "Affected Vulkan source compiles and CUDA CUTLASS/Marlin host syntax checks pass. CUDA device build/link/runtime and HIP remain unverified.",
     "performance_scope": "One before/after C1 short native pair:43.61414->43.51202 decode TPS; TTFT2313.785->2318.430ms; request8160.513->8178.879ms. No repeat signal and no refreshed original score.",
-    "next_step": "Execute bounded F1 real C1/C4 post-conv/spec-GDN chain profile; only then one fusion and at most one smaller fallback. Keep remaining public composition and integrated Q1 qualification separate; do not migrate every historical test first.",
+    "next_step": "F2 first named candidate: private eager W8A8 final-consumer event leases; preserve oneDNN participation, queue ordering, public validation/error semantics and actual reader lifetime. Direct checked-preparation consumption remains a separately measured second candidate. Q1/default qualification and public composition stay open.",
     "U0_tests": "23 host tests in4 CTest cases pass, including8 generated artifact tests; no GPU arithmetic changed.",
     "U0_receipt": {
       "artifact": "upstream-u1-integration-v1/u0-receipt-v1.json",
@@ -6705,6 +6705,12 @@
       "artifact": "upstream-u2-clean-cpu-v1/receipt-v1.json",
       "sha256": "529c12d15921b7ee84fb579ea17ba5eeb30b5a7d04d4c0a6a46ba4e36ca83fcc",
       "bytes": 3256
+    },
+    "F1_profile_tests": "Test-only device/host event cycle labels build2 steps; C1/C4 profile130/451 assertions pass. All32/128 IDs and17/25 complete non-time cycles exact preceding unlabeled runs, all event cycle labels valid. Actual pureC1Q4/C4Q4 cycles isolate672/288 all48-layer producer/recurrence pairs; graph captures/replays0. PostConv median4.271us both; typed-SLM136.667/404.479us; producer work0.397/0.259% of profiled pure decode-cycle wall. Queue gap15.729/26.146us includes required metadata readback, not removable transfer time. F1 stopped per precondition low demonstrated complete-path potential; no fusion implementation/gain or graph/Python score/quality admission promotion.",
+    "F1_profile_receipt": {
+      "artifact": "upstream-f1-boundary-profile-v1/receipt-v1.json",
+      "sha256": "6a4704c54f280f7d9ac9261f965cb36935e8f83efe2f4c52de7dba7b5cf09c49",
+      "bytes": 18382
     }
   }
 }
