@@ -2218,7 +2218,7 @@
     },
     {
       "task": "P7",
-      "status": "in_progress_bounded_hybrid_state_bytes_closed_default_reference_and_mode_qualification_open",
+      "status": "in_progress_typed_SLM_serving_gain_retained_default_reference_and_mode_qualification_open",
       "complete": false,
       "C1_repetitions_per_engine": 3,
       "actual_native_primary_assertions_each": 1895,
@@ -2263,7 +2263,7 @@
         "bytes": 484222,
         "sha256": "4ef94808be5009536b9e1976410b821ce96d0b958338216b2f29ed18bd87f2ac"
       },
-      "remaining": "Bounded final serving matrix on046ece complete; new QK signed-zero robustness fix has current two-prefix all48GDN/all16KV byte proof and current65full controlled head rows exact. Default D64 still four failures, P1 automatic/default admission and integrated MTP/C4/long state qualification remain open. No new serving score for this arithmetic repair; prior measurements retain046ece identity.",
+      "remaining": "Bounded final matrix on046ece complete; QK signed-zero fix has held-out all48GDN/all16KV eager byte proof and controlled65full head rows exact. Current typed SLM default1 has exact operator snapshots/native C1/C4 serving continuity and lifecycle, plus C1/C4short gains; final practical/primary evidence refresh still required. DefaultD64four failures/P1 automatic/default admission and integrated original MTP/C4/long-state qualification remain open. Older matrix keeps046ece identity; no new current Python-parity score.",
       "C4_repetitions_per_engine": 3,
       "C4_native_assertions_each": 7781,
       "C4_native_all4096_ids_and419_non_timing_cycles_exact_repeats": true,
@@ -2916,7 +2916,7 @@
           "sha256": "3da49f66c6730614433e01fb429bc9c4e89d00c1f88a01982534334261bf9c7e"
         }
       },
-      "next": "Finish live affected C4-32K candidate worker, compare current mixed/C4-32K raw timings/resources/IDs/cycles against frozen7feb originals/controls, preserve deliberate changed attention arithmetic and actual continuation differences. Existing lifecycle483/483 on candidate. No blanket transfer of prior full practical/default-controlled qualification; automatic verifier/defaultD64/all-layer gates remain open.",
+      "next": "Typed contiguous GDN memory in existing SLM retained default1: exact495unit/321operator/38default-route/483lifecycle, C1decode+3.36% and C4short common-decode+8.66% native pilot, no new Python score. Next refresh final-candidate changed-path practical/MTP and primary C1/C4 evidence, with fixed frozen binary/inputs and bounded repetitions; reuse unchanged original evidence explicitly. Keep defaultD64four failures/P1 automatic/reference/integratedmode gates open. No further GDN register/geometry sweep without new causal evidence; goalactive/P7incomplete.",
       "current_quality": {
         "practical_tasks": 8,
         "practical_passed": 8,
@@ -6489,9 +6489,137 @@
         "new_serving_score_measured": false,
         "P7_complete": false,
         "scope": "Actual same held-out layer43 original P128/D1 QKV, RoPE coefficients and pinned checkpoint norm weights. Both frozen executables use identical current timing-test source; old product header/attention source mounted read-only over build only, tracked source never reset. Complete eager host submissions plus one queue-completion wait per128-call batch; three batches after16warm calls, two fresh workers perarm, ABBAorder. All samples including reproducibly slower firstP128batch retained; medians are descriptive, no cause attributed to startup/clock/submission. No profile/device events included, no serving/TPS/TTFT/MTP-Q4 or Python performance claim. Prior full state/D64 evidence remains5ace scoped. Corrected arrays exact and old three strict zero-sign failures retained. No additional arithmetic optimization justified by this small measured cost."
+      },
+      "typed_spec_GDN_SLM": {
+        "decision": "retain_default1_F16_contiguous_memory_in_existing_SLM_path",
+        "control": "VT_XPU_GDN_SPEC_SLM_TYPED=0",
+        "arithmetic_change": false,
+        "new_device_workspace_bytes": 0,
+        "SLM_per_WG_bytes": 32768,
+        "receipt": {
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p7-gdn-slm-typed-v1/receipt-v1.json",
+          "bytes": 57562,
+          "sha256": "49ad614a5c23c4c7af235b23cb087800a9cb2d13412957c345d0b276aed75891"
+        },
+        "source": [
+          {
+            "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p7-gdn-slm-typed-v1/source-v3/src/vt/xpu/xpu_gdn.cpp",
+            "bytes": 50866,
+            "sha256": "a53a6501eff9084aec297b674fb37ed2b92e467b566f2930910d67a514a7b6ba"
+          },
+          {
+            "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p7-gdn-slm-typed-v1/source-v3/tests/vt/test_xpu_gdn.cpp",
+            "bytes": 83204,
+            "sha256": "d43c2f6d1ecdaada5b7cf4011e2fc91bd89aacc7137ce4ab59894588efb83e28"
+          }
+        ],
+        "final_binaries": [
+          {
+            "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p7-gdn-slm-typed-v1/test_xpu_gdn-v3",
+            "bytes": 33920576,
+            "sha256": "a4c00dd903c505f8b3fe988e1055d7d57c15d06af048bf51a6194dcec5211f07"
+          },
+          {
+            "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p7-gdn-slm-typed-v1/test_xpu_exl3_mtp-v2",
+            "bytes": 34045152,
+            "sha256": "4d47b46e24c7f6c99e11b534370177361f1207e141f539b7aa63f0e68ba8468c"
+          }
+        ],
+        "focused_unit_assertions": 495,
+        "paired_complete_operator_assertions": 321,
+        "default_route_probe_assertions": 38,
+        "current_default_lifecycle_assertions": 483,
+        "lifecycle_entire_payload_exact_prior_046ece": true,
+        "complete_operator_median_elapsed_reduction_percent": {
+          "C1_Q4": 29.462172029323973,
+          "C4_Q4": 14.89389567737901,
+          "C4_ragged_Q4_Q2_Q1_Q3": 23.09054460729165
+        },
+        "native_unprofiled_pilot": {
+          "c1": {
+            "measurements": {
+              "off": {
+                "decode_tps": 50.22357010202789,
+                "mean_request_TTFT_ms": 2316.4240720000003,
+                "E2E_s": 22.685372171,
+                "mean_MTP_decode_cycle_ms": 55.34402752989129
+              },
+              "on": {
+                "decode_tps": 51.909546656122,
+                "mean_request_TTFT_ms": 2324.727027,
+                "E2E_s": 22.03211249,
+                "mean_MTP_decode_cycle_ms": 53.5463120461956
+              }
+            },
+            "on_vs_off_change_percent": {
+              "decode_tps": 3.3569428670026547,
+              "mean_request_TTFT_ms": 0.3584384698968712,
+              "E2E_s": -2.8796515925583965,
+              "mean_MTP_decode_cycle_ms": -3.2482556184129208
+            }
+          },
+          "c4": {
+            "measurements": {
+              "off": {
+                "decode_tps": 107.58234244880168,
+                "mean_request_TTFT_ms": 7628.182651,
+                "E2E_s": 21.348866118,
+                "mean_MTP_decode_cycle_ms": 86.35430515454551
+              },
+              "on": {
+                "decode_tps": 116.9005816313439,
+                "mean_request_TTFT_ms": 7582.63887875,
+                "E2E_s": 20.524417406,
+                "mean_MTP_decode_cycle_ms": 79.61959236363637
+              }
+            },
+            "on_vs_off_change_percent": {
+              "decode_tps": 8.661494972538586,
+              "mean_request_TTFT_ms": -0.5970461685789519,
+              "E2E_s": -3.8617915698336613,
+              "mean_MTP_decode_cycle_ms": -7.798931134766518
+            }
+          }
+        },
+        "continuity": {
+          "c1": {
+            "all_emitted_IDs_exact": true,
+            "all_non_timing_cycles_exact": true,
+            "emitted_tokens": 1024,
+            "cycles": 371,
+            "accepted": 656,
+            "proposed": 1104,
+            "prior_046ece_all_IDs_non_timing_cycles_exact": true
+          },
+          "c4": {
+            "all_emitted_IDs_exact": true,
+            "all_non_timing_cycles_exact": true,
+            "emitted_tokens": 1024,
+            "cycles": 121,
+            "accepted": 590,
+            "proposed": 1299
+          }
+        },
+        "default_C1_P4096_O1024": {
+          "assertions": 1900,
+          "decode_tps": 51.78137474248805,
+          "TTFT_ms": 2330.7287359999996,
+          "E2E_s": 22.086893151,
+          "all_1024_IDs_371_non_timing_cycles_exact_explicit_on_and_prior": true
+        },
+        "separate_C1_O32_target_queue_ms": {
+          "off": 48.95483635714286,
+          "on": 46.685796214285716
+        },
+        "separate_C1_O32_draft_queue_ms": {
+          "off": 5.223043214285714,
+          "on": 5.238102571428572
+        },
+        "qualification_promoted": false,
+        "remaining": "Single native pilot per arm/C1 and short C4, not a fresh original campaign or three-repeat final candidate matrix. Exact operator snapshots and native serving continuity do not promote integrated all-layer original MTP/C4/long-context state/default reference or P1 automatic admission. Prior completed matrix retains046ece source identity; current default binary needs scoped final practical/primary evidence."
       }
     }
   ],
   "performance_baseline": "7536aededc049b2157f12eadb0f4cc6bbf29b7b7",
-  "performance_next": "Bounded signed-zero cost A/B complete: original operands P128/D1 complete preamble+0.6033%/+0.5853%wall, corrected49/49each versus old3strict failures; no new serving score. Next one typed contiguous-memory specialization in existing speculative GDN SLM kernel, preserving ascending-K/all FP32 snapshots/owner barriers and fallback; exact focused unit/graph proof then paired complete operator/request gain before retaining. Do not repeat rejected private-register geometry or completed broad matrix. DefaultD64four failures/P1 automatic/reference/integratedmode gates remain open; goalactive."
+  "performance_next": "Typed contiguous GDN memory in existing SLM retained default1: exact495unit/321operator/38default-route/483lifecycle, C1decode+3.36% and C4short common-decode+8.66% native pilot, no new Python score. Next refresh final-candidate changed-path practical/MTP and primary C1/C4 evidence, with fixed frozen binary/inputs and bounded repetitions; reuse unchanged original evidence explicitly. Keep defaultD64four failures/P1 automatic/reference/integratedmode gates open. No further GDN register/geometry sweep without new causal evidence; goalactive/P7incomplete."
 }
