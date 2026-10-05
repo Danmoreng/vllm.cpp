@@ -5,11 +5,45 @@ import sys
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tools/exl3_reference"))
-from mtp_state_scope import initialized_kv_addresses, speculative_state_reads
+from mtp_state_scope import integrated_batch_reads, initialized_kv_addresses, speculative_state_reads
 from capture_integrated_mtp import observe_prepared_batch
 
 
 class MtpStateScopeTest(unittest.TestCase):
+    def test_actual_batch_transition_retains_survivor_identity(self):
+        for ids, lengths in ((["a", "b", "c", "d"], [1, 4, 2, 3]),
+                             (["c", "d"], [2, 4]), (["d"], [3])):
+            qsl = [0]
+            for length in lengths:
+                qsl.append(qsl[-1] + length)
+            positions = [p for length in lengths for p in range(132 - length, 132)]
+            plans = integrated_batch_reads(ids, [1000] * qsl[-1], [positions] * 3,
+                                           qsl, [132] * len(ids))
+            self.assertEqual([p["request_id"] for p in plans], ids)
+            self.assertEqual([p["end"] - p["begin"] for p in plans], lengths)
+            self.assertFalse(any(p["cold_prefill"] for p in plans))
+
+    def test_cold_c4_requires_actual_all_four_prefill_rows(self):
+        plans = integrated_batch_reads(["a", "b", "c", "d"], [1000] * 512,
+                                      [list(range(128)) * 4] * 3,
+                                      [0, 128, 256, 384, 512], [128] * 4)
+        self.assertTrue(all(p["cold_prefill"] for p in plans))
+        self.assertEqual(plans[-1]["begin"], 384)
+
+    def test_invalid_active_batch_is_rejected(self):
+        for ids, tokens, pos, qsl, seq in (
+                (["a", "a"], [1000] * 8, [list(range(128, 132)) * 2] * 3, [0, 4, 8], [132, 132]),
+                (["a"], [True] * 4, [list(range(128, 132))] * 3, [0, 4], [132]),
+                (["a"], [1000] * 4, [list(range(128, 132))] * 3, [0, 3], [132]),
+                (["a"], [1000] * 5, [list(range(128, 133))] * 3, [0, 5], [133]),
+                (["a"], [1000] * 4, [list(range(128, 132))] * 3, [0, 4], [161]),
+                (["a"], [1000] * 4, [list(range(127, 131))] * 3, [0, 4], [132]),
+                (["a", "b"], [1000] * 132, [list(range(128)) + list(range(128, 132))] * 3,
+                 [0, 128, 132], [128, 132])):
+            with self.subTest(ids=ids, qsl=qsl, seq=seq):
+                with self.assertRaises(ValueError):
+                    integrated_batch_reads(ids, tokens, pos, qsl, seq)
+
     def test_batch_observer_preserves_call_and_result_identity(self):
         calls, observed = [], []
         result = object()

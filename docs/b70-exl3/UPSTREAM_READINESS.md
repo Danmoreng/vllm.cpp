@@ -358,3 +358,25 @@ analysis are in recovery/upstream-q1-layer0-attribution-v1/receipt-v1.json,
 C4->C2->C1, default-reference admission and autonomous native MTP equivalence
 remain unproven. The experimental fast route and frozen default failures stay;
 independent F3/U2/U6 work can proceed without waiting for exact Q1 parity.
+
+Original-side Q1 transition coverage is now available. A separate synchronous
+eager diagnostic admits four cold P128 requests, cancels two after the first
+Q4 forward and one after the next, and observes actual C4prefill/C4Q4/C2Q4/C1Q4
+target batches. Original MTP3, draft generation and rejection sampling remain;
+all four output maps exactly match the unobserved cancellation control. The
+in-process EngineCore, max_num_seqs4/max_num_batched_tokens512 and disabled async
+scheduling are explicit diagnostic overrides, not a serving/concurrency score.
+
+The capture copies/hashes all3,316 complete arrays (6,044,934,144B), including
+1,536 produced full FP32 token snapshots,336 consumed SSM seeds and only valid
+Conv windows/initialized logical FP8 KV. No raw state payloads are persisted.
+All896 original inter-step Conv/SSM/KV-prefix checks pass in the GPU capture;
+the host analyzer independently checks metadata/descriptor coverage and file
+identities, not absent raw payloads. Previous accepted lengths include1 and4;
+2/3 and ragged/mixed target batches are not covered by this GPU run. Fourteen
+focused host methods pass; actual original worker exit0 with24GiB/no swap/two
+CPUs and no OOM. The capsule is recovery/upstream-q1-transition-v1/receipt-v1.json,
+5634 bytes,SHA2563429e85f51b0f29be1712232b24f1a9a1301210ce7ab4cc17e8c4cc7fe15516c.
+Native cold-cache transition replay/full-array digest comparison remains next.
+This original-only evidence does not change the existing native C1 strict
+state failure, default-reference decision or experimental verifier policy.

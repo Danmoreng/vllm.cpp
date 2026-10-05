@@ -11,6 +11,38 @@ def _require(condition, message):
         raise ValueError(message)
 
 
+def integrated_batch_reads(request_ids, tokens, positions, query_start_loc, seq_lens):
+    """Admit actual unpadded C1..4 cold P128 or bounded speculative rows.
+
+    Request identity and row offsets come from the prepared batch. This does
+    not infer a transition from requested concurrency or from output timing.
+    """
+    _require(isinstance(request_ids, list) and 1 <= len(request_ids) <= 4 and
+             all(isinstance(v, str) and v for v in request_ids) and
+             len(set(request_ids)) == len(request_ids), "invalid live request ownership")
+    count = len(request_ids)
+    _require(len(query_start_loc) == count + 1 and query_start_loc[0] == 0 and
+             all(type(v) is int for v in query_start_loc) and
+             query_start_loc[-1] == len(tokens) and 0 < len(tokens) <= 512,
+             "invalid active token offsets")
+    _require(all(type(t) is int and 0 <= t < 248320 for t in tokens), "invalid active token IDs")
+    _require(len(seq_lens) == count and all(type(s) is int and 128 <= s <= 160 for s in seq_lens),
+             "invalid bounded sequence lengths")
+    result, expected_positions = [], []
+    for row, request in enumerate(request_ids):
+        begin, end = query_start_loc[row:row + 2]
+        length, seq = end - begin, seq_lens[row]
+        cold = length == seq == 128
+        _require(cold or (1 <= length <= 4 and seq - length >= 128), "unsupported target row")
+        result.append({"request_id": request, "row": row, "begin": begin, "end": end,
+                       "cold_prefill": cold})
+        expected_positions.extend(range(seq - length, seq))
+    _require(positions == [expected_positions] * 3, "actual positions differ from live rows")
+    _require(all(v["cold_prefill"] == result[0]["cold_prefill"] for v in result),
+             "mixed prefill/spec scope is not this bounded transition")
+    return result
+
+
 def speculative_state_reads(query_start_loc, state_indices, accepted,
                             capacity, conv_widths, ssm_slots):
     """Select consumed seeds and every written FP32 token snapshot.
