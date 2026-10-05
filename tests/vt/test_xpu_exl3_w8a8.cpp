@@ -101,27 +101,27 @@ TEST_CASE("XPU EXL3 W8A8 P7: model map ownership generations public guards and q
     vt::GetBackend(first.q.device).Synchronize(first.q);
   };
   upload_map(original_map.data);
-  std::shared_ptr<const vt::Exl3W8A8ModelMap> cache;
+  vt::SharedPtrCache<const vt::Exl3W8A8ModelMap> cache;
   for (int width : {1024, 128, 2048, 1024}) {
     CAPTURE(width);
     const vt::Exl3GroupedLinearArgs args{bits, 2, "P7_MODEL_MAP", width};
     vt::Exl3GroupedW8A8(first.q, out.tensor, input.tensor, trellis.tensor,
         suh.tensor, svh.tensor, map, args);
     const auto expected = out.download();
-    const auto old_cache = cache;
+    const auto old_cache = cache.Load();
     vt::detail::Exl3GroupedW8A8Model(second.q, out.tensor, input.tensor, trellis.tensor,
         suh.tensor, svh.tensor, map, args, owner, cache);
     vt::GetBackend(second.q.device).Synchronize(second.q);
     xpu_test::SameBytes(out.download(), expected);
-    REQUIRE(cache); CHECK(cache->Matches(map, groups, owner));
-    if (old_cache) CHECK(cache == old_cache);
+    REQUIRE(cache.Load()); CHECK(cache.Load()->Matches(map, groups, owner));
+    if (old_cache) CHECK(cache.Load() == old_cache);
   }
   // Two cold host callers on distinct queues publish/read the slot atomically.
   // Each call keeps its own immutable certificate until submissions complete.
   {
     const auto expected = out.download();
     Buffer other_out(second.q, DType::kF16, {m, n});
-    cache.reset();
+    cache.Reset();
     const vt::Exl3GroupedLinearArgs concurrent_args{bits, 2, "P7_CONCURRENT_MAP", 1024};
     auto first_call = std::async(std::launch::async, [&] {
       vt::detail::Exl3GroupedW8A8Model(first.q, out.tensor, input.tensor, trellis.tensor,
@@ -136,33 +136,34 @@ TEST_CASE("XPU EXL3 W8A8 P7: model map ownership generations public guards and q
     REQUIRE_NOTHROW(first_call.get()); REQUIRE_NOTHROW(second_call.get());
     xpu_test::SameBytes(out.download(), expected);
     xpu_test::SameBytes(other_out.download(), expected);
-    REQUIRE(cache); CHECK(cache->Matches(map, groups, owner));
+    REQUIRE(cache.Load()); CHECK(cache.Load()->Matches(map, groups, owner));
   }
   // Same address, distinct ownership control block: this is a new residency
   // generation. An alias sharing the original control block remains valid.
   std::shared_ptr<void> alias(owner, owner.get());
-  CHECK(cache->Matches(map, groups, alias));
+  CHECK(cache.Load()->Matches(map, groups, alias));
   auto generation = std::shared_ptr<void>(owner.get(), [keep = owner](void*) {});
-  CHECK_FALSE(cache->Matches(map, groups, generation));
+  CHECK_FALSE(cache.Load()->Matches(map, groups, generation));
   auto wrong = map; wrong.shape[0] -= 1;
-  CHECK_FALSE(cache->Matches(wrong, groups, owner));
+  CHECK_FALSE(cache.Load()->Matches(wrong, groups, owner));
   wrong = map; wrong.stride[0] = 2;
-  CHECK_FALSE(cache->Matches(wrong, groups, owner));
+  CHECK_FALSE(cache.Load()->Matches(wrong, groups, owner));
   wrong = map; wrong.device.type = vt::DeviceType::kCPU;
-  CHECK_FALSE(cache->Matches(wrong, groups, owner));
-  CHECK_FALSE(cache->Matches(map, groups - 1, owner));
-  const auto previous_cache = cache;
+  CHECK_FALSE(cache.Load()->Matches(wrong, groups, owner));
+  CHECK_FALSE(cache.Load()->Matches(map, groups - 1, owner));
+  const auto previous_cache = cache.Load();
   const vt::Exl3GroupedLinearArgs args{bits, 2, "P7_MODEL_MAP", 1024};
   vt::detail::Exl3GroupedW8A8Model(first.q, out.tensor, input.tensor, trellis.tensor,
       suh.tensor, svh.tensor, map, args, generation, cache);
-  CHECK(cache != previous_cache); CHECK(cache->Matches(map, groups, generation));
+  CHECK(cache.Load() != previous_cache); CHECK(cache.Load()->Matches(map, groups, generation));
   const auto preserved = out.download();
   // Public callers cannot suppress validation with a cached payload, even
   // after modifying an allocation in place. Both public seams must discard it.
   std::vector<int32_t> bad(size_t(n / 128));
   std::memcpy(bad.data(), original_map.data, original_map.nbytes); bad[0] = groups;
   upload_map(bad.data());
-  auto injected = args; injected.model_map = cache.get();
+  const auto injected_map = cache.Load();
+  auto injected = args; injected.model_map = injected_map.get();
   CHECK_THROWS_WITH_AS(vt::Exl3GroupedW8A8(first.q, out.tensor, input.tensor,
       trellis.tensor, suh.tensor, svh.tensor, map, injected),
       doctest::Contains("shard_of_nb group out of range"), std::runtime_error);
@@ -182,7 +183,7 @@ TEST_CASE("XPU EXL3 W8A8 P7: model map ownership generations public guards and q
   CHECK_THROWS_WITH_AS(vt::detail::Exl3GroupedW8A8Model(first.q, out.tensor, input.tensor,
       trellis.tensor, suh.tensor, svh.tensor, map, args, next_generation, cache),
       doctest::Contains("shard_of_nb group out of range"), std::runtime_error);
-  xpu_test::SameBytes(out.download(), preserved); CHECK(cache->Matches(map, groups, generation));
+  xpu_test::SameBytes(out.download(), preserved); CHECK(cache.Load()->Matches(map, groups, generation));
   upload_map(original_map.data);
   // Actual new allocation/reload invalidates the certificate and receives its
   // own checked decomposition; the old cache keeps its allocation alive.
@@ -191,11 +192,11 @@ TEST_CASE("XPU EXL3 W8A8 P7: model map ownership generations public guards and q
   auto new_map = map; new_map.data = replacement.get();
   vt::GetBackend(first.q.device).Copy(first.q, new_map.data, original_map.data, map.Bytes());
   vt::GetBackend(first.q.device).Synchronize(first.q);
-  CHECK_FALSE(cache->Matches(new_map, groups, replacement));
+  CHECK_FALSE(cache.Load()->Matches(new_map, groups, replacement));
   vt::detail::Exl3GroupedW8A8Model(first.q, out.tensor, input.tensor, trellis.tensor,
       suh.tensor, svh.tensor, new_map, args, replacement, cache);
   xpu_test::SameBytes(out.download(), preserved);
-  CHECK(cache->Matches(new_map, groups, replacement));
+  CHECK(cache.Load()->Matches(new_map, groups, replacement));
   // A warm routing certificate never removes dynamic input or scale guards.
   auto execute_owned = [&] { vt::detail::Exl3GroupedW8A8Model(first.q, out.tensor,
       input.tensor, trellis.tensor, suh.tensor, svh.tensor, new_map, args, replacement, cache); };
@@ -224,12 +225,12 @@ TEST_CASE("XPU EXL3 W8A8 P7: model map ownership generations public guards and q
   std::weak_ptr<void> lifetime = replacement;
   // The model-only default must exercise the certificate, not silently select
   // the public fallback. Public calls above still ignored an injected payload.
-  unsetenv("VT_XPU_W8A8_MODEL_MAP"); cache.reset();
+  unsetenv("VT_XPU_W8A8_MODEL_MAP"); cache.Reset();
   execute_owned();
-  REQUIRE(cache); CHECK(cache->Matches(new_map, groups, replacement));
+  REQUIRE(cache.Load()); CHECK(cache.Load()->Matches(new_map, groups, replacement));
   xpu_test::SameBytes(out.download(), preserved);
   replacement.reset(); CHECK_FALSE(lifetime.expired());
-  cache.reset(); CHECK(lifetime.expired());
+  cache.Reset(); CHECK(lifetime.expired());
   CHECK(vt::GetReferenceTierHits() == 0);
   std::cout << "P7_MODEL_MAP ownership_generations=1 public_guards=1 cross_queue=1 retired_owner=1" << std::endl;
 }
@@ -264,7 +265,7 @@ TEST_CASE("XPU EXL3 W8A8 P7: model map complete operator gain") {
   auto map = vt::Tensor::Contiguous(owner.get(), DType::kI32, gpu.q.device, {n / 128});
   vt::GetBackend(gpu.q.device).Copy(gpu.q, map.data, routing.data, routing.nbytes);
   vt::GetBackend(gpu.q.device).Synchronize(gpu.q);
-  std::shared_ptr<const vt::Exl3W8A8ModelMap> cache;
+  vt::SharedPtrCache<const vt::Exl3W8A8ModelMap> cache;
   const vt::Exl3GroupedLinearArgs args{bits, 2, "P7_MODEL_MAP_BENCH", 1024};
   auto execute = [&] { vt::detail::Exl3GroupedW8A8Model(gpu.q, out.tensor, input.tensor,
       trellis.tensor, suh.tensor, svh.tensor, map, args, owner, cache);
@@ -304,7 +305,7 @@ TEST_CASE("XPU EXL3 W8A8 P7: model map complete operator gain") {
     trials.push_back(std::move(trial));
     xpu_test::SameBytes(out.download(), expected);
     xpu_test::SameBytes(input.download(), before);
-    REQUIRE(cache); CHECK(cache->Matches(map, groups, owner));
+    REQUIRE(cache.Load()); CHECK(cache.Load()->Matches(map, groups, owner));
     (void)vt::xpu::DrainProfileEvents(); (void)vt::xpu::DrainHostProfileRecords();
   }
   nlohmann::json result = {{"rows", m}, {"k", k}, {"n", n}, {"groups", groups},

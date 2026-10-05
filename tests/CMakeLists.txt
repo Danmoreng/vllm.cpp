@@ -83,6 +83,13 @@ function(vllm_cpp_add_test name)
   set_tests_properties(${name} PROPERTIES SKIP_RETURN_CODE 77)
 endfunction()
 
+find_package(Threads REQUIRED)
+add_executable(test_shared_ptr_cache vt/test_shared_ptr_cache.cpp)
+target_include_directories(test_shared_ptr_cache PRIVATE ${CMAKE_SOURCE_DIR}/include)
+target_link_libraries(test_shared_ptr_cache PRIVATE vllm_test_main Threads::Threads)
+vllm_cpp_set_warnings(test_shared_ptr_cache)
+add_test(NAME test_shared_ptr_cache COMMAND test_shared_ptr_cache)
+
 vllm_cpp_add_test(test_exl3_w8a8_panel_plan vt/test_exl3_w8a8_panel_plan.cpp)
 if(VLLM_CPP_XPU)
   vllm_cpp_add_test(test_xpu_ops vt/test_xpu_ops.cpp)

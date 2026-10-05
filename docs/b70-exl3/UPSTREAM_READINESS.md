@@ -31,9 +31,17 @@ and must be excluded from a future public contribution.
 The merge's native smoke preserves all 256 output IDs, 113 non-time cycles,
 complete lifecycle results and tracked device peak. GDN snapshot/route and
 affected host tests pass. The single short timing pair shows about 0.2% change;
-it is a merge sanity check, not a new Python score. The full CPU build still
-has pre-existing GCC16 shared-pointer atomic deprecation and GCC12 array-bounds
-failures. Affected Vulkan source compiles and CUDA host syntax checks pass;
+it is a merge sanity check, not a new Python score. The initial full CPU build
+exposed pre-existing GCC16 shared-pointer atomic deprecation and GCC12
+array-bounds failures. U2 replaces the deprecated publication with a copyable
+C++20 atomic shared-owner cache. GCC16 now builds the CPU library and selected
+targets; five focused CPU tests pass (5,019 assertions, one existing registry
+case skipped). The SYCL build and SmallM/W8A8 ownership tests pass (199/76
+assertions); MTP lifecycle passes 483 assertions with its complete payload
+unchanged from the merge baseline. GCC12 was not rerun. The U2 cache receipt is
+indexed in `RECOVERY_STATUS.json`; this repair makes no performance claim.
+Affected Vulkan source compiles and CUDA host syntax checks pass at integration;
+the affected CUDA Qwen dense host syntax check also passes after this repair.
 CUDA device build/link/runtime and HIP remain unverified.
 
 U0 supplies generated host fixtures and an explicit artifact-root entry point

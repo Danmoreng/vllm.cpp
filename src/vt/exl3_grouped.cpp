@@ -156,7 +156,7 @@ const std::vector<Exl3W8A8Panel>& Exl3W8A8ModelMap::Panels(int columns) const {
 void detail::Exl3GroupedW8A8Model(Queue& q, Tensor& out, const Tensor& in,
     const Tensor& tr, const Tensor& suh, const Tensor& svh, const Tensor& map,
     const Exl3GroupedLinearArgs& args, const std::shared_ptr<void>& resident_owner,
-    std::shared_ptr<const Exl3W8A8ModelMap>& cache) {
+    SharedPtrCache<const Exl3W8A8ModelMap>& cache) {
   (void)ValidateW8A8Operands(q, out, in, tr, suh, svh, map, args);
   VT_CHECK(q.device.type == DeviceType::kXPU, "EXL3 shared W8A8 requires XPU");
   const char* setting = std::getenv("VT_XPU_W8A8_MODEL_MAP");
@@ -168,10 +168,10 @@ void detail::Exl3GroupedW8A8Model(Queue& q, Tensor& out, const Tensor& in,
     Exl3GroupedW8A8(q, out, in, tr, suh, svh, map, args);
     return;
   }
-  auto metadata = std::atomic_load(&cache);
+  auto metadata = cache.Load();
   if (!metadata || !metadata->Matches(map, int(suh.shape[0]), resident_owner)) {
     metadata = std::make_shared<const Exl3W8A8ModelMap>(q, map, int(suh.shape[0]), resident_owner);
-    std::atomic_store(&cache, metadata);
+    cache.Store(metadata);
   }
   auto owned_args = args;
   // A call retains its exact immutable generation even if another queue
@@ -257,7 +257,7 @@ void detail::Exl3GroupedLinearModel(Queue& q, Tensor& out, const Tensor& in,
     const Tensor& trellis, const Tensor& suh, const Tensor& svh, const Tensor& shard,
     Tensor& in_had, Tensor& partials, const Exl3GroupedLinearArgs& args,
     const std::shared_ptr<void>& resident_owner,
-    std::shared_ptr<const Exl3W8A8ModelMap>& cache) {
+    SharedPtrCache<const Exl3W8A8ModelMap>& cache) {
   ValidateSmallMOperands(q, out, in, trellis, suh, svh, shard, in_had, partials, args);
   VT_CHECK(q.device.type == DeviceType::kXPU, "EXL3 model SmallM requires XPU");
   const char* setting = std::getenv("VT_XPU_SMALLM_MODEL_MAP");
@@ -267,7 +267,7 @@ void detail::Exl3GroupedLinearModel(Queue& q, Tensor& out, const Tensor& in,
   owned_args.model_map = nullptr;
   std::shared_ptr<const Exl3W8A8ModelMap> metadata;
   if (mode == "1") {
-    metadata = std::atomic_load(&cache);
+    metadata = cache.Load();
     if (!metadata || !metadata->Matches(shard, int(suh.shape[0]), resident_owner)) {
       bool capturing = false;
 #ifdef VLLM_CPP_XPU
@@ -281,7 +281,7 @@ void detail::Exl3GroupedLinearModel(Queue& q, Tensor& out, const Tensor& in,
 #endif
       } else {
         metadata = std::make_shared<const Exl3W8A8ModelMap>(q, shard, int(suh.shape[0]), resident_owner);
-        std::atomic_store(&cache, metadata);
+        cache.Store(metadata);
       }
     }
     owned_args.model_map = metadata.get();
