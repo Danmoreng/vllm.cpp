@@ -183,6 +183,16 @@ This single pair is a first signal, not a refreshed Python/U6 score. The route
 remains opt-in pending large QKVZ, broader lifecycle/integrated-state checks and
 bounded repeat measurements; matching tokens alone does not qualify state.
 
+The subsequent projection qualification adds pinned original QKVZ M896/M1600
+captures from the same frozen P128 normalization operands. All six Gate/Up and
+QKVZ cases at M129/M896/M1600 now pass111 assertions each. The test additionally
+checks the actual last128-column INT8 weight block against the independent
+original witness, accounting for the final panel's compact row stride. Existing
+native/public byte checks, queue reuse and immediate result retirement remain.
+The new capture, frozen tool/binary and commands are indexed in the projection
+receipt. This closes the large-QKVZ operator check; integrated model-state,
+lifecycle and repeat-performance qualification still remain.
+
 A clean public contribution composition,
 ordinary-route admission and integrated original MTP state qualification remain
 separate work. Preserve the frozen default D27/D29 failures and controlled-oracle
