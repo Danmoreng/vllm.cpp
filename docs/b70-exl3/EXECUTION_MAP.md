@@ -2776,3 +2776,25 @@ Benchmark helper only; no engine/kernel/reference change. Preserve the first fiv
 Report max consecutive emitted-observation gap as longest observed streaming pause, excluding TTFT. For an after_emitted trigger, the final source observation before actual admission must reach the threshold and the preceding observation must be below it: validate actual earliest crossing, with MTP chunk overshoot explicit, rather than merely inspecting requested metadata. Focused self-check rejects both early and late admission for the intended reasons and retains all previous native/original depth/context/cold/error contracts. Real frozen input preparation independently checks all9cases, exact previous5cases, mixed4096/32768/16 and four distinct32768page identities. Actual host checks exit0. GPU measurements are separate; no matrix completion or speedup claim from preparation.
 
 Receipt /home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p7-long-mixed-v1/driver-receipt-v1.json (3260B,SHA256a98221cc62cbc3de5281d777ac4372bb08b375fd2ba2ad0e2c887d5c73ab6cae). Goalactive,P7incomplete. Proceed with one original/native actual32K/mixed sample each, then32K-prefix/practical/default-controlled/draft qualification. Commit and immediatepush the focused tested driver step under standing authorization.
+
+## 149. P7 actual32K and requested4K/32K mixed matrix measured
+
+One warmed representative actual execution per engine/case, original/native sequential with native-first C4 reversal. Actual native productf09a99738, report/preparation8a4b98270. Fixed262144max context/page1600/budget1600/180blocks/FP16/F32GDN/FP8KV/full2483206bpwhead/compact65536MTP3; real32K input IDs, not merely a32K constructor setting. C4 uses four frozen distinct4K introductions with the shared frozen32K tail; all first pages distinct. WarmO32 plus reset, every scored request cold and emits full256tokens. All6worker exits0; native C1633/633,C42447/2447,mixed1216/1216; graphrelease0each. No new product change in this package.
+
+| Actual MTP3 workload | Original | Native |
+|---|---|---|
+| C1P32768/O256 decode tok/s |49.952305|36.165329|
+| C1 TTFT ms |18419.483107|25895.175489|
+| C1 E2E s |23.524402|32.946271|
+| C4P32768/O256each E2E s |95.872572|166.180365|
+| C4 common four-way decode tok/s |no common interval|76.098269 (430tokens/5.650588s)|
+| MixedP4096/P32768/O256each E2E s |30.578586|56.485550|
+| Mixed short longest observed streaming pause ms |53.850775|1856.064690|
+
+C1 decode -27.6003%,E2E+40.0515%; C4 E2E+73.3346%; mixed E2E+84.7226%. Both mixed engines actually add the long request immediately after the first observation reaching16short emitted tokens; observed16inboth, not merely a configured trigger. This is frontend admission; it does not imply simultaneous GPU scheduling. OriginalC4/mixed have no common overlap; no original matching C4 or mixed aggregate decode rate invented. Native mixed common interval23.980091tok/s,401tokens/16.722205s. C1A/P original153/315/native152/312; C4original597/1281/native608/1248; mixed301/639 versus298/642. Different trajectories: C1first51; C4first195/71/92/21; mixed short66,long51. No numerical parity/default qualification promotion.
+
+Offline native complete-cycle wall classification, not GPU stage times and not additive toTTFT/E2E: C1 long21prefill-only cycles25.894113s plus104decode-only7.050285s. C4long21prefill-only27.039954s,62mixed-prefill/decode118.998631s (mean1919.332760ms),104decode-only20.135738s. Mixedproper3prefill-only2.924810s,21mixed34.870353s(mean1660.493021ms),111decode-only18.688140s. Scheduled-position classification does not infer waiting-owner activity. This identifies mixed execution as a next profiling dependency, not proof of a particular bad kernel or removable host wait. Existing GDN structural reference distributes state across subgroup lanes; its source identity is not proof of exact pinned-library execution. Keep native arithmetic/state contracts; no repeated rejected GRF variants or blind reduction transplant.
+
+Six resources: swap0/noOOM/limit, maximum cgrouppeak6993846272B; native device peaks stay below32GiB and all graphs retired. Original/native limits32GiB/12GiB remain explicit, whole-worker CPU throttle includes startup/compile/warmup and is not attributed to score. Productioninactive and only chatui afterwards. Source/binary/prompt/mode/compiler-linked parent/actual commands/exits/raw/frontend stats/resources/recomputable reports: /home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p7-long-mixed-v1/matrix-receipt-v1.json (471601B,SHA256112a8ede1f38d62d36e19ec14aa4583d548e7fa5bcef7571339fbc2211ae85b2). All261unique declared artifact identities independently verified. Phase diagnosis and final environment sidecars linked in existing status ledger.
+
+P7 incomplete,goalactive. Next required32K-prefixO64 and original fixture, current practical/default-controlled/compact-draft qualification; then measured mixed-path source/event diagnosis and arithmetic-preserving GDN dataflow work if justified. Original/default/full-state gates remain open. Commit and immediatepush this tested matrix checkpoint under standing authorization.

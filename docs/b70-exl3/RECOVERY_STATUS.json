@@ -2072,7 +2072,7 @@
     },
     {
       "task": "P7",
-      "status": "in_progress_target_only_align_retained_bounded_capacity_state_proved",
+      "status": "in_progress_actual_32K_and_proper_mixed_measured_prefix_quality_open",
       "complete": false,
       "C1_repetitions_per_engine": 3,
       "actual_native_primary_assertions_each": 1895,
@@ -2117,7 +2117,7 @@
         "bytes": 484222,
         "sha256": "4ef94808be5009536b9e1976410b821ce96d0b958338216b2f29ed18bd87f2ac"
       },
-      "remaining": "P7 remaining actual32K-prompt/mixed4K32K-after16/prefix32K/current practical/default-controlled/compact-draft qualification. No default reference promotion; original stability/P1/default/all-state remain open. NativeMTP3 primary typednorm46.466tok/s remains27.301% below original median63.916 on differing trajectories. Original eager diagnostic compilation/custom-op mode differs from compiled graph; no blind register sweeps.",
+      "remaining": "P7 incomplete. Actual4K no-MTP262K capacity/state/lifecycle and actual32K C1/C4 plus proper4K/32K mixed-after16 measured. Native32K C1 decode -27.6003%, C4 E2E+73.3346%, mixed E2E+84.7226% and short streaming pause1.856s vsoriginal.05385s. Next32K-prefixO64/native plus original fixture, current practical/default-controlled/compact-draft qualification and source/event diagnosis of mixed prefill/decode cost. Original stability/P1/default/full-state gates remain open; originalC4/mixed no common overlap and trajectories differ, no parity or completion promotion. Do not repeat rejected GRF sweeps or blindly transplant alternate arithmetic.",
       "C4_repetitions_per_engine": 3,
       "C4_native_assertions_each": 7781,
       "C4_native_all4096_ids_and419_non_timing_cycles_exact_repeats": true,
@@ -2313,18 +2313,436 @@
         }
       },
       "long_mixed_benchmark_support": {
-        "status": "delivered_host_checked_GPU_execution_pending",
+        "status": "delivered_host_and_actual_GPU_cases_checked",
         "proper_mixed_4K_32K_admission_after_emitted": 16,
         "four_distinct_32K_prompts": true,
         "no_MTP_new_workload_context_restored": 262144,
         "longest_observed_streaming_pause_reported": true,
         "actual_trigger_observations_checked": true,
         "actual_self_check_and_frozen_input_prepare_exit": 0,
-        "GPU_case_pass_claim": false,
+        "GPU_case_pass_claim": true,
         "receipt": {
           "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p7-long-mixed-v1/driver-receipt-v1.json",
           "bytes": 3260,
           "sha256": "a98221cc62cbc3de5281d777ac4372bb08b375fd2ba2ad0e2c887d5c73ab6cae"
+        }
+      },
+      "actual_32K_and_proper_mixed_matrix": {
+        "repetitions_each": 1,
+        "actual_GPU_exits_each": 0,
+        "native_product_commit": "f09a99738",
+        "driver_commit": "8a4b98270",
+        "cases": {
+          "c1-32k-prompt": {
+            "metrics": {
+              "original": {
+                "common_decode_overlap": {
+                  "start_s": 18.419484267011285,
+                  "end_s": 23.52435376899666,
+                  "emitted_tokens": 255,
+                  "aggregate_emitted_tokens_per_s": 49.95230532353978,
+                  "boundary_policy": "exclude start, include end; whole emitted chunks only"
+                },
+                "end_to_end_wall_s": 23.52440226901672,
+                "per_request": {
+                  "request-0": {
+                    "prompt_tokens": 32768,
+                    "emitted_tokens": 256,
+                    "ttft_ms": 18419.483107019914,
+                    "tpot_ms": 20.019096086217164,
+                    "longest_observed_streaming_pause_ms": 59.63260697899386,
+                    "end_to_end_ms": 23524.35260900529,
+                    "token_timestamp_granularity": "one timestamp per emitted MTP chunk"
+                  }
+                },
+                "accepted": 153,
+                "proposed": 315,
+                "mean_decode_cycle_ms": null,
+                "graph_captures": null,
+                "graph_replays": null
+              },
+              "native": {
+                "common_decode_overlap": {
+                  "start_s": 25.895310949,
+                  "end_s": 32.946263075,
+                  "emitted_tokens": 255,
+                  "aggregate_emitted_tokens_per_s": 36.16532851779003,
+                  "boundary_policy": "exclude start, include end; whole emitted chunks only"
+                },
+                "end_to_end_wall_s": 32.946270585,
+                "per_request": {
+                  "request-0": {
+                    "prompt_tokens": 32768,
+                    "emitted_tokens": 256,
+                    "ttft_ms": 25895.175489,
+                    "tpot_ms": 27.650792650980385,
+                    "longest_observed_streaming_pause_ms": 67.95603599999822,
+                    "end_to_end_ms": 32946.127615,
+                    "token_timestamp_granularity": "one timestamp per emitted MTP chunk"
+                  }
+                },
+                "accepted": 152,
+                "proposed": 312,
+                "mean_decode_cycle_ms": 67.79120293269217,
+                "graph_captures": 0,
+                "graph_replays": 104
+              }
+            },
+            "comparison": {
+              "E2E_native_elapsed_change_percent": 40.05146744320276,
+              "first_ID_differences": {
+                "request-0": {
+                  "index": 51,
+                  "native": 10345,
+                  "original": 7854
+                }
+              },
+              "scope": "Actual emitted-token/TTFT/E2E samples on identical frozen prompts. Trajectories and admission can differ; no numerical parity claim.",
+              "decode_native_rate_change_percent": -27.600281341275167
+            },
+            "actual_native_assertions": 633
+          },
+          "c4-32k-prompt": {
+            "metrics": {
+              "original": {
+                "common_decode_overlap": null,
+                "end_to_end_wall_s": 95.87257247898378,
+                "per_request": {
+                  "request-0": {
+                    "prompt_tokens": 32768,
+                    "emitted_tokens": 256,
+                    "ttft_ms": 18673.985505010933,
+                    "tpot_ms": 20.101558239263134,
+                    "longest_observed_streaming_pause_ms": 60.629476996837184,
+                    "end_to_end_ms": 23799.882856023032,
+                    "token_timestamp_granularity": "one timestamp per emitted MTP chunk"
+                  },
+                  "request-1": {
+                    "prompt_tokens": 32768,
+                    "emitted_tokens": 256,
+                    "ttft_ms": 42498.53748999885,
+                    "tpot_ms": 20.32417701180641,
+                    "longest_observed_streaming_pause_ms": 60.4246559960302,
+                    "end_to_end_ms": 47681.20262800949,
+                    "token_timestamp_granularity": "one timestamp per emitted MTP chunk"
+                  },
+                  "request-2": {
+                    "prompt_tokens": 32768,
+                    "emitted_tokens": 256,
+                    "ttft_ms": 66395.3769869986,
+                    "tpot_ms": 21.30170099211254,
+                    "longest_observed_streaming_pause_ms": 60.45993400039151,
+                    "end_to_end_ms": 71827.3107399873,
+                    "token_timestamp_granularity": "one timestamp per emitted MTP chunk"
+                  },
+                  "request-3": {
+                    "prompt_tokens": 32768,
+                    "emitted_tokens": 256,
+                    "ttft_ms": 90535.16477099038,
+                    "tpot_ms": 20.917104811786547,
+                    "longest_observed_streaming_pause_ms": 60.36527201649733,
+                    "end_to_end_ms": 95869.02649799595,
+                    "token_timestamp_granularity": "one timestamp per emitted MTP chunk"
+                  }
+                },
+                "accepted": 597,
+                "proposed": 1281,
+                "mean_decode_cycle_ms": null,
+                "graph_captures": null,
+                "graph_replays": null
+              },
+              "native": {
+                "common_decode_overlap": {
+                  "start_s": 146.04365281,
+                  "end_s": 151.694241276,
+                  "emitted_tokens": 430,
+                  "aggregate_emitted_tokens_per_s": 76.09826880639775,
+                  "boundary_policy": "exclude start, include end; whole emitted chunks only"
+                },
+                "end_to_end_wall_s": 166.180364882,
+                "per_request": {
+                  "request-0": {
+                    "prompt_tokens": 32768,
+                    "emitted_tokens": 256,
+                    "ttft_ms": 27043.914596,
+                    "tpot_ms": 488.82425545098044,
+                    "longest_observed_streaming_pause_ms": 2221.473789000015,
+                    "end_to_end_ms": 151694.09973600003,
+                    "token_timestamp_granularity": "one timestamp per emitted MTP chunk"
+                  },
+                  "request-1": {
+                    "prompt_tokens": 32768,
+                    "emitted_tokens": 256,
+                    "ttft_ms": 64987.202602,
+                    "tpot_ms": 364.1003492588234,
+                    "longest_observed_streaming_pause_ms": 2221.473789000015,
+                    "end_to_end_ms": 157832.79166299998,
+                    "token_timestamp_granularity": "one timestamp per emitted MTP chunk"
+                  },
+                  "request-2": {
+                    "prompt_tokens": 32768,
+                    "emitted_tokens": 256,
+                    "ttft_ms": 103907.361971,
+                    "tpot_ms": 238.61130809803925,
+                    "longest_observed_streaming_pause_ms": 2221.473789000015,
+                    "end_to_end_ms": 164753.245536,
+                    "token_timestamp_granularity": "one timestamp per emitted MTP chunk"
+                  },
+                  "request-3": {
+                    "prompt_tokens": 32768,
+                    "emitted_tokens": 256,
+                    "ttft_ms": 146040.582848,
+                    "tpot_ms": 78.96746879215682,
+                    "longest_observed_streaming_pause_ms": 428.03128399998513,
+                    "end_to_end_ms": 166177.28738999998,
+                    "token_timestamp_granularity": "one timestamp per emitted MTP chunk"
+                  }
+                },
+                "accepted": 608,
+                "proposed": 1248,
+                "mean_decode_cycle_ms": 193.61286116346193,
+                "graph_captures": 6,
+                "graph_replays": 98
+              }
+            },
+            "comparison": {
+              "E2E_native_elapsed_change_percent": 73.3346259363473,
+              "first_ID_differences": {
+                "request-0": {
+                  "index": 195,
+                  "native": 10896,
+                  "original": 5357
+                },
+                "request-1": {
+                  "index": 71,
+                  "native": 945,
+                  "original": 26609
+                },
+                "request-2": {
+                  "index": 92,
+                  "native": 21314,
+                  "original": 3738
+                },
+                "request-3": {
+                  "index": 21,
+                  "native": 3274,
+                  "original": 47904
+                }
+              },
+              "scope": "Actual emitted-token/TTFT/E2E samples on identical frozen prompts. Trajectories and admission can differ; no numerical parity claim.",
+              "like_for_like_common_overlap_decode_comparison": false
+            },
+            "actual_native_assertions": 2447
+          },
+          "mixed-4k-32k": {
+            "metrics": {
+              "original": {
+                "common_decode_overlap": null,
+                "end_to_end_wall_s": 30.578586459014332,
+                "per_request": {
+                  "short": {
+                    "prompt_tokens": 4096,
+                    "emitted_tokens": 256,
+                    "ttft_ms": 1972.3926000006031,
+                    "tpot_ms": 19.00813498422412,
+                    "longest_observed_streaming_pause_ms": 53.850774973398075,
+                    "end_to_end_ms": 6819.467020977754,
+                    "token_timestamp_granularity": "one timestamp per emitted MTP chunk"
+                  },
+                  "long": {
+                    "prompt_tokens": 32768,
+                    "emitted_tokens": 256,
+                    "ttft_ms": 23109.256063005887,
+                    "tpot_ms": 20.268759078474023,
+                    "longest_observed_streaming_pause_ms": 60.4986640100833,
+                    "end_to_end_ms": 28277.789628016762,
+                    "token_timestamp_granularity": "one timestamp per emitted MTP chunk",
+                    "admission_trigger": {
+                      "request": "short",
+                      "tokens": 16,
+                      "observed_tokens_at_admission": 16,
+                      "observed_at_s": 2.300754151016008
+                    }
+                  }
+                },
+                "accepted": 301,
+                "proposed": 639,
+                "mean_decode_cycle_ms": null,
+                "graph_captures": null,
+                "graph_replays": null
+              },
+              "native": {
+                "common_decode_overlap": {
+                  "start_s": 38.24885569,
+                  "end_s": 54.971060895,
+                  "emitted_tokens": 401,
+                  "aggregate_emitted_tokens_per_s": 23.980090848311054,
+                  "boundary_policy": "exclude start, include end; whole emitted chunks only"
+                },
+                "end_to_end_wall_s": 56.485550063,
+                "per_request": {
+                  "short": {
+                    "prompt_tokens": 4096,
+                    "emitted_tokens": 256,
+                    "ttft_ms": 2924.931947,
+                    "tpot_ms": 204.10238681568626,
+                    "longest_observed_streaming_pause_ms": 1856.0646899999965,
+                    "end_to_end_ms": 54971.040585,
+                    "token_timestamp_granularity": "one timestamp per emitted MTP chunk"
+                  },
+                  "long": {
+                    "prompt_tokens": 32768,
+                    "emitted_tokens": 256,
+                    "ttft_ms": 34871.459546,
+                    "tpot_ms": 71.51641746274512,
+                    "longest_observed_streaming_pause_ms": 217.22667499999915,
+                    "end_to_end_ms": 53108.145999,
+                    "token_timestamp_granularity": "one timestamp per emitted MTP chunk",
+                    "admission_trigger": {
+                      "request": "short",
+                      "tokens": 16,
+                      "observed_tokens_at_admission": 16,
+                      "observed_at_s": 3.377261524
+                    }
+                  }
+                },
+                "accepted": 298,
+                "proposed": 642,
+                "mean_decode_cycle_ms": 168.36162396396392,
+                "graph_captures": 6,
+                "graph_replays": 105
+              }
+            },
+            "comparison": {
+              "E2E_native_elapsed_change_percent": 84.72256766580684,
+              "first_ID_differences": {
+                "long": {
+                  "index": 51,
+                  "native": 10345,
+                  "original": 7854
+                },
+                "short": {
+                  "index": 66,
+                  "native": 264,
+                  "original": 21873
+                }
+              },
+              "scope": "Actual emitted-token/TTFT/E2E samples on identical frozen prompts. Trajectories and admission can differ; no numerical parity claim.",
+              "like_for_like_common_overlap_decode_comparison": false
+            },
+            "actual_native_assertions": 1216
+          }
+        },
+        "native_complete_cycle_phase_classification": {
+          "scope": "Offline complete frontend-cycle wall classification, includes target/draft/sampling/waits; not pure GPU stage cost and not additive to TTFT/E2E. Actual scheduled positions, no waiting-owner inference.",
+          "cases": {
+            "c1-native-32k-prompt-v1": {
+              "prefill_only": {
+                "cycles": 21,
+                "sum_complete_cycle_wall_s": 25.894113428000004,
+                "mean_complete_cycle_ms": 1233.0530203809526,
+                "logical_forward_tokens": 32768,
+                "logical_logit_rows_histogram": {
+                  "1": 21
+                }
+              },
+              "decode_only": {
+                "cycles": 104,
+                "sum_complete_cycle_wall_s": 7.050285104999986,
+                "mean_complete_cycle_ms": 67.79120293269217,
+                "logical_forward_tokens": 416,
+                "logical_logit_rows_histogram": {
+                  "4": 104
+                }
+              }
+            },
+            "c4-32k-prompt-native-v1": {
+              "prefill_only": {
+                "cycles": 21,
+                "sum_complete_cycle_wall_s": 27.039954123,
+                "mean_complete_cycle_ms": 1287.616863,
+                "logical_forward_tokens": 33600,
+                "logical_logit_rows_histogram": {
+                  "1": 20,
+                  "2": 1
+                }
+              },
+              "mixed_prefill_decode": {
+                "cycles": 62,
+                "sum_complete_cycle_wall_s": 118.99863109399999,
+                "mean_complete_cycle_ms": 1919.332759580645,
+                "logical_forward_tokens": 97968,
+                "logical_logit_rows_histogram": {
+                  "5": 20,
+                  "6": 1,
+                  "9": 19,
+                  "10": 1,
+                  "13": 21
+                }
+              },
+              "decode_only": {
+                "cycles": 104,
+                "sum_complete_cycle_wall_s": 20.13573756100004,
+                "mean_complete_cycle_ms": 193.61286116346193,
+                "logical_forward_tokens": 1168,
+                "logical_logit_rows_histogram": {
+                  "16": 45,
+                  "12": 15,
+                  "8": 23,
+                  "4": 21
+                }
+              }
+            },
+            "mixed-4k-32k-native-v1": {
+              "prefill_only": {
+                "cycles": 3,
+                "sum_complete_cycle_wall_s": 2.924810237,
+                "mean_complete_cycle_ms": 974.9367456666666,
+                "logical_forward_tokens": 4096,
+                "logical_logit_rows_histogram": {
+                  "1": 3
+                }
+              },
+              "decode_only": {
+                "cycles": 111,
+                "sum_complete_cycle_wall_s": 18.688140259999994,
+                "mean_complete_cycle_ms": 168.36162396396392,
+                "logical_forward_tokens": 772,
+                "logical_logit_rows_histogram": {
+                  "4": 29,
+                  "8": 82
+                }
+              },
+              "mixed_prefill_decode": {
+                "cycles": 21,
+                "sum_complete_cycle_wall_s": 34.870353445999996,
+                "mean_complete_cycle_ms": 1660.493021238095,
+                "logical_forward_tokens": 32852,
+                "logical_logit_rows_histogram": {
+                  "5": 21
+                }
+              }
+            }
+          }
+        },
+        "GPU_worker_resources": 6,
+        "resource_peak_bytes": 6993846272,
+        "swap_or_OOM_or_limit_hits": 0,
+        "qualification_promoted": false,
+        "receipt": {
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p7-long-mixed-v1/matrix-receipt-v1.json",
+          "bytes": 471601,
+          "sha256": "112a8ede1f38d62d36e19ec14aa4583d548e7fa5bcef7571339fbc2211ae85b2"
+        },
+        "phase_diagnosis": {
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p7-long-mixed-v1/phase-diagnosis-v1.json",
+          "bytes": 2722,
+          "sha256": "fe49d3c0fefdc0506078a2245c529cda426a75e06da7360b6332626b928c617f"
+        },
+        "final_environment": {
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p7-long-mixed-v1/final-environment-v1.json",
+          "bytes": 154,
+          "sha256": "88e5887890aaa2fda47626b9672d5bcf577a77e3d781c2677a86bdf22017a0f4"
         }
       }
     }
