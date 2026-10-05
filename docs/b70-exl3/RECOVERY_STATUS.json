@@ -2218,7 +2218,7 @@
     },
     {
       "task": "P7",
-      "status": "in_progress_C2_C3_original_verifier_extension_operator_and_owner_passed_affected_model_evaluation_active",
+      "status": "in_progress_partial_verifier_retained_current_mixed_prefill_profile_next",
       "complete": false,
       "C1_repetitions_per_engine": 3,
       "actual_native_primary_assertions_each": 1895,
@@ -2263,7 +2263,7 @@
         "bytes": 484222,
         "sha256": "4ef94808be5009536b9e1976410b821ce96d0b958338216b2f29ed18bd87f2ac"
       },
-      "remaining": "All eight planned serving/prefix matrix rows executed on unchanged7feb68781, primaryC1/C4 three repetitions each and other sentinels once; current bounded lifecycle483/483 in SLM package, not full supported-mode qualification. Current primary C1 decode-21.86%, C1-32K-22.53%; native C4-4K E2E-36.09%, C4-32K+43.24%, proper4K/32K mixed+54.89%, with differing continuations and original serial/no matched overlapping score. Preserve defaultD64 four failures, full-all-layer state/reference and P1 automatic-admission gates. No performance/serving completion promotion.",
+      "remaining": "All eight serving/prefix matrix cases executed on prior7feb; primary three repeats each. New34bfd partialC2/C3 candidate lifecycle483/483, mixed1216/1216 and C4-32K2447/2447, actualexit0. Mixed E2E37.270828s(+22.07% original); C4-32K127.538209s(+33.52% original), improved21.19%/6.78% vs prior. C1 prior primary decode-21.86% and C1-32K-22.53% unchanged-route evidence, not fresh candidate repeats. No transfer of old final source quality. DefaultD64 four failures, full-all-layer state/reference and P1 default admission still open.",
       "C4_repetitions_per_engine": 3,
       "C4_native_assertions_each": 7781,
       "C4_native_all4096_ids_and419_non_timing_cycles_exact_repeats": true,
@@ -5158,7 +5158,7 @@
         "PREFIX-32K"
       ],
       "partial_batched_verifier": {
-        "status": "operator_original_graph_owner_passed_mixed_gain_measured_C4_32K_worker_live",
+        "status": "retained_operator_owner_lifecycle_mixed_C4_32K_actual_workers_passed",
         "product_parent": "dbaa601942ae6b9ac8a03fc8cc5c04a43ec315ab",
         "operator_receipt": {
           "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p7-verify-partial-v1/operator-receipt-v1.json",
@@ -5256,13 +5256,211 @@
         "mixed_elapsed_change_percent": -21.18690296827991,
         "mixed_long_all256IDs_exact_prior": true,
         "mixed_short_first_difference_prior": 209,
-        "mixed_scope": "One quiet candidate; C2/C3 changed from genericF32 to originalF16 attention arithmetic, not identical old trajectory. Final raw/resource comparison and C4-32K measurement pending live sequential runner.",
+        "mixed_scope": "One quiet candidate; deliberate genericF32 to originalF16 attention switch. Long all256IDs exact prior; short first difference209,46different IDs. 19non-timing cycles differ; no identical trajectory or full-quality promotion.",
         "qualification_promoted": false,
         "automatic_verifier_enabled": false,
-        "P7_complete": false
+        "P7_complete": false,
+        "product_source": "34bfd22eb0353631b1148bbf4c0497e5a8c6c24f",
+        "serving_receipt": {
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p7-verify-partial-v1/serving-receipt-v1.json",
+          "bytes": 39761,
+          "sha256": "52522642371ceb2f429ee4b7a415cfc0be81fd60ba5e1312d058af9a34c155db"
+        },
+        "mixed_final": {
+          "elapsed_change_vs_prior_percent": -21.18690296827991,
+          "elapsed_change_vs_original_percent": 22.07052715555191,
+          "cycles": {
+            "candidate_count": 135,
+            "prior_count": 135,
+            "all_non_timing_cycles_exact_prior": false,
+            "changed_cycles": 19
+          },
+          "trajectory": {
+            "long": {
+              "tokens": 256,
+              "all_IDs_exact_prior": true,
+              "first_difference_prior": null,
+              "changed_IDs": 0
+            },
+            "short": {
+              "tokens": 256,
+              "all_IDs_exact_prior": false,
+              "first_difference_prior": {
+                "index": 209,
+                "candidate": 3428,
+                "prior": 1000
+              },
+              "changed_IDs": 46
+            }
+          },
+          "pure_decode_by_active_requests": {
+            "candidate": {
+              "1": {
+                "cycles": 29,
+                "mean_cycle_wall_ms": 62.35771493103407,
+                "emitted_tokens": 59,
+                "graph_replay_cycles": 25
+              },
+              "2": {
+                "cycles": 82,
+                "mean_cycle_wall_ms": 79.05287028048816,
+                "emitted_tokens": 401,
+                "graph_replay_cycles": 80
+              }
+            },
+            "prior_native": {
+              "1": {
+                "cycles": 29,
+                "mean_cycle_wall_ms": 62.88269593103413,
+                "emitted_tokens": 59,
+                "graph_replay_cycles": 25
+              },
+              "2": {
+                "cycles": 82,
+                "mean_cycle_wall_ms": 195.11451297560936,
+                "emitted_tokens": 401,
+                "graph_replay_cycles": 80
+              }
+            }
+          },
+          "memory": {
+            "backend_peak_device_bytes": 30466812248,
+            "host_peak_rss_bytes": 13582594048,
+            "released_graph_bytes": 0
+          },
+          "candidate_E2E_s": 37.270828376,
+          "original_E2E_s": 30.532208916003583,
+          "assertions": {
+            "total": 1216,
+            "passed": 1216,
+            "failed": 0
+          }
+        },
+        "c4_32K_final": {
+          "elapsed_change_vs_prior_percent": -6.784680243224994,
+          "elapsed_change_vs_original_percent": 33.52236836680345,
+          "cycles": {
+            "candidate_count": 187,
+            "prior_count": 187,
+            "all_non_timing_cycles_exact_prior": false,
+            "changed_cycles": 2
+          },
+          "trajectory": {
+            "request-0": {
+              "tokens": 256,
+              "all_IDs_exact_prior": true,
+              "first_difference_prior": null,
+              "changed_IDs": 0
+            },
+            "request-1": {
+              "tokens": 256,
+              "all_IDs_exact_prior": true,
+              "first_difference_prior": null,
+              "changed_IDs": 0
+            },
+            "request-2": {
+              "tokens": 256,
+              "all_IDs_exact_prior": true,
+              "first_difference_prior": null,
+              "changed_IDs": 0
+            },
+            "request-3": {
+              "tokens": 256,
+              "all_IDs_exact_prior": true,
+              "first_difference_prior": null,
+              "changed_IDs": 0
+            }
+          },
+          "pure_decode_by_active_requests": {
+            "candidate": {
+              "4": {
+                "cycles": 45,
+                "mean_cycle_wall_ms": 117.31790928888776,
+                "emitted_tokens": 430,
+                "graph_replay_cycles": 43
+              },
+              "3": {
+                "cycles": 15,
+                "mean_cycle_wall_ms": 97.99359993333306,
+                "emitted_tokens": 109,
+                "graph_replay_cycles": 13
+              },
+              "2": {
+                "cycles": 23,
+                "mean_cycle_wall_ms": 84.00002030434574,
+                "emitted_tokens": 116,
+                "graph_replay_cycles": 21
+              },
+              "1": {
+                "cycles": 21,
+                "mean_cycle_wall_ms": 63.17325423809518,
+                "emitted_tokens": 47,
+                "graph_replay_cycles": 21
+              }
+            },
+            "prior_native": {
+              "4": {
+                "cycles": 45,
+                "mean_cycle_wall_ms": 117.35909475555704,
+                "emitted_tokens": 430,
+                "graph_replay_cycles": 43
+              },
+              "3": {
+                "cycles": 15,
+                "mean_cycle_wall_ms": 397.1486615333343,
+                "emitted_tokens": 109,
+                "graph_replay_cycles": 13
+              },
+              "2": {
+                "cycles": 23,
+                "mean_cycle_wall_ms": 291.35102547826244,
+                "emitted_tokens": 116,
+                "graph_replay_cycles": 21
+              },
+              "1": {
+                "cycles": 21,
+                "mean_cycle_wall_ms": 63.206537571426495,
+                "emitted_tokens": 47,
+                "graph_replay_cycles": 21
+              }
+            }
+          },
+          "memory": {
+            "backend_peak_device_bytes": 30559702194,
+            "host_peak_rss_bytes": 13583753216,
+            "released_graph_bytes": 0
+          },
+          "candidate_E2E_s": 127.538209012,
+          "original_E2E_s": 95.51823456399143,
+          "assertions": {
+            "total": 2447,
+            "passed": 2447,
+            "failed": 0
+          }
+        },
+        "all_swap_peaks_zero_and_memory_limit_OOM_events_zero": true,
+        "verified_serving_artifact_identities": 48,
+        "analysis_correction": "An earlier inline final-analysis assertion incorrectly required prior-native non-timing C4 cycles to be identical. Actual all1024 final IDs are identical, but autonomous accepted lengths/emission positions differ after the intentional original-arithmetic switch. No worker failure or reference/tolerance change; no identical-trajectory claim."
+      },
+      "current_mixed_profile": {
+        "product_source": "34bfd22eb0353631b1148bbf4c0497e5a8c6c24f",
+        "receipt": {
+          "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p7-mixed-profile-v1/profile-receipt-v1.json",
+          "bytes": 41999,
+          "sha256": "944b8293c1d8e420b7f9635912585ae574f1fb674b600ac73457bd3b0d50197e"
+        },
+        "actual_exit": 0,
+        "assertions": 1216,
+        "all512IDs_and135_non_timing_cycles_exact_quiet": true,
+        "long_mixed_prefill_target_span_ms": 25532.546666,
+        "long_mixed_prefill_W8A8_stream_sum_ms": 7144.538,
+        "long_mixed_prefill_SDPA_sum_ms": 3263.991,
+        "long_mixed_prefill_index_validation_host_sum_ms": 1518.102,
+        "long_mixed_prefill_index_validation_events": 2037,
+        "scope": "Separate diagnostic; nested host/device sums are not additive critical path. Decode graph replay hides internal events. Failed Docker launch125 retained; corrected actual GPU worker exit0."
       }
     }
   ],
   "performance_baseline": "7536aededc049b2157f12eadb0f4cc6bbf29b7b7",
-  "performance_next": "Finish live affected C4-32K candidate worker, compare current mixed/C4-32K raw timings/resources/IDs/cycles against frozen7feb originals/controls, preserve deliberate changed attention arithmetic and actual continuation differences. Existing lifecycle483/483 on candidate. No blanket transfer of prior full practical/default-controlled qualification; automatic verifier/defaultD64/all-layer gates remain open."
+  "performance_next": "Implement focused arithmetic-equivalent direct GDN mixed output views for disjoint contiguous model-owned spec/prefill token intervals; keep checked scatter fallback. Current profile and affected prior product full-model receipts complete; final-current practical/default-controlled/draft/state qualification and P7 remain open."
 }
