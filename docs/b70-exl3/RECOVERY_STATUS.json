@@ -2146,9 +2146,12 @@
         "path": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/performance-p7-primary-serving-v1/receipt-c4-timeline-v1.json",
         "bytes": 390856,
         "sha256": "c6b18283c52acd690bea601604e640c487abd1c8327f6375b80e978134770f44"
-      }
+      },
+      "actual_original_eager_main_fused_plus_standalone_norm_ms": 0.3213445,
+      "actual_original_eager_multirow_head_norm_ms": 0.0857925,
+      "norm_materialization_hypothesis_unproved": "Structural reference half residual addition before variance versus native F32. Actual installed operator and actual residual dtype need independent same-input proof; no arithmetic/reference/gate change."
     }
   ],
   "performance_baseline": "7536aededc049b2157f12eadb0f4cc6bbf29b7b7",
-  "performance_next": "P7 causal bounded norm/GDN operator improvement: actual original eager GDN~.804ms/RMSNorm~.405ms versus native10.984/3.875ms. Inspect typed pointers/dataflow while preserving existing F32 reduction and every FP32 snapshot; focused old/new exact operator checks and unprofiled complete-path gain before promotion. Do not repeat P5 rejected register variants or remove graph safeguards. Original C4 admission/stability investigation, then remaining noMTP/32K/mixed/prefix/practical/default-controlled/draft/lifecycle matrix; no parity/quality promotion."
+  "performance_next": "P7 next isolate actual installed norm on identical inputs/residuals/weights, check actual dtypes and FP16 residual/materialization boundary against native Gemma5120, without rewriting references/thresholds or changing product arithmetic first. Structural source is not binary proof; multirow cost is separate from main5120 norm. Then bounded arithmetic-preserving typed norm/GDN dataflow optimization only with exact state/operator and complete-path gain. Original C4 admission/stability and remaining noMTP/32K/mixed/prefix/practical/default-controlled/draft/lifecycle matrix stay open."
 }
