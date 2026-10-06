@@ -6665,7 +6665,7 @@
     "F1": "stopped_at_bounded_precondition_low_measured_producer_cost_no_fusion_variant",
     "F2": "completed_first_event_candidate_rejected_second_direct_candidate_retained_prefill_memory_default_model_only",
     "F3": "completed_bounded_actual_shape_and_specific_FAoutM4_investigation_stop_without_kernel_variant",
-    "U6": "primary_3plus3_M0_C4_initial_and_long_mixed_fresh_pairs_complete_original_multi_request_overlap_unmet_remaining_life_prefix_composition_handoff",
+    "U6": "primary_3plus3_M0_C4_initial_long_mixed_and_lifecycle_prefix_complete_original_multi_request_overlap_unmet_remaining_contribution_composition_handoff",
     "receipt": {
       "artifact": "upstream-u1-integration-v1/receipt-v1.json",
       "sha256": "c0f79e400d9b5dbf62a63f8367bda529308967b608e0ec72b838d178ca8a17af",
@@ -6812,6 +6812,12 @@
       "artifact": "upstream-u6-final-matrix-v1/long-mixed-receipt-v1.json",
       "sha256": "b48f49bcda5653a0ea13ee132d5b1c8ea38246f714841a7ed14b2dff37b65ee0",
       "bytes": 58287
+    },
+    "U6_lifecycle_prefix_tests": "Same final frozen binary/source/defaultdirectprepare/experimentalverifier1, threefreshsequentialworkers180W24GiBnoswapCPU2/allactualexit0/noOOMswap/hostpeaks<6.7GB/beforeafterservicepowerobservations. Native lifecycle483assertions, fullJSONexactF2control including1/4/2/1,mixed,EOS,cancel/slotreuse,poisonedspares,graph/eager/graph; sentinellayers0/47 only, notnewfull48layer pertokenstate/FP8KVproof. NativeprefixP32768/O64coldrepeat363assertions, all128IDs/every nonmemoryJSONfield exactfinalhistoricalcontrol, coldrepeat64IDsexact, firstpositions0/30400, repeat2368computedprompttokens, graphs2captures56replays/releasegraphbytes0. Nativepeak30403660867->30385296451B isexisting18364416B directpreparationbenefit, notnewoptimization. Originalprefixactual0, coldrepeat64IDsexact/cached30400; bothsequencesexactolderoriginal. Native/originalfirstdiff51botharms. No native/originalprefix timingcomparison: nativeuncomparabletimer/stepmemoryprobes vsoriginalseparateO32warmup/frontendtimestamps. No newfullstatedumps/comparison; preserveaffectedF2fullstate/projection checks andfailedQ1 scopes/defaultlabels separately. Numerical/defaultreference/ordinaryadmission/wholebackendqualification remainsopen, no additionalvariant/repetition/promotion. Remainingcontributioncomposition andfinalhandoff.",
+    "U6_lifecycle_prefix_receipt": {
+      "artifact": "upstream-u6-final-matrix-v1/lifecycle-prefix-receipt-v1.json",
+      "sha256": "b3a803792e018ed9ea6ffb606d12412d1c21204a07c29c11642f7073b03f3399",
+      "bytes": 24331
     }
   }
 }

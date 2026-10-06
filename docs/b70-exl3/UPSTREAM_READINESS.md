@@ -637,3 +637,35 @@ b48f49bcda5653a0ea13ee132d5b1c8ea38246f714841a7ed14b2dff37b65ee0.
 Continue lifecycle/prefix, remaining contribution composition and final handoff.
 Q1/default-reference qualification remains failed/open; the three-repeat
 primary C1 decode gap remains19.1752%.
+
+U6 lifecycle/prefix is complete on the same final frozen binary, with three
+fresh sequential workers at180W/24GiB/no-swap/two CPUs and production stopped.
+Native lifecycle passes483/483 assertions and its entire JSON equals the F2
+control: ordered1/4/2/1, mixed prefill/speculation, EOS, cancellation/slot reuse,
+poisoned spare slots and graph/eager/graph. Its sentinel checks cover layers0/47;
+they are not a new full48-layer per-token state or FP8-KV comparison.
+
+Native P32768/O64 cold/repeat passes363/363 assertions. All128 IDs and every
+non-memory JSON field equal the historical final control; both64-token outputs
+are identical. First positions are0/30400, so the repeat computes2368 prompt
+tokens. Graphs capture2/replay56, and after engine release graph bytes are0.
+Tracked peak drops30403660867->30385296451B, the already accepted18364416B
+direct-preparation reduction, not a new optimization.
+
+The fresh original prefix worker exits0: cold/repeat64 IDs exact and30400
+cached tokens; both complete sequences equal its older original control.
+Native/original first differ at51 in both cold and repeat. There is no
+native/original prefix speed comparison: the native test has no comparable
+request timer and performs completed-step memory probes; original frontend
+timestamps follow its separate O32 warmup. No new full state dumps are made.
+Affected F2 same-input/projection/full-native-state checks and failed Q1
+integrated original-state checks retain their separate scopes and labels.
+
+All three workers have zero swap/OOM events and host cgroup peaks below6.7GB.
+Commands, results, exact-control relations and before/after power/service
+observations are indexed in
+recovery/upstream-u6-final-matrix-v1/lifecycle-prefix-receipt-v1.json,24331 bytes,
+SHA256 b3a803792e018ed9ea6ffb606d12412d1c21204a07c29c11642f7073b03f3399.
+Remaining work is the contribution composition and reproducible final review
+handoff, with quality/reference open gates preserved. No whole-backend or
+performance-parity qualification is promoted.
