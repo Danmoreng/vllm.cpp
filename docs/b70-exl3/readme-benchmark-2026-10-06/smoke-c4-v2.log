@@ -1,0 +1,12 @@
+[doctest] doctest version is "2.5.2"
+[doctest] run with "--help" for options
+engine: device placement: --fit is on by default but cannot apply to a safetensors checkpoint (its weight footprint is not known where the placement must be installed); continuing with no placement
+[vllm] kv-cache: XPU Qwen hybrid attention page 32 -> 1600 tokens (Mamba page 3268608 B, attention token 2048 B, MTP depth 3)
+vllm.cpp: WARNING using KV cache scaling factor 1.0 for fp8. If this is unintended, verify that k/v_scale scaling factors are properly set in the checkpoint.
+vllm.cpp: Asynchronous scheduling is disabled (max_concurrent_batches=1)
+README_START "runner-smoke"
+README_DONE "runner-smoke" wall_s=12.174879207
+===============================================================================
+[doctest] test cases:  1 |  1 passed | 0 failed | 13 skipped
+[doctest] assertions: 39 | 39 passed | 0 failed |
+[doctest] Status: SUCCESS!

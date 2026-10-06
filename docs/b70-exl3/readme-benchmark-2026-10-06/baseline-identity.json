@@ -1,0 +1,9 @@
+{
+  "python_source_commit": "ed47c5b84614f5654440355b12fa61b6eea8ee5e",
+  "recorded_files": {
+    "python-readme.txt": "39a6f067dfc17dfba0cae9c8515da8eb867ff398253edb94c88cfa0b5261e300",
+    "python-baseline-summary.json": "9dc0db6adfdedc8a955e2843b922d867944b7cb215c71212e79e71570e9b51f3",
+    "python-scenarios.json": "b58c43bb445f3dd4cae12eb7e088f331a13cd17e3b4842238079d5400224ccf1"
+  },
+  "power_cap_uw": 180000000
+}
