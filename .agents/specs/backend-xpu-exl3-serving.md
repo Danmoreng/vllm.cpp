@@ -2,13 +2,16 @@
 
 ## Now
 
-Row: `BACKEND-XPU-EXL3-SERVING`. State: `SPIKE`.
+Row: `BACKEND-XPU-EXL3-SERVING`. State: `ACTIVE`.
 Canonical issue: `ISSUE-GH-3331`.
 Base: `0fbd7c994fd40f4e62f9a75ad135146b00f0952c`.
-The first commit records this integration contract before importing product code.
-The next step composes the complete serving chain, then builds the public server.
-Composition, server execution, independent review and reference qualification
-remain separate gates. No gate is inferred from this specification.
+The committed specification precedes the scoped product import. Fresh CPU and
+XPU server builds and bounded HTTP/native checks have run. The CPU integration
+repair scopes the pinned FP16 policy to XPU and preserves ordinary backend loading.
+The rebuilt XPU endpoint and unchanged-native control checks pass. The next gates
+audit the contribution range and record the applicable upstream checks.
+Composition, independent review and reference qualification remain separate gates.
+Independent review is pending; this row is not merge-qualified.
 
 ## Scope
 
@@ -35,8 +38,12 @@ This spec governs its current integration, not that earlier implementation.
 
 The ordinary behavior pin remains the revision in `../upstream-sync.md`.
 Do not change that global pin or label a custom EXL3 plugin as stock vLLM.
-The existing local source checkout is at `e126687a9a`, behind the current pin.
-Reference gates needing the current pin remain pending until it is available.
+The ordinary current pin is `a7c23ac96d7806e7c7e7d862eadbce5a33529b94`.
+The resolved checkout's HEAD remains `e126687a9a`, but its full current-pin commit
+and source objects are available. Six platform, Qwen, scheduler, sampler and MTP
+source files were inspected through that immutable commit. This is source evidence;
+no current-pin runtime/model qualification was run. Those reference gates stay pending.
+The stock XPU platform's quantization list does not register EXL3.
 
 Read the matching vLLM platform, Qwen, scheduler, sampler and MTP paths.
 Use the model-author EXL3 format and explicitly pinned XPU donors where stock
@@ -145,6 +152,32 @@ No complete benchmark matrix is required or authorized by this integration scope
 Independent static/mutation review remains pending until a distinct reviewer runs it.
 A self-review cannot discharge that gate. Preserve the developer's single-agent setting.
 
+The new ACTIVE serving row grows the exact runnable population by one.
+Only `BACKEND-XPU-EXL3-SERVING` is added to `RUNNABLE_BASELINE` in
+`scripts/check-gate-commands.py`; no existing row or gate is removed.
+`tests/scripts/test_check_gate_commands.py` adds the exact-pin removal mutation
+and the runnable-spec assertion. The new test fails before the data entry exists
+and passes after it is added. Checker semantics and numerical bounds are unchanged.
+
+Current focused results on 2026-10-06:
+
+| Gate | Result / scope |
+|---|---|
+| CPU build and model-free tests | Library built;20 focused CTest entries pass, including the retained ordinary CPU EXL3 forward and explicit FP16 layer-policy test. |
+| XPU server build | Actual `server` target and model/test binaries link with oneAPI2026.1.1 and oneDNN3.13.0; shared cleanup uses the production core. |
+| HTTP target-only and MTP3 | Each bounded client run passes11 checks for usage/text, templates, streaming, C1–C4, cancellation/EOS/reuse, mode and drain. MTP draft counters advance. |
+| Native C1 P4096/O256 |256 IDs and113 non-timing cycles match unchanged development control;610 assertions per arm. Single timing pair is a continuity observation. |
+| Native lifecycle |483 assertions per arm; complete result JSON matches the control, including poisoned spare state and graph/eager/graph. |
+| Aligned native P32768/O64 prefix |363 assertions; warm position30400, identical cold/warm IDs at batch1600. |
+| HTTP prefix |4K diagnostic trace restores1600 tokens and cold/warm text matches; strict cached-token metric check fails because its counter remains zero. |
+| Host resource observations | Recorded workers have no OOM-kill increment or swap; native graph bytes return to zero on release. |
+| Baseline and automatic gates | Pristine and spec-stage preflight exit1, three failures and12 skips. Final applicable product preflight must be recorded independently. |
+| Reference and review | Current-pin runtime qualification and independent static/mutation review pending; inherited TV/KL and integrated state failures remain failed. |
+
+These results do not qualify stochastic equivalence, full logprob parity,16 admitted
+slots, the configured262K maximum, or the batch4096 prefix cases. README points to
+the explicit experimental envelope; no global pin, checker, tolerance or golden changed.
+
 ## Dependencies
 
 Checkpoint: `turboderp/Qwen3.8-27B-exl3` at
@@ -189,6 +222,6 @@ No exception can be recorded as a passing correctness or review gate.
 
 ## Owed
 
-Independent review, current-pin reference availability and known numerical/capacity
+Independent review, current-pin runtime qualification and known numerical/capacity
 qualification remain explicit gates. Existing owning rows retain their obligations.
 This integration does not silently close those reference or performance gaps.

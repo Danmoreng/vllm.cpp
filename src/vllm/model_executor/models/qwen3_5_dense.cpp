@@ -9,6 +9,7 @@
 #include "vllm/v1/worker/gpu/cudagraph_dispatch.h"
 #include "vllm/model_executor/models/model_registry.h"
 
+#include <cstdio>
 #include <cstdlib>
 #include <memory>
 #include <optional>
@@ -34,6 +35,30 @@ namespace {
 bool DenseDecodeGraphEnabled() {
   const char* value = std::getenv("VLLM_CPP_DENSE_DECODE_GRAPH");
   return value == nullptr || value[0] != '0';
+}
+
+bool Gptq4RouteTraceEnabled() {
+  const char* value = std::getenv("VLLM_CPP_GPTQ4_TRACE_ROUTE");
+  return value != nullptr && value[0] == '1' && value[1] == '\0';
+}
+
+void TraceGptq4Route(const ModelForwardInput& input, const char* selected,
+                     const char* reason, bool dense_graph, bool uniform_decode,
+                     bool gptq_opt_in, bool platform_graph, bool platform_opt_in,
+                     int max_graph_batch) {
+  std::fprintf(stderr,
+               "{\"event\":\"gptq4_route\",\"selected\":\"%s\","
+               "\"reason\":\"%s\",\"tokens\":%zu,\"requests\":%d,"
+               "\"pure_decode\":%d,\"uniform_query_len\":%lld,"
+               "\"dense_graph_enabled\":%d,\"uniform_decode\":%d,"
+               "\"gptq_graph_opt_in\":%d,\"platform_graph\":%d,"
+               "\"platform_requires_opt_in\":%d,\"max_graph_batch\":%d}\n",
+               selected, reason, input.token_ids.size(), input.num_reqs,
+               input.pure_decode ? 1 : 0,
+               static_cast<long long>(input.uniform_query_len),
+               dense_graph ? 1 : 0, uniform_decode ? 1 : 0,
+               gptq_opt_in ? 1 : 0, platform_graph ? 1 : 0,
+               platform_opt_in ? 1 : 0, max_graph_batch);
 }
 
 class Qwen3_5DenseLoadedModel final : public LoadedModel {
@@ -134,6 +159,21 @@ std::unique_ptr<LoadedModel> LoadQwen3_5DenseModel(
 
 void PrepareQwen3_5Dense(LoadedModel& model, const HfConfig& config,
                          vt::Queue& queue) {
+  auto& qwen = ModelAs<Qwen3_5DenseLoadedModel>(
+      model, "Qwen3_5ForConditionalGeneration");
+  if (qwen.weights().gptq4_checkpoint) {
+    VT_CHECK(queue.device.type == vt::DeviceType::kXPU,
+             "gptq4: packed resident requires XPU");
+    for (const Qwen3_5DenseLayerWeights& layer : qwen.weights().layers)
+      layer.gptq4.PrepareResident(queue);
+    std::fprintf(stderr,
+                 "[gptq4] target text path: XPU oneDNN W4A16, FP16 activations "
+                 "and BA, FP32 GDN recurrence, eager forward; %zu layers, "
+                 "%zu packed resident bytes\n",
+                 qwen.weights().layers.size(),
+                 qwen.weights().Gptq4ResidentBytes());
+    return;
+  }
   // MODEL-FP8-BLOCK-LINEAR (#1189 M4). FIRST, before any resident is built: the
   // dense forward READS `Fp8BlockWeight`s now, so what is refused here is a
   // device with no block-scaled GEMM rather than the weight itself. The
@@ -151,7 +191,6 @@ void PrepareQwen3_5Dense(LoadedModel& model, const HfConfig& config,
   // PERF-27B-LMHEAD-FP4 (issue #213): build the packed lm_head's resident HERE —
   // on CUDA before the runner captures a decode graph, elsewhere before the first
   // forward pays the dequant. Inert on every BF16/FP8/GGUF/tied checkpoint.
-  auto& qwen = ModelAs<Qwen3_5DenseLoadedModel>(model, "Qwen3_5ForConditionalGeneration");
   Qwen3_5DenseModel::PrepareLmHeadResident(qwen.weights(), queue);
   // PERF-27B-GDN-FP8-QKVZ: build the merged FP8 GDN [qkv;z] operand here, at
   // model prepare — before the first forward, so it can never allocate or copy
@@ -173,18 +212,6 @@ ForwardLogits ForwardQwen3_5Dense(LoadedModel& model,
   const detail::DeviceTokenIdsScope device_ids_scope(
       input.device_token_ids, static_cast<int64_t>(input.token_ids.size()));
 
-  // SPEC-MTP I5d-pre hidden-state tap. When the spec verify forward requests the
-  // drafter's [T,H] post-final-norm hidden (I5d), route to the EXISTING
-  // ForwardDeviceTap: byte-identical logits to ForwardDevice, plus the hidden
-  // moved into *input.hidden_tap. Null (every spec-off run) falls through to the
-  // unchanged path below, so the forward is byte-identical when spec is off.
-  if (input.hidden_tap != nullptr) {
-    return Qwen3_5DenseModel::ForwardDeviceTap(
-        input.token_ids, input.positions, input.attn_meta, input.gdn_meta,
-        input.attn_kv, input.gdn_state, weights, input.config, input.queue,
-        input.hidden_tap, input.logits_indices);
-  }
-
   // SPEC-DFLASH D1 (DF-AUX-TAPS): non-null routes to ForwardDeviceMultiTap
   // (byte-identical logits + the [T,H×taps] aux capture); null is byte-identical to
   // the path below. Mutually exclusive with hidden_tap.
@@ -195,11 +222,17 @@ ForwardLogits ForwardQwen3_5Dense(LoadedModel& model,
   // #2812/#1625 gate: the ARCH-SCOPED overload, so the evidence families
   // (Qwen3.5-GDN included) capture ambient while every other family keeps
   // the explicit opt-in — the same shape as the qwen3 driver's gate.
+  // GPTQ oneDNN command-graph support is qualified separately from the eager
+  // path. Keep eager as the default until the full target/state gates pass.
+  const char* gptq_graph = std::getenv("VT_GPTQ4_GRAPH");
+  const bool gptq_opt_in = gptq_graph != nullptr &&
+                           gptq_graph[0] == '1' && gptq_graph[1] == '\0';
+  const auto& platform = platforms::GetPlatform(input.queue.device.type);
   const bool graph_cuda =
-      platforms::GetPlatform(input.queue.device.type).support_static_graph_mode() &&
-      !platforms::GetPlatform(input.queue.device.type)
-           .static_graph_requires_opt_in(input.config.architectures);
-  constexpr int kMaxDecodeGraphBatch = 64;
+      (!weights.gptq4_checkpoint || gptq_opt_in) &&
+      platform.support_static_graph_mode() &&
+      !platform.static_graph_requires_opt_in(input.config.architectures);
+  const int kMaxDecodeGraphBatch = platform.max_static_graph_batch_size();
 
   // SPEC-DSPARK W8 (#442): mirror vLLM's UNIFORM-decode predicate instead of
   // "query_len == 1". Upstream's captured decode length is
@@ -258,15 +291,47 @@ ForwardLogits ForwardQwen3_5Dense(LoadedModel& model,
                  static_cast<long long>(input.uniform_query_len),
                  input.gather_logits ? 1 : 0, input.logits_indices.size(),
                  uniform_decode ? "graph" : "eager");
-  if (DenseDecodeGraphEnabled() && uniform_decode && graph_cuda &&
-      input.num_reqs <= kMaxDecodeGraphBatch) {
+  const bool dense_graph = DenseDecodeGraphEnabled();
+  const bool use_graph = dense_graph && uniform_decode && graph_cuda &&
+                         input.num_reqs <= kMaxDecodeGraphBatch;
+  if (weights.gptq4_checkpoint && Gptq4RouteTraceEnabled()) {
+    const bool platform_graph = platform.support_static_graph_mode();
+    const bool platform_opt_in =
+        platform.static_graph_requires_opt_in(input.config.architectures);
+    const char* reason = use_graph ? "eligible"
+        : !dense_graph ? "dense_graph_disabled"
+        : !uniform_decode ? "not_uniform_decode"
+        : !gptq_opt_in ? "gptq_graph_opt_in_missing"
+        : !platform_graph ? "platform_graph_disabled"
+        : platform_opt_in ? "platform_requires_opt_in"
+        : "batch_exceeds_graph_limit";
+    TraceGptq4Route(input, use_graph ? "graph" : "eager", reason,
+                    dense_graph, uniform_decode, gptq_opt_in, platform_graph,
+                    platform_opt_in, kMaxDecodeGraphBatch);
+  }
+  if (use_graph) {
     if (!qwen.decode_graph()) {
       qwen.decode_graph() = std::make_unique<Qwen3_5DenseDecodeGraph>(
           weights, input.config, input.queue, input.gdn_state_slots);
     }
     return qwen.decode_graph()->Step(
         input.token_ids, input.positions, input.attn_meta, input.gdn_meta,
-        input.attn_kv, input.gdn_state, input.aux_tap);
+        input.attn_kv, input.gdn_state, input.aux_tap, input.hidden_tap);
+  }
+
+  // Prefill, mixed batches and unsupported graph shapes retain the eager
+  // owning MTP tap. Supported decode shapes publish leased graph outputs above.
+  if (input.hidden_tap != nullptr) {
+    if (weights.gptq4_checkpoint && Gptq4RouteTraceEnabled())
+      std::fprintf(stderr,
+                   "{\"event\":\"gptq4_route\",\"selected\":\"eager\","
+                   "\"reason\":\"hidden_tap\",\"tokens\":%zu,"
+                   "\"requests\":%d}\n",
+                   input.token_ids.size(), input.num_reqs);
+    return Qwen3_5DenseModel::ForwardDeviceTap(
+        input.token_ids, input.positions, input.attn_meta, input.gdn_meta,
+        input.attn_kv, input.gdn_state, weights, input.config, input.queue,
+        input.hidden_tap, input.logits_indices);
   }
 
   // SPEC-DSPARK W8 (#442): the aux multi-tap forward is the DFlash/DSpark

@@ -16,45 +16,6 @@
 namespace vllm::v1 {
 namespace {
 
-// `_greedy_sample_draft` (spec_decode/speculator.py:276-280 @ 555967922, on
-// `DraftModelSpeculator` (:69), which AutoRegressiveSpeculator inherits it from,
-// and not on autoregressive/speculator.py): argmax over each named row of
-// a device [rows, vocab] logits buffer, downloaded once. Lowest-index tie-break,
-// matching our sampler's argmax. `rows` names which logits row each request
-// samples from: the prefill's last_token_indices, and the identity on a decode
-// step.
-std::vector<int32_t> GreedySampleDraft(const vllm::ForwardLogits& logits,
-                                       const std::vector<int64_t>& rows,
-                                       vt::Queue& queue) {
-  const int64_t vocab = logits.vocab;
-  const int64_t num_rows = logits.rows;
-  std::vector<float> host(static_cast<size_t>(num_rows) *
-                          static_cast<size_t>(vocab));
-  vt::Backend& backend = vt::GetBackend(queue.device.type);
-  backend.Copy(queue, host.data(), logits.device_tensor.data,
-               host.size() * sizeof(float));
-  backend.Synchronize(queue);
-
-  std::vector<int32_t> drafted(rows.size(), 0);
-  for (size_t r = 0; r < rows.size(); ++r) {
-    const int64_t row = rows[r];
-    VT_CHECK(row >= 0 && row < num_rows,
-             "MtpPropose: draft logits row out of range");
-    const float* logit_row =
-        host.data() + static_cast<size_t>(row) * static_cast<size_t>(vocab);
-    int32_t best_idx = 0;
-    float best_val = logit_row[0];
-    for (int64_t v = 1; v < vocab; ++v) {
-      if (logit_row[static_cast<size_t>(v)] > best_val) {
-        best_val = logit_row[static_cast<size_t>(v)];
-        best_idx = static_cast<int32_t>(v);
-      }
-    }
-    drafted[r] = best_idx;
-  }
-  return drafted;
-}
-
 // What `_prefill` (:335-371) leaves behind for the decode steps: the step-0
 // draft token, the draft model's hidden state at each request's
 // last_token_indices row (:367-371), and that row's POSITION (:346), which
@@ -106,17 +67,19 @@ PrefillOutcome ProposePrefill(
   // ── The one paged draft forward (I5c) + shared lm_head. ──────────────────────
   vllm::Qwen3_5MTPHiddenStates hidden = draft.ForwardPaged(
       spi.input_ids, positions32, target_hidden, target_attn_meta, draft_kv, queue);
-  vllm::ForwardLogits logits = draft.ComputeLogits(hidden.tensor, queue);
-  VT_CHECK(logits.on_device() && logits.rows == T,
-           "MtpProposePrefill: unexpected draft logits shape");
-
   PrefillOutcome out;
   // ── Greedy draft pick over each request's last (sampled) row
   // (spec_decode/speculator.py:276-280). ──────────────────────────────────────
   out.sampled_rows.assign(
       spi.last_token_indices.begin(),
       spi.last_token_indices.begin() + static_cast<size_t>(num_reqs));
-  out.draft_tokens = GreedySampleDraft(logits, out.sampled_rows, queue);
+  // Keep all forward rows for draft KV/feedback, but apply the head only to the
+  // sampled rows, as the pinned producer does before sample_draft.
+  const auto selected = draft.GatherHiddenRows(hidden.tensor, out.sampled_rows, queue);
+  const auto logits = draft.ComputeLogits(selected.tensor, queue);
+  VT_CHECK(logits.on_device() && logits.rows == num_reqs,
+           "MtpProposePrefill: unexpected selected draft logits shape");
+  out.draft_tokens = draft.SelectDraftTokens(logits, queue);
 
   // :346 — the positions of those same rows. The decode half advances from them.
   // The k=1 caller drops them, and dropping a host vector costs nothing.
@@ -244,12 +207,8 @@ MtpDraftProposal MtpProposeDrafts(
   // not necessarily run when this line is reached; releasing the source buffer
   // returns it to the device pool, from which the very next allocation inside
   // ForwardPaged could take those bytes and overwrite them before the copies
-  // read them. It is one verify-sized [T,H] bf16 activation held across k-1
+  // read them. It is one verify-sized [T,H] draft activation held across k-1
   // draft steps, which is small beside the draft KV it is protecting.
-
-  // A decode step samples from row r for request r: one query token per request.
-  std::vector<int64_t> decode_rows(static_cast<size_t>(num_reqs));
-  for (int r = 0; r < num_reqs; ++r) decode_rows[static_cast<size_t>(r)] = r;
 
   // :266-272 `_multi_step_decode` — `for step in range(1, num_speculative_steps)`.
   for (int step = 1; step < k; ++step) {
@@ -272,14 +231,13 @@ MtpDraftProposal MtpProposeDrafts(
     vllm::ForwardLogits logits = draft.ComputeLogits(hidden.tensor, queue);
     VT_CHECK(logits.on_device() && logits.rows == num_reqs,
              "MtpProposeDrafts: unexpected draft decode logits shape");
-    const std::vector<int32_t> drafted =
-        GreedySampleDraft(logits, decode_rows, queue);
+    const std::vector<int32_t> drafted = draft.SelectDraftTokens(logits, queue);
 
     // :460-471 `update_draft_inputs` — record the step and feed it forward.
     const bool more =
         update_draft_inputs(drafted, step, k, drafts, inputs, max_model_len);
     // Releasing the PREVIOUS carry is safe here, unlike the prefill handoff
-    // above: GreedySampleDraft synchronised the queue two lines up, so the
+    // above: SelectDraftTokens synchronised the queue two lines up, so the
     // forward that read it has completed and its storage cannot be handed to a
     // later allocation while still in use.
     carry = std::move(hidden);
