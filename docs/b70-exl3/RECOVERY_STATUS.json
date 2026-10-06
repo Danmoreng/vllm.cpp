@@ -6665,7 +6665,7 @@
     "F1": "stopped_at_bounded_precondition_low_measured_producer_cost_no_fusion_variant",
     "F2": "completed_first_event_candidate_rejected_second_direct_candidate_retained_prefill_memory_default_model_only",
     "F3": "completed_bounded_actual_shape_and_specific_FAoutM4_investigation_stop_without_kernel_variant",
-    "U6": "primary_3plus3_M0_one_pair_C4_initial_one_pair_complete_original_C4_overlap_unmet_remaining_long_mixed_life_prefix_composition_handoff",
+    "U6": "primary_3plus3_M0_C4_initial_and_long_mixed_fresh_pairs_complete_original_multi_request_overlap_unmet_remaining_life_prefix_composition_handoff",
     "receipt": {
       "artifact": "upstream-u1-integration-v1/receipt-v1.json",
       "sha256": "c0f79e400d9b5dbf62a63f8367bda529308967b608e0ec72b838d178ca8a17af",
@@ -6806,6 +6806,12 @@
       "artifact": "upstream-u6-final-matrix-v1/m0-c4-receipt-v1.json",
       "sha256": "a59a513bcd1532b7dd45186e323df0da62f15534c7327716c93960fde1f04aac",
       "bytes": 7474
+    },
+    "U6_long_mixed_tests": "Six fresh unprofiled sequential engines, one per arm per fixedcase, same primary frozen binary/source/defaultdirectprepare/experimentalverifier1/180W/24GiBnoswapCPU2/page1600/180blocks/O32warmup-prefixreset, actualexit0 all. Older originals share current pinned identities/workload/resources but no independent oldpower observation found; fresh originals used, not relabeled oldscores. C1P32768/O256 native633assertions, all256IDs/all125nontimecycles exact final historicalnative. Decode40.329931vs45.607179TPS(-11.5711%);TTFT21.093964vs18.457269s;E2E27.416956vs24.048544s(+14.0067%). Native/currentoriginal first73; fresh/oldoriginal first51, one trial not newkernelgain/primarygapreplacement. C4P32768/O256each native2447assertions, all1024IDs/all187nontimecycles exact, E2E122.240472vs95.675042s(+27.7663%), nativecommondecode86.307817TPS; original no commonfourwayinterval/all424specscheduleroutputsdrafts1. Mixed4K/32KO256each native1216assertions, all512IDs/all135nontimecycles exact, E2E35.992697vs30.534883s(+17.8740%), nativecommondecode64.992941TPS; original no commontwo-wayinterval/all213specscheduleroutputsdrafts1, botholdoriginal sequences exact. Allrequests crossarmIDs differ; noC4/mixedGPUparity or extra repeats. Hostpeaks<6.7GB/noSwapOOM. HostC4analyzerv4 actualexit1 indexes unavailable overlap; v5 handlesNone, retains allassertions andpass, noGPUrerun; versions/failure preserved. Envelopev1 incorrectly described observedonlyUI postworker asduringfirstworker; correctedv2 retainsv1, firstprelaunchpower/service observedinconversation, remainingfourworkers beforeafterfiles. Numerical/reference/defaultqualificationfailedopen; primary3plus3gap19.1752% unchanged. Lifecycle/prefix/composition/handoff remain.",
+    "U6_long_mixed_receipt": {
+      "artifact": "upstream-u6-final-matrix-v1/long-mixed-receipt-v1.json",
+      "sha256": "b48f49bcda5653a0ea13ee132d5b1c8ea38246f714841a7ed14b2dff37b65ee0",
+      "bytes": 58287
     }
   }
 }
