@@ -41,6 +41,11 @@ ctest --test-dir build-xpu --output-on-failure \
 ```
 
 `VLLM_CPP_XPU` defaults to `OFF`; CPU builds need no SYCL installation.
+Standalone EXL3/GPTQ benchmark probes additionally require
+`VLLM_CPP_XPU_DIAGNOSTICS=ON` (default OFF); their GPTQ components require
+oneDNN. This isolates probe/benchmark targets without changing inference
+operators or the focused unit tests. For the portable current-model recipe
+and capability/diagnostic boundaries, see [EXL3_XPU.md](EXL3_XPU.md).
 The no-GPU check masks Level Zero devices with `ONEAPI_DEVICE_SELECTOR=opencl:cpu`.
 The backend check uses an 8 MiB process allocation budget and a tiny F32 matrix
 kernel, not model weights or a long benchmark.

@@ -4379,7 +4379,7 @@ vllm_cpp_add_test(test_qwen3_5_dense_load_residency
 
 vllm_cpp_add_test(test_gptq4_weight
   vllm/models/test_gptq4_weight.cpp)
-if(VLLM_CPP_XPU AND VLLM_CPP_XPU_ONEDNN_ENABLED)
+if(VLLM_CPP_XPU AND VLLM_CPP_XPU_ONEDNN_ENABLED AND VLLM_CPP_XPU_DIAGNOSTICS)
   execute_process(COMMAND git -c safe.directory=${CMAKE_SOURCE_DIR} rev-parse HEAD
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
     OUTPUT_VARIABLE GPTQ4_BENCH_BASE_COMMIT OUTPUT_STRIP_TRAILING_WHITESPACE)
