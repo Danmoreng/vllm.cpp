@@ -593,3 +593,47 @@ recovery/upstream-u6-final-matrix-v1/m0-c4-receipt-v1.json,7474 bytes,SHA256
 a59a513bcd1532b7dd45186e323df0da62f15534c7327716c93960fde1f04aac.
 Continue long/mixed, lifecycle/prefix, remaining composition and handoff;
 Q1/default-reference qualification remains failed/open.
+
+U6 long/mixed is now complete: one fresh unprofiled native and original engine
+for each fixed case, all six actual exits zero. The primary frozen binary and
+source are unchanged; default direct preparation, explicit experimental
+verifier, page1600/180blocks, 180W, 24GiB/no-swap/two CPUs and O32 warmup followed
+by prefix reset remain the launch contract. Startup is excluded from scores.
+Older original controls have matching pinned identities/workload/resources,
+but no independent power observation was found; their scores are not reused.
+
+| Fixed MTP3 case | Native/original request wall seconds | Native/original common decode tokens/s |
+|---|---:|---:|
+| C1 P32768/O256 | 27.416956 / 24.048544 | 40.329931 / 45.607179 |
+| C4 P32768/O256 each | 122.240472 / 95.675042 | 86.307817 / unavailable |
+| Staggered P4096/P32768, O256 each | 35.992697 / 30.534883 | 64.992941 / unavailable |
+
+C1 native decode is11.5711% lower, request wall14.0067% higher, and TTFT
+21.093964/18.457269 seconds. This is one autonomous trial, not a new kernel
+gain or same-operand comparison: current original IDs differ from its older
+control at51, and native/current original at73. All three native cases retain
+every historical final-control ID and non-time cycle field:256/125,
+1024/187 and512/135 IDs/cycles, with633/2447/1216 passing assertions.
+
+Original C4 and mixed have no common decode interval; all424/213 speculative
+scheduler outputs count one actual speculative request. Their request-wall
+differences (+27.7663%/+17.8740%) are different scheduling/continuation
+comparisons, not multi-request GPU throughput parity. Native/current original
+IDs differ in every request. The mixed original retains both older control
+sequences; C1/C4 original variations remain visible. No extra repetitions or
+qualification/default-reference promotion follows these results.
+
+All worker host cgroup peaks are below6.7GB, with zero swap/OOM events.
+The first host C4 analyzer fails by indexing an unavailable overlap as a
+dictionary; v5 preserves the absent interval and passes unchanged full-data
+checks. The failed v4 is retained, and no GPU run is repeated. Initial envelope
+v1 incorrectly described a post-worker observation as during the worker;
+v2 corrects that scope while preserving the original file. Remaining four
+workers have explicit before/after power/service/container observations.
+
+Commands, complete outputs, resources, analysis versions and identities are in
+recovery/upstream-u6-final-matrix-v1/long-mixed-receipt-v1.json,58287 bytes,SHA256
+b48f49bcda5653a0ea13ee132d5b1c8ea38246f714841a7ed14b2dff37b65ee0.
+Continue lifecycle/prefix, remaining contribution composition and final handoff.
+Q1/default-reference qualification remains failed/open; the three-repeat
+primary C1 decode gap remains19.1752%.
