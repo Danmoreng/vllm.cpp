@@ -1,0 +1,185 @@
+B70 EXL3 UPSTREAM READINESS / PERFORMANCE REVIEW — 2026-10-06
+Bounded implementation/measurement and local composition proofs are complete.
+Archive identities/verification are recorded separately after the report commit.
+
+Scope: local execution of B70_EXL3_UPSTREAM_READINESS_AND_PERFORMANCE_PLAN_3803ad4_EN.md.
+The old P0–P7 work period is closed. This is not a restart or a parity declaration.
+No upstream branch, issue, PR, maintainer contact, CI/policy waiver or publication was created.
+
+CODE / RUNTIME
+
+Preserved baseline: 3803ad4a6b9974f4afd1b6c9ad3e333d5e9b6ff8.
+Upstream base: e67a071a649814e102a91145a0b1b424884f16da.
+Untuned integration commit: 3dfa3c3193c5950bf284229441e81f26b99d499c.
+Product inputs match pushed checkpoint3307247ac; the final archive MANIFEST identifies
+its exact packagedHEAD. Later report/status commits do not change product arithmetic.
+Final U6 source: fd40e0b920d815102508dcb442a3b75e8ee50176.
+U6 native executable SHA256: c0ca1870dac2707889e02e648bd806d33d8b26a08b4fa99d8747ac21a9461ae3.
+Later changes isolate development probes and public documentation; all106 selected product
+headers/sources are byte-exact to the current development HEAD. No new arithmetic profile.
+
+Model: turboderp/Qwen3.8-27B-exl3, revision113cf7ab958054860e43fb7f3063b1af19171095.
+4-bpw body, full248320-token6-bpw target head,65536-token compact draft subset, MTP3.
+Rotated EXL3 W8A8 for large projections; FP16 materialization, FP32 recurrent state, FP8 KV.
+Page1600; configured context262144 is not a full262K-generation proof.
+Builder image: sha256:ae6950731b3c031f812a95c0eb615a572239426440bf67fd1b3c9c9cbfce9eca.
+Original image: sha256:8d0e1dbe1e6a3a31e79b5ddcc1c050589c08721360af9374b9acd01236f97918.
+icpx2026.1.1 (20260724), IGC2.41.5, driver1.17.39758+10, Arc Pro B70 ID57891.
+Native dependency source pins and licenses are in NOTICE and docs/EXL3_XPU.md.
+A source pin does not establish the provenance of an independently supplied wheel/library.
+
+PLAN EXECUTION
+
+U0: portable CLI/env/cwd artifact resolution, content identity and malformed/missing/corrupt
+input outcomes delivered. Optional external missing data skips77; required data fails.
+U1: upstream integrated separately; C1P4096/O256 IDs/cycles and native lifecycle regression
+checks pass. CPU library and supported Vulkan/CUDA host surfaces were checked. CUDA device
+build/link/runtime, HIP and other hardware remain unverified. Earlier GCC12 failure retained.
+U2: C++20 shared-cache repair; accurate optional oneDNN capability and legacy alias; hermetic
+SmallM vs separate external admission; notices/source provenance; clean CPU source build;
+development probes defaultOFF; public recipe/runtime-guard symbol index; selected contribution.
+Q1: bounded integrated C1Q4 and C4->C2->C1 full-state comparisons performed and FAIL.
+The experimental verifier remains opt-in. No default-reference replacement or gate relaxation.
+F1: bounded actual producer/recurrence measurement stopped before fusion: eager producer
+cost was only0.397%/0.259% of measured C1/C4 cycle time. Not a graph-internal upper bound.
+F2: event-owned eager reuse implemented/tested/measured, then rejected. Completion fences
+remain. Direct model-owned checked preparation retained separately for memory/prefill benefit.
+F3: actual executed C4-long/mixed shapes and the specified FA-outM4 anomaly investigated.
+No reference-attention/ragged pure-decode calls in those traces; new M4 donor/native cores
+within overlapping timing ranges. No kernel variant, general tile search or further retry.
+U6: fresh primary3+3, target-only sentinel, initialC4, long/mixed pairs, lifecycle and prefix
+matrix complete. Original multi-request overlap gate unmet; no extraC4 repetitions.
+
+CURRENT PERFORMANCE — UNPROFILED
+
+Primary C1P4096/O1024/MTP3,3 fresh native and3 fresh original workers:
+                         Native median       Original median       Difference
+Emitted decode tok/s     51.706602            63.973659             -19.1752%
+TTFT seconds              2.295125             1.950013             +17.6980%
+Request elapsed seconds  22.079860            17.940983             +23.0694%
+
+Original runs55.7053/64.0197/63.9737tok/s all retained. Native1024IDs/all371 non-time
+cycles repeat exactly; accepted656/proposed1104. Cross-engine continuations differ;
+original repetitions can differ too. This is autonomous serving, not same-trajectory
+kernel speedup or evidence that either implementation is more accurate.
+TTFT includes work through first output, not pure prefill kernel time.
+
+Other fresh one-pair cases (not three-repeat medians):
+Case                         Native decode / original       Native / original elapsed
+C1P4096/O256/MTP0             26.3201 /29.4640tok/s          11.9274 /10.5641s
+C1P32768/O256/MTP3            40.3299 /45.6072tok/s          27.4170 /24.0485s
+C4P4096/O1024each             130.5032 native commonTPS      43.9539 /76.2204s
+C4P32768/O256each              86.3078 native commonTPS     122.2405 /95.6750s
+Mixed4K/32K,O256each           64.9929 native commonTPS      35.9927 /30.5349s
+
+Original C4/mixed scheduler observations execute one speculative request per result and
+have no all-request common decode interval. Its elapsed serving-policy result is real;
+matched concurrent GPU throughput is unavailable, not a sum of per-request rates.
+Shorter single-run long-context gap is not a new optimization or replacement primary score.
+
+Scores use fixed180W, one sequential GPU worker,24GiB/no-swap/CPU2, O32 actual request
+warmup then cold-prefix reset, startup excluded, profileOFF. Matched compiled control uses
+maxseq4/batch1600/180blocks, not the unrelated full production maxseq16/batch4096 profile.
+Original frontend batches are not GPU cycles; MTP chunks are not individual-token arrivals.
+Native tracked allocation and original Torch allocation/reservation have different scopes.
+
+RETAINED PERFORMANCE CHANGE
+
+Direct checked activation preparation is model-owned, certificate/budget guarded,
+K/128<=144, at most64MiB preparation; panel1024/oneDNN version/FP16 boundaries unchanged.
+The public explicit-workspace contract still populates scratch and preserves validation
+before mutation. No lifetime fence removed; no host busy-wait introduced.
+Real groupedQKVZ/GateUp M129/M896/M1600 xq/scales/INT8 panels/F16 outputs exact.
+Native baseline/direct full48-layer GDN state and autonomous IDs/non-time cycles exact.
+Paired3+3 native median TTFT2325.617->2293.791ms (-1.3685%); decode change-0.1208%
+is noise, not a gain. Peak device allocation saves18,364,416B; workspace148,387,904->
+130,023,488B. This is useful modest prefill/memory improvement, not parity.
+
+QUALIFICATION / OPEN GATES
+
+Default P128/D64: actual exit1,808assertions/804pass/4fail; D27TV0.0305754/KL0.00212581,
+D29TV0.212752/KL0.163144. Complete rows match the separately controlled arithmetic
+reference; that label is not a replacement default golden.
+Integrated C1: actual exit1,8237assertions/7566pass/671fail;931 full state arrays retained.
+FirstQ4 inputs and own prefill seeds match; afterQ4 state diverges. Layer0 attribution
+found differing Q/K-normalization materialization/reduction boundaries, not a sole-cause
+or accuracy-ranking proof. Its replay retains the same671 failures.
+C4->C2->C1: actual exit1,117366assertions/114068pass/3298fail;3316 initialized state/KV
+arrays compared,18 exact/3298 different. Native accepted-token continuity passes;
+that is distinct from original state equality. No original-state injection into inference.
+Two prior held-out eager/no-MTP P128/D1 full-state checks pass; not integratedMTP/C4 proof.
+Native lifecycle483assertions/fullJSON exact; prefix32K/O64 cold-repeat64IDs exact within
+each implementation,30400cached tokens. Native/original prefix sequences differ; native
+functional driver and original frontend do not provide comparable prefix timing.
+Ordinary verifier admission, integrated reference-state parity, broad RNG/sampling and
+full262K generation remain unqualified. No claim that the complete backend is production-
+qualified; no inference-reference tensors or whole-model dense expansion.
+
+CONTRIBUTION / REPRODUCTION
+
+The public selection is a local review composition, not one giant published PR or an
+approved three-PR split. It excludes local AGENTS changes, private reports/plans/evidence,
+standalone probes and unrelated GPTQ benchmark/capture orchestration. Shared GPTQ/denseF16
+oneDNN compatibility remains because current model interfaces/operators depend on it;
+GPTQ is diagnostic, not a qualified engine. All106 current product files are retained.
+Upstream AGENTS/CONTRIBUTING/workflows and their actual protocol/AI-attribution rules are
+preserved. No historical trailers fabricated; no checker/CI rule edited or waived.
+There is no current900-line hard limit; dependency cuts need later maintainer discussion,
+which is outside this authorized local work period.
+
+259 selected paths:106 src/include,80 tests,27 third-party,35 reference tools,6 other tools,
+5 build/public-doc/notice paths. Minimal5path admission patch is an ALTERNATIVE standalone
+entry; do not apply it before the combined full patch. Target/MTP/graph functionality shares
+Qwen model/worker/ops interfaces. The combined build proves reachability; it does not prove
+those three conceptual subsets are independently buildable public PRs.
+
+Combined final patch SHA256:48393ffe8ba34a55eea9eb707a5fe58a0c972a4b5e65f276269cca538e7acee7.
+Actual gitapply--check/apply passes; all259 resulting files byte-exact to the declared snapshot.
+First export mishandled two no-final-newline donor headers; original failed-byte comparison
+and corrected export retained. Current public links resolve; selected payloads contain no
+personal home literal/binaryNUL/narrow known credential-pattern matches. Not a full history
+or credential audit. Original measured evidence was not rewritten to remove paths.
+Fresh composed CPU configuration0, two host targets6steps/2focusedCTest pass:
+14cacheassertions and5 generated artifact methods. Full intended CPU library builds
+614steps/583.208s, GCC16.2.1, no model/oneAPI/personal.env/GPU enabled. Not a full suite.
+Fresh native source build639steps/1102.290s, actualexit0. New executable31,150,592B,
+SHA256950872812a9eddda94147e0b6b51ff307b761f0fe7d285acaf2a0b3434264eba.
+Unprofiled native P4096/O32/O32warmup-prefixreset smoke130/130 assertions, actualexit0.
+All32IDs/all17non-timecycles and full payload except clocks/hostRSS exact to the F2
+default control; devicepeak30,307,785,027B and releasedgraphbytes0. No swap/OOM.
+Host CPU-library compilation overlaps this functional smoke, so no new timing score
+is inferred. Main performance numbers retain the separate frozen U6 binary identity.
+Composition proof receipt: upstream-u2-feature-composition-v1/receipt-v1.json,
+21,390B,SHA256efa41d81696bef40f6b4ff6e609354a2685840f042986178044c748171000c3f.
+All82 indexed payload identities rehashed when frozen; all26 prior plan receipts exact.
+Combined patch inventory:259paths/58,348added/809removed lines. This is an inventory,
+not a giant upstream PR or a numerical size-policy claim.
+
+Command files, actual exits/logs, workload/route/source/dependency identities, SHA-indexed
+receipts and full request traces accompany the final archive. Reproduction starts with
+code/docs/EXL3_XPU.md and the explicit command arguments, not a personal Docker tag.
+Large external model weights, built engine ELF binaries, full state/logit tensor payloads
+and raw long profiles
+are omitted with their identities. Pro cannot independently recompare omitted arrays from
+this archive alone. The archive is private full-source review material; its public selected
+patch has a distinct policy/evidence boundary. The post-commit archive manifest and
+external receipt record actual ZIP verification and SHA256 without a self-referential
+commit/archive hash. Checked-in source/test/vendor assets remain in the full code tree.
+
+Tokenizer PR3363 was re-read during the final audit (not retroactively labeled an
+integration-time check). It remains open and was not cherry-picked. The proposed
+Tokenizer::FromHfJson sibling-name API lookup is absent; current InputProcessor
+already has its own tokenizer_eos_token fallback and generation_config ID union.
+This27B checkpoint supplies text_config EOS248044 plus generation EOS248046/248044,
+unlike the PR9B missing-ID example. No generic-checkpoint qualification inferred.
+Read-only source: https://github.com/mudler/vllm.cpp/pull/3363.
+
+NEXT PRO REVIEW
+
+Please plan against the current source and measured19.1752% primary decode gap,
+separately from TTFT and the numerical/reference decision. Keep the remaining
+experimental/default gates visible. Investigate actual executed target GPU work
+with bounded current measurements; the ragged pure-decode bottleneck and oldFA-outM4
+gap were not demonstrated in the new traces. Preserve current F16/state/ownership
+boundaries and use same-input complete-operation/request checks for any new candidate.
+This work period adds no further optimization after its stated F1/F2/F3 stop rules.
