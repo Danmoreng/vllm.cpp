@@ -1,0 +1,167 @@
+{
+  "schema": "b70-exl3-worker-resource-v1",
+  "command": [
+    "/receipts/test_xpu_exl3_mtp-v1",
+    "--test-case=*README: complete serving matrix*"
+  ],
+  "worker_pid": 7,
+  "worker_executable": "/receipts/test_xpu_exl3_mtp-v1",
+  "worker_executable_sha256": "9311dddc0500eae5cb7e8b74a3c16d172169a567be14d53099081f1a980bbe8b",
+  "worker_exit_code": -15,
+  "worker_wall_s": 435.91646773599496,
+  "cgroup_root": "/sys/fs/cgroup",
+  "cgroup_membership": "0::/",
+  "before": {
+    "memory.current": {
+      "raw": "9170944"
+    },
+    "memory.peak": {
+      "raw": "9617408"
+    },
+    "memory.max": {
+      "raw": "25769803776"
+    },
+    "memory.high": {
+      "raw": "max"
+    },
+    "memory.events": {
+      "raw": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0",
+      "counters": {
+        "low": 0,
+        "high": 0,
+        "max": 0,
+        "oom": 0,
+        "oom_kill": 0,
+        "oom_group_kill": 0,
+        "sock_throttled": 0
+      }
+    },
+    "memory.swap.current": {
+      "raw": "0"
+    },
+    "memory.swap.peak": {
+      "raw": "0"
+    },
+    "memory.swap.max": {
+      "raw": "0"
+    },
+    "memory.swap.events": {
+      "raw": "high 0\nmax 0\nfail 0",
+      "counters": {
+        "high": 0,
+        "max": 0,
+        "fail": 0
+      }
+    },
+    "cpu.max": {
+      "raw": "200000 100000"
+    },
+    "cpu.stat": {
+      "raw": "usage_usec 44972\nuser_usec 28254\nsystem_usec 16717\nnice_usec 0\ncore_sched.force_idle_usec 0\nnr_periods 0\nnr_throttled 0\nthrottled_usec 0\nnr_bursts 0\nburst_usec 0",
+      "counters": {
+        "usage_usec": 44972,
+        "user_usec": 28254,
+        "system_usec": 16717,
+        "nice_usec": 0,
+        "core_sched.force_idle_usec": 0,
+        "nr_periods": 0,
+        "nr_throttled": 0,
+        "throttled_usec": 0,
+        "nr_bursts": 0,
+        "burst_usec": 0
+      }
+    }
+  },
+  "after": {
+    "memory.current": {
+      "raw": "55554048"
+    },
+    "memory.peak": {
+      "raw": "4114497536"
+    },
+    "memory.max": {
+      "raw": "25769803776"
+    },
+    "memory.high": {
+      "raw": "max"
+    },
+    "memory.events": {
+      "raw": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0",
+      "counters": {
+        "low": 0,
+        "high": 0,
+        "max": 0,
+        "oom": 0,
+        "oom_kill": 0,
+        "oom_group_kill": 0,
+        "sock_throttled": 0
+      }
+    },
+    "memory.swap.current": {
+      "raw": "0"
+    },
+    "memory.swap.peak": {
+      "raw": "0"
+    },
+    "memory.swap.max": {
+      "raw": "0"
+    },
+    "memory.swap.events": {
+      "raw": "high 0\nmax 0\nfail 0",
+      "counters": {
+        "high": 0,
+        "max": 0,
+        "fail": 0
+      }
+    },
+    "cpu.max": {
+      "raw": "200000 100000"
+    },
+    "cpu.stat": {
+      "raw": "usage_usec 432219402\nuser_usec 412169341\nsystem_usec 20050060\nnice_usec 0\ncore_sched.force_idle_usec 0\nnr_periods 4336\nnr_throttled 0\nthrottled_usec 0\nnr_bursts 0\nburst_usec 0",
+      "counters": {
+        "usage_usec": 432219402,
+        "user_usec": 412169341,
+        "system_usec": 20050060,
+        "nice_usec": 0,
+        "core_sched.force_idle_usec": 0,
+        "nr_periods": 4336,
+        "nr_throttled": 0,
+        "throttled_usec": 0,
+        "nr_bursts": 0,
+        "burst_usec": 0
+      }
+    }
+  },
+  "counter_deltas": {
+    "memory.events": {
+      "low": 0,
+      "high": 0,
+      "max": 0,
+      "oom": 0,
+      "oom_kill": 0,
+      "oom_group_kill": 0,
+      "sock_throttled": 0
+    },
+    "memory.swap.events": {
+      "high": 0,
+      "max": 0,
+      "fail": 0
+    },
+    "cpu.stat": {
+      "usage_usec": 432174430,
+      "user_usec": 412141087,
+      "system_usec": 20033343,
+      "nice_usec": 0,
+      "core_sched.force_idle_usec": 0,
+      "nr_periods": 4336,
+      "nr_throttled": 0,
+      "throttled_usec": 0,
+      "nr_bursts": 0,
+      "burst_usec": 0
+    }
+  },
+  "child_major_fault_delta": 20,
+  "children_peak_rss_bytes": 12013932544,
+  "scope": "One worker; cgroup values include this wrapper and any other members. Peaks are lifetime cgroup/process peaks, not interval-exclusive. Missing counters are unavailable. Wall time includes worker startup; this is not a warmed serving score. No inference arithmetic is changed."
+}

@@ -1,0 +1,131 @@
+{
+  "scope": "All21 matching XPU/backend/platform objects byte-identical to completed clean composition build. Benchmark adds only host harness code.",
+  "objects": [
+    {
+      "path": "CMakeFiles/vllm.dir/src/vllm/platforms/xpu.cpp.o",
+      "development_sha256": "cac24675a8f9e2cc5b649a1aec62bf30c63705b78b96c3d30de5c08136abdf89",
+      "clean_composition_sha256": "cac24675a8f9e2cc5b649a1aec62bf30c63705b78b96c3d30de5c08136abdf89",
+      "equal": true
+    },
+    {
+      "path": "CMakeFiles/vllm_xpu.dir/src/vt/xpu/xpu_attention.cpp.o",
+      "development_sha256": "6cd66b34cf6522395df0b7df0c9d5fe8e609dcbe58e6b1bee3f6cc825b6f5039",
+      "clean_composition_sha256": "6cd66b34cf6522395df0b7df0c9d5fe8e609dcbe58e6b1bee3f6cc825b6f5039",
+      "equal": true
+    },
+    {
+      "path": "CMakeFiles/vllm_xpu.dir/src/vt/xpu/xpu_attention_prefill.cpp.o",
+      "development_sha256": "8cd37bb2971d05c39b5c4e86fed931ea9226119612b7c9122bc5ee32a4301d42",
+      "clean_composition_sha256": "8cd37bb2971d05c39b5c4e86fed931ea9226119612b7c9122bc5ee32a4301d42",
+      "equal": true
+    },
+    {
+      "path": "CMakeFiles/vllm_xpu.dir/src/vt/xpu/xpu_attention_split.cpp.o",
+      "development_sha256": "49ccb02e24d1c33805ead86de7bb1b7a58147460e3ad6096571483865accbea5",
+      "clean_composition_sha256": "49ccb02e24d1c33805ead86de7bb1b7a58147460e3ad6096571483865accbea5",
+      "equal": true
+    },
+    {
+      "path": "CMakeFiles/vllm_xpu.dir/src/vt/xpu/xpu_elementwise.cpp.o",
+      "development_sha256": "7d4446e5ec013171e3298ea5ab1b1ea158014da494de3af0fe023c0b2361743b",
+      "clean_composition_sha256": "7d4446e5ec013171e3298ea5ab1b1ea158014da494de3af0fe023c0b2361743b",
+      "equal": true
+    },
+    {
+      "path": "CMakeFiles/vllm_xpu.dir/src/vt/xpu/xpu_exl3.cpp.o",
+      "development_sha256": "33125756d77e265f421cd52b2a760664ab4ae6bc26a2b3720773a025e25a5df5",
+      "clean_composition_sha256": "33125756d77e265f421cd52b2a760664ab4ae6bc26a2b3720773a025e25a5df5",
+      "equal": true
+    },
+    {
+      "path": "CMakeFiles/vllm_xpu.dir/src/vt/xpu/xpu_exl3_attention.cpp.o",
+      "development_sha256": "f659e816d43e6bd406cca919a1b439c0a60ea9031fc775cafd5fc0ba5eb0284f",
+      "clean_composition_sha256": "f659e816d43e6bd406cca919a1b439c0a60ea9031fc775cafd5fc0ba5eb0284f",
+      "equal": true
+    },
+    {
+      "path": "CMakeFiles/vllm_xpu.dir/src/vt/xpu/xpu_exl3_prefill.cpp.o",
+      "development_sha256": "275091c596d684490323eee82e9b5a06dbf391c4904259746598ff12287dc85d",
+      "clean_composition_sha256": "275091c596d684490323eee82e9b5a06dbf391c4904259746598ff12287dc85d",
+      "equal": true
+    },
+    {
+      "path": "CMakeFiles/vllm_xpu.dir/src/vt/xpu/xpu_exl3_smallm.cpp.o",
+      "development_sha256": "24e956169e588aac7020090c9516b2d3b82277f27da2216e4110db990012f039",
+      "clean_composition_sha256": "24e956169e588aac7020090c9516b2d3b82277f27da2216e4110db990012f039",
+      "equal": true
+    },
+    {
+      "path": "CMakeFiles/vllm_xpu.dir/src/vt/xpu/xpu_exl3_w8a8.cpp.o",
+      "development_sha256": "fdb48d0addd19b8977ad236708885c3282c169b2b29558b0a2956aa7a6633e54",
+      "clean_composition_sha256": "fdb48d0addd19b8977ad236708885c3282c169b2b29558b0a2956aa7a6633e54",
+      "equal": true
+    },
+    {
+      "path": "CMakeFiles/vllm_xpu.dir/src/vt/xpu/xpu_gdn.cpp.o",
+      "development_sha256": "dd9200946fc1d8ef94013fd8eb561e4b37ca6dfc3b6088f5d3a2890bc1ec90f4",
+      "clean_composition_sha256": "dd9200946fc1d8ef94013fd8eb561e4b37ca6dfc3b6088f5d3a2890bc1ec90f4",
+      "equal": true
+    },
+    {
+      "path": "CMakeFiles/vllm_xpu.dir/src/vt/xpu/xpu_gdn_chunked.cpp.o",
+      "development_sha256": "2af6fe0d0f659dddcc696b4fce85cdfe8406ebee4005e42ed1cef484080ae7c8",
+      "clean_composition_sha256": "2af6fe0d0f659dddcc696b4fce85cdfe8406ebee4005e42ed1cef484080ae7c8",
+      "equal": true
+    },
+    {
+      "path": "CMakeFiles/vllm_xpu.dir/src/vt/xpu/xpu_gptq4.cpp.o",
+      "development_sha256": "b231f8f8c076348c92fa57189b80b6350762e52043f6614387c30511c7aaa248",
+      "clean_composition_sha256": "b231f8f8c076348c92fa57189b80b6350762e52043f6614387c30511c7aaa248",
+      "equal": true
+    },
+    {
+      "path": "CMakeFiles/vllm_xpu.dir/src/vt/xpu/xpu_norm.cpp.o",
+      "development_sha256": "b9a1ae34e15acbd8eb35dd2317b1b3f2c9532a27857e605843967d944200e811",
+      "clean_composition_sha256": "b9a1ae34e15acbd8eb35dd2317b1b3f2c9532a27857e605843967d944200e811",
+      "equal": true
+    },
+    {
+      "path": "CMakeFiles/vllm_xpu.dir/src/vt/xpu/xpu_ops.cpp.o",
+      "development_sha256": "cc53b53c5c0d99e851bbdbfb5b9ec5a43424634fd47712044b8ae471ee84e3d5",
+      "clean_composition_sha256": "cc53b53c5c0d99e851bbdbfb5b9ec5a43424634fd47712044b8ae471ee84e3d5",
+      "equal": true
+    },
+    {
+      "path": "CMakeFiles/vllm_xpu.dir/src/vt/xpu/xpu_sampling.cpp.o",
+      "development_sha256": "209480e540851c770fe17808188cf30b791f23764bb968d6b5f5644de26fc803",
+      "clean_composition_sha256": "209480e540851c770fe17808188cf30b791f23764bb968d6b5f5644de26fc803",
+      "equal": true
+    },
+    {
+      "path": "CMakeFiles/vllm_xpu_backend.dir/src/vt/xpu/xpu_backend.cpp.o",
+      "development_sha256": "1804739018799f4a4bbeae14abcab99d0aca809750c0755119e982105d9716ba",
+      "clean_composition_sha256": "1804739018799f4a4bbeae14abcab99d0aca809750c0755119e982105d9716ba",
+      "equal": true
+    },
+    {
+      "path": "CMakeFiles/vllm_xpu_xe2_gdn.dir/src/vt/xpu/xpu_gdn_fp16_producer.cpp.o",
+      "development_sha256": "6254cbf056a1e9ab6b81747e3f31b743e35b1d95a1dba388127bcb698f6fefbd",
+      "clean_composition_sha256": "6254cbf056a1e9ab6b81747e3f31b743e35b1d95a1dba388127bcb698f6fefbd",
+      "equal": true
+    },
+    {
+      "path": "CMakeFiles/vllm_xpu_xe2_gdn.dir/src/vt/xpu/xpu_gdn_xe2.cpp.o",
+      "development_sha256": "c989bab5ebb6f6de72f5749e424cf0cfc960cb91d6df92b0879535e4f40b6611",
+      "clean_composition_sha256": "c989bab5ebb6f6de72f5749e424cf0cfc960cb91d6df92b0879535e4f40b6611",
+      "equal": true
+    },
+    {
+      "path": "CMakeFiles/vllm_xpu_xe2_verify.dir/src/vt/xpu/xpu_attention_decode_xe2.cpp.o",
+      "development_sha256": "9865cbc13acbee6c9178ffd87f6566028f7d83f776fa92c7861460117f18eb6f",
+      "clean_composition_sha256": "9865cbc13acbee6c9178ffd87f6566028f7d83f776fa92c7861460117f18eb6f",
+      "equal": true
+    },
+    {
+      "path": "CMakeFiles/vllm_xpu_xe2_verify.dir/src/vt/xpu/xpu_attention_verify_xe2.cpp.o",
+      "development_sha256": "585996b693abc56828ae2bd461343036115d3fb7566a9c4762ece3414d154424",
+      "clean_composition_sha256": "585996b693abc56828ae2bd461343036115d3fb7566a9c4762ece3414d154424",
+      "equal": true
+    }
+  ]
+}

@@ -23,6 +23,7 @@
 #include "vt/exl3_grouped.h"
 #include "vt/breakable_graph.h"
 #include "vllm/v1/core/sched/scheduler.h"
+#include "vllm/v1/metrics/loggers.h"
 
 namespace {
 std::vector<int32_t> Ints(const vllm::StTensor& tensor) {
@@ -1740,6 +1741,141 @@ TEST_CASE("XPU EXL3 public engine R11: held-out capability task manifest") {
   save();
 }
 
+
+// The public Python README matrix uses sampled requests, complete O1024
+// warmup waves and a persistent worker/cache. Keep the earlier greedy R11
+// comparisons unchanged; this is a separate measurement entry point.
+TEST_CASE("XPU EXL3 public engine README: complete serving matrix") {
+  const char* model = std::getenv("VT_B70_EXL3_MODEL");
+  const char* manifest_path = std::getenv("VT_B70_EXL3_README_WORKLOAD");
+  const char* output = std::getenv("VT_B70_EXL3_ENGINE_OUTPUT");
+  if (!model || !manifest_path || !output) std::exit(77);
+  REQUIRE_FALSE(std::filesystem::exists(output));
+  REQUIRE(std::string(std::getenv("VT_XPU_PROFILE") ? std::getenv("VT_XPU_PROFILE") : "0") == "0");
+  REQUIRE(std::getenv("VT_SPEC_TRACE") == nullptr);
+  std::ifstream input(manifest_path); REQUIRE(input.good());
+  const auto manifest = nlohmann::json::parse(input);
+  REQUIRE(manifest.at("schema") == "b70-exl3-readme-workload-v1");
+  const auto& launch = manifest.at("launch");
+  vllm::entrypoints::EngineParams params;
+  params.max_model_len = launch.at("max_model_len");
+  params.max_num_batched_tokens = launch.at("max_num_batched_tokens");
+  params.max_num_seqs = launch.at("max_num_seqs");
+  params.num_blocks = launch.at("num_blocks");
+  params.kv_cache_dtype = "fp8";
+  params.enable_prefix_caching = true;
+  params.speculative_config = vllm::ParseSpeculativeConfigJson(
+      "{\"method\":\"mtp\",\"num_speculative_tokens\":3}");
+  vllm::v1::metrics::PrometheusStatLogger logger("Qwen3.8-27B", params.max_model_len, 0, 3);
+  auto loaded = vllm::entrypoints::LoadedEngine::FromModelDir(model, params);
+  REQUIRE_FALSE(loaded->runner().use_async_scheduling());
+  REQUIRE(loaded->block_size() == 1600);
+  REQUIRE(loaded->max_num_seqs() == params.max_num_seqs);
+  loaded->engine().set_stat_logger(&logger);
+  nlohmann::json result = {{"schema", "b70-exl3-readme-output-v1"},
+      {"launch", launch}, {"waves", nlohmann::json::array()},
+      {"timing_scope", "In-process public engine; pretokenized prompts; no HTTP transport. Native request statistics and 250ms counter samples."}};
+  const auto save = [&] {
+    const std::string temporary = std::string(output) + ".tmp";
+    std::ofstream file(temporary); file << result.dump(2) << '\n'; file.close();
+    REQUIRE(file.good());
+    std::filesystem::rename(temporary, output);
+  };
+  save();
+  for (const auto& wave : manifest.at("waves")) {
+    REQUIRE_FALSE(loaded->engine().has_unfinished_requests());
+    std::cout << "README_START " << wave.at("id") << std::endl;
+    nlohmann::json row = {{"id", wave.at("id")}, {"scenario", wave.at("scenario")},
+        {"group", wave.at("group")}, {"warmup", wave.at("warmup")},
+        {"metrics_before", logger.Expose()}, {"requests", nlohmann::json::object()},
+        {"samples", nlohmann::json::array()}, {"cycles", nlohmann::json::array()}};
+    const auto began = std::chrono::steady_clock::now();
+    const auto seconds = [&] {
+      return std::chrono::duration<double>(std::chrono::steady_clock::now() - began).count();
+    };
+    for (const auto& spec : wave.at("requests")) {
+      const auto prompt = spec.at("prompt_ids").get<std::vector<int32_t>>();
+      vllm::SamplingParams sampling;
+      sampling.temperature = spec.at("temperature");
+      sampling.top_p = spec.at("top_p"); sampling.top_k = spec.at("top_k");
+      sampling.seed = spec.at("seed").get<int64_t>();
+      sampling.ignore_eos = true; sampling.max_tokens = spec.at("output_tokens");
+      sampling.output_kind = vllm::RequestOutputKind::kCumulative;
+      REQUIRE(prompt.size() + *sampling.max_tokens <= size_t(params.max_model_len));
+      const std::string id = wave.at("id").get<std::string>() + "-" + spec.at("id").get<std::string>();
+      row["requests"][id] = {{"prompt_tokens", prompt.size()}, {"prompt_sha256", spec.at("prompt_sha256")},
+          {"sampling", {{"temperature", sampling.temperature}, {"top_p", sampling.top_p},
+                        {"top_k", sampling.top_k}, {"seed", *sampling.seed}}},
+          {"output_limit", *sampling.max_tokens}, {"admitted_at_s", seconds()},
+          {"observations", nlohmann::json::array()}};
+      loaded->engine().add_request(id, prompt, sampling);
+    }
+    std::map<std::string, int64_t> emitted;
+    std::set<std::string> finished;
+    double last_sample = -1.;
+    for (int cycle = 0; loaded->engine().has_unfinished_requests() && cycle < 8192; ++cycle) {
+      const auto proposed = loaded->runner().spec_drafts_proposed();
+      const auto accepted = loaded->runner().spec_drafts_accepted();
+      const double start = seconds();
+      const auto outputs = loaded->engine().step();
+      const double end = seconds();
+      // The ported generic logger has no cached-prefill accounting yet.
+      // Count the target's actual scheduled prompt rows and initial position
+      // instead; do not infer computed tokens from its logical prompt counter.
+      const auto& step = loaded->runner().last_step();
+      const auto& dense = loaded->runner().input_batch().req_ids;
+      for (size_t index = 0; index + 1 < step.query_start_loc.size(); ++index) {
+        REQUIRE(dense[index].has_value());
+        auto& trace = row["requests"].at(*dense[index]);
+        const int offset = step.query_start_loc[index];
+        const int position = step.positions.at(offset);
+        const int length = step.query_start_loc[index + 1] - offset;
+        if (!trace.contains("first_scheduled_position")) trace["first_scheduled_position"] = position;
+        const int remaining = trace.at("prompt_tokens").get<int>() - position;
+        trace["computed_prefill_tokens"] = trace.value("computed_prefill_tokens", 0) +
+            std::max(0, std::min(length, remaining));
+      }
+      for (const auto& request : outputs) {
+        REQUIRE(request.outputs.size() == 1);
+        const auto& completion = request.outputs.front();
+        auto& trace = row["requests"].at(request.request_id);
+        const int64_t count = completion.token_ids.size();
+        const int64_t delta = count - emitted[request.request_id];
+        REQUIRE(delta >= 0); emitted[request.request_id] = count;
+        if (delta) trace["observations"].push_back({{"at_s", end}, {"tokens", count}, {"new_tokens", delta}});
+        if (request.finished) {
+          trace["finished_at_s"] = end; trace["ids"] = completion.token_ids;
+          trace["finish_reason"] = completion.finish_reason.value_or("");
+          finished.insert(request.request_id);
+        }
+      }
+      row["cycles"].push_back({{"start_s", start}, {"end_s", end},
+          {"proposed", loaded->runner().spec_drafts_proposed() - proposed},
+          {"accepted", loaded->runner().spec_drafts_accepted() - accepted}});
+      if (end - last_sample >= .25) {
+        row["samples"].push_back({{"at_s", seconds()}, {"metrics", logger.Expose()}});
+        last_sample = seconds();
+      }
+    }
+    row["batch_wall_s"] = seconds();
+    row["metrics_after"] = logger.Expose();
+    REQUIRE(finished.size() == wave.at("requests").size());
+    for (const auto& trace : row.at("requests")) {
+      CHECK(trace.at("ids").size() == trace.at("output_limit").get<size_t>());
+      CHECK(trace.at("finish_reason") == "length");
+    }
+    const auto memory = vt::xpu::GetMemoryInfo();
+    row["backend_peak_device_bytes"] = memory.peak_allocated_bytes;
+    row["backend_live_device_bytes"] = memory.allocated_bytes;
+    CHECK(vt::GetReferenceTierHits() == 0);
+    std::cout << "README_DONE " << wave.at("id") << " wall_s=" << row.at("batch_wall_s") << std::endl;
+    result["waves"].push_back(std::move(row)); save();
+  }
+  loaded.reset();
+  result["after_release_graph_bytes"] = vt::xpu::GetMemoryInfo().graph_device_bytes;
+  CHECK(result.at("after_release_graph_bytes") == 0);
+  result["complete"] = true; save();
+}
 
 TEST_CASE("XPU EXL3 public engine R11: frozen serving timing workload") {
   const char* model = std::getenv("VT_B70_EXL3_MODEL");

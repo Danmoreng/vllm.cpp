@@ -1,0 +1,2 @@
+[1/2] Building CXX object tests/CMakeFiles/test_xpu_exl3_mtp.dir/vllm/models/test_xpu_exl3_mtp.cpp.o
+[2/2] Linking CXX executable tests/test_xpu_exl3_mtp

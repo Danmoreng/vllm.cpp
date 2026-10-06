@@ -1,0 +1,17 @@
+engine: device placement: --fit is on by default but cannot apply to a safetensors checkpoint (its weight footprint is not known where the placement must be installed); continuing with no placement
+[doctest] doctest version is "2.5.2"
+[doctest] run with "--help" for options
+[vllm] kv-cache: XPU Qwen hybrid attention page 32 -> 1600 tokens (Mamba page 3268608 B, attention token 2048 B, MTP depth 3)
+vllm.cpp: WARNING using KV cache scaling factor 1.0 for fp8. If this is unintended, verify that k/v_scale scaling factors are properly set in the checkpoint.
+vllm.cpp: Asynchronous scheduling is disabled (max_concurrent_batches=1)
+README_START "runner-smoke"
+===============================================================================
+tests/vllm/models/test_xpu_exl3_mtp.cpp:1748:
+TEST CASE:  XPU EXL3 public engine README: complete serving matrix
+
+tests/vllm/models/test_xpu_exl3_mtp.cpp:1748: FATAL ERROR: test case CRASHED: SIGTERM - Termination request signal
+
+===============================================================================
+[doctest] test cases:  1 |  0 passed | 1 failed | 13 skipped
+[doctest] assertions: 11 | 11 passed | 0 failed |
+[doctest] Status: FAILURE!

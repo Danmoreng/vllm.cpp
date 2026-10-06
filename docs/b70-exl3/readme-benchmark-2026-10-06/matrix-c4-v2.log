@@ -1,0 +1,184 @@
+engine: device placement: --fit is on by default but cannot apply to a safetensors checkpoint (its weight footprint is not known where the placement must be installed); continuing with no placement
+[doctest] doctest version is "2.5.2"
+[doctest] run with "--help" for options
+[vllm] kv-cache: XPU Qwen hybrid attention page 32 -> 1600 tokens (Mamba page 3268608 B, attention token 2048 B, MTP depth 3)
+vllm.cpp: WARNING using KV cache scaling factor 1.0 for fp8. If this is unintended, verify that k/v_scale scaling factors are properly set in the checkpoint.
+vllm.cpp: Asynchronous scheduling is disabled (max_concurrent_batches=1)
+README_START "phase-512-c1-r0"
+README_DONE "phase-512-c1-r0" wall_s=31.957266199
+README_START "phase-512-c1-r1"
+README_DONE "phase-512-c1-r1" wall_s=21.95742491
+README_START "phase-512-c1-r2"
+README_DONE "phase-512-c1-r2" wall_s=20.135680951
+README_START "phase-512-c1-r3"
+README_DONE "phase-512-c1-r3" wall_s=21.390708669
+README_START "phase-512-c1-r4"
+README_DONE "phase-512-c1-r4" wall_s=20.971212273
+README_START "phase-512-c1-r5"
+README_DONE "phase-512-c1-r5" wall_s=22.665236711
+README_START "phase-2k-c1-r0"
+README_DONE "phase-2k-c1-r0" wall_s=19.079802017
+README_START "phase-2k-c1-r1"
+README_DONE "phase-2k-c1-r1" wall_s=20.472498821
+README_START "phase-2k-c1-r2"
+README_DONE "phase-2k-c1-r2" wall_s=23.427005648
+README_START "phase-2k-c1-r3"
+README_DONE "phase-2k-c1-r3" wall_s=23.212476722
+README_START "phase-2k-c1-r4"
+README_DONE "phase-2k-c1-r4" wall_s=22.142830408
+README_START "phase-2k-c1-r5"
+README_DONE "phase-2k-c1-r5" wall_s=21.794969297
+README_START "phase-4k-c1-r0"
+README_DONE "phase-4k-c1-r0" wall_s=21.918919605
+README_START "phase-4k-c1-r1"
+README_DONE "phase-4k-c1-r1" wall_s=26.029764374
+README_START "phase-4k-c1-r2"
+README_DONE "phase-4k-c1-r2" wall_s=23.253757512
+README_START "phase-4k-c1-r3"
+README_DONE "phase-4k-c1-r3" wall_s=23.815517823
+README_START "phase-4k-c1-r4"
+README_DONE "phase-4k-c1-r4" wall_s=24.17025577
+README_START "phase-4k-c1-r5"
+README_DONE "phase-4k-c1-r5" wall_s=22.194990522
+README_START "phase-8k-c1-r0"
+README_DONE "phase-8k-c1-r0" wall_s=26.588886214
+README_START "phase-8k-c1-r1"
+README_DONE "phase-8k-c1-r1" wall_s=27.762755002
+README_START "phase-8k-c1-r2"
+README_DONE "phase-8k-c1-r2" wall_s=26.364605761
+README_START "phase-8k-c1-r3"
+README_DONE "phase-8k-c1-r3" wall_s=26.847887509
+README_START "phase-8k-c1-r4"
+README_DONE "phase-8k-c1-r4" wall_s=25.35336711
+README_START "phase-8k-c1-r5"
+README_DONE "phase-8k-c1-r5" wall_s=26.804435796
+README_START "phase-16k-c1-r0"
+README_DONE "phase-16k-c1-r0" wall_s=33.560970257
+README_START "phase-16k-c1-r1"
+README_DONE "phase-16k-c1-r1" wall_s=31.14887779
+README_START "phase-16k-c1-r2"
+README_DONE "phase-16k-c1-r2" wall_s=30.094571253
+README_START "phase-16k-c1-r3"
+README_DONE "phase-16k-c1-r3" wall_s=30.697873815
+README_START "phase-16k-c1-r4"
+README_DONE "phase-16k-c1-r4" wall_s=31.776064342
+README_START "phase-16k-c1-r5"
+README_DONE "phase-16k-c1-r5" wall_s=33.745697852
+README_START "phase-32k-c1-r0"
+README_DONE "phase-32k-c1-r0" wall_s=43.957795938
+README_START "phase-32k-c1-r1"
+README_DONE "phase-32k-c1-r1" wall_s=43.099210532
+README_START "phase-32k-c1-r2"
+README_DONE "phase-32k-c1-r2" wall_s=45.666177631
+README_START "phase-32k-c1-r3"
+README_DONE "phase-32k-c1-r3" wall_s=43.014671745
+README_START "phase-32k-c1-r4"
+README_DONE "phase-32k-c1-r4" wall_s=45.519054124
+README_START "phase-32k-c1-r5"
+README_DONE "phase-32k-c1-r5" wall_s=43.763966977
+README_START "phase-64k-c1-r0"
+README_DONE "phase-64k-c1-r0" wall_s=74.340762027
+README_START "phase-64k-c1-r1"
+README_DONE "phase-64k-c1-r1" wall_s=72.871386255
+README_START "phase-64k-c1-r2"
+README_DONE "phase-64k-c1-r2" wall_s=74.882558342
+README_START "phase-64k-c1-r3"
+README_DONE "phase-64k-c1-r3" wall_s=71.837289642
+README_START "phase-128k-c1-r0"
+README_DONE "phase-128k-c1-r0" wall_s=147.01424103
+README_START "phase-128k-c1-r1"
+README_DONE "phase-128k-c1-r1" wall_s=151.449078227
+README_START "phase-128k-c1-r2"
+README_DONE "phase-128k-c1-r2" wall_s=147.957078234
+README_START "phase-128k-c1-r3"
+README_DONE "phase-128k-c1-r3" wall_s=151.560929342
+README_START "concurrency-2k-c2-r0"
+README_DONE "concurrency-2k-c2-r0" wall_s=30.878024921
+README_START "concurrency-2k-c2-r1"
+README_DONE "concurrency-2k-c2-r1" wall_s=28.94995296
+README_START "concurrency-2k-c2-r2"
+README_DONE "concurrency-2k-c2-r2" wall_s=28.970020301999998
+README_START "concurrency-2k-c2-r3"
+README_DONE "concurrency-2k-c2-r3" wall_s=29.585973907
+README_START "concurrency-2k-c3-r0"
+README_DONE "concurrency-2k-c3-r0" wall_s=32.467593177
+README_START "concurrency-2k-c3-r1"
+README_DONE "concurrency-2k-c3-r1" wall_s=32.895309245
+README_START "concurrency-2k-c3-r2"
+README_DONE "concurrency-2k-c3-r2" wall_s=34.391682363
+README_START "concurrency-2k-c3-r3"
+README_DONE "concurrency-2k-c3-r3" wall_s=33.04631684
+README_START "concurrency-2k-c4-r0"
+README_DONE "concurrency-2k-c4-r0" wall_s=41.191859308
+README_START "concurrency-2k-c4-r1"
+README_DONE "concurrency-2k-c4-r1" wall_s=39.888395212
+README_START "concurrency-2k-c4-r2"
+README_DONE "concurrency-2k-c4-r2" wall_s=39.914480502
+README_START "concurrency-2k-c4-r3"
+README_DONE "concurrency-2k-c4-r3" wall_s=40.103850796
+README_START "concurrency-4k-c2-r0"
+README_DONE "concurrency-4k-c2-r0" wall_s=33.156366176
+README_START "concurrency-4k-c2-r1"
+README_DONE "concurrency-4k-c2-r1" wall_s=31.724689544
+README_START "concurrency-4k-c2-r2"
+README_DONE "concurrency-4k-c2-r2" wall_s=33.280226372
+README_START "concurrency-4k-c2-r3"
+README_DONE "concurrency-4k-c2-r3" wall_s=31.432657606
+README_START "concurrency-4k-c3-r0"
+README_DONE "concurrency-4k-c3-r0" wall_s=39.113479701
+README_START "concurrency-4k-c3-r1"
+README_DONE "concurrency-4k-c3-r1" wall_s=39.146719012
+README_START "concurrency-4k-c3-r2"
+README_DONE "concurrency-4k-c3-r2" wall_s=38.395166326
+README_START "concurrency-4k-c3-r3"
+README_DONE "concurrency-4k-c3-r3" wall_s=39.465128645
+README_START "concurrency-4k-c4-r0"
+README_DONE "concurrency-4k-c4-r0" wall_s=46.404016145
+README_START "concurrency-4k-c4-r1"
+README_DONE "concurrency-4k-c4-r1" wall_s=48.45793193
+README_START "concurrency-4k-c4-r2"
+README_DONE "concurrency-4k-c4-r2" wall_s=48.019839489
+README_START "concurrency-4k-c4-r3"
+README_DONE "concurrency-4k-c4-r3" wall_s=46.057311992
+README_START "concurrency-16k-c2-r0"
+README_DONE "concurrency-16k-c2-r0" wall_s=49.443068174
+README_START "concurrency-16k-c2-r1"
+README_DONE "concurrency-16k-c2-r1" wall_s=49.662071347
+README_START "concurrency-16k-c2-r2"
+README_DONE "concurrency-16k-c2-r2" wall_s=50.604882093
+README_START "concurrency-16k-c2-r3"
+README_DONE "concurrency-16k-c2-r3" wall_s=50.549044359
+README_START "concurrency-16k-c3-r0"
+README_DONE "concurrency-16k-c3-r0" wall_s=67.929479246
+README_START "concurrency-16k-c3-r1"
+README_DONE "concurrency-16k-c3-r1" wall_s=86.287044679
+README_START "concurrency-16k-c3-r2"
+README_DONE "concurrency-16k-c3-r2" wall_s=68.763969506
+README_START "concurrency-16k-c3-r3"
+README_DONE "concurrency-16k-c3-r3" wall_s=71.22027274
+README_START "concurrency-16k-c4-r0"
+README_DONE "concurrency-16k-c4-r0" wall_s=85.765031727
+README_START "concurrency-16k-c4-r1"
+README_DONE "concurrency-16k-c4-r1" wall_s=85.101250771
+README_START "concurrency-16k-c4-r2"
+README_DONE "concurrency-16k-c4-r2" wall_s=87.420739946
+README_START "concurrency-16k-c4-r3"
+README_DONE "concurrency-16k-c4-r3" wall_s=87.782151547
+README_START "prefix-16k-cold-warm-r1"
+README_DONE "prefix-16k-cold-warm-r1" wall_s=28.943195786
+README_START "prefix-16k-cold-warm-r2"
+README_DONE "prefix-16k-cold-warm-r2" wall_s=28.960329817
+README_START "prefix-16k-cold-warm-r3"
+README_DONE "prefix-16k-cold-warm-r3" wall_s=30.387815387
+README_START "prefix-64k-cold-warm-r1"
+README_DONE "prefix-64k-cold-warm-r1" wall_s=73.652412789
+README_START "prefix-64k-cold-warm-r2"
+README_DONE "prefix-64k-cold-warm-r2" wall_s=72.854437946
+README_START "prefix-64k-cold-warm-r3"
+README_DONE "prefix-64k-cold-warm-r3" wall_s=73.191196433
+README_START "full-context-199680-r1"
+README_DONE "full-context-199680-r1" wall_s=255.058249896
+===============================================================================
+[doctest] test cases:      1 |      1 passed | 0 failed | 13 skipped
+[doctest] assertions: 183251 | 183251 passed | 0 failed |
+[doctest] Status: SUCCESS!

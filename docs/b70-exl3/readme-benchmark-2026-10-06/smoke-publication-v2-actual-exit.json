@@ -1,0 +1,20 @@
+{
+  "exit_code": 1,
+  "elapsed_s": 13.072219822999614,
+  "before": {
+    "service": "inactive",
+    "containers": [
+      "b70-chatui"
+    ],
+    "power_cap_uw": 180000000,
+    "timestamp": "2026-10-06T09:53:52.975136+02:00"
+  },
+  "after": {
+    "service": "inactive",
+    "containers": [
+      "b70-chatui"
+    ],
+    "power_cap_uw": 180000000,
+    "timestamp": "2026-10-06T09:54:06.057554+02:00"
+  }
+}

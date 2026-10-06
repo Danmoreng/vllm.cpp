@@ -1,0 +1,77 @@
+B70 EXL3: native README-Serving-Matrix, 2026-10-06
+
+Die vollständige Serving-Matrix wurde gemessen: 20 Szenarien, 70 Messwellen und 124 Requests; alle erzeugten exakt 1.024 Ausgabetokens und endeten mit length. Hinzu kamen 17 vollständige Warmup-Wellen mit 35 Requests sowie zwei separate Prefix-Kontrollen. Hauptkampagne: 183.251/183.251 Assertions bestanden, tatsächlicher Exitcode 0. Keine Preemptions, kein zusätzlicher Prompt-Recompute, keine Host-OOM-Kills, kein Swap und keine CPU-Quota-Drosselung.
+
+Wesentliche Einschränkungen: Die native Engine konnte das Rezept mit max_num_seqs=16 nicht ausführen; gemessen wurde mit 4 Slots, die alle tatsächlichen C1–C4-Szenarien abdecken. Bei Batchgröße 4.096 blieben die 16K- und 64K-Resends ohne Prefix-Cache-Treffer. Erfolgreiche Request-Abschlüsse bedeuten hier keine vollständige Qualifikation des öffentlichen Produktionsrezepts.
+
+Einzelrequest-Kontexte: Median, jeweils C++ / historische Python-README-Werte.
+Budget       Waves  Prefill tok/s       Decode tok/s        TTFT s           E2E s           MTP akzeptiert
+512           5      1267.6/ 1718.8    48.7/ 58.4        0.39/   0.30    21.39/  17.84   55.7%/ 55.1%
+2k            5      2050.6/ 2431.6    48.4/ 59.9        0.98/   0.84    22.14/  17.92   56.8%/ 59.5%
+4k            5      1923.5/ 2241.4    47.2/ 57.1        2.12/   1.83    23.82/  19.74   54.6%/ 55.0%
+8k            5      1874.6/ 2305.6    45.6/ 54.9        4.36/   3.57    26.80/  22.20   54.2%/ 52.2%
+16k           5      1794.5/ 2168.2    46.4/ 56.2        9.11/   7.58    31.15/  25.75   57.3%/ 56.3%
+32k           5      1651.7/ 1977.7    42.7/ 54.5       19.81/  16.60    43.76/  35.39   55.7%/ 56.6%
+64k           3      1434.7/ 1670.0    37.6/ 52.7       45.67/  39.32    72.87/  58.73   55.9%/ 60.7%
+128k          3      1136.2/ 1262.5    28.3/ 39.9      115.35/ 103.98   151.45/ 129.68   54.1%/ 54.5%
+199680        1       931.5/  999.3    25.1/ 38.5      214.36/ 200.07   255.06/ 226.60   57.0%/ 61.2%
+
+Aggregierter Decode tok/s bei vollständig überlappenden Requests: C++ / Python.
+Budget       C1                 C2                 C3                 C4
+2k             48.2/  61.2        78.9/ 108.1       110.3/ 154.2       127.0/ 190.5
+4k             46.9/  57.6        78.9/ 107.3       107.5/ 140.4       117.9/ 180.1
+16k            45.8/  56.6        73.4/ 103.1        92.5/ 134.7       106.0/ 165.0
+
+Prefix-Wellen: cached = erste geplante Prompt-Position; computed = tatsächlich berechnete Prompt-Tokens.
+Hauptmatrix Batch4096, prefix-16k-cold-warm-r1: cached 0/16382, computed 16382, TTFT 9.149 s, Decode 51.68 tok/s, E2E 28.943 s
+Hauptmatrix Batch4096, prefix-16k-cold-warm-r2: cached 0/16382, computed 16382, TTFT 9.152 s, Decode 51.64 tok/s, E2E 28.960 s
+Hauptmatrix Batch4096, prefix-16k-cold-warm-r3: cached 0/16382, computed 16382, TTFT 9.164 s, Decode 48.20 tok/s, E2E 30.388 s
+Hauptmatrix Batch4096, prefix-64k-cold-warm-r1: cached 0/65469, computed 65469, TTFT 45.687 s, Decode 36.58 tok/s, E2E 73.652 s
+Hauptmatrix Batch4096, prefix-64k-cold-warm-r2: cached 0/65469, computed 65469, TTFT 45.698 s, Decode 37.67 tok/s, E2E 72.854 s
+Hauptmatrix Batch4096, prefix-64k-cold-warm-r3: cached 0/65469, computed 65469, TTFT 45.693 s, Decode 37.20 tok/s, E2E 73.191 s
+Isoliert 64K Batch4096, prefix-64k-cold-warm-r1: cached 0/65469, computed 65469, TTFT 45.775 s, Decode 36.66 tok/s, E2E 73.682 s
+Isoliert 64K Batch4096, prefix-64k-cold-warm-r2: cached 0/65469, computed 65469, TTFT 45.617 s, Decode 37.73 tok/s, E2E 72.731 s
+Isoliert 64K Batch4096, prefix-64k-cold-warm-r3: cached 0/65469, computed 65469, TTFT 45.692 s, Decode 34.84 tok/s, E2E 75.053 s
+Kontrolle 16K Batch1600, prefix-16k-cold-warm-r1: cached 0/16382, computed 16382, TTFT 10.272 s, Decode 47.88 tok/s, E2E 31.638 s
+Kontrolle 16K Batch1600, prefix-16k-cold-warm-r2: cached 14400/16382, computed 1982, TTFT 1.444 s, Decode 49.73 tok/s, E2E 22.016 s
+Kontrolle 16K Batch1600, prefix-16k-cold-warm-r3: cached 14400/16382, computed 1982, TTFT 1.449 s, Decode 47.92 tok/s, E2E 22.796 s
+
+Veröffentlichte Python-Prefix-Werte, 64K aus isoliertem Worker:
+prefix-16k-cold-warm r1: cached 0/16382, computed 16382, TTFT 7.562 s, E2E 22.737 s
+prefix-16k-cold-warm r2: cached 14400/16382, computed 1982, TTFT 1.023 s, E2E 17.438 s
+prefix-16k-cold-warm r3: cached 14400/16382, computed 1982, TTFT 1.005 s, E2E 18.646 s
+prefix-64k-cold-warm r1: cached 0/65469, computed 65469, TTFT 39.030 s, E2E 59.842 s
+prefix-64k-cold-warm r2: cached 62400/65469, computed 3069, TTFT 2.486 s, E2E 22.804 s
+prefix-64k-cold-warm r3: cached 62400/65469, computed 3069, TTFT 2.525 s, E2E 23.145 s
+
+Prefix-Befund und Quellcode:
+Bei Batchgröße 4.096 wurden in den nativen C1-Prefix-Resends keine Cache-Treffer beobachtet, auch nicht im frischen 64K-Worker. GPUModelRunner::publish_recurrent_prefixes (src/vllm/v1/worker/gpu/runner.cpp:2150) veröffentlicht nur den exakt erreichten finalen Zustand an 1.600er-Seitengrenzen. Der Scheduler begrenzt Prefill-Chunks durch das Tokenbudget, ohne diese Grenzen auszurichten (src/vllm/v1/core/sched/scheduler.cpp:925). Für 4.096er-Chunks liegt die erste gemeinsame Grenze erst bei 102.400 Tokens, hinter den beiden getesteten Prompts. Die separate 1.600er-Kontrolle ändert nur das Batchbudget; ihre Werte ersetzen keinen Wert der Hauptmatrix. In dieser Aufgabe wurden keine Produkt-Kernels oder Scheduler-Funktionen verändert.
+Die 1.600er-Kontrolle bestätigt die Wiederverwendung: warm cached=14.400, computed=1.982 und TTFT=1,444/1,449 s gegenüber 10,272 s kalt. Prefix-Caching funktioniert damit in dieser ausgerichteten Konfiguration; das 4.096er-Rezept bleibt offen.
+Die isolierten Kontrollen verwenden jeweils einen kurzen Initialisierungs-Warmup mit 495 Prompt- und 1.024 Ausgabetokens (auch mit MTP-Tail weniger als 1.600); dadurch entsteht keine vollständige Prefix-Seite. Der erste gemessene Resend hatte nachweislich cached=0. Python profiliert und erfasst Graphen während der Worker-Initialisierung; die Startprotokolle sind verschieden. Der ursprüngliche Python-64K-Punkt im kompletten Lauf hatte bereits 14.400 Cache-Tokens aus früheren Aufgaben; deshalb stammen die oben verglichenen Cold/Warm-Werte aus dem separaten frischen Python-Worker.
+
+Workload, Hardware und Konfiguration:
+Intel Arc Pro B70 bei unveränderten 180 W. Gepinntes Qwen3.8-27B EXL3 4.00bpw, Revision 113cf7ab958054860e43fb7f3063b1af19171095; Target-Head 6bpw / 248.320 Zeilen, kompakter MTP-Draft 65.536 Zeilen. FP8-KV, MTP=3, GPU-Graphen und Prefix-Caching aktiviert. Sampling: temperature=1.0, top_p=0.95, top_k=20, ursprüngliche Request-Seeds, thinking disabled, ignore_eos=true, O=1024. Alle 248 eingefrorenen Prompt-/Request-Dateien wurden gegen das öffentliche Fixture-Manifest per Hash geprüft. Der gepinnte Tokenizer und Chat-Template erzeugten exakt die ursprünglichen Prompt-Längen. Gemessene logische Eingabe: 1.960.760 Tokens; Ausgabe: 126.976 Tokens.
+Native Engine: direkte öffentliche In-Process-API, vorab tokenisierte Prompts, synchroner Scheduler, Kontextlimit 262.144, Batchbudget 4.096, 4 Slots, 180 KV-Seiten zu 1.600 Tokens. Container: 24 GiB Host-RAM, kein Swap, 2 CPU-Quota; keine Drosselung beobachtet. Python-Basis: veröffentlichte README-Release-v2-Messungen vom 2026-10-02 über OpenAI-HTTP-API, Batchbudget 4.096, 16 Slots, automatisches KV-Budget bei GPU-Auslastungsbudget 0.965, keine Docker-CPU-/Speicherquota. Python wurde in dieser Aufgabe nicht erneut auf der GPU gemessen.
+Vor der Hauptmatrix wurde das native 16-Slot-Rezept tatsächlich versucht: ein kurzer Smoke hing in einer W8A8-Queue-Warteoperation und wurde nach 435,9 s beendet; ein weiterer Smoke mit dem älteren Publication-Pfad scheiterte an device USM allocation. Die unveränderte bekannte öffentliche Kontroll-Binary bestand 130/130 Prüfungen und reproduzierte alle 32 früheren Token-IDs. Die neue 4-Slot-Smoke bestand 39/39 Prüfungen. Der vollständige Matrixlauf verwendet den normalen Direct-Prepare-Pfad. Diese Messung qualifiziert keine 16 gleichzeitig zugelassenen nativen Requests.
+Nur der Benchmark-Testtreiber wurde ergänzt. Produkt-Kernels, Treiber, Powerlimit, Gewichte, numerische Toleranzen und Referenzlabels blieben unverändert. Alle 21 verglichenen Backend-/Plattform-Objektdateien sind hash-identisch zum sauberen öffentlichen Composition-Build (backend-object-relation.json). GPU-Arbeiten liefen nacheinander; der Produktionsdienst blieb gestoppt.
+
+Metrikdefinitionen und Grenzen:
+Prefill tok/s: tatsächlich geplante Target-Prompt-Tokens / native Request-Prefill-Zeit; bei parallelen Requests werden Request-Zeiten summiert. Cache-Tokens werden aus der ersten geplanten Position gelesen, da die generische native cached-prefill-Metrik derzeit nicht implementiert ist. Decode tok/s: Ausgabetokens nach dem ersten Token / native Request-Decode-Zeit. Beide Phasen werden pro Messwelle ausgewertet und anschließend als Szenario-Median berichtet. TTFT: Admission bis zu ersten ausgegebenen IDs. E2E: Wellen-Admission bis zum Abschluss aller Requests; Modellstart, Warmup und Speicherung nach der Welle sind ausgeschlossen.
+Aggregierter Decode: Differenzen des Generated-Token-Counters aus 250-ms-Samples nach dem ersten Token aller Requests und vor dem Abschluss irgendeines Requests, zusammengeführt über gültige Wellen bei konstanter Belegung. C1 in dieser Tabelle verwendet dieselbe Counter-Definition; deshalb unterscheiden sich seine Werte leicht von der Einzelrequest-Decode-Tabelle. Die Samples messen Tokenpakete der Engine, keine isolierten GPU-Kernels. Die Aufgaben je Parallelitätsstufe unterscheiden sich entsprechend dem eingefrorenen README-Korpus; dies ist kein gepaarter Skalierungstest.
+Alle Decode-Werte enthalten MTP=3. Numerische Parität, RNG-Parität und semantische Ausgabequalität wurden durch dieses Durchsatzbenchmark nicht qualifiziert. Unterschiedliche generierte Verläufe und MTP-Akzeptanz beeinflussen die Anwendungsgeschwindigkeit. Aus dem Vergleich folgt keine Aussage, dass eine Engine korrekter ist. Direktes natives API versus historischer Python-HTTP-Stack bleibt eine Vergleichsgrenze.
+
+Gesamtdauer der Hauptkampagne inklusive Start, Warmups und Speicherung: 4245.761 s / 70.76 min.
+Summe der gemessenen Wellen: 3384.017 s / 56.40 min; alle Ausgabetokens geteilt durch diese Wellenzeit: 37.52 tok/s. Diese Rate enthält Prefill und Resends und ist keine reine Decode-Rate.
+Maximal intern erfasste native Device-Bytes: 32016149611. Nicht erfasste Treiber-/Bibliotheksallokationen sind ausgeschlossen; nicht direkt mit Torch-Allocator-Werten vergleichbar.
+Längster getesteter Prompt: 199.673 Tokens plus 1.024 Ausgabetokens. Das konfigurierte Kontextlimit 262.144 wurde nicht an der Grenze 261.120+1.024 getestet.
+16K/C3 enthielt einen erhaltenen Ausreißer: TTFT 42,319 s gegenüber 22,282/22,311 s, E2E 86,287 gegenüber 68,764/71,220 s. Keine Kernel-Ursache wurde isoliert.
+
+Reproduktionsdaten und vollständige Ergebnisse (alle Pfade relativ zu diesem Bericht):
+matrix-c4-v2-summary.json: alle 20 Szenarien und alle Wellen; matrix-c4-v2-summary.csv: die 20 Szenario-Zusammenfassungen.
+prefix-isolated-c4-v3-summary.json / prefix16-aligned-v1-summary.json: separate Prefix-Kontrollen.
+matrix-c4-v2.json / prefix-isolated-c4-v3.json / prefix16-aligned-v1.json: native Ausgaben, Zykluszähler, Prometheus-Samples.
+workload-c4-v2.json / prefix-isolated-workload-c4-v3.json / prefix16-aligned-workload-v1.json: originale Request-Daten und tokenisierte Prompts.
+*-command.json / *-actual-exit.json / *-resource.json / *.log: genaue Aufrufe, echte Exitcodes, Binary-Hashes, cgroups und Service-/Powerstatus.
+provenance-c4-v2.json / backend-object-relation.json: eingefrorener Executable-Stand, Testtreiber-Diff und Backend-Objektvergleich.
+python-baseline-summary.json / baseline-identity.json / python-readme.txt / python-scenarios.json: eingefrorene öffentliche Basis.
+prepare-workload.py / summarize.py / run-observed.py / resource-runner-v1.py / make-report.py: Vorbereitung, Beobachtung und Auswertung.

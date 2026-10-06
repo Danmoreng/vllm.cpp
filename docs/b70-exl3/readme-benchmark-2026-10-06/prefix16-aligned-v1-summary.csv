@@ -1,0 +1,2 @@
+name,waves,concurrency,prompt_min,prompt_max,prefill_tps_median,decode_tps_median,fully_overlapped_decode_tps,ttft_s_median,batch_wall_s_median,mtp_acceptance,preemptions
+prefix-16k-cold-warm,3,1,16382,16382,1373.3290060027387,47.92283551707752,48.560242206994,1.448871021,22.795868753,0.6198884758364313,0.0

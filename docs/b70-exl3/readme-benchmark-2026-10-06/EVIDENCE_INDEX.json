@@ -1,0 +1,206 @@
+{
+  "schema": "b70-readme-benchmark-evidence-index-v1",
+  "measured_source_base": "9478e22e3c7124ab148fa074d0015e1890898e5f",
+  "measured_source_delta": "provenance-c4-v2.json source_diff; only tests/vllm/models/test_xpu_exl3_mtp.cpp changed",
+  "local_evidence_root": "/home/sebastian/LocalLLM/b70-exl3-fixtures/recovery/readme-native-serving-2026-10-06",
+  "review_archive_evidence_root": "evidence/readme-native-serving-2026-10-06",
+  "checked_in_files": {
+    "BENCHMARK_REPORT_2026-10-06.txt": {
+      "bytes": 12062,
+      "sha256": "6022ee2f8e41c098f84cbc7940ea60d4c2a656e51e9811fbfec695d08dd12ac0"
+    },
+    "python-baseline-summary.json": {
+      "bytes": 19765,
+      "sha256": "9dc0db6adfdedc8a955e2843b922d867944b7cb215c71212e79e71570e9b51f3"
+    },
+    "baseline-identity.json": {
+      "bytes": 422,
+      "sha256": "9de7a78651ebe0eb6d42b6c5ed8f1697ab78e43790a718b6d5bf2224cea71ff3"
+    },
+    "python-scenarios.json": {
+      "bytes": 3456,
+      "sha256": "b58c43bb445f3dd4cae12eb7e088f331a13cd17e3b4842238079d5400224ccf1"
+    },
+    "provenance-c4-v2.json": {
+      "bytes": 9711,
+      "sha256": "6bb21d902b613571a44ff8ab61a716b885f6f3ce8c6d3b46a69c2e22da06d67c"
+    },
+    "backend-object-relation.json": {
+      "bytes": 6602,
+      "sha256": "924b2265255194cec296c2b15d160d53a6a5e349c2effb1a51c53ddb61fd1015"
+    },
+    "build-v3.log": {
+      "bytes": 154,
+      "sha256": "396d1ed034b2e3f240ba59b7a1fc5d87f668e2f7eee718a180150641de3945e7"
+    },
+    "matrix-c4-v2-summary.json": {
+      "bytes": 121048,
+      "sha256": "63a99f4c21ca242e6374e540388f1e94daf0ca3efe397b01da84563ca1d191f0"
+    },
+    "matrix-c4-v2-summary.csv": {
+      "bytes": 2903,
+      "sha256": "924501b0131fdc01dab38e1df9149a1dd11b518e6f7b69bd3d4dc20e36f99fb7",
+      "original_evidence_sha256": "89ae7f042420a89e9feb08141ccebdce5e528cde4a79e2fba4e1172732a21b5f",
+      "normalization": "Git copy uses LF instead of CSV writer CRLF; all values unchanged. Original CSV retained in archive evidence."
+    },
+    "prefix-isolated-c4-v3-summary.json": {
+      "bytes": 6201,
+      "sha256": "b191c4bf483229d14edb221c40ebbfc484d6fa183629576f43a7148d46ff10e1"
+    },
+    "prefix-isolated-c4-v3-summary.csv": {
+      "bytes": 312,
+      "sha256": "de9733f0e7383b2980b5dc0942c7b2d438258cdb744b7871d43e857fdb0192ce",
+      "original_evidence_sha256": "60c6fbc768f2dc3363404eb35cbf2fa83a5657c6f89fc0e6fbedbf861e0ac90c",
+      "normalization": "Git copy uses LF instead of CSV writer CRLF; all values unchanged. Original CSV retained in archive evidence."
+    },
+    "prefix16-aligned-v1-summary.json": {
+      "bytes": 6218,
+      "sha256": "94cee53055a59182bd1bbc409055ce485d83748dd97df27b94a4ce9bcf0cc3c2"
+    },
+    "prefix16-aligned-v1-summary.csv": {
+      "bytes": 309,
+      "sha256": "f4d6c3d33da1fed5d2568b80105298deeba6b5cd19b2919c1c4d04a52cbebb93",
+      "original_evidence_sha256": "8691dd1ebd43c781ebbaa10b87faa84cca52a28967bb04200077dad60da684c0",
+      "normalization": "Git copy uses LF instead of CSV writer CRLF; all values unchanged. Original CSV retained in archive evidence."
+    },
+    "matrix-c4-v2-actual-exit.json": {
+      "bytes": 404,
+      "sha256": "f6f5425d018aa2f7ff80be5f7cb1bd78405299061d3a80a77d383d40de2d62be"
+    },
+    "matrix-c4-v2-resource.json": {
+      "bytes": 4267,
+      "sha256": "b2992283208fd315a139503de050cdb14eef35d6d9f056951c66075484250203"
+    },
+    "matrix-c4-v2-command.json": {
+      "bytes": 1920,
+      "sha256": "e289e4b32eada27b7e04df71e5679db44939eab5ac160dcdff3be0036a3e923f"
+    },
+    "matrix-c4-v2.log": {
+      "bytes": 8381,
+      "sha256": "da5dda0ac75ad6e47f1b408d25cf2edcfef0ff4298bf8b91ac6947a2fb7a3029"
+    },
+    "prefix-isolated-c4-v3-actual-exit.json": {
+      "bytes": 405,
+      "sha256": "febaff30b4c4bb9deea6175e49da44ca8b48159dca87b25aca16272130a6be7c"
+    },
+    "prefix-isolated-c4-v3-resource.json": {
+      "bytes": 4255,
+      "sha256": "d2295e1efd2a480734c847508606004bfeabbf263220ea2154af8018505a2fd2"
+    },
+    "prefix-isolated-c4-v3-command.json": {
+      "bytes": 1963,
+      "sha256": "893e837a8eddfca6dab0e7a5f95278b7ec7b7735dbfc34d7411cbea6dbc48139"
+    },
+    "prefix-isolated-c4-v3.log": {
+      "bytes": 1229,
+      "sha256": "a9f4fd47abb83d8ef41827f3dab9d43a428257cdfb203c577995dd865fc6c1d9"
+    },
+    "prefix16-aligned-v1-actual-exit.json": {
+      "bytes": 405,
+      "sha256": "8d299556801f70527392b56215cf0223bcdc6b0f238cb2758850bd0929a43f09"
+    },
+    "prefix16-aligned-v1-resource.json": {
+      "bytes": 4254,
+      "sha256": "de09e6a0b7a37897ec86ef2134aaa0dec4d3e3e6f6f2f1abdb27f7daa190b154"
+    },
+    "prefix16-aligned-v1-command.json": {
+      "bytes": 1955,
+      "sha256": "bd3157de9aa0ab88be729e1de09ec59cbdb3482e2f3547cadba70842df61cbe6"
+    },
+    "prefix16-aligned-v1.log": {
+      "bytes": 1230,
+      "sha256": "ab310d407bea4cb49525b64af648424e3033d5f758766af78ca68ac66bdb47ef"
+    },
+    "smoke-v1-actual-exit.json": {
+      "bytes": 407,
+      "sha256": "883a8b9e6a58b9fa1579f5c3c2906cbb2893680227ea76b5f61ea531a24af87f"
+    },
+    "smoke-v1-resource.json": {
+      "bytes": 4255,
+      "sha256": "22ec5225f609d5f584a85fa540778ec08dc9fa2d509cc7fc59a604348378a5ec"
+    },
+    "smoke-v1-command.json": {
+      "bytes": 1911,
+      "sha256": "e7f89f9529bbc19155783f7754904344e4174a4a777d0a0b576d1f6b0008a52f"
+    },
+    "smoke-v1.log": {
+      "bytes": 1188,
+      "sha256": "db7532029cd2911a815892fb7fb218b1748ce882e46ed6e8de725ddc3f922d3c"
+    },
+    "smoke-publication-v2-actual-exit.json": {
+      "bytes": 405,
+      "sha256": "d55915f9527ec3ccac58b65daf3b2c60222fdc1f8b167bbd162e82610a04a278"
+    },
+    "smoke-publication-v2-resource.json": {
+      "bytes": 4238,
+      "sha256": "4c8f6d1da4b8195b12744dcb8f3cc970e96918d31a4f450aafc450bbd76c99af"
+    },
+    "smoke-publication-v2-command.json": {
+      "bytes": 1989,
+      "sha256": "1b2cf7d653f80ecae4105dfc305e7dc3d3c19684325258f7b3a8fc9a464f9ec5"
+    },
+    "smoke-publication-v2.log": {
+      "bytes": 1224,
+      "sha256": "9cb97d76e7f539289b8950009c0365066a29eb2e3319c1ee1eb16ea819ceb608"
+    },
+    "smoke-c4-v2-actual-exit.json": {
+      "bytes": 405,
+      "sha256": "fe04d17e802f09df063f12789cb33c256290ec8578bb4c63118c38c3a4919e16"
+    },
+    "smoke-c4-v2-resource.json": {
+      "bytes": 4240,
+      "sha256": "50dd35195fcf8d88ec09b7d057995a6647031b3690103093c0b582d5babf8e1f"
+    },
+    "smoke-c4-v2-command.json": {
+      "bytes": 1923,
+      "sha256": "99394bb20a7d04d560cd68d17a1daf004353a2a0d0ee32a4542132f18e1109c4"
+    },
+    "smoke-c4-v2.log": {
+      "bytes": 925,
+      "sha256": "710866d34e04e3136ad5ed33a6757d7aabd3c52597035693f535d7689c9a81eb"
+    },
+    "control-v1-actual-exit.json": {
+      "bytes": 404,
+      "sha256": "bfcd54faf7b8782f9fe1f8c65c1cf78dc1d24d1b5baea56505c5850d3a976835"
+    },
+    "control-v1-resource.json": {
+      "bytes": 4260,
+      "sha256": "bf28757db053f8685f234a21e190ce8bdf05aa5f783261211c6b2b46d5484387"
+    },
+    "control-v1-command.json": {
+      "bytes": 2047,
+      "sha256": "442b105a8a2e4f46bd5c25b06e0659b15ae2aa0eaedb86941256cfee9c7d2e83"
+    },
+    "control-v1.log": {
+      "bytes": 854,
+      "sha256": "f976fe622ea157785383739e54aeb97c39e2924a828756c096c7cde8a4b62dcb"
+    }
+  },
+  "external_raw_files": {
+    "matrix-c4-v2.json": {
+      "bytes": 327756390,
+      "sha256": "12e6ddcfe13a6cc574e43bb4e9003953120ffe1419a600c6bc980fe39bfc3ba6"
+    },
+    "prefix-isolated-c4-v3.json": {
+      "bytes": 14959927,
+      "sha256": "555d099da07b74e548e2f35c9eae2a31e57163965a75208b5060e37fddefdddf"
+    },
+    "prefix16-aligned-v1.json": {
+      "bytes": 11133956,
+      "sha256": "2b7ef0c3637fcb7984a52cb36e119a04660e4194fd3c471ebed7b28a2cf27501"
+    },
+    "workload-c4-v2.json": {
+      "bytes": 10675443,
+      "sha256": "9ccfef2a70f58f884e55d9ea58e5c5da53135337c1f57c996a334b29cea20766"
+    },
+    "prefix-isolated-workload-c4-v3.json": {
+      "bytes": 853752,
+      "sha256": "627767bc9412ab1ddb0aa1ccd11cc7b9c01469f57eaa7e04af76b8854bf55d92"
+    },
+    "prefix16-aligned-workload-v1.json": {
+      "bytes": 213360,
+      "sha256": "9f701f26ef918d534fff22339cf6eac37d7314c3ff670a7f1e40556cd8d53688"
+    }
+  },
+  "scope": "Serving matrix at 180 W, sampled MTP3. Native admission4 versus original16; prefix4096 misses preserved. No numerical qualification."
+}
