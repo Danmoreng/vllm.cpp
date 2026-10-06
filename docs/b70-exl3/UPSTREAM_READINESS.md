@@ -669,3 +669,38 @@ SHA256 b3a803792e018ed9ea6ffb606d12412d1c21204a07c29c11642f7073b03f3399.
 Remaining work is the contribution composition and reproducible final review
 handoff, with quality/reference open gates preserved. No whole-backend or
 performance-parity qualification is promoted.
+
+U2 now isolates standalone development executables behind
+`VLLM_CPP_XPU_DIAGNOSTICS` (default OFF, requires XPU). It gates
+`b70_exl3_bench`, the two root GPTQ probes and the test-tree
+`bench_gptq4_model`; five translation units, not inference operators or unit
+tests. OFF retains all1538 non-probe compile commands byte-exact to the prior
+native configuration. ON restores the probes; only the older test benchmark's
+Git provenance macro changes with HEAD. The head probe compiles/links in two
+steps. No diagnostic GPU benchmark is run, and native configuration is restored
+to OFF with identical commands. CPU plus diagnostics ON rejects with exit1.
+
+The newly documented CPU recipe configures with the option unset/default OFF,
+builds its two focused targets in six steps and passes both CTest cases:
+14 shared-cache assertions and five generated admission methods. This is not
+a new full library build/suite or oneDNN dependency build. Earlier clean CPU
+and independent admission-patch results retain their separate receipts.
+
+[EXL3_XPU.md](../EXL3_XPU.md) is the portable current-model build/check recipe,
+dependency/notices table, centralized guard-symbol index and honest capability
+matrix. A literal source inventory finds149 `VT_B70_*` names: three in product
+sources,146 only in tests/tools. The product top20 override, optional fallback
+trace and legacy one-shot GPTQ GDN dump are classified explicitly; the latter
+is inactive for ordinary EXL3 inference, not silently removed. Test/model/dump
+controls do not become ordinary engine configuration. No runtime math, hardware
+admission guard, reference label or measurement is changed.
+
+The initial host command comparison fails because the still-enabled test
+benchmark's Git provenance macro changed; preserve the original command sets
+and failure record. Gating that remaining benchmark yields the exact1538
+non-probe command comparison without ignoring arithmetic flags. Commands,
+logs, source snapshots, classification and identities are in
+recovery/upstream-u2-diagnostic-isolation-v1/receipt-v1.json,13636 bytes,SHA256
+3feeb701d51883e896db07684b860815703a793299e96ae3b81f9930aec07dbb.
+Full contribution composition and the final reproducible Pro handoff remain;
+the bounded U6 functional/performance results and Q1 failed/open gates stand.

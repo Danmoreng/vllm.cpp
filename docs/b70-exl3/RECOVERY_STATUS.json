@@ -6660,7 +6660,7 @@
     "integration_commit": "3dfa3c3193c5950bf284229441e81f26b99d499c",
     "integration_status": "native_merge_regression_pass_GCC16_CPU_build_pass_remaining_portability_open",
     "U0": "complete_portable_projection_identity_slice",
-    "U2": "partial_atomic_cache_oneDNN_SmallM_notices_and_clean_CPU_build_complete_contribution_and_remaining_capability_hygiene_open",
+    "U2": "atomic_cache_oneDNN_SmallM_notices_clean_CPU_build_portable_admission_slice_and_diagnostic_isolation_public_recipe_complete_full_contribution_composition_open",
     "Q1": "bounded_eager_C1_and_C4transition_target_replays_executed_strictstate_fail_default_repeatability_fail_verifier_experimental_qualification_open",
     "F1": "stopped_at_bounded_precondition_low_measured_producer_cost_no_fusion_variant",
     "F2": "completed_first_event_candidate_rejected_second_direct_candidate_retained_prefill_memory_default_model_only",
@@ -6818,6 +6818,12 @@
       "artifact": "upstream-u6-final-matrix-v1/lifecycle-prefix-receipt-v1.json",
       "sha256": "b3a803792e018ed9ea6ffb606d12412d1c21204a07c29c11642f7073b03f3399",
       "bytes": 24331
+    },
+    "U2_diagnostic_isolation_tests": "CMake-only VLLM_CPP_XPU_DIAGNOSTICS defaultOFF/requiresXPU gatesfourstandalone development executables/five translationunits (EXL3bench,two rootGPTQprobes,testtreeGPTQmodelbench), notbackend/operator/unittest code. NativeOFF1538nonprobecompilecommands byteexact olderconfig;ONrestoresall5units, onlyexistingtestbenchmarkGitprovenancemacro changes ce143bb4->a638f9ef;restoredOFFcommands exact. ExplicitONheadprobe2compile/linkstepsactual0,noGPURUN/benchmark. CPU+diagnosticsONexpectedactual1 withcorrectdiagnostic. FreshfocusedcurrentCPU defaultunsetOFF configures0, twohosttargets6stepsbuild0/2CTestcases0/14C++assertions+5generatedhostmethods, noGPU/model/oneAPI; notfullCPUsuite/library ornewoneDNNbuild. Newportable EXL3_XPU.md currentmodel/builddependency/notices/guard-symbolindex/experimentalvsqualified/reference/scopedtestskip boundaries. Literal149 VT_B70 names,3product/146testtool:top20override/fallbackstderrtrace/legacyGPTQlayer0P4096one-shotdump, latterinactiveordinaryEXL3 andnotremovedwithoutreachability. Initialhostanalysisactual1 dueungatedtestbenchmarkGitmacro;rawcommandsets/failurepreserved,thenremainingbenchmarkgatedwithall1538nonprobecommands exact, no ignoredarithmeticflags. No math/ref/threshold/driver/power/service/performancechanges;earliercleanCPU/portablecontribution/U6/Q1evidence separated. Fullfeaturecontributioncomposition/finalhandoff remains.",
+    "U2_diagnostic_isolation_receipt": {
+      "artifact": "upstream-u2-diagnostic-isolation-v1/receipt-v1.json",
+      "sha256": "3feeb701d51883e896db07684b860815703a793299e96ae3b81f9930aec07dbb",
+      "bytes": 13636
     }
   }
 }
