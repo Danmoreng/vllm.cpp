@@ -6665,7 +6665,7 @@
     "F1": "stopped_at_bounded_precondition_low_measured_producer_cost_no_fusion_variant",
     "F2": "completed_first_event_candidate_rejected_second_direct_candidate_retained_prefill_memory_default_model_only",
     "F3": "completed_bounded_actual_shape_and_specific_FAoutM4_investigation_stop_without_kernel_variant",
-    "U6": "bounded_fixed_matrix_lifecycle_prefix_and_full_composition_complete_report_ready_final_archive_and_completion_audit_pending",
+    "U6": "bounded_matrix_lifecycle_prefix_full_composition_and_report_complete_archive_outcome_authority_is_external_handoff_receipt",
     "receipt": {
       "artifact": "upstream-u1-integration-v1/receipt-v1.json",
       "sha256": "c0f79e400d9b5dbf62a63f8367bda529308967b608e0ec72b838d178ca8a17af",
@@ -6675,7 +6675,7 @@
     "cpu_limit": "GCC16 now builds the CPU library and selected targets;5 focused CTest cases pass with5019 assertions and one existing registry test-case skip. GCC12 previous unchanged muse_glimmer_mm array-bounds failure retained; not rerun after the cache repair.",
     "other_backends": "Affected Vulkan source compiles and CUDA CUTLASS/Marlin host syntax checks pass. CUDA device build/link/runtime and HIP remain unverified.",
     "performance_scope": "One before/after C1 short native pair:43.61414->43.51202 decode TPS; TTFT2313.785->2318.430ms; request8160.513->8178.879ms. No repeat signal and no refreshed original score.",
-    "next_step": "Commit/push completed composition proof/report; produce current-source Pro review ZIP with compact immutable evidence, dependency/reference/qualification tables, manifest and omissions; re-open/hash-verify archive and perform full plan stop-rule/completion audit before goalcomplete. U0/U1/U2/Q1/F1/F2/F3 and bounded U6 measurements executed; preserve strict Q1/default failures/experimentalverifier, original C4/mixed overlapunmet, no newoptimization/P0-P7retry/publicbranch/PR/contact.",
+    "next_step": "Archive/completion outcome is established only by recovery/upstream-final-handoff-v1/receipt-v1.json and its exact ZIP/source identity, generated after this source checkpoint. Until that receipt records verified payload/Git-blob/ZIP checks and full plan audit, handoff is not proven complete. Afterwards stop this bounded plan; further optimization or public contribution requires developer direction. Preserve strict Q1/default failed gates, experimental verifier, originalC4/mixed overlapunmet, all stop/rejection records; do not restartP0-P7/createpublicbranch/PR/contact.",
     "U0_tests": "23 host tests in4 CTest cases pass, including8 generated artifact tests; no GPU arithmetic changed.",
     "U0_receipt": {
       "artifact": "upstream-u1-integration-v1/u0-receipt-v1.json",
@@ -6825,12 +6825,13 @@
       "sha256": "3feeb701d51883e896db07684b860815703a793299e96ae3b81f9930aec07dbb",
       "bytes": 13636
     },
-    "U2_composition_tests": "Local combined259path patch applies to selected pristine e67paths; all259payloads exact, all106currentproductsource/headerpaths byteexact pushed3307247ac. Three preview CMake/publicdoc selection derivatives only; source-v2 differs from actually built source-v1 only portable tools README. Upstream2539policy/workflow payloads/symlinks untouched. CPU no.env/model/oneAPI configures0; twohosttargets6steps/2CTest14assertions+5methods pass; full CPUlibrary614steps0. Fresh oneAPI/oneDNN/TLA modeltest639steps0; new31,150,592Bbinary SHA950872812a9eddda94147e0b6b51ff307b761f0fe7d285acaf2a0b3434264eba. GPU4K/O32/O32warmup-reset24GiBnoswapCPU2/180W/defaultdirectprepare/experimentalverifier1/profileOFF130assertions0; all32IDs17nontimecycles/fullnon-time-non-hostRSSJSON exact F2defaultcontrol, same30,307,785,027Bdevicepeak/releasegraph0/noOOMswap. CPUlibrarycompile overlaps functional smoke, not score. All1457common compile commands differ only six enumerated optional diarization/example tokens;20XPUbackendcommands rawexact, no numerical flag filtered. First export EOF bug/two failed configure attempts/symlink-observer corrections preserved. Narrow259payload personal-root/NUL/credentialpattern scan clean/public4linksresolve, notfullhistoryscan. PR3363 read-only checkedlate finalaudit: open/nocherry-pick, actual27B EOSprovided; existingInputProcessorfallbackdistinctfrom proposedTokenizerAPI. No arithmetic/reference/threshold/driver/power/dependency/policy/checker/CIchanges or publication; strictQ1/default qualification staysfailedopen. Technicalreport ready, ZIP/audit pending.",
+    "U2_composition_tests": "Local combined259path patch applies to selected pristine e67paths; all259payloads exact, all106currentproductsource/headerpaths byteexact pushed3307247ac. Three preview CMake/publicdoc selection derivatives only; source-v2 differs from actually built source-v1 only portable tools README. Upstream2539policy/workflow payloads/symlinks untouched. CPU no.env/model/oneAPI configures0; twohosttargets6steps/2CTest14assertions+5methods pass; full CPUlibrary614steps0. Fresh oneAPI/oneDNN/TLA modeltest639steps0; new31,150,592Bbinary SHA950872812a9eddda94147e0b6b51ff307b761f0fe7d285acaf2a0b3434264eba. GPU4K/O32/O32warmup-reset24GiBnoswapCPU2/180W/defaultdirectprepare/experimentalverifier1/profileOFF130assertions0; all32IDs17nontimecycles/fullnon-time-non-hostRSSJSON exact F2defaultcontrol, same30,307,785,027Bdevicepeak/releasegraph0/noOOMswap. CPUlibrarycompile overlaps functional smoke, not score. All1457common compile commands differ only six enumerated optional diarization/example tokens;20XPUbackendcommands rawexact, no numerical flag filtered. First export EOF bug/two failed configure attempts/symlink-observer corrections preserved. Narrow259payload personal-root/NUL/credentialpattern scan clean/public4linksresolve, notfullhistoryscan. PR3363 read-only checkedlate finalaudit: open/nocherry-pick, actual27B EOSprovided; existingInputProcessorfallbackdistinctfrom proposedTokenizerAPI. No arithmetic/reference/threshold/driver/power/dependency/policy/checker/CIchanges or publication; strictQ1/default qualification staysfailedopen. Technicalreport delivered; archive/completion outcome recorded separately in external handoff receipt.",
     "U2_composition_receipt": {
       "artifact": "upstream-u2-feature-composition-v1/receipt-v1.json",
       "sha256": "efa41d81696bef40f6b4ff6e609354a2685840f042986178044c748171000c3f",
       "bytes": 21390
     },
-    "review_report": "docs/b70-exl3/PRO_UPSTREAM_READINESS_REVIEW_2026-10-06.txt"
+    "review_report": "docs/b70-exl3/PRO_UPSTREAM_READINESS_REVIEW_2026-10-06.txt",
+    "handoff_receipt_authority": "recovery/upstream-final-handoff-v1/receipt-v1.json (external artifact root; post-source-commit generation, not a self-referential archive hash)"
   }
 }
