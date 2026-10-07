@@ -39,8 +39,10 @@ return to zero after release. Captured cgroups report no OOM-kill increment or s
 ## Public server and distinct limits
 
 The actual `examples/vllm-server` passes bounded target-only and MTP3 HTTP checks
-for text/usage, template, streaming, C1–C4, cancellation, EOS and slot reuse.
-Draft-token metrics advance in MTP3; target-only has no speculative family.
+for text/usage, template, streaming, C1–C4 client requests, cancellation/EOS and
+successful follow-up requests. HTTP alone does not prove GPU overlap or physical
+slot identity. Draft-token counters advance in MTP; target-only requires no
+advance, allowing registered constant counters. Exact draft depth is launch evidence.
 These short HTTP checks are functional evidence, not a serving-throughput matrix.
 The public client and launch recipe are in [EXL3_XPU.md](../EXL3_XPU.md).
 
@@ -65,3 +67,24 @@ arithmetic reference is a separate label. The ordinary vLLM pin remains
 not register EXL3. No runtime qualification against that pin was run here.
 Independent static/mutation review is pending. This checkpoint supports experimental
 review, not a claim that the backend is fully reference-qualified or merge-ready.
+
+## Publication follow-up on 2026-10-07
+
+The unpublished contribution now uses main
+`452617154b8231a0fea4b5331b246427d96622b8`, preserving the upstream TT slot-churn
+repair. Tested code head: `11cb381f61b37c9aba88ca63d8f60180e4cf5ef2`.
+CPU/XPU rebuilds and corrected target/MTP3 HTTP checks pass. Required scheduler
+gauges are present, finite, nonnegative and observed drained under a bounded
+deadline. The compact map is included with its exact byte hash and MIT provenance.
+
+The fresh unchanged-control/contribution sentinel matches256 IDs and113 non-timing
+cycles, with610 assertions per arm. The new native lifecycle matches the unchanged
+historical control JSON, with483 assertions. These checks retain their original
+workload and tolerances. Timing is a single continuity observation; no performance
+matrix or reference qualification was repeated. The original table above retains
+its historical identity.
+
+The [public evidence appendix](b70-exl3-publication-evidence/README.md) contains
+current commands, exits, JSON, binary hashes and separately labelled historical
+failure excerpts. The full preflight was not repeated after this rebase. All
+remaining red/PENDING qualification gates stay open.

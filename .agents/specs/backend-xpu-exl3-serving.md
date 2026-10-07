@@ -4,12 +4,13 @@
 
 Row: `BACKEND-XPU-EXL3-SERVING`. State: `ACTIVE`.
 Canonical issue: `ISSUE-GH-3331`.
-Base: `0fbd7c994fd40f4e62f9a75ad135146b00f0952c`.
+Base: `452617154b8231a0fea4b5331b246427d96622b8`.
+Original composition base: `0fbd7c994fd40f4e62f9a75ad135146b00f0952c`.
 The committed specification precedes the scoped product import. Fresh CPU and
 XPU server builds and bounded HTTP/native checks have run. The CPU integration
 repair scopes the pinned FP16 policy to XPU and preserves ordinary backend loading.
-The rebuilt XPU endpoint and unchanged-native control checks pass. The next gates
-audit the contribution range and record the applicable upstream checks.
+The rebuilt XPU endpoint and unchanged-native control checks pass. The publication follow-up repairs the HTTP drain test and retains the TT slot-churn
+fix through a rebase. Current scoped results and historical red gates are linked below.
 Composition, independent review and reference qualification remain separate gates.
 Independent review is pending; this row is not merge-qualified.
 
@@ -165,7 +166,7 @@ Current focused results on 2026-10-06:
 |---|---|
 | CPU build and model-free tests | Library built;20 focused CTest entries pass, including the retained ordinary CPU EXL3 forward and explicit FP16 layer-policy test. |
 | XPU server build | Actual `server` target and model/test binaries link with oneAPI2026.1.1 and oneDNN3.13.0; shared cleanup uses the production core. |
-| HTTP target-only and MTP3 | Each bounded client run passes11 checks for usage/text, templates, streaming, C1–C4, cancellation/EOS/reuse, mode and drain. MTP draft counters advance. |
+| Historical HTTP target-only and MTP3 | The old client reported11 checks per arm; Pro found a false-positive drain check for missing gauges. Corrected current results are recorded below; native lifecycle evidence remains separate. |
 | Native C1 P4096/O256 |256 IDs and113 non-timing cycles match unchanged development control;610 assertions per arm. Single timing pair is a continuity observation. |
 | Native lifecycle |483 assertions per arm; complete result JSON matches the control, including poisoned spare state and graph/eager/graph. |
 | Aligned native P32768/O64 prefix |363 assertions; warm position30400, identical cold/warm IDs at batch1600. |
@@ -219,6 +220,30 @@ A maintainer prerequisite must name its exact gate rather than silently expand s
 Stop on destructive conflicts, unavailable required resources or unresolved behavior.
 Keep the branch reviewable when merge approval or independent review remains pending.
 No exception can be recorded as a passing correctness or review gate.
+
+## Publication follow-up
+
+The 2026-10-07 R1 repair requires both finite nonnegative scheduler gauges,
+observes drain under a short deadline and keeps observations on failure.
+Seven full-client model-free tests and two affected CPU CTest entries pass.
+Corrected target/MTP3 real HTTP runs each pass11 checks; target needs no draft map.
+HTTP simultaneous requests and successful follow-ups do not establish physical
+slot identity or GPU overlap. Draft activity alone does not establish exact depth;
+actual launch commands record MTP3. The exact compact map is now bundled under
+its donor MIT license, byte-identical to the required hash; stale MTP/NOTICE text
+is corrected.
+
+The unpublished contribution was rebased onto current main, preserving its TT
+GDN state-slot repair alongside the XPU attention policy. CPU and actual XPU
+server/model rebuilds pass. The fresh native sentinel pair matches256 IDs and113
+non-timing cycles (610 assertions each); the current lifecycle matches the unchanged
+historical control (483 assertions each). TT runtime qualification is unavailable.
+The [public evidence appendix](../../docs/benchmarks/b70-exl3-publication-evidence/README.md)
+contains new derivative hashes, commands, exits, JSON results and failure excerpts.
+The full preflight was not repeated at this head. Historical four-failure/13-skip
+outcomes are preserved; precise tools-suite baseline cause equivalence is unresolved.
+Independent review, qualification and maintainer gate disposition remain pending.
+Publication requires explicit human approval and permits one draft only, no merge.
 
 ## Owed
 
