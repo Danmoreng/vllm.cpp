@@ -31,7 +31,7 @@ ports, and/or vendors code from third-party projects, including:
   - oneDNN (Apache-2.0): optional shared SYCL dependency, not vendored here.
     VLLM_CPP_XPU_ONEDNN (or its GPTQ4 compatibility alias) requires 3.13.0.
     Distributions carrying the library must retain its license and the notices
-    of included third-party components. Source pins are documented in docs/XPU.md.
+    of included third-party components. Source pins are documented in docs/EXL3_XPU.md.
   - xgrammar (Apache-2.0) — C++ grammar core, vendored for structured output.
   - cpp-httplib (MIT) and nlohmann/json (MIT) — header-only dependencies.
   - OpenSSL (Apache-2.0) — a DYNAMIC SYSTEM dependency, not vendored and not

@@ -76,6 +76,25 @@ Load the oneAPI environment and make the supplied oneDNN library visible to the
 runtime loader. Use explicit local model and draft-map paths. No Python or Torch
 runs in the native inference process.
 
+The exact compact MTP map is included at
+`third_party/exl3xpu/qwen3.8-27b-draft-vocab.json`, under its retained MIT license.
+See that directory's README for the distinct metadata source revision and blob.
+From the repository root, verify and copy it without reformatting:
+
+```sh
+printf '%s  %s\n' \
+  b4eadc088059190983fe0498af11864f5aaa2eaf2ec58ae9864f0715634d313d \
+  third_party/exl3xpu/qwen3.8-27b-draft-vocab.json | sha256sum --check
+cp third_party/exl3xpu/qwen3.8-27b-draft-vocab.json /path/to/draft_vocab.json
+```
+
+The JSON schema contains `block_size` (128), `n_blocks` (512), `blocks` (512
+sorted unique block indices), `tokens` (65536), and source `vocab` (248077).
+The retained `model` string and corpus statistics describe its donor selection;
+they are not runtime paths or weights. The native full head has 248320 padded
+rows. The loader verifies the exact 2654-byte file's hash before using its map;
+a different selection or reserialized JSON is rejected.
+
 ```sh
 EXL3_DRAFT_VOCAB=/path/to/draft_vocab.json \
 VT_ASYNC_SCHED=0 VT_ASYNC_RUNNER=0 VT_XPU_GRAPH=1 \
@@ -97,8 +116,8 @@ build-xpu/examples/vllm-server \
 
 The existing CLI accepts `auto`, `cpu` and `cuda`; it does not accept `xpu`.
 In this XPU build with CUDA/HIP disabled, `auto` resolves the XPU platform.
-For target-only operation omit `--speculative-config`. The draft path is required
-when loading the compact MTP head and its exact mapping is checked by the loader.
+For target-only operation omit `--speculative-config`; no draft map is required.
+`EXL3_DRAFT_VOCAB` is required only when loading the compact MTP head.
 The checkpoint's generation configuration remains the default; the smoke below
 explicitly requests greedy sampling. Vision requests are outside this text path.
 
@@ -111,9 +130,18 @@ python3 tools/bench/exl3_http_smoke.py \
   --out /path/to/new-http-result.json
 ```
 
-The client checks nonstreaming/streaming text and terminal usage, C1–C4 request
-isolation, cancellation, EOS, slot reuse, chat-template token accounting and
-speculation metrics. It counts output through API usage, not SSE frame counts.
+The client checks nonstreaming/streaming text and terminal usage, C1–C4 client
+requests, cancellation and EOS followed by successful requests, chat-template
+token accounting and speculation counters. Simultaneous clients do not prove
+GPU overlap or the identity of a reused physical slot; the native lifecycle
+test supplies separate state-ownership evidence. Target-only requires no draft
+counter advance, allowing registered constant counters. MTP requires draft
+activity; its exact depth of three must be checked in the launch configuration,
+since this server's info endpoint does not expose that resolved setting.
+Both scheduler gauges must be present, finite, nonnegative and become zero
+within `--drain-timeout` (default two seconds, maximum ten). Drain observations
+retain values and timestamps, including on failure.
+The client counts output through API usage, not SSE frame counts.
 Streaming logprobs are not provided by the existing transport. Nonstreaming MTP
 logprob positions may be absent and appear as `token_id` placeholders; this smoke
 is not logprob parity or exact-token-ID qualification. The native control check

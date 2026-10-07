@@ -50,7 +50,8 @@ class XpuPlatform final : public Platform {
     return p;
   }
   // Native text path: EXL3 projections, F32 GDN state and float/E4M3 paged KV.
-  // Vision and speculative draft execution are not enabled by this backend.
+  // Compact MTP3 is implemented in the bounded tested text envelope.
+  // Vision is unsupported; full reference qualification remains incomplete.
   bool supports_model_architecture(std::string_view architecture) const override {
     return architecture == "Qwen3_5ForConditionalGeneration";
   }
