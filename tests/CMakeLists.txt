@@ -9,6 +9,8 @@ endif()
 # CPU-only benchmark-harness contract. The tools deliberately use only the
 # Python standard library; image/model/GPU preflights remain dgx-only.
 find_package(Python3 COMPONENTS Interpreter REQUIRED)
+add_test(NAME test_exl3_http_smoke COMMAND ${Python3_EXECUTABLE}
+  "${CMAKE_SOURCE_DIR}/tests/scripts/test_exl3_http_smoke.py")
 add_test(NAME test_b70_inventory COMMAND ${Python3_EXECUTABLE}
   "${CMAKE_SOURCE_DIR}/tests/scripts/test_b70_inventory.py")
 add_test(NAME test_exl3_projection_extract COMMAND ${Python3_EXECUTABLE}

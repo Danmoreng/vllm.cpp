@@ -4,6 +4,7 @@ import argparse
 import concurrent.futures
 import hashlib
 import json
+import math
 import re
 import time
 import traceback
@@ -17,9 +18,15 @@ p.add_argument('--mode', choices=['target', 'mtp3'], required=True)
 p.add_argument('--out', required=True)
 p.add_argument('--prompt-ids')
 p.add_argument('--eos-id', type=int, default=248044)
+p.add_argument('--drain-timeout', type=float, default=2.,
+               help='Maximum seconds to observe scheduler teardown (0 < value <= 10)')
 a = p.parse_args()
+if not math.isfinite(a.drain_timeout) or not 0 < a.drain_timeout <= 10:
+    p.error('--drain-timeout must be finite and in (0, 10]')
 assert not Path(a.out).exists()
-report = {'mode': a.mode, 'url': a.url, 'checks': [], 'scope': 'Bounded HTTP function checks; no Python-reference or maximum-context qualification.'}
+report = {'mode': a.mode, 'url': a.url, 'checks': [], 'drain_observations': [],
+          'scope': 'Bounded HTTP behavior; simultaneous clients do not prove GPU overlap or physical slot identity. No Python-reference or maximum-context qualification.'}
+SCHEDULER_GAUGES = ('vllm:num_requests_running', 'vllm:num_requests_waiting')
 
 def check(name, **facts):
     report['checks'].append({'name': name, **facts})
@@ -36,8 +43,8 @@ def api(path, body=None):
         assert resp.status == 200
         return json.load(resp)
 
-def metrics():
-    with open_req('/metrics') as resp:
+def metrics(timeout=120):
+    with open_req('/metrics', timeout=timeout) as resp:
         text = resp.read().decode()
     values = {}
     for line in text.splitlines():
@@ -45,8 +52,30 @@ def metrics():
             continue
         name = line.split('{', 1)[0].split(' ', 1)[0]
         value = float(line.rsplit(' ', 1)[-1])
+        if name in SCHEDULER_GAUGES:
+            assert math.isfinite(value) and value >= 0, f'invalid scheduler gauge {name}: {value}'
         values[name] = values.get(name, 0.) + value
+    for name in SCHEDULER_GAUGES:
+        assert name in values, f'missing scheduler gauge {name}'
+        assert math.isfinite(values[name]) and values[name] >= 0, f'invalid scheduler gauge {name}: {values[name]}'
     return values
+
+def drained_metrics():
+    started = time.monotonic()
+    deadline = started+a.drain_timeout
+    while True:
+        remaining = deadline-time.monotonic()
+        assert remaining > 0, 'scheduler drain deadline exceeded'
+        values = metrics(timeout=remaining)
+        report['drain_observations'].append({
+            'unix_s': time.time(), 'elapsed_s': time.monotonic()-started,
+            'gauges': {name: values[name] for name in SCHEDULER_GAUGES}})
+        assert time.monotonic() <= deadline, 'scheduler drain deadline exceeded'
+        if all(values[name] == 0 for name in SCHEDULER_GAUGES):
+            return values
+        remaining = deadline-time.monotonic()
+        assert remaining > 0, 'scheduler drain deadline exceeded'
+        time.sleep(min(.05, remaining))
 
 def complete(prompt, cap=32, **extra):
     body = {'model': a.model, 'prompt': prompt, 'temperature': 0.,
@@ -132,7 +161,8 @@ try:
     assert canceled['closed_after_first_text']
     reused = complete(prompts[0])
     assert signature(reused) == signature(baseline[0])
-    check('cancellation-and-freed-slot-reuse', cancellation=canceled, reuse=reused)
+    check('cancellation-and-followup-request', cancellation=canceled, followup=reused,
+          physical_slot_identity='not observed by this HTTP client')
     eos = complete('End of sequence probe.', cap=16, ignore_eos=False,
                    allowed_token_ids=[a.eos_id])
     assert eos['response']['choices'][0]['finish_reason'] == 'stop', eos
@@ -140,7 +170,7 @@ try:
     check('eos-stop', eos_id=a.eos_id, result=eos)
     after_eos = complete(prompts[0])
     assert signature(after_eos) == signature(baseline[0])
-    check('eos-slot-reuse', result=after_eos)
+    check('eos-followup-request', result=after_eos)
     messages = [{'role': 'user', 'content': 'What is one plus one? Reply briefly.'}]
     templated = api('/tokenize', {'model': a.model, 'messages': messages,
                                  'chat_template_kwargs': {'enable_thinking': False}})
@@ -172,15 +202,23 @@ try:
         assert cached > 0, {'before': m0, 'cold': m1, 'warm': m2}
         check('aligned-cold-warm-prefix', prompt_sha256=hashlib.sha256(prompt.encode()).hexdigest(),
               prompt_tokens=4096, cached_tokens_warm=cached, cold=cold, warm=warm)
-    final = metrics()
-    draft_keys = [k for k in final if k.startswith('vllm:spec_decode_num_draft_tokens')]
+    final = drained_metrics()
+    draft_keys = {k for k in before.keys() | final.keys()
+                  if k.startswith('vllm:spec_decode_num_draft_tokens')}
+    for key in draft_keys:
+        assert key in final, f'draft counter disappeared: {key}'
+        assert all(math.isfinite(v) and v >= 0 for v in
+                   (before.get(key, 0.), final[key])), f'invalid draft counter {key}'
+        assert final[key] >= before.get(key, 0.), f'draft counter reset: {key}'
+    draft_delta = sum(final[k]-before.get(k, 0.) for k in draft_keys)
     if a.mode == 'mtp3':
-        assert draft_keys and sum(final[k]-before.get(k, 0.) for k in draft_keys) > 0, final
+        assert draft_keys and draft_delta > 0, final
     else:
-        assert not draft_keys, final
-    check('actual-speculation-mode', metrics_before=before, metrics_after=final)
-    assert final.get('vllm:num_requests_running', 0.) == 0. and final.get('vllm:num_requests_waiting', 0.) == 0., final
-    check('server-drained', metrics=final)
+        assert draft_delta == 0, final
+    check('speculation-counter-activity', requested_mode=a.mode, draft_token_delta=draft_delta,
+          exact_draft_depth='not exposed by this server; verify the launch configuration separately',
+          metrics_before=before, metrics_after=final)
+    check('server-drained', metrics=final, deadline_s=a.drain_timeout)
     report['status'] = 'PASS'
 except Exception as error:
     report['status'] = 'FAIL'
