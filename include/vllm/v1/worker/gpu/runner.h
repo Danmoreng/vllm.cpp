@@ -91,6 +91,7 @@ class KVConnector;  // KV-EXTERNAL-CACHE: worker-side store/load seam (fwd-decl)
 }  // namespace vllm::v1::kv_offload
 
 namespace vllm::v1 {
+struct RejectionSamplerOutput;
 
 // Decode-first reorder (utils.py::reorder_batch_to_split_decodes_and_prefills @
 // e24d1b24, T0 subset). Reorders `input_batch`'s active [0, num_reqs) requests so
@@ -804,6 +805,7 @@ class GPUModelRunner final : public ModelRunnerBase {
     // Borrowed views into `encoder_cache_` entries, in the order their `true`
     // positions appear in `is_mm_embed`. Valid only while this step runs.
     std::vector<vt::Tensor> mm_embeds;
+    std::vector<std::shared_ptr<MmEncoderLifetime>> mm_lifetimes;
     // [total_num_scheduled_tokens]; `char` because std::vector<bool> has no
     // contiguous buffer to hand a model.
     std::vector<char> is_mm_embed;
@@ -823,9 +825,11 @@ class GPUModelRunner final : public ModelRunnerBase {
   void execute_mm_encoder(const SchedulerOutput& scheduler_output);
   // `_gather_mm_embeddings` (gpu_model_runner.py:3220, grep -c == 1).
   MmGather gather_mm_embeddings(const SchedulerOutput& scheduler_output,
-                                int total_num_scheduled_tokens);
+                                int total_num_scheduled_tokens,
+                                int draft_lookahead = 0);
   // `_calc_mrope_positions` (gpu_model_runner.py:2748, grep -c == 1): [3, T]
-  // row-major. The prompt part is SLICED from the per-request array; the
+  // row-major. Image prompt coordinates are SLICED from the per-request array;
+  // text prompt rows in a mixed batch use ordinary token positions. The
   // completion part is SYNTHESISED as `context_len + i + delta` on all three
   // axes, which is why one int per request carries M-RoPE across every decode
   // step (gpu_model_runner.py:2786, grep -c == 1).
@@ -1117,7 +1121,8 @@ class GPUModelRunner final : public ModelRunnerBase {
   // #2534: the final-logit dump (VT_DUMP_LOGITS). Called from BOTH sampling
   // paths, because the production default takes the device-resident branch of
   // sample_tokens_async and not sample_tokens.
-  void dump_step_logits(const vt::Tensor& logits);
+  void dump_step_logits(const vt::Tensor& logits,
+                        const RejectionSamplerOutput* verification = nullptr);
 
   vt::Tensor assemble_sample_logits(
       const std::optional<GrammarOutput>& grammar_output,
@@ -1537,6 +1542,11 @@ class GPUModelRunner final : public ModelRunnerBase {
     // step (ModelForwardInput::hidden_tap output), consumed by propose_drafts to
     // run the MTP drafter. Empty (null storage) unless spec is on.
     Qwen3_5MTPHiddenStates spec_hidden;
+    // Borrowed shifted visual slices retain their encoder parents until the
+    // post-sampling draft merge/proposal has completed. Gather before request
+    // progress advances, merge after shift/splice knows the sampled token.
+    std::optional<MmGather> spec_mm_gather;
+    std::vector<int32_t> spec_mm_positions;
     // SPEC-DFLASH D5: the target's D1 MULTI-tap captured this step
     // (ModelForwardInput::aux_tap output) — the residual stream at the draft's
     // target_layer_ids as [T, H×taps] bf16, consumed by propose_drafts_dflash.

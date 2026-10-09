@@ -337,6 +337,12 @@ const char* OpNameImpl(OpId op) {
       return "MatmulGptq4W4A16";
     case OpId::kMatmulDenseF16:
       return "MatmulDenseF16";
+    case OpId::kVisionPosEmbedInterpolate:
+      return "VisionPosEmbedInterpolate";
+    case OpId::kVisionRopeGrid:
+      return "VisionRopeGrid";
+    case OpId::kVisionRopeApply:
+      return "VisionRopeApply";
     case OpId::kRmsNorm:
       return "RmsNorm";
     case OpId::kResidualRmsNorm:

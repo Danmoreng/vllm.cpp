@@ -1,6 +1,12 @@
 add_library(vllm_test_main STATIC doctest_main.cpp)
 target_include_directories(vllm_test_main SYSTEM PUBLIC ${CMAKE_SOURCE_DIR}/third_party)
 
+add_executable(test_vision_prefix_capture v1/worker/gpu/test_vision_prefix_capture.cpp)
+target_include_directories(test_vision_prefix_capture PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(test_vision_prefix_capture PRIVATE vllm_test_main)
+vllm_cpp_set_warnings(test_vision_prefix_capture)
+add_test(NAME test_vision_prefix_capture COMMAND test_vision_prefix_capture)
+
 if(UNIX)
   add_test(NAME test_triton_aot_drift_contract
     COMMAND bash "${CMAKE_SOURCE_DIR}/tests/scripts/test_triton_aot_drift.sh")
@@ -9,6 +15,8 @@ endif()
 # CPU-only benchmark-harness contract. The tools deliberately use only the
 # Python standard library; image/model/GPU preflights remain dgx-only.
 find_package(Python3 COMPONENTS Interpreter REQUIRED)
+add_test(NAME test_native_vision_attribution_pins COMMAND ${Python3_EXECUTABLE}
+  "${CMAKE_SOURCE_DIR}/tests/scripts/test_native_vision_attribution_pins.py")
 add_test(NAME test_exl3_http_smoke COMMAND ${Python3_EXECUTABLE}
   "${CMAKE_SOURCE_DIR}/tests/scripts/test_exl3_http_smoke.py")
 add_test(NAME test_b70_inventory COMMAND ${Python3_EXECUTABLE}
@@ -170,6 +178,62 @@ if(VLLM_CPP_XPU)
   target_link_options(test_xpu_w8a8_workspaces PRIVATE -fsycl)
   set_tests_properties(test_xpu_w8a8_workspaces PROPERTIES RUN_SERIAL TRUE LABELS "xpu;hermetic")
   vllm_cpp_add_test(test_xpu_gdn_fp16_variable vt/test_xpu_gdn_fp16_variable.cpp)
+  vllm_cpp_add_test(test_xpu_vision_ops vt/test_xpu_vision_ops.cpp)
+  # N1 diagnostic only: no production dispatch switch, no registered test gate.
+  add_executable(native-layer-norm-boundary-probe tools/native_layer_norm_boundary_probe.cpp)
+  target_link_libraries(native-layer-norm-boundary-probe PRIVATE vllm::vllm)
+  target_include_directories(native-layer-norm-boundary-probe PRIVATE ${CMAKE_SOURCE_DIR}/src)
+  target_compile_options(native-layer-norm-boundary-probe PRIVATE -fsycl -save-temps=obj)
+  target_link_options(native-layer-norm-boundary-probe PRIVATE -fsycl)
+  vllm_cpp_set_warnings(native-layer-norm-boundary-probe)
+  target_compile_definitions(test_xpu_vision_ops PRIVATE
+    XPU_VISION_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/vt/fixtures/xpu_vision_ops")
+  set_tests_properties(test_xpu_vision_ops PROPERTIES RUN_SERIAL TRUE LABELS "xpu;vision")
+  vllm_cpp_add_test(test_xpu_vision_mtp vt/test_xpu_vision_mtp.cpp)
+  set_tests_properties(test_xpu_vision_mtp PROPERTIES RUN_SERIAL TRUE LABELS "xpu;vision")
+  vllm_cpp_add_test(test_xpu_vision_tower vt/test_xpu_vision_tower.cpp)
+  target_compile_definitions(test_xpu_vision_tower PRIVATE
+    XPU_VISION_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/vt/fixtures/xpu_vision_ops")
+  set_tests_properties(test_xpu_vision_tower PROPERTIES RUN_SERIAL TRUE LABELS "xpu;vision")
+  if(VLLM_CPP_REQUIRE_EXL3_TEST_ARTIFACTS)
+    set_tests_properties(test_xpu_vision_ops test_xpu_vision_tower test_xpu_vision_mtp PROPERTIES
+      ENVIRONMENT "EXL3_REQUIRE_ARTIFACTS=1")
+  endif()
+  add_test(NAME test_native_vision_external_artifacts COMMAND ${Python3_EXECUTABLE}
+    "${CMAKE_SOURCE_DIR}/tests/scripts/test_native_vision_external_artifacts.py"
+    $<TARGET_FILE:test_xpu_vision_tower>)
+  set_tests_properties(test_native_vision_external_artifacts PROPERTIES
+    RUN_SERIAL TRUE LABELS "host;vision;external-artifact-contract")
+  add_test(NAME test_native_vision_mtp_external_artifacts COMMAND ${Python3_EXECUTABLE}
+    "${CMAKE_SOURCE_DIR}/tests/scripts/test_native_vision_mtp_artifacts.py"
+    $<TARGET_FILE:test_xpu_vision_mtp>)
+  set_tests_properties(test_native_vision_mtp_external_artifacts PROPERTIES
+    RUN_SERIAL TRUE LABELS "host;vision;external-artifact-contract")
+  if(VLLM_CPP_IMAGE_CODECS)
+    # Internal isolated phase utility, not a public-ABI example or CTest suite.
+    add_executable(native-vision-bench tools/native_vision_bench.cpp)
+    target_link_libraries(native-vision-bench PRIVATE vllm::vllm)
+    vllm_cpp_set_warnings(native-vision-bench)
+    add_executable(native-vision-compare tools/native_vision_compare.cpp)
+    target_link_libraries(native-vision-compare PRIVATE vllm::vllm)
+    vllm_cpp_set_warnings(native-vision-compare)
+    add_executable(native-vision-first-gdn-compare tools/native_vision_first_gdn_compare.cpp)
+    target_link_libraries(native-vision-first-gdn-compare PRIVATE vllm::vllm)
+    target_include_directories(native-vision-first-gdn-compare PRIVATE ${CMAKE_SOURCE_DIR}/src)
+    vllm_cpp_set_warnings(native-vision-first-gdn-compare)
+    add_executable(native-vision-target-state-compare tools/native_vision_target_state_compare.cpp)
+    target_link_libraries(native-vision-target-state-compare PRIVATE vllm::vllm)
+    vllm_cpp_set_warnings(native-vision-target-state-compare)
+    # Real C-API execution with internal request-boundary profile drains.
+    # Keep one static runtime; no internal symbols enter the public C ABI.
+    add_executable(native-vision-serving-profile tools/native_vision_serving_profile.cpp)
+    target_link_libraries(native-vision-serving-profile PRIVATE vllm::vllm)
+    target_include_directories(native-vision-serving-profile PRIVATE ${CMAKE_SOURCE_DIR}/src)
+    if(VLLM_CPP_XPU_ONEDNN_ENABLED)
+      target_compile_definitions(native-vision-serving-profile PRIVATE VLLM_CPP_XPU_ONEDNN)
+    endif()
+    vllm_cpp_set_warnings(native-vision-serving-profile)
+  endif()
   target_include_directories(test_xpu_exl3 PRIVATE ${CMAKE_SOURCE_DIR}/src)
   vllm_cpp_add_test(test_xpu_exl3_prefill vt/test_xpu_exl3_prefill.cpp)
   target_include_directories(test_xpu_exl3_prefill PRIVATE ${CMAKE_SOURCE_DIR}/src)
@@ -2093,14 +2157,19 @@ target_include_directories(test_deepseek_v4_multigroup_kv PRIVATE
 # Multimodal M1 processor-parity gate: C++ Qwen3-VL image pipeline
 # (pixel_values/grid/mm-hash/placeholder-expansion) BIT-identical to the vLLM
 # 0.25.0 oracle fixture (tests/vllm/multimodal/fixtures/qwen3vl).
+vllm_cpp_add_test(test_torchvision_resize vllm/multimodal/test_torchvision_resize.cpp)
+target_compile_definitions(test_torchvision_resize PRIVATE
+  TV_RESIZE_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/vllm/multimodal/fixtures/torchvision_resize")
 vllm_cpp_add_test(test_qwen3vl_processor vllm/multimodal/test_qwen3vl_processor.cpp)
 target_compile_definitions(test_qwen3vl_processor PRIVATE
-  MM_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/vllm/multimodal/fixtures/qwen3vl")
+  MM_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/vllm/multimodal/fixtures/qwen3vl"
+  TV_RESIZE_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/vllm/multimodal/fixtures/torchvision_resize")
 # Multimodal M2a vision-tower faithfulness gate: the C++ Qwen3_VisionTransformer
 # forward vs the dumped vLLM 0.25.0 tower reference (patch-embed/block0/merger/
 # DeepStack taps + full [196,10240] output). GPU + VLLM_QWEN3VL_WEIGHTS required,
 # else skipped (scripts/mm/m2a_tower_ref_dump.py + m2a_tower_weight_dump.py).
 vllm_cpp_add_test(test_qwen3vl_tower vllm/multimodal/test_qwen3vl_tower.cpp)
+vllm_cpp_add_test(test_qwen3vl_device_weights vllm/multimodal/test_qwen3vl_device_weights.cpp)
 target_compile_definitions(test_qwen3vl_tower PRIVATE
   MM_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/vllm/multimodal/fixtures/qwen3vl"
   TOWER_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/vllm/multimodal/fixtures/qwen3vl_tower")
@@ -2777,6 +2846,12 @@ vllm_cpp_add_test(test_beam_search vllm/entrypoints/test_beam_search.cpp)
 # to the existing single-sequence mm processors (CPU, no model weights). Reuses
 # the M1 image (qwen3vl) + A1 audio (whisper_audio) processor-parity fixtures.
 vllm_cpp_add_test(test_chat_mm vllm/entrypoints/openai/test_chat_mm.cpp)
+if(VLLM_CPP_IMAGE_CODECS)
+  vllm_cpp_add_test(test_native_image_codec
+    vllm/entrypoints/openai/test_native_image_codec.cpp)
+  target_compile_definitions(test_native_image_codec PRIVATE
+    IMAGE_CODEC_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/vllm/entrypoints/openai/fixtures/native_image_codec")
+endif()
 target_compile_definitions(test_chat_mm PRIVATE
   MM_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/vllm/multimodal/fixtures/qwen3vl"
   MM_AUDIO_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/vllm/multimodal/fixtures/whisper_audio"

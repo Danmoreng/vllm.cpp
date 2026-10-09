@@ -112,6 +112,8 @@ option(VLLM_CPP_BUILD_EXAMPLES "Build examples" ON)
 # deviation, NOT a compute/ML dependency (consistent with the no-pytorch/no-ggml
 # rule).
 option(VLLM_CPP_SERVER "Build the OpenAI HTTP server (needs third_party/httplib/httplib.h)" ON)
+option(VLLM_CPP_IMAGE_CODECS
+  "Enable native image container decoding using system libpng/libjpeg" OFF)
 option(VLLM_CPP_LITERAL_STATIC
   "Link the CPU-only server as a literal static executable (experimental musl release lane only)"
   OFF)
@@ -1219,6 +1221,7 @@ add_library(vllm STATIC
   # Pillow's BICUBIC resampler, which is NOT torchvision's and NOT a four-tap
   # cubic (dots3-note W6c, #2537).
   src/vllm/multimodal/pil_resize.cpp
+  src/vllm/multimodal/torchvision_resize.cpp
   src/vllm/multimodal/qwen3vl_processor.cpp
   # Nemotron Nano VL / Omni dynamic-resolution tiler and torch's antialiased
   # bicubic resize (a third algorithm beside Pillow's and torchvision's).
@@ -1391,6 +1394,7 @@ add_library(vllm STATIC
   src/capi/chat_prompt.cpp
   src/vllm/entrypoints/openai/protocol.cpp
   src/vllm/entrypoints/openai/chat_mm.cpp
+  src/vllm/entrypoints/openai/image_codec.cpp
   # ENG-MM-INPUT-PIPELINE (#2475): the per-architecture multimodal chat seam
   # registry, and Qwen3-VL's registration into it. The registration TU is
   # SELF-REGISTERING and is reached through vllm's INTERFACE --whole-archive.
@@ -1399,6 +1403,7 @@ add_library(vllm STATIC
   src/vllm/entrypoints/openai/mm_chat_nano_nemotron_vl.cpp
   src/vllm/entrypoints/openai/mm_chat_dots3note.cpp
   src/vllm/entrypoints/openai/mm_chat_qwen3vl.cpp
+  src/vllm/entrypoints/openai/mm_chat_qwen3_5.cpp
   src/vllm/entrypoints/openai/serving_utils.cpp
   src/vllm/entrypoints/openai/serving_completion.cpp
   src/vllm/entrypoints/openai/serving_chat.cpp
@@ -1629,6 +1634,13 @@ target_include_directories(vllm PRIVATE src)
 # engine <minja/chat-template.hpp> / <minja/minja.hpp> that backs
 # src/vllm/entrypoints/chat_template.cpp.
 target_include_directories(vllm SYSTEM PUBLIC third_party)
+if(VLLM_CPP_IMAGE_CODECS)
+  find_package(PNG 1.6 REQUIRED)
+  find_package(JPEG REQUIRED)
+  target_link_libraries(vllm PRIVATE PNG::PNG JPEG::JPEG)
+  set_source_files_properties(src/vllm/entrypoints/openai/image_codec.cpp
+    PROPERTIES COMPILE_DEFINITIONS VLLM_CPP_IMAGE_CODECS)
+endif()
 vllm_cpp_set_warnings(vllm)
 # SYSTEM covers the FRONT-END diagnostics from those vendored headers, but not
 # the ones the OPTIMIZER raises after inlining: those are attributed to the TU
@@ -1869,7 +1881,7 @@ if(VLLM_CPP_XPU)
   endif()
   add_library(vllm_xpu_backend OBJECT src/vt/xpu/xpu_backend.cpp)
   add_library(vllm_xpu OBJECT
-    src/vt/xpu/xpu_elementwise.cpp src/vt/xpu/xpu_norm.cpp
+    src/vt/xpu/xpu_elementwise.cpp src/vt/xpu/xpu_norm.cpp src/vt/xpu/xpu_vision_ops.cpp
     src/vt/xpu/xpu_sampling.cpp src/vt/xpu/xpu_ops.cpp src/vt/xpu/xpu_exl3.cpp
     src/vt/xpu/xpu_gdn.cpp src/vt/xpu/xpu_attention.cpp src/vt/xpu/xpu_exl3_prefill.cpp
     src/vt/xpu/xpu_exl3_smallm.cpp
@@ -1881,7 +1893,12 @@ if(VLLM_CPP_XPU)
   set_source_files_properties(src/vt/xpu/xpu_exl3_smallm.cpp
     src/vt/xpu/xpu_exl3_w8a8.cpp PROPERTIES
     COMPILE_OPTIONS "-ffast-math")
-  if(VLLM_CPP_XPU_XE2_PREFILL OR VLLM_CPP_XPU_XE2_GDN)
+  # Vision uses FP16 Xe2 attention independently of text FP8 prefill.
+  set(_vt_xe2_vision OFF)
+  if(VLLM_CPP_XPU_ONEDNN_ENABLED AND VLLM_CPP_SYCL_TLA_DIR)
+    set(_vt_xe2_vision ON)
+  endif()
+  if(VLLM_CPP_XPU_XE2_PREFILL OR VLLM_CPP_XPU_XE2_GDN OR _vt_xe2_vision)
     if(NOT EXISTS "${VLLM_CPP_SYCL_TLA_DIR}/include/cutlass/cutlass.h")
       message(FATAL_ERROR "VLLM_CPP_SYCL_TLA_DIR must name the pinned SYCL-TLA checkout")
     endif()
@@ -1913,6 +1930,25 @@ if(VLLM_CPP_XPU)
     target_compile_definitions(vllm_xpu PRIVATE VLLM_CPP_XPU_XE2_PREFILL)
     target_sources(vllm PRIVATE $<TARGET_OBJECTS:vllm_xpu_xe2_prefill>)
   endif()
+  if(_vt_xe2_vision)
+    add_library(vllm_xpu_xe2_vision OBJECT src/vt/xpu/xpu_vision_attention_xe2.cpp)
+    # Preserve the tested contracted base2 softmax; other vision ops stay strict.
+    set_source_files_properties(src/vt/xpu/xpu_vision_attention_xe2.cpp PROPERTIES
+      COMPILE_OPTIONS "-fp-model=fast")
+    set_target_properties(vllm_xpu_xe2_vision PROPERTIES POSITION_INDEPENDENT_CODE ON)
+    target_include_directories(vllm_xpu_xe2_vision PRIVATE include src)
+    target_include_directories(vllm_xpu_xe2_vision SYSTEM PRIVATE
+      third_party/b70_xe2_prefill
+      "${VLLM_CPP_SYCL_TLA_DIR}/include"
+      "${VLLM_CPP_SYCL_TLA_DIR}/tools/util/include"
+      "${VLLM_CPP_SYCL_TLA_DIR}/applications")
+    target_compile_definitions(vllm_xpu_xe2_vision PRIVATE
+      CUTLASS_ENABLE_HEADERS_ONLY CUTLASS_ENABLE_SYCL SYCL_INTEL_TARGET CUTLASS_VERSIONS_GENERATED)
+    target_compile_options(vllm_xpu_xe2_vision PRIVATE -fsycl)
+    target_compile_definitions(vllm_xpu PRIVATE VLLM_CPP_XPU_XE2_VISION)
+    target_sources(vllm PRIVATE $<TARGET_OBJECTS:vllm_xpu_xe2_vision>)
+  endif()
+  unset(_vt_xe2_vision)
   if(VLLM_CPP_XPU_XE2_PREFILL OR VLLM_CPP_XPU_XE2_GDN)
     # Short FP16 decode shares the Torch-free XMX policy with verification;
     # it does not require the experimental long-prefill route.
@@ -1965,6 +2001,7 @@ if(VLLM_CPP_XPU)
     find_package(dnnl 3.13.0 EXACT CONFIG REQUIRED)
     target_sources(vllm_xpu PRIVATE src/vt/xpu/xpu_gptq4.cpp
       src/vt/xpu/xpu_exl3_attention.cpp)
+    target_sources(vllm_xpu PRIVATE src/vt/xpu/xpu_vision_attention.cpp)
     target_compile_definitions(vllm_xpu PRIVATE VLLM_CPP_XPU_ONEDNN)
     target_compile_definitions(vllm_xpu_backend PRIVATE VLLM_CPP_XPU_ONEDNN)
     target_link_libraries(vllm_xpu PRIVATE DNNL::dnnl)

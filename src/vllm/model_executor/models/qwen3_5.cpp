@@ -29,10 +29,15 @@
 #include "vllm/model_executor/models/dense_device_glue.h"
 #include "vllm/model_executor/models/device_pool.h"  // DevicePool/Pool/AuxPool/ActivePool (shared)
 #include "vt/tenstorrent/tenstorrent_device.h"  // DebugDeviceReadbackF32 (TT-only debug seam)
+#include "vt/gdn_fp16_plan.h"
 
 #include "vllm/model_executor/models/act_dump.h"  // ROCM-TIER-DIVERGENCE (#2590)
 #include "vllm/model_executor/models/qwen3_5_dense.h"
+#include "vllm/model_executor/models/qwen3_5_diagnostics.h"
+#include "vllm/model_executor/models/qwen3_5_dense_mm.h"
+#include "vllm/model_executor/models/model_registry.h"
 #include "vllm/model_executor/models/qwen3_5_internal.h"
+#include "vllm/model_executor/models/qwen3_5_gdn_replay.h"
 #include "vllm/model_executor/device_placement.h"
 #include "vllm/model_executor/moe_placement_seam.h"
 #include "vllm/model_executor/models/qwen3_5_gdn_block.h"  // RunGdnBlockPaged (W5b seam, #2110)
@@ -5785,12 +5790,13 @@ DBuf GdnBlockPaged(Dev d, const GdnLayerWeights& w, const HfConfig& cfg,
   // f32-accumulated conv math are unchanged. The post-conv split reads dconv's
   // dtype (GdnPostConv/GdnConvSplit are templated on it). The conv reads the
   // merged mixed_qkv view's padded row stride directly — no materialization.
-  // The EXL3 C1 producer retains the unrounded FP32 Conv result
+  // The EXL3 prefill producer retains the unrounded FP32 Conv result
   // through normalization, rounds scaled Q to FP16, and prepares gate prefixes
   // directly from raw A. Its state remains FP32 across the following decode.
   const bool fp16_producer_prefill = d.q.device.type == vt::DeviceType::kXPU &&
       d.activation_dtype == DType::kF16 && mixed.dtype == DType::kF16 && gptq == nullptr &&
-      !w.in_proj_qkv_exl3.Empty() && !spec && np == 1 && nd == 0 && T >= 1 && T <= 4096 &&
+      !w.in_proj_qkv_exl3.Empty() && !spec && np >= 1 && np <= 4 &&
+      np_tok >= np && np_tok <= vt::kGdnFp16MaxTokens &&
       Hk == 16 && Hv == 48 && Dk == 128 && Dv == 128 && Kw == 4 &&
       vt::OpRegistered(vt::OpId::kGdnPrefillRawGate, d.q.device.type);
   const DType convdt = fp16_producer_prefill ? DType::kF32 : mixed.dtype;
@@ -5944,9 +5950,29 @@ DBuf GdnBlockPaged(Dev d, const GdnLayerWeights& w, const HfConfig& cfg,
     DBuf dql2(d, actdt, {T, Hk, Dk});
     DBuf dkl2(d, actdt, {T, Hk, Dk});
     if (fp16_producer_prefill || GlueFuseEnabled()) {
-      vt::GdnPostConv(d.q, dql2.t(), dkl2.t(), vf.t(), dg.t(), dbeta.t(),
-                      dconv.t(), araw, braw, a_log_dev, dt_bias_dev,
-                      vt::GdnPostConvArgs{1e-6F, fp16_producer_prefill});
+      if (fp16_producer_prefill && nd_tok > 0) {
+        // Preserve the existing ordinary decode arithmetic while prefills use
+        // the installed producer's unrounded Conv and scaled-Q convention.
+        // The two groups remain device-side tensor views of one batched step.
+        DBuf decode_conv(d, mixed.dtype, {nd_tok, conv_dim});
+        vt::CastF16(d.q, decode_conv.t(), SubView(dconv.t(), 0, nd_tok));
+        Tensor qd = SubView(dql2.t(), 0, nd_tok), kd = SubView(dkl2.t(), 0, nd_tok),
+               vd = SubView(vf.t(), 0, nd_tok), gd = SubView(dg.t(), 0, nd_tok),
+               bd = SubView(dbeta.t(), 0, nd_tok);
+        vt::GdnPostConv(d.q, qd, kd, vd, gd, bd, decode_conv.t(),
+            araw.Slice(0, 0, nd_tok), braw.Slice(0, 0, nd_tok), a_log_dev, dt_bias_dev,
+            vt::GdnPostConvArgs{1e-6F, false});
+        Tensor qp = SubView(dql2.t(), nd_tok, np_tok), kp = SubView(dkl2.t(), nd_tok, np_tok),
+               vp = SubView(vf.t(), nd_tok, np_tok), gp = SubView(dg.t(), nd_tok, np_tok),
+               bp = SubView(dbeta.t(), nd_tok, np_tok);
+        vt::GdnPostConv(d.q, qp, kp, vp, gp, bp, SubView(dconv.t(), nd_tok, np_tok),
+            araw.Slice(0, nd_tok, nd_tok + np_tok), braw.Slice(0, nd_tok, nd_tok + np_tok), a_log_dev, dt_bias_dev,
+            vt::GdnPostConvArgs{1e-6F, true});
+      } else {
+        vt::GdnPostConv(d.q, dql2.t(), dkl2.t(), vf.t(), dg.t(), dbeta.t(),
+                        dconv.t(), araw, braw, a_log_dev, dt_bias_dev,
+                        vt::GdnPostConvArgs{1e-6F, fp16_producer_prefill});
+      }
       DumpGdnStage(d, "mixed", mixed);
       DumpGdnStage(d, "postconv_q", dql2.t());
       DumpGdnStage(d, "postconv_k", dkl2.t());
@@ -6060,7 +6086,7 @@ DBuf GdnBlockPaged(Dev d, const GdnLayerWeights& w, const HfConfig& cfg,
       gdn_args.query_start_loc_host = p_qsl.data();
       if (indexed_state_io) {
         if (fp16_producer_prefill) {
-          vt::GdnPrefillRawGate(d.q, o_pre, q_pre, k_pre, v_pre, araw, b_pre,
+          vt::GdnPrefillRawGate(d.q, o_pre, q_pre, k_pre, v_pre, araw.Slice(0, nd_tok, nd_tok + np_tok), b_pre,
               a_log_dev, dt_bias_dev, dss.t(), sdi.gdn_prefill_qsl.t(),
               vt::GdnArgs{1.0f});
         } else {
@@ -6075,7 +6101,7 @@ DBuf GdnBlockPaged(Dev d, const GdnLayerWeights& w, const HfConfig& cfg,
       } else {
         DBuf dpqsl(d, DType::kI32, {np + 1}, p_qsl.data());
         if (fp16_producer_prefill) {
-          vt::GdnPrefillRawGate(d.q, o_pre, q_pre, k_pre, v_pre, araw, b_pre,
+          vt::GdnPrefillRawGate(d.q, o_pre, q_pre, k_pre, v_pre, araw.Slice(0, nd_tok, nd_tok + np_tok), b_pre,
               a_log_dev, dt_bias_dev, dss.t(), dpqsl.t(), vt::GdnArgs{1.0f});
         } else {
           vt::GdnPrefill(d.q, o_pre, q_pre, k_pre, v_pre, g_pre, b_pre,
@@ -8727,17 +8753,27 @@ void RunDenseLayerPaged(Dev d, const Qwen3_5DenseLayerWeights& layer,
 DBuf MtpHeadHidden(Dev device, const Qwen3_5MTPWeights& weights,
                    const HfConfig& config, const OwnedTensor& embed_tokens,
                    const std::vector<int32_t>& input_ids,
-                   const Tensor& target_hidden_states, int64_t tokens) {
+                   const Tensor& target_hidden_states, int64_t tokens,
+                   const Tensor* inputs_embeds = nullptr) {
   const int64_t hidden_size = config.hidden_size;
   const int64_t vocab_size = config.vocab_size;
   const float eps = static_cast<float>(config.rms_norm_eps);
   const DType draft_dtype = ActDType(device);
 
-  Tensor embedding_table = Qwen3_5EmbeddingTable(device.b, device.q, embed_tokens,
-                                                vocab_size, hidden_size);
-  DBuf device_ids(device, DType::kI32, {tokens}, input_ids.data());
-  DBuf embedding(device, draft_dtype, {tokens, hidden_size});
-  vt::Embedding(device.q, embedding.t(), embedding_table, device_ids.t());
+  DBuf device_ids, embedding;
+  Tensor embedding_view;
+  if (inputs_embeds != nullptr) {
+    // Already merged by the caller from the SAME cached image output; the
+    // draft has no second encoder. Preserve FP16 XPU/BF16 generic storage.
+    embedding_view = *inputs_embeds;
+  } else {
+    Tensor embedding_table = Qwen3_5EmbeddingTable(device.b, device.q, embed_tokens,
+                                                  vocab_size, hidden_size);
+    device_ids = DBuf(device, DType::kI32, {tokens}, input_ids.data());
+    embedding = DBuf(device, draft_dtype, {tokens, hidden_size});
+    vt::Embedding(device.q, embedding.t(), embedding_table, device_ids.t());
+    embedding_view = embedding.t();
+  }
 
   Tensor embedding_norm_weight =
       ResidentWeight(device, weights.pre_fc_norm_embedding, {hidden_size});
@@ -8745,7 +8781,7 @@ DBuf MtpHeadHidden(Dev device, const Qwen3_5MTPWeights& weights,
       ResidentWeight(device, weights.pre_fc_norm_hidden, {hidden_size});
   DBuf embedding_norm(device, draft_dtype, {tokens, hidden_size});
   DBuf target_norm(device, draft_dtype, {tokens, hidden_size});
-  vt::RmsNorm(device.q, embedding_norm.t(), embedding.t(), embedding_norm_weight,
+  vt::RmsNorm(device.q, embedding_norm.t(), embedding_view, embedding_norm_weight,
               vt::RmsNormArgs{eps, true});
   vt::RmsNorm(device.q, target_norm.t(), target_hidden_states, hidden_norm_weight,
               vt::RmsNormArgs{eps, true});
@@ -8980,6 +9016,47 @@ std::vector<float> ProjectGdnFp8QkvzForTest(vt::Queue queue,
             vt::BF16ToF32(zb[static_cast<size_t>(t * value_dim + i)]);
   }
   return host;
+}
+
+std::vector<uint16_t> ReplayQwen3_5GdnBlockFp16ForDiagnostics(
+    vt::Queue& queue, const GdnLayerWeights& weights, const HfConfig& config,
+    const vt::Tensor& normalized, const GdnStateCache& state,
+    const v1::CommonAttentionMetadata& attention,
+    const v1::GDNAttentionMetadata& gdn, const std::vector<int32_t>& positions,
+    int64_t selected_token_row) {
+  VT_CHECK(queue.device.type == vt::DeviceType::kXPU &&
+               normalized.device == queue.device && normalized.dtype == DType::kF16 &&
+               normalized.rank == 2 && normalized.IsContiguous() &&
+               normalized.shape[1] == config.hidden_size &&
+               normalized.shape[0] > 0 && normalized.shape[0] <= 1600 &&
+               selected_token_row >= 0 && selected_token_row < normalized.shape[0] &&
+               positions.size() == size_t(normalized.shape[0]) &&
+               attention.num_actual_tokens == normalized.shape[0] &&
+               gdn.num_actual_tokens == normalized.shape[0] &&
+               state.conv_state.dtype == DType::kF16 && state.ssm_state.dtype == DType::kF32,
+           "GDN FP16 replay: invalid bounded device inputs");
+  const auto slots = detail::ValidateGdnStateCacheLayout({state});
+  VT_CHECK(state.conv_state.device == queue.device && state.ssm_state.device == queue.device &&
+               state.conv_state.data && state.ssm_state.data &&
+               state.conv_state.IsContiguous() && state.ssm_state.IsContiguous() &&
+               state.conv_state.shape[1] == 2 * config.linear_num_key_heads * config.linear_key_head_dim +
+                                            config.linear_num_value_heads * config.linear_value_head_dim &&
+               state.conv_state.shape[2] >= config.linear_conv_kernel_dim - 1 &&
+               state.ssm_state.shape[1] == config.linear_num_value_heads &&
+               state.ssm_state.shape[2] == config.linear_value_head_dim &&
+               state.ssm_state.shape[3] == config.linear_key_head_dim,
+           "GDN FP16 replay: incompatible persistent state layout/device");
+  detail::ValidateGdnAttentionMetadata(gdn, slots, false);
+  Dev d{vt::GetBackend(queue.device), queue, DType::kF16};
+  auto sdi = BuildStepDevInputs(d, positions, attention, gdn, slots);
+  DBuf output = GdnBlockPaged(d, weights, config, normalized, sdi, gdn, state, normalized.shape[0]);
+  VT_CHECK(output.t().dtype == DType::kF16 && output.t().stride[1] == 1,
+           "GDN FP16 replay: unexpected output row");
+  std::vector<uint16_t> row(config.hidden_size);
+  d.b.Copy(d.q, row.data(), static_cast<const char*>(output.t().data) +
+           selected_token_row * output.t().stride[0] * sizeof(uint16_t), row.size() * sizeof(uint16_t));
+  d.b.Synchronize(d.q); // Private diagnostic observation; no normal caller.
+  return row;
 }
 
 std::vector<float> GdnBlockPagedForTest(vt::Queue queue, const GdnLayerWeights& w,
@@ -10249,7 +10326,8 @@ Qwen3_5MTPHiddenStates Qwen3_5MTPModel::ForwardPaged(
     const std::vector<int32_t>& positions,
     const vt::Tensor& target_hidden_states,
     const v1::CommonAttentionMetadata& attn_meta, PagedKvCache& draft_kv,
-    vt::Queue& queue, int64_t spec_step_idx) const {
+    vt::Queue& queue, int64_t spec_step_idx,
+    const vt::Tensor* inputs_embeds) const {
   const int64_t tokens = static_cast<int64_t>(input_ids.size());
   const int64_t hidden_size = config_->hidden_size;
   const int64_t num_layers = weights_->NumLayers();
@@ -10268,6 +10346,14 @@ Qwen3_5MTPHiddenStates Qwen3_5MTPModel::ForwardPaged(
                target_hidden_states.device == queue.device,
            "qwen3_5 MTP paged forward: target hidden states must be contiguous "
            "bf16 [T,H] or xpu f16 [T,H] on the queue device");
+  if (inputs_embeds != nullptr) {
+    VT_CHECK(inputs_embeds->data != nullptr && inputs_embeds->rank == 2 &&
+                 inputs_embeds->shape[0] == tokens &&
+                 inputs_embeds->shape[1] == hidden_size &&
+                 inputs_embeds->dtype == target_hidden_states.dtype &&
+                 inputs_embeds->device == queue.device && inputs_embeds->IsContiguous(),
+             "qwen3_5 MTP paged forward: merged embeddings must match contiguous target hidden [T,H] dtype/device");
+  }
   // MODEL-QWEN35-EXL3-HEAD (#2495 item 5): ONE precondition, two containers.
   // The trellis stores [K=2H, N=H] where the torch Linear stores [N=H, K=2H],
   // so the same projection is asserted through the orientation its own owner
@@ -10302,7 +10388,7 @@ Qwen3_5MTPHiddenStates Qwen3_5MTPModel::ForwardPaged(
   // Same head math as Forward; the difference is the DECODER LAYER, which runs
   // paged (writes/reads the draft KV layer via slot_mapping/block_table).
   DBuf hidden = MtpHeadHidden(device, *weights_, *config_, *embed_tokens_,
-                              input_ids, target_hidden_states, tokens);
+                              input_ids, target_hidden_states, tokens, inputs_embeds);
   DBuf residual(device, ResidualDType(device), {tokens, hidden_size});
   residual.Zero(device);
 
@@ -10556,6 +10642,69 @@ static Dev DenseDev(Queue& queue, const Qwen3_5DenseWeights& weights) {
   return d;
 }
 
+MmForwardBuffers Qwen3_5DenseEmbedMultimodal(
+    const Qwen3_5DenseWeights& weights, const HfConfig& config,
+    vt::Queue& queue, const MmEmbedInputs& inputs) {
+  VT_CHECK(queue.device.type == vt::DeviceType::kXPU && weights.exl3_checkpoint &&
+               weights.precision.activation == DType::kF16 && IsExl3Checkpoint(config),
+           "qwen3_5 dense MM embed: native EXL3 XPU FP16 required");
+  VT_CHECK(inputs.token_ids && inputs.is_mm_embed && inputs.mm_embeds &&
+               inputs.mrope_positions,
+           "qwen3_5 dense MM embed: all runner input channels required");
+  const auto& ids = *inputs.token_ids;
+  const auto& mask = *inputs.is_mm_embed;
+  const auto& slices = *inputs.mm_embeds;
+  const int64_t t = static_cast<int64_t>(ids.size()), h = config.hidden_size;
+  VT_CHECK(t > 0 && t <= std::numeric_limits<int32_t>::max() && h > 0 &&
+               static_cast<int64_t>(mask.size()) == t &&
+               static_cast<int64_t>(inputs.mrope_positions->size()) == 3*t,
+           "qwen3_5 dense MM embed: nonempty T-token mask and [3,T] positions required");
+  VT_CHECK(!inputs.host_token_ids_stale || inputs.device_token_ids != nullptr,
+           "qwen3_5 dense MM embed: stale host IDs require authoritative device IDs");
+  std::vector<int32_t> rows;
+  for (int64_t row=0;row<t;++row)
+    if (mask[row]) rows.push_back(static_cast<int32_t>(row));
+  int64_t source_rows = 0;
+  for (const auto& slice : slices) {
+    VT_CHECK(slice.rank == 2 && slice.shape[0] >= 0 && slice.shape[0] <= t-source_rows &&
+                 slice.shape[1] == h && slice.dtype == DType::kF16 &&
+                 slice.IsContiguous() && slice.device == queue.device &&
+                 (slice.shape[0] == 0 || slice.data != nullptr),
+             "qwen3_5 dense MM embed: contiguous device FP16 visual rows [N,H] required");
+    source_rows += slice.shape[0];
+  }
+  VT_CHECK(source_rows == static_cast<int64_t>(rows.size()),
+           "qwen3_5 dense MM embed: visual rows must balance the placeholder mask");
+  Dev d = DenseDev(queue,weights);
+  DBuf merged(d,DType::kF16,{t,h});
+  {
+    const detail::DeviceTokenIdsScope device_ids(inputs.device_token_ids,t);
+    DenseEmbedInto(d,merged,ids,weights,config);
+  }
+  // The runner mask supplies validated destination rows in ascending order.
+  // Coalesce contiguous runs into device copies: no index-validation readback
+  // or CPU materialization of image/embedding values is needed for the merge.
+  size_t offset = 0;
+  for (const auto& slice : slices) {
+    int64_t source = 0;
+    while (source < slice.shape[0]) {
+      int64_t end = source+1;
+      while (end < slice.shape[0] && rows[offset+end] == rows[offset+end-1]+1) ++end;
+      d.b.Copy(queue,static_cast<uint16_t*>(merged.ptr())+int64_t(rows[offset+source])*h,
+               static_cast<const uint16_t*>(slice.data)+source*h,
+               static_cast<size_t>(end-source)*h*sizeof(uint16_t));
+      source=end;
+    }
+    offset += static_cast<size_t>(slice.shape[0]);
+  }
+  DBuf positions(d,DType::kI32,{3,t},inputs.mrope_positions->data());
+  MmForwardBuffers result;
+  result.mm.inputs_embeds=merged.t(); result.mm.positions3=positions.t();
+  result.storage.push_back(merged.ReleaseShared());
+  result.storage.push_back(positions.ReleaseShared());
+  return result;
+}
+
 // TT-27B-STEP-DECOMPOSE (VT_TT_STEP_PHASES): the dense captured step's host
 // phase clock (.agents/specs/tenstorrent-27b-step-decompose.md). READ-ONLY —
 // it brackets existing calls and prints one stderr line per step; with the
@@ -10642,7 +10791,8 @@ static DBuf DenseForwardLayers(Dev d, const Tensor& hidden_in,
                                const std::vector<int32_t>* aux_layer_ids = nullptr,
                                const Tensor* aux_out = nullptr,
                                bool return_hidden = false,
-                               StepDevInputs* persistent_sdi = nullptr) {
+                               StepDevInputs* persistent_sdi = nullptr,
+                               const Tensor* device_mrope_positions = nullptr) {
   const int64_t T = hidden_in.shape[0];
   const int64_t H = config.hidden_size;
   if (std::getenv("VT_TT_ALLOC_TRACE") != nullptr)
@@ -10688,7 +10838,24 @@ static DBuf DenseForwardLayers(Dev d, const Tensor& hidden_in,
   // would build. FuseAttnPreamble is default-ON (VT_FUSE_ATTN_PREAMBLE) so
   // AttnQkNormRopeGate reads this per-token cache; sdi.positions is unused for rope
   // then. mrope_cos_sin==nullptr (every text caller) ⇒ byte-identical to before.
-  if (persistent_sdi != nullptr) {
+  if (device_mrope_positions != nullptr) {
+    VT_CHECK(mrope_cos_sin == nullptr,
+             "qwen3_5 dense: device M-RoPE and host cache are mutually exclusive");
+    auto rope = FullAttnRopeArgs(d, config);
+    const auto& sections = config.rope_parameters.mrope_section;
+    VT_CHECK(sections.size() == 3,
+             "qwen3_5 dense: device M-RoPE requires three sections");
+    std::copy(sections.begin(), sections.end(), rope.mrope_section.begin());
+    rope.mrope_interleaved = config.rope_parameters.mrope_interleaved;
+    if (persistent_sdi == nullptr)
+      sdi.attn_cos_sin = DBuf(d, DType::kF32, {T, config.rotary_dim});
+    else
+      VT_CHECK(sdi.has_attn_cos_sin && sdi.attn_cos_sin.t().shape[0] == T &&
+                   sdi.attn_cos_sin.t().shape[1] == config.rotary_dim,
+               "qwen3_5 dense: persistent device M-RoPE cache required");
+    vt::RopeCosSinCache(d.q, sdi.attn_cos_sin.t(), *device_mrope_positions, rope);
+    sdi.has_attn_cos_sin = true;
+  } else if (persistent_sdi != nullptr) {
     // Option A: the persistent cos|sin buffer was allocated pre-capture; re-fill only
     // (captured) so every replay re-derives rope from the freshly-staged positions.
     // The MRoPE VL path never drives the decode graph (persistent_sdi is nullptr
@@ -10888,6 +11055,87 @@ static std::vector<int32_t> LastTokenLogitsIndices(
     indices[static_cast<size_t>(i)] = am.query_start_loc[static_cast<size_t>(i) + 1] - 1;
   }
   return indices;
+}
+
+static void ValidateDenseMultimodalForward(const ModelForwardInput& input,
+                                          const Qwen3_5DenseWeights& weights) {
+  VT_CHECK(input.mm.has_value(), "qwen3_5 dense MM: multimodal inputs required");
+  VT_CHECK(input.queue.device.type == vt::DeviceType::kXPU &&
+               weights.exl3_checkpoint && weights.precision.activation == DType::kF16 &&
+               IsExl3Checkpoint(input.config),
+           "qwen3_5 dense MM: native EXL3 XPU FP16 required");
+  VT_CHECK(input.num_reqs >= 1 && input.num_reqs <= kNativeQwen3_5MaxConcurrentRequests &&
+               input.attn_meta.num_reqs == input.num_reqs &&
+               (input.num_speculative_tokens == 0 ||
+                (input.num_speculative_tokens >= 1 && input.num_speculative_tokens <= 3 &&
+                 input.hidden_tap != nullptr)) &&
+               input.aux_tap == nullptr,
+           "qwen3_5 dense MM: C1-C4 target-only or MTP1-3 hidden tap required");
+  const auto& mm = *input.mm;
+  const auto& cfg = input.config;
+  const int64_t t = static_cast<int64_t>(input.token_ids.size());
+  const auto& embeds = mm.inputs_embeds;
+  const auto& positions = mm.positions3;
+  VT_CHECK(embeds.data != nullptr && embeds.rank == 2 && embeds.shape[0] == t &&
+               embeds.shape[1] == cfg.hidden_size && embeds.dtype == DType::kF16 &&
+               embeds.IsContiguous() && embeds.device == input.queue.device,
+           "qwen3_5 dense MM: contiguous device FP16 embeddings [T,H] required");
+  VT_CHECK(positions.data != nullptr && positions.rank == 2 && positions.shape[0] == 3 &&
+               positions.shape[1] == t && positions.IsContiguous() &&
+               (positions.dtype == DType::kI32 || positions.dtype == DType::kI64) &&
+               positions.device == input.queue.device,
+           "qwen3_5 dense MM: contiguous device integer positions [3,T] required");
+  VT_CHECK(mm.deepstack.data == nullptr && mm.deepstack_levels == 0 &&
+               mm.ple_token_ids.data == nullptr,
+           "qwen3_5 dense MM: this tower has no DeepStack or PLE inputs");
+  const auto& sections = cfg.rope_parameters.mrope_section;
+  VT_CHECK(cfg.rotary_dim > 0 && cfg.rotary_dim <= cfg.head_dim &&
+               cfg.rotary_dim % 2 == 0 && sections.size() == 3 &&
+               sections[0] >= 0 && sections[1] >= 0 && sections[2] >= 0 &&
+               int64_t(sections[0]) + sections[1] + sections[2] == cfg.rotary_dim / 2,
+           "qwen3_5 dense MM: M-RoPE sections must cover rotary_dim/2");
+  VT_CHECK(std::isfinite(cfg.rope_theta) && cfg.rope_theta > 0 &&
+               cfg.rope_theta <= std::numeric_limits<float>::max(),
+           "qwen3_5 dense MM: finite positive FP32 RoPE base required");
+  // Validate multimodal metadata before persistent writes. Cache addressing uses the
+  // runner's 1-D logical positions, never the compressed image coordinates.
+  CheckDensePagedForward(input.token_ids, input.positions, input.attn_meta,
+                         input.gdn_meta, input.attn_kv, input.gdn_state, weights, cfg);
+}
+
+ForwardLogits Qwen3_5DenseForwardEmbeddings(const ModelForwardInput& input,
+                                          const Qwen3_5DenseWeights& weights) {
+  ValidateDenseMultimodalForward(input, weights);
+  const auto& mm = *input.mm;
+  const auto& cfg = input.config;
+  const int64_t t = static_cast<int64_t>(input.token_ids.size());
+  const auto& embeds = mm.inputs_embeds;
+  const auto& positions = mm.positions3;
+  Dev d = DenseDev(input.queue, weights);
+  DBuf tap;
+  Tensor tap_view;
+  if (input.hidden_tap != nullptr) {
+    tap = DBuf(d,DType::kF16,{t,cfg.hidden_size});
+    tap_view = tap.t();
+  }
+  DBuf logits = DenseForwardLayers(
+      d,embeds,input.positions,input.attn_meta,input.gdn_meta,input.attn_kv,
+      input.gdn_state,weights,cfg,input.logits_indices,
+      input.hidden_tap ? &tap_view : nullptr,/*host_mrope=*/nullptr,
+      /*aux_layer_ids=*/nullptr,/*aux_out=*/nullptr,/*return_hidden=*/false,
+      /*persistent_sdi=*/nullptr,&positions);
+  if (input.hidden_tap != nullptr) {
+    input.hidden_tap->producer_ready_event.reset();
+    input.hidden_tap->tensor = tap.t();
+    input.hidden_tap->storage = tap.ReleaseShared();
+  }
+  if (input.gather_logits || input.hidden_tap != nullptr)
+    return WrapDeviceLogits(d,std::move(logits),cfg.vocab_size);
+  ForwardLogits result;
+  result.rows = logits.t().shape[0]; result.vocab = cfg.vocab_size;
+  result.host.resize(static_cast<size_t>(result.rows) * cfg.vocab_size);
+  logits.Download(d,result.host.data());
+  return result;
 }
 
 // Full eager dense paged forward body: embed (host token_ids) then the capturable
@@ -11681,11 +11929,13 @@ struct DecodeGraphSlotKey {
   int64_t size = 0;       // S, the captured token count
   int64_t query_len = 1;  // the uniform query length the graph was captured for
   bool spec = false;      // the step carried spec-decode segmentation
+  bool multimodal = false; // separate input/rotation ownership from text graphs
 };
 inline bool operator<(const DecodeGraphSlotKey& a, const DecodeGraphSlotKey& b) {
   if (a.size != b.size) return a.size < b.size;
   if (a.query_len != b.query_len) return a.query_len < b.query_len;
-  return static_cast<int>(a.spec) < static_cast<int>(b.spec);
+  if (a.spec != b.spec) return static_cast<int>(a.spec) < static_cast<int>(b.spec);
+  return static_cast<int>(a.multimodal) < static_cast<int>(b.multimodal);
 }
 
 // The bound on how many DISTINCT speculative query lengths one driver captures.
@@ -11944,6 +12194,10 @@ struct PinnedStepInputs {
 static DevicePool& PersistentDecodeInputPool(vt::Backend& b) {
   static detail::PoolTable table;
   return table.For(b);
+}
+
+DevicePool& Qwen3_5PersistentDecodePoolForDiagnostics(vt::Backend& b) {
+  return PersistentDecodeInputPool(b);
 }
 
 // Option A per-step input staging: copy the slot's refreshed host inputs into its
@@ -12812,7 +13066,8 @@ struct Qwen3_5DenseDecodeGraph::Impl {
     std::vector<int32_t> positions;   // [S]
     v1::CommonAttentionMetadata attn_meta;
     v1::GDNAttentionMetadata gdn_meta;
-    std::unique_ptr<DBuf> hidden;     // [S,H] bf16 persistent embed target
+    std::unique_ptr<DBuf> hidden;     // [S,H] persistent embedding target
+    std::unique_ptr<DBuf> mrope_positions; // [3,S] I32, graph-owned MM input
     std::shared_ptr<DBuf> logits;     // [S,vocab] f32 held graph output
     std::shared_ptr<DBuf> mtp_hidden;  // [S,H] normalized leased output
     // SPEC-DSPARK W8 (#442): the DFlash/DSpark verify must ALSO emit the
@@ -12960,10 +13215,13 @@ struct Qwen3_5DenseDecodeGraph::Impl {
   struct SlotRing {
     SizeSlot slot[2];
     int next = 0;
+    uint64_t last_used = 0;
   };
   std::map<DecodeGraphSlotKey, SlotRing> slots;  // (S, q, spec) -> parity ring
   int64_t replays = 0;                // total replays (diagnostics)
   bool any_captured = false;          // diagnostics: at least one live graph
+  bool native_mm_seen = false;
+  uint64_t use_clock = 0;
 };
 
 Qwen3_5DenseDecodeGraph::Qwen3_5DenseDecodeGraph(const Qwen3_5DenseWeights& weights,
@@ -12988,7 +13246,24 @@ ForwardLogits Qwen3_5DenseDecodeGraph::Step(
     const v1::GDNAttentionMetadata& gdn_meta,
     const std::vector<PagedKvCache>& attn_kv,
     const std::vector<GdnStateCache>& gdn_state, Qwen3_5AuxTaps* aux_out,
-    Qwen3_5MTPHiddenStates* hidden_out) {
+    Qwen3_5MTPHiddenStates* hidden_out, const ModelForwardInput* multimodal_input) {
+  const MultiModalForwardInput* mm = nullptr;
+  if (multimodal_input) {
+    ValidateDenseMultimodalForward(*multimodal_input, impl_->weights);
+    VT_CHECK(multimodal_input->token_ids == token_ids && multimodal_input->positions == positions &&
+                 &multimodal_input->attn_meta == &attn_meta && &multimodal_input->gdn_meta == &gdn_meta &&
+                 &multimodal_input->attn_kv == &attn_kv && &multimodal_input->gdn_state == &gdn_state &&
+                 multimodal_input->hidden_tap == hidden_out &&
+                 multimodal_input->queue.id == impl_->queue.id &&
+                 multimodal_input->config.hidden_size == impl_->config.hidden_size &&
+                 multimodal_input->config.rotary_dim == impl_->config.rotary_dim &&
+                 multimodal_input->config.rope_theta == impl_->config.rope_theta &&
+                 multimodal_input->config.rope_parameters.mrope_section == impl_->config.rope_parameters.mrope_section &&
+                 multimodal_input->config.rope_parameters.mrope_interleaved == impl_->config.rope_parameters.mrope_interleaved,
+             "dense graph: multimodal input must describe this exact forward");
+    mm = &*multimodal_input->mm;
+    impl_->native_mm_seen = true;
+  }
   VT_CHECK(hidden_out == nullptr || aux_out == nullptr,
            "dense graph: MTP hidden and auxiliary taps are mutually exclusive");
   CheckDensePagedForward(token_ids, positions, attn_meta, gdn_meta, attn_kv,
@@ -13099,7 +13374,7 @@ ForwardLogits Qwen3_5DenseDecodeGraph::Step(
   // question out of the spec path. The shape count stays bounded by max_num_seqs
   // because num_reqs is.
   const bool spec_step = has_gdn && gdn_meta.num_spec_decodes > 0;
-  const int64_t S = (spec_step || hidden_out != nullptr)
+  const int64_t S = (mm || spec_step || hidden_out != nullptr)
                         ? B : PadToCaptureSize(B, impl_->max_num_reqs);
   if (sph.on) sph.S = S;
   // ENG-CUDAGRAPH-BREAK W6 (#1374): this step's uniform query length, and the
@@ -13108,7 +13383,7 @@ ForwardLogits Qwen3_5DenseDecodeGraph::Step(
   const int64_t Q = (attn_meta.num_reqs > 0 && B % attn_meta.num_reqs == 0)
                         ? B / attn_meta.num_reqs
                         : 0;
-  const DecodeGraphSlotKey key{S, Q, spec_step};
+  const DecodeGraphSlotKey key{S, Q, spec_step, mm != nullptr};
   // A q > 1 batch that carries NO spec segmentation is refused rather than
   // captured, and this is a TIGHTENING that arrived with the widening. `S` for a
   // non-spec step is `PadToCaptureSize(B)` and `BuildPaddedDecode` rewrites the
@@ -13119,8 +13394,11 @@ ForwardLogits Qwen3_5DenseDecodeGraph::Step(
   const bool qlen_capped = DecodeGraphQueryLenCapped(impl_->slots, key);
   if (qlen_capped) v1::NoteDecodeGraphQueryLenDecline();
   if (!impl_->enabled || S < 0 || !servable_shape || qlen_capped ||
+      (mm && mm->positions3.dtype != DType::kI32) ||
       (has_gdn && !detail::CanUseGdnDecodeGraphSize(
           B, S, IndexedGdnStateIoEnabled(impl_->queue.device)))) {
+    if (multimodal_input)
+      return Qwen3_5DenseForwardEmbeddings(*multimodal_input, impl_->weights);
     if (hidden_out != nullptr) {
       return Qwen3_5DenseModel::ForwardDeviceTap(
           token_ids, positions, attn_meta, gdn_meta, attn_kv, gdn_state,
@@ -13159,8 +13437,37 @@ ForwardLogits Qwen3_5DenseDecodeGraph::Step(
   // this step's slot from the size's parity ring (alternating), and host-wait its
   // previous replay before Refresh touches its persistent host inputs (hazard-C).
   // OFF: always slot[0], no wait — byte-identical to the single-slot driver.
+  // Native image/text transitions add another family of captured shapes. Keep
+  // at most three parity rings (six graphs on the qualified XPU provider),
+  // below its eight-live-graph limit. Retire the least recently used whole
+  // shape only at a new-shape boundary; text-only drivers keep their policy.
   const bool new_shape = impl_->slots.find(key) == impl_->slots.end();
+  if (impl_->native_mm_seen && impl_->queue.device.type == vt::DeviceType::kXPU &&
+      new_shape && impl_->slots.size() >= 3) {
+    b.Synchronize(impl_->queue);
+    while (impl_->slots.size() >= 3) {
+      auto victim = std::min_element(impl_->slots.begin(), impl_->slots.end(),
+          [](const auto& a, const auto& other) {
+            return a.second.last_used < other.second.last_used;
+          });
+      for (auto& old : victim->second.slot) {
+        old.graph.Reset();
+        Pool(b).UnpinForGraph(b, old.pinned);
+        old.pinned.clear();
+        old.pin.Free();
+        if (old.reuse_event.handle != nullptr) b.DestroyEvent(old.reuse_event);
+      }
+      if (const char* trace=std::getenv("VT_NATIVE_VISION_TRACE"); trace && trace[0]=='2') {
+        const auto record=nlohmann::json{{"tokens",victim->first.size},
+            {"query_len",victim->first.query_len},
+            {"multimodal",victim->first.multimodal}}.dump();
+        std::fprintf(stderr,"NATIVE_VISION_GRAPH_EVICT %s\n",record.c_str());
+      }
+      impl_->slots.erase(victim);
+    }
+  }
   Impl::SlotRing& ring = impl_->slots[key];
+  ring.last_used = ++impl_->use_clock;
   // W6: a distinct captured shape is the observable the widening is measured by.
   // Without it a two-shape driver and a one-shape driver are indistinguishable
   // from outside, which is how #1020 stayed silent.
@@ -13437,6 +13744,20 @@ ForwardLogits Qwen3_5DenseDecodeGraph::Step(
     s.dev.reset();
   }
 
+  if (mm && !s.mrope_positions) {
+    ActivePoolScope persistent_scope(&PersistentDecodeInputPool(d.b));
+    s.mrope_positions = std::make_unique<DBuf>(d, DType::kI32,
+                                              std::vector<int64_t>{3, S});
+  }
+  const auto stage_embedding = [&] {
+    if (mm) {
+      b.Copy(impl_->queue, s.hidden->ptr(), mm->inputs_embeds.data, mm->inputs_embeds.Bytes());
+      b.Copy(impl_->queue, s.mrope_positions->ptr(), mm->positions3.data, mm->positions3.Bytes());
+    } else {
+      DenseEmbedInto(d, *s.hidden, s.token_ids, impl_->weights, impl_->config);
+    }
+  };
+
   // Fast path: this size's graph is captured. Embed OUTSIDE the graph into the
   // persistent hidden buffer, stage this step's inputs into the persistent device
   // buffers (Option A: H2D out of the captured region), then relaunch the graph.
@@ -13481,7 +13802,7 @@ ForwardLogits Qwen3_5DenseDecodeGraph::Step(
       vt::tenstorrent::WarmDecodeIds(
           s.token_ids.data(), static_cast<int64_t>(s.token_ids.size()));
     } else {
-      DenseEmbedInto(d, *s.hidden, s.token_ids, impl_->weights, impl_->config);
+      stage_embedding();
     }
     if (sph.on) sph.embed_ms = StepPhaseMsOf(sph_te0, StepPhaseClk::now());
     if (dbuf) {
@@ -13602,6 +13923,10 @@ ForwardLogits Qwen3_5DenseDecodeGraph::Step(
                                          gdn_state_slots)
                     : BuildFullAttnStepDevInputs(d, s.positions, s.attn_meta));
         MaybeBuildAttnCosSin(d, *s.dev, impl_->config, S, fp4_attn);
+        if (mm && !s.dev->has_attn_cos_sin) {
+          s.dev->attn_cos_sin = DBuf(d, DType::kF32, {S, impl_->config.rotary_dim});
+          s.dev->has_attn_cos_sin = true;
+        }
       }
       const bool has_idx = s.dev->has_gdn_idx &&
                            s.gdn_meta.non_spec_state_indices_tensor.has_value();
@@ -13633,7 +13958,7 @@ ForwardLogits Qwen3_5DenseDecodeGraph::Step(
           s.hidden->ptr(), S, H, dtab.data, vocab, H,
           static_cast<int64_t>(s.token_ids.size()));
     } else {
-      DenseEmbedInto(d, *s.hidden, s.token_ids, impl_->weights, impl_->config);
+      stage_embedding();
     }
     if (sph.on) sph.embed_ms = StepPhaseMsOf(sph_te1, StepPhaseClk::now());
     // ENG-CUDAGRAPH-BREAK W4 (#1307): the capture is the SHARED SEAM's, not this
@@ -13702,7 +14027,8 @@ ForwardLogits Qwen3_5DenseDecodeGraph::Step(
                               s.gdn_meta, attn_kv, gdn_state, impl_->weights,
                               impl_->config, {}, mtp_arg, nullptr,
                               aux_ids_arg, aux_out_arg, /*return_hidden=*/false,
-                              dbuf ? s.dev.get() : nullptr);
+                              dbuf ? s.dev.get() : nullptr,
+                              mm ? &s.mrope_positions->t() : nullptr);
       // R2 (the qwen3.cpp:1054-1061 port): advance cur_pos on-device
       // (plus_one) INSIDE the captured trace, at the END of the body — after
       // every cur_pos read in the layers' RAC/PA. cur_pos/update_idxs are
@@ -13840,7 +14166,7 @@ ForwardLogits Qwen3_5DenseDecodeGraph::Step(
   s.hidden = std::make_unique<DBuf>(d, ActDType(d), std::vector<int64_t>{S, H});
   const StepPhaseClk::time_point sph_te2 =
       sph.on ? StepPhaseClk::now() : sph.t0;
-  DenseEmbedInto(d, *s.hidden, s.token_ids, impl_->weights, impl_->config);
+  stage_embedding();
   if (sph.on) sph.embed_ms = StepPhaseMsOf(sph_te2, StepPhaseClk::now());
   // W2 (capture-warmup redesign): NO snapshot/restore around the warmup.
   // The restore 2ed5e912e4 added traded semantic correctness for program-
@@ -13862,7 +14188,9 @@ ForwardLogits Qwen3_5DenseDecodeGraph::Step(
   DBuf lg = DenseForwardLayers(d, s.hidden->t(), s.positions, s.attn_meta,
                                s.gdn_meta, attn_kv, gdn_state, impl_->weights,
                                impl_->config, {}, mtp_arg, nullptr, aux_ids_arg,
-                               aux_out_arg);
+                               aux_out_arg, /*return_hidden=*/false,
+                               /*persistent_sdi=*/nullptr,
+                               mm ? &s.mrope_positions->t() : nullptr);
   if (sph.on) {
     sph.body_ms = StepPhaseMsOf(sph_tb1, StepPhaseClk::now());
     // The cold step's eager forward: the first blocking read after this stamp

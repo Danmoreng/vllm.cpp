@@ -295,6 +295,81 @@ TEST_CASE("XPU EXL3 producer SmallM: real M1/M4 captures and first/last head blo
   CHECK(vt::GetReferenceTierHits() == 0);
 }
 
+// Opt-in strict diagnostic: isolate the stateless EXL3 row boundary from
+// scheduler, image positions, recurrent state and sampler decisions. A failure
+// records batch-shape arithmetic differences; it is not a new default CI gate.
+TEST_CASE("XPU EXL3 diagnostic: fixed real row across image verification batch shapes") {
+  const char* env = exl3_test::ExternalEnvironment("VT_B70_EXL3_S0B_FIXTURES");
+  exl3_test::ExternalPath(env, true);
+  Queue gpu(vt::DeviceType::kXPU);
+  for (const std::string family : {"mlp_gate", "head_first", "head_last"}) {
+    CAPTURE(family);
+    const auto path=std::filesystem::path(env)/(family+".safetensors");
+    exl3_test::ExternalPath(path);
+    auto fixture=vllm::SafetensorsFile::Open(path.string());
+    const auto& tr=fixture.Get("trellis");
+    REQUIRE(tr.dtype=="I16"); REQUIRE(tr.shape.size()==3);
+    const int k=int(tr.shape[0]*16), n=int(tr.shape[1]*16), bits=int(tr.shape[2]/16);
+    REQUIRE(vt::LoadUnaligned<uint32_t>(fixture.Get("mul1").data)==0x83DCD12Du);
+    const auto& original=fixture.Get("activation_m1_fp16");
+    REQUIRE(original.dtype=="F16"); REQUIRE(original.shape==std::vector<int64_t>{1,k});
+    Buffer packed(gpu.q,DType::kI8,{k/16,n/16,32*bits}),
+        u(gpu.q,DType::kF16,{1,k}), v(gpu.q,DType::kF16,{n}),
+        shard(gpu.q,DType::kI32,{n/128});
+    REQUIRE(packed.bytes==tr.nbytes);
+    packed.upload(tr.data); u.upload(fixture.Get("suh").data); v.upload(fixture.Get("svh").data);
+    shard.upload(std::vector<int32_t>(n/128,0).data());
+    std::vector<unsigned char> baseline,baseline_had,dpas_baseline;
+    for (int m : {1,2,4,8,12,16}) {
+      CAPTURE(m);
+      std::vector<unsigned char> repeated(size_t(m)*original.nbytes);
+      for (int row=0;row<m;++row)
+        std::memcpy(repeated.data()+size_t(row)*original.nbytes,original.data,original.nbytes);
+      Buffer input(gpu.q,DType::kF16,{m,k}),output(gpu.q,DType::kF16,{m,n});
+      input.upload(repeated.data());
+      Scratch scratch(gpu.q,m,k,n,bits,1);
+      vt::Exl3GroupedLinear(gpu.q,output.tensor,input.tensor,packed.tensor,
+          u.tensor,v.tensor,shard.tensor,scratch.had.tensor,scratch.parts.tensor,
+          {bits,2,family.c_str()});
+      const auto all=output.download(),blocked=scratch.had.download();
+      std::vector<unsigned char> row(all.begin(),all.begin()+size_t(n)*2),had(size_t(k)*2);
+      for (int tile=0;tile<k/16;++tile)
+        std::memcpy(had.data()+size_t(tile)*32,
+                    blocked.data()+size_t(tile*scratch.plan.padded_rows)*32,32);
+      if (m==1) { baseline=row; baseline_had=had; }
+      if (m==4) dpas_baseline=row;
+      size_t differences=0; double error=0,norm=0,max_absolute=0;
+      bool finite=true;
+      for (int col=0;col<n;++col) {
+        const uint16_t a=vt::LoadUnaligned<uint16_t>(row.data()+2*col),
+                       b=vt::LoadUnaligned<uint16_t>(baseline.data()+2*col);
+        differences+=a!=b;
+        const double actual=vt::F16ToF32(a),expected=vt::F16ToF32(b),delta=actual-expected;
+        finite &= std::isfinite(actual) && std::isfinite(expected);
+        error+=delta*delta; norm+=expected*expected;
+        max_absolute=std::max(max_absolute,std::abs(delta));
+      }
+      REQUIRE(finite);
+      const bool m1_output_exact=row==baseline;
+      bool rows_equal=true;
+      for (int r=1;r<m;++r)
+        rows_equal &= std::memcmp(row.data(),all.data()+size_t(r)*n*2,size_t(n)*2)==0;
+      const nlohmann::json record={{"family",family},{"m",m},{"k",k},{"n",n},{"bits",bits},
+          {"vector",scratch.plan.vector},{"row_block",scratch.plan.row_block},
+          {"splits",scratch.plan.splits},{"tile_rows_per_split",scratch.plan.tile_rows_per_split},
+          {"input_hadamard_exact",had==baseline_had},{"within_batch_rows_exact",rows_equal},
+          {"m1_output_exact",m1_output_exact},{"m4_output_exact",m>=4 ? nlohmann::json(row==dpas_baseline) : nlohmann::json(nullptr)},
+          {"different_f16_values",differences},{"relative_l2",norm>0 ? std::sqrt(error/norm) : 0},
+          {"max_absolute",max_absolute}};
+      std::cout << "EXL3_BATCH_SHAPE " << record.dump() << '\n';
+      CHECK(had==baseline_had);
+      CHECK(rows_equal);
+      CHECK(m1_output_exact); // Strict diagnostic stays red if arithmetic changes.
+    }
+  }
+  CHECK(vt::GetReferenceTierHits()==0);
+}
+
 TEST_CASE("XPU EXL3 producer SmallM: real grouped Gate/Up M1/4/12/16/128") {
   const char* sources = exl3_test::ExternalEnvironment("VT_B70_EXL3_S0B_FIXTURES");
   const char* captures = exl3_test::ExternalEnvironment("VT_B70_EXL3_S1_FIXTURES");

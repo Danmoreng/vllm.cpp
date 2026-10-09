@@ -56,6 +56,14 @@ add_executable(vllm-cli cli/main.cpp)
 target_link_libraries(vllm-cli PRIVATE vllm::shared)
 vllm_cpp_set_warnings(vllm-cli)
 
+if(VLLM_CPP_XPU AND VLLM_CPP_IMAGE_CODECS)
+  # Direct embedding-client proof: exported C ABI only, no private engine path.
+  add_executable(native-vision-chat native_vision_chat/main.cpp)
+  target_link_libraries(native-vision-chat PRIVATE vllm::shared)
+  target_include_directories(native-vision-chat SYSTEM PRIVATE ${CMAKE_SOURCE_DIR}/third_party)
+  vllm_cpp_set_warnings(native-vision-chat)
+endif()
+
 # gliner-cli: a THIN CLIENT of the public C ABI (MODEL-GLINER25). Loads a
 # GLiNER2.5 checkpoint and runs zero-shot NER via vllm_gliner_ner (ABI v27),
 # proving library-first consumption of the NER surface.

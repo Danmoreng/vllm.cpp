@@ -276,8 +276,22 @@ void RopeCosSinCacheKernel(Queue& q, Tensor& cache, const Tensor& positions, con
   if (!args.rotary_dim) return;
   const View dst(cache), pos(positions);
   const auto rot = args.rotary_dim, half = rot / 2;
+  const bool multi_axis = positions.rank == 2;
+  const int64_t tokens = cache.shape[0];
   const auto event = NativeQueue(q).parallel_for(sycl::range<1>(cache.shape[0] * half), [=](sycl::id<1> item) {
-    const int64_t row = item[0] / half, pair = item[0] % half, p = Position(pos, row);
+    const int64_t row = item[0] / half, pair = item[0] % half;
+    int axis = 0;
+    if (multi_axis) {
+      if (args.mrope_interleaved) {
+        // The executing Qwen3.5 M-RoPE selects H/W every third pair;
+        // pairs beyond each section's extent retain the temporal axis.
+        if (pair % 3 == 1 && pair < int64_t(args.mrope_section[1]) * 3) axis = 1;
+        else if (pair % 3 == 2 && pair < int64_t(args.mrope_section[2]) * 3) axis = 2;
+      } else if (pair >= args.mrope_section[0]) {
+        axis = pair < int64_t(args.mrope_section[0]) + args.mrope_section[1] ? 1 : 2;
+      }
+    }
+    const int64_t p = Position(pos, int64_t(axis) * tokens + row);
     float c, s;
     if (args.linear_scaling_factor > 0) {
       // Round both pow and its reciprocal to F32 before the F32 angle.
@@ -331,6 +345,22 @@ void RopeFromCacheKernel(Queue& q, Tensor& queries, Tensor* keys, const Tensor& 
   });
   RecordProfileEvent(q, "rope_cache_consume", event);
 }
+void VisionRopeApplyKernel(Queue& q, Tensor& queries, Tensor& keys, const Tensor& cache) {
+  TraceXpuOp(OpId::kVisionRopeApply, q, {&queries, &keys, &cache});
+  const View qs(queries), ks(keys), cs(cache);
+  const int64_t heads = queries.shape[1], dim = queries.shape[2];
+  const int64_t half = dim / 2;
+  const auto event = NativeQueue(q).parallel_for(sycl::range<1>(queries.Numel()), [=](sycl::id<1> item) {
+    const int64_t pair = item[0] % half;
+    const int64_t head = (item[0] / half) % (2 * heads);
+    const int64_t token = item[0] / (half * (2 * heads));
+    Rotate(head < heads ? qs : ks, token, head < heads ? head : head - heads,
+           pair, pair + half, Load(cs, token * dim + pair),
+           Load(cs, token * dim + half + pair), true);
+  });
+  RecordProfileEvent(q, "vision_rope_apply", event);
+}
+
 namespace {
 template<bool Fp8>
 void CacheWrite(Queue& q, const Tensor& keys, const Tensor& values, Tensor& key_cache,
@@ -440,39 +470,32 @@ void PagedAttentionKernel(Queue& q, Tensor& out, const Tensor& query, const Tens
   const auto* table = static_cast<const int32_t*>(block_table.data);
   const char* setting = std::getenv("VT_XPU_ATTENTION");
   const std::string_view mode = setting ? setting : "auto";
-  int64_t packed_verify_rows = 0;
-#ifdef VLLM_CPP_XPU_XE2_VERIFY
-  const char* verify_setting = std::getenv("VT_XPU_XE2_VERIFY");
-  const bool packed_requested = mode == "verify" ||
-      (mode == "auto" && verify_setting && std::string_view(verify_setting) == "1");
-  if (requests > 1 && packed_requested)
-    packed_verify_rows = PagedAttentionXe2VerifyQueryLength(
-        tokens, requests, args.query_start_loc_host);
-#endif
   const int64_t max_length = args.max_seq_len;
-  CheckDeviceMetadata(q, [=] {
-    if (offsets[0] != 0 || offsets[requests] != tokens) return false;
-    for (int64_t r = 0; r < requests; ++r) {
-      const int64_t first = offsets[r], end = offsets[r + 1], length = lengths[r];
-      if (first < 0 || end < first || end > tokens) return false;
-      // A uniform host hint selects the packed batched layout. Prove it against
-      // fresh device offsets inside the existing eager/graph metadata check;
-      // never trust total-token division or add a per-layer host readback.
-      if (packed_verify_rows && (first != r * packed_verify_rows ||
-          end != (r + 1) * packed_verify_rows ||
-          (max_length > 0 && length > max_length))) return false;
-      if (end == first) continue;  // Padded/inactive rows need no valid cache entries.
-      if (length < end - first) return false;
-      const auto needed = (length + page - 1) / page;
-      if (needed > columns) return false;
-      for (int64_t b = 0; b < needed; ++b) {
-        const auto id = table[r * bt_row + b * bt_col];
-        if (id < 0 || id >= blocks) return false;
+  const auto check_metadata = [&](int64_t packed_verify_rows) {
+    CheckDeviceMetadata(q, [=] {
+      if (offsets[0] != 0 || offsets[requests] != tokens) return false;
+      for (int64_t r = 0; r < requests; ++r) {
+        const int64_t first = offsets[r], end = offsets[r + 1], length = lengths[r];
+        if (first < 0 || end < first || end > tokens) return false;
+        // An admitted packed donor uses a uniform host hint. Prove it against
+        // fresh device offsets inside the existing eager/graph metadata check;
+        // never trust total-token division or add a per-layer host readback.
+        if (packed_verify_rows && (first != r * packed_verify_rows ||
+            end != (r + 1) * packed_verify_rows ||
+            (max_length > 0 && length > max_length))) return false;
+        if (end == first) continue;  // Padded/inactive rows need no valid cache entries.
+        if (length < end - first) return false;
+        const auto needed = (length + page - 1) / page;
+        if (needed > columns) return false;
+        for (int64_t b = 0; b < needed; ++b) {
+          const auto id = table[r * bt_row + b * bt_col];
+          if (id < 0 || id >= blocks) return false;
+        }
       }
-    }
-    return true;
-  }, "XPU paged attention invalid sequence offsets, lengths or block table", {&seq_lens, &query_start_loc, &block_table});
-  if (!tokens) return;
+      return true;
+    }, "XPU paged attention invalid sequence offsets, lengths or block table", {&seq_lens, &query_start_loc, &block_table});
+  };
+  if (!tokens) { check_metadata(0); return; }
   size_t lanes = 1;
   while (lanes < static_cast<uint64_t>(dim)) lanes *= 2;
   VT_CHECK(lanes <= NativeQueue(q).get_device().get_info<sycl::info::device::max_work_group_size>(),
@@ -499,6 +522,20 @@ void PagedAttentionKernel(Queue& q, Tensor& out, const Tensor& query, const Tens
         std::string_view(__VERSION__) == "Intel(R) oneAPI DPC++/C++ Compiler 2026.1.1 (2026.1.1.20260724)" &&
         device.get_info<sycl::info::device::driver_version>() == "1.17.39758+10" &&
         device.get_platform().get_info<sycl::info::platform::version>() == "1.17";
+    int64_t packed_verify_rows = 0;
+#ifdef VLLM_CPP_XPU_XE2_VERIFY
+    const char* verify_setting = std::getenv("VT_XPU_XE2_VERIFY");
+    const bool packed_requested = mode == "verify" ||
+        (automatic && verify_setting && std::string_view(verify_setting) == "1");
+    if (requests > 1 && packed_requested &&
+        CanUsePagedAttentionXe2Verify(q, target, query, key_cache, value_cache,
+                                     block_table, seq_lens, query_start_loc, args))
+      packed_verify_rows = PagedAttentionXe2VerifyQueryLength(tokens, requests, args.query_start_loc_host);
+#endif
+    // Generic fallback reads fresh lengths and has no packed maximum-length
+    // specialization. Do not bake a capture-time bound into that route just
+    // because a caller requested a fast kernel that cannot admit its tensors.
+    check_metadata(packed_verify_rows);
     bool onednn = false;
 #ifdef VLLM_CPP_XPU_ONEDNN
     if (mode == "exl3_onednn" || (automatic && tokens > 128))

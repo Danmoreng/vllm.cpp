@@ -44,6 +44,8 @@
 
 namespace vllm {
 
+struct ModelForwardInput;
+
 // Dense SwiGLU MLP (replaces the 35B MoE block). Synthetic/legacy projections
 // use Matmul-B [in,out], ordinary BF16 checkpoints use one raw-NK gate/up
 // owner, and compressed checkpoints retain NVFP4 residents.
@@ -683,7 +685,9 @@ class Qwen3_5DenseDecodeGraph {
                      Qwen3_5AuxTaps* aux_out = nullptr,
                      // MTP normalized [T,H] output with paired ownership above;
                      // mutually exclusive with aux_out.
-                     Qwen3_5MTPHiddenStates* hidden_out = nullptr);
+                     Qwen3_5MTPHiddenStates* hidden_out = nullptr,
+                     // Borrowed full MM input; staged into graph-owned buffers.
+                     const ModelForwardInput* multimodal_input = nullptr);
 
   // Diagnostics (A/B + tests): is a graph currently captured, and how many
   // replays have run since the last (re)capture.

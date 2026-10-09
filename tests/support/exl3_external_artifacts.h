@@ -2,19 +2,37 @@
 #include <cstdlib>
 #include <filesystem>
 #include <iostream>
+#include <initializer_list>
 #include <stdexcept>
 #include <string>
 #include <string_view>
 
 namespace exl3_test {
 // Test-only admission; never initializes a GPU or changes a service. CTest
-// invokes each external case separately so a missing input cannot hide a
-// different case's result. Required qualification jobs must opt into failure.
+// invokes exit-code based external cases separately. Mixed executables use
+// the per-case helpers instead. Required qualification opts into failure.
 inline bool RequireExternalArtifacts() {
   const char* mode = std::getenv("EXL3_REQUIRE_ARTIFACTS");
   if (!mode || std::string_view(mode) == "0") return false;
   if (std::string_view(mode) == "1") return true;
   throw std::runtime_error("EXL3_REQUIRE_ARTIFACTS must be0 or1");
+}
+// Mixed doctest executables must skip the CASE, never exit the process and
+// suppress unrelated synthetic cases. Invalid modes enter the case and fail.
+inline bool OptionalExternalEnvironmentMissing(std::initializer_list<const char*> names) {
+  const char* mode=std::getenv("EXL3_REQUIRE_ARTIFACTS");
+  if (mode && std::string_view(mode)!="0") return false;
+  for (const auto* name:names) {
+    const char* value=std::getenv(name);
+    if (!value || !*value) return true;
+  }
+  return false;
+}
+inline const char* CaseExternalEnvironment(const char* name) {
+  (void)RequireExternalArtifacts();
+  const char* value=std::getenv(name);
+  if (!value || !*value) throw std::runtime_error(std::string("missing EXL3 test artifact: set ")+name);
+  return value;
 }
 [[noreturn]] inline void MissingExternalArtifact(const std::string& reason) {
   const bool required = RequireExternalArtifacts();

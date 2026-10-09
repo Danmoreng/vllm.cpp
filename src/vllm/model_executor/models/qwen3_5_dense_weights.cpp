@@ -3,6 +3,7 @@
 // (qwen3_5_weights.cpp) but routes each Linear bf16 vs W4A4-materialized-to-bf16
 // by name (notes §3.6) and swaps the MoE block for the dense SwiGLU MLP.
 #include "vllm/model_executor/models/qwen3_5_dense.h"
+#include "vllm/model_executor/models/qwen3_5_gdn_replay.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -1183,6 +1184,13 @@ OwnedTensor LoadMergedBf16RawNK(const TensorResolver& get,
   // the public vllm::LoadMergedBf16RawNK API (used by the 27B GDN loader below
   // and test_qwen27_dense_forward) as a byte-identical thin forward.
   return dense_loaders::LoadMergedBf16RawNK(get, names);
+}
+
+GdnLayerWeights LoadQwen3_5DenseGdnFp16ForDiagnostics(
+    const TensorResolver& get, const std::string& layer_base) {
+  const TensorExists has = dense_loaders::ProbeThroughResolver(get);
+  dense_loaders::CheckProbeCanAnswerNo(has, "LoadQwen3_5DenseGdnFp16ForDiagnostics");
+  return LoadGdnDense(get, has, layer_base, Fp8BlockQuantConfig{}, true);
 }
 
 GdnLayerWeights LoadQwen3_5DenseGdn(const TensorResolver& get,

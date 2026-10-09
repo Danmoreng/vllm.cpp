@@ -180,7 +180,13 @@ class Qwen3_5MTPModel {
       const std::vector<int32_t>& positions,
       const vt::Tensor& target_hidden_states,
       const v1::CommonAttentionMetadata& attn_meta, PagedKvCache& draft_kv,
-      vt::Queue& queue, int64_t spec_step_idx = 0) const;
+      vt::Queue& queue, int64_t spec_step_idx = 0,
+      const vt::Tensor* inputs_embeds = nullptr) const;
+
+  // inputs_embeds, when supplied, are already merged [T,H] in the hidden-state
+  // dtype/device. The caller retains their owner until queued draft reads finish.
+  // The pinned V2 image draft preserves ordinary 1-D positions here; target
+  // M-RoPE axes are a separate input contract. Null keeps the existing lookup.
 
   // Gather `rows` of a [T,H] device hidden-state tensor into a fresh,
   // owning [rows.size(), H] buffer of the same dtype (SPEC-MTP-K-GT-1, #81).

@@ -10,6 +10,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <limits>
 #include <map>
 #include <numeric>
 #include <set>
@@ -21,6 +22,8 @@
 #include "vllm/model_executor/models/dense_exl3_linear.h"
 #include "vllm/model_executor/models/dense_attn_block.h"
 #include "vllm/model_executor/models/qwen3_5_dense.h"
+#include "vllm/model_executor/models/qwen3_5_dense_mm.h"
+#include "vllm/model_executor/models/model_registry.h"
 #include "vllm/model_executor/models/qwen3_5_mtp.h"
 #include "vllm/model_executor/models/qwen3_5_gdn_block.h"
 #include "vllm/model_executor/models/qwen3_5_attn_block.h"
@@ -2968,6 +2971,290 @@ TEST_CASE("XPU dense EXL3 FP16: QKVZ/QKV groups preserve independent source proj
   CHECK(vt::GetReferenceTierHits() == 0);
 }
 
+TEST_CASE("XPU dense EXL3 MM embed: ordered visual rows and authoritative IDs") {
+  xpu_test::Queue gpu(vt::DeviceType::kXPU);
+  auto c=Config(); c.raw["quantization_config"]={{"quant_method","exl3"}};
+  const auto w=Weights(c,false);
+  const auto read=[&](const vt::Tensor& tensor) {
+    std::vector<unsigned char> bytes(tensor.Bytes());
+    auto& b=vt::GetBackend(gpu.q.device.type);
+    b.Copy(gpu.q,bytes.data(),tensor.data,bytes.size()); b.Synchronize(gpu.q);
+    return bytes;
+  };
+  const std::vector<int32_t> ids{3,7,2,5,9},stale(5,0),positions{0,1,2,3,4,0,1,2,3,4,0,1,2,3,4};
+  xpu_test::Buffer device_ids(gpu.q,DType::kI32,{5}), first(gpu.q,DType::kF16,{4,128}),
+      second(gpu.q,DType::kF16,{3,128});
+  device_ids.upload(ids.data());
+  first.put(xpu_test::Values(4*128,13,0.5)); second.put(xpu_test::Values(3*128,29,0.25));
+  const auto first_bytes=first.download(),second_bytes=second.download(),id_bytes=device_ids.download();
+  std::vector<unsigned char> retained_bytes;
+  vllm::MmForwardBuffers retained;
+  for (const auto& mask : {std::vector<char>{0,0,0,0,0},std::vector<char>{0,1,1,0,1},
+                           std::vector<char>{1,1,1,1,1}}) {
+    std::vector<vt::Tensor> slices;
+    if (mask[1] && !mask[0]) {
+      // The unused neighboring source rows are deliberately different.
+      slices={first.tensor.Slice(0,1,3),second.tensor.Slice(0,2,3)};
+    } else if (mask[0]) slices={first.tensor.Slice(0,0,3),second.tensor.Slice(0,1,3)};
+    std::vector<unsigned char> expected(5*128*2);
+    for (size_t row=0;row<ids.size();++row)
+      std::memcpy(expected.data()+256*row,w.embed_tokens.bytes.data()+256*ids[row],256);
+    size_t destination=0;
+    for (const auto& slice : slices) {
+      const auto source=read(slice);
+      for (int64_t row=0;row<slice.shape[0];++row) {
+        while (!mask[destination]) ++destination;
+        std::memcpy(expected.data()+256*destination,source.data()+256*row,256);
+        ++destination;
+      }
+    }
+    for (bool mirrored : {false,true}) {
+      vllm::MmEmbedInputs input;
+      input.token_ids=mirrored ? &stale : &ids;
+      input.mm_embeds=&slices; input.is_mm_embed=&mask; input.mrope_positions=&positions;
+      input.device_token_ids=mirrored ? static_cast<int32_t*>(device_ids.tensor.data) : nullptr;
+      input.host_token_ids_stale=mirrored;
+      const auto result=vllm::Qwen3_5DenseEmbedMultimodal(w,c,gpu.q,input);
+      REQUIRE(result.storage.size()==2);
+      REQUIRE(result.mm.inputs_embeds.dtype==DType::kF16);
+      xpu_test::SameBytes(read(result.mm.inputs_embeds),expected);
+      const auto pos=read(result.mm.positions3);
+      REQUIRE(pos.size()==positions.size()*sizeof(int32_t));
+      CHECK(std::memcmp(pos.data(),positions.data(),pos.size())==0);
+      if (!retained.storage.empty()) xpu_test::SameBytes(read(retained.mm.inputs_embeds),retained_bytes);
+      else { retained=result; retained_bytes=expected; }
+      if (mirrored) {
+        auto bad=input; bad.device_token_ids=nullptr;
+        CHECK_THROWS_WITH_AS(vllm::Qwen3_5DenseEmbedMultimodal(w,c,gpu.q,bad),
+                            doctest::Contains("stale host IDs"),std::runtime_error);
+      }
+    }
+  }
+  xpu_test::SameBytes(first.download(),first_bytes);
+  xpu_test::SameBytes(second.download(),second_bytes);
+  xpu_test::SameBytes(device_ids.download(),id_bytes);
+  std::vector<char> invalid_mask{1,0,0,0,0}; std::vector<vt::Tensor> slices;
+  vllm::MmEmbedInputs invalid;
+  invalid.token_ids=&ids; invalid.mm_embeds=&slices;
+  invalid.is_mm_embed=&invalid_mask; invalid.mrope_positions=&positions;
+  CHECK_THROWS_WITH_AS(vllm::Qwen3_5DenseEmbedMultimodal(w,c,gpu.q,invalid),
+                      doctest::Contains("balance the placeholder mask"),std::runtime_error);
+  auto wrong=first.tensor; wrong.dtype=DType::kBF16; slices={wrong};
+  CHECK_THROWS_WITH_AS(vllm::Qwen3_5DenseEmbedMultimodal(w,c,gpu.q,invalid),
+                      doctest::Contains("FP16 visual rows"),std::runtime_error);
+  CHECK(vt::GetReferenceTierHits()==0);
+}
+
+TEST_CASE("XPU dense EXL3 MM: device embeddings, positions and owned hidden outputs") {
+  xpu_test::Queue gpu(vt::DeviceType::kXPU);
+  auto c = Config();
+  c.raw["quantization_config"] = {{"quant_method","exl3"}};
+  c.rope_parameters.mrope_section = {11,11,10};
+  c.rope_parameters.mrope_interleaved = true;
+  c.max_position_embeddings = 4096;
+  const auto w = Weights(c,false);
+  auto registered = vllm::BorrowQwen3_5DenseLoadedModel(w);
+  xpu_test::Buffer kv(gpu.q,DType::kF16,{2*2*8*128}),
+      conv(gpu.q,DType::kF16,{2,384,3}), ssm(gpu.q,DType::kF32,{2,1,128,128}),
+      embeds(gpu.q,DType::kF16,{4,128}), axes(gpu.q,DType::kI32,{3,4}),
+      actual_ids(gpu.q,DType::kI32,{4});
+  auto reset = [&] {
+    kv.put(std::vector<float>(2*2*8*128,0));
+    conv.put(std::vector<float>(2*384*3,0));
+    ssm.put(std::vector<float>(2*128*128,0));
+  };
+  const auto read = [&](const vt::Tensor& tensor) {
+    std::vector<unsigned char> bytes(tensor.Bytes());
+    auto& b=vt::GetBackend(gpu.q.device.type);
+    b.Copy(gpu.q,bytes.data(),tensor.data,bytes.size()); b.Synchronize(gpu.q);
+    return bytes;
+  };
+  vllm::PagedKvCache cache;
+  cache.data=kv.tensor.data; cache.dtype=DType::kF16; cache.num_blocks=2;
+  cache.block_size=8; cache.num_kv_heads=1; cache.head_size=128;
+  std::vector<vllm::PagedKvCache> caches{cache};
+  std::vector<vllm::GdnStateCache> states(1);
+  states[0].conv_state=conv.tensor; states[0].ssm_state=ssm.tensor;
+  vllm::v1::CommonAttentionMetadata am;
+  am.num_reqs=1; am.num_actual_tokens=4;
+  am.query_start_loc=am.query_start_loc_cpu={0,4};
+  am.seq_lens=am.seq_lens_cpu={4}; am.max_query_len=am.max_seq_len=4;
+  am.block_table_num_cols=1; am.block_table_tensor={1};
+  am.slot_mapping={8,9,10,11}; am.causal=true;
+  vllm::v1::GDNAttentionMetadata gm;
+  gm.num_actual_tokens=gm.num_prefill_tokens=4; gm.num_prefills=1;
+  gm.non_spec_state_indices_tensor=std::vector<int32_t>{1};
+  gm.non_spec_query_start_loc=gm.prefill_query_start_loc=std::vector<int32_t>{0,4};
+  gm.has_initial_state=gm.prefill_has_initial_state=std::vector<uint8_t>{0};
+  gm.prefill_state_indices=std::vector<int32_t>{1};
+  const auto chunks=vllm::v1::ComputeCausalConv1dMetadata(*gm.non_spec_query_start_loc);
+  gm.batch_ptr=chunks.batch_ptr; gm.token_chunk_offset_ptr=chunks.token_chunk_offset_ptr;
+  const std::vector<int32_t> logical{0,1,2,3}, placeholders{0,0,0,0}, gather{3};
+  const int32_t same_axes[]={0,1,2,3,0,1,2,3,0,1,2,3};
+  const std::vector<int32_t> axis_source(std::begin(same_axes),std::end(same_axes));
+  axes.upload(same_axes);
+  std::vector<unsigned char> first_logits;
+  for (const auto& ids : {std::vector<int32_t>{3,7,2,5},std::vector<int32_t>{3,9,2,5}}) {
+    std::vector<uint16_t> merged(4*128);
+    for (size_t row=0;row<ids.size();++row)
+      std::memcpy(merged.data()+128*row,w.embed_tokens.bytes.data()+256*ids[row],256);
+    embeds.upload(merged.data());
+    const auto input_bytes=embeds.download(), position_bytes=axes.download();
+    reset();
+    vllm::Qwen3_5MTPHiddenStates plain_tap;
+    const auto plain=vllm::Qwen3_5DenseModel::ForwardDeviceTap(
+        ids,logical,am,gm,caches,states,w,c,gpu.q,&plain_tap,gather);
+    const auto expected_logits=read(plain.device_tensor), expected_hidden=read(plain_tap.tensor);
+    const auto expected_kv=kv.download(), expected_conv=conv.download(), expected_ssm=ssm.download();
+    if (first_logits.empty()) first_logits=expected_logits;
+    else CHECK(expected_logits != first_logits);
+    reset();
+    vllm::Qwen3_5MTPHiddenStates tap;
+    vllm::ModelForwardInput input{placeholders,logical,am,gm,caches,states,c,gpu.q,gather};
+    input.num_reqs=1; input.hidden_tap=&tap;
+    input.mm=vllm::MultiModalForwardInput{};
+    input.mm->inputs_embeds=embeds.tensor; input.mm->positions3=axes.tensor;
+    auto actual=vllm::Qwen3_5DenseForwardEmbeddings(input,w);
+    REQUIRE(actual.on_device()); REQUIRE(actual.rows==1); REQUIRE(actual.vocab==128);
+    REQUIRE(tap.storage != nullptr); REQUIRE(tap.tensor.dtype==DType::kF16);
+    xpu_test::SameBytes(read(actual.device_tensor),expected_logits);
+    xpu_test::SameBytes(read(tap.tensor),expected_hidden);
+    xpu_test::SameBytes(kv.download(),expected_kv);
+    xpu_test::SameBytes(conv.download(),expected_conv);
+    xpu_test::SameBytes(ssm.download(),expected_ssm);
+    reset();
+    // A graph hint must not substitute the text embedding/1-D rotation path.
+    input.pure_decode=true;
+    actual=vllm::ModelRegistry::Forward(*registered,input);
+    CHECK_FALSE(actual.non_owning_view);
+    xpu_test::SameBytes(read(actual.device_tensor),expected_logits);
+    xpu_test::SameBytes(read(tap.tensor),expected_hidden);
+    xpu_test::SameBytes(kv.download(),expected_kv);
+    xpu_test::SameBytes(conv.download(),expected_conv);
+    xpu_test::SameBytes(ssm.download(),expected_ssm);
+    input.pure_decode=false;
+    reset();
+    input.num_speculative_tokens=1;
+    actual=vllm::ModelRegistry::Forward(*registered,input);
+    xpu_test::SameBytes(read(actual.device_tensor),expected_logits);
+    xpu_test::SameBytes(read(tap.tensor),expected_hidden);
+    xpu_test::SameBytes(kv.download(),expected_kv);
+    xpu_test::SameBytes(conv.download(),expected_conv);
+    xpu_test::SameBytes(ssm.download(),expected_ssm);
+    input.num_speculative_tokens=0;
+    reset();
+    const int32_t token_rows[]={3,0,2,5}; actual_ids.upload(token_rows);
+    const std::vector<char> image_mask{0,1,0,0};
+    const std::vector<vt::Tensor> visual_rows{embeds.tensor.Slice(0,1,2)};
+    vllm::MmEmbedInputs merge;
+    merge.token_ids=&placeholders; merge.mm_embeds=&visual_rows;
+    merge.is_mm_embed=&image_mask; merge.mrope_positions=&axis_source;
+    merge.device_token_ids=static_cast<int32_t*>(actual_ids.tensor.data);
+    merge.host_token_ids_stale=true;
+    const auto prepared=vllm::Qwen3_5DenseEmbedMultimodal(w,c,gpu.q,merge);
+    auto merged_input=input; merged_input.mm=prepared.mm;
+    merged_input.device_token_ids=merge.device_token_ids;
+    merged_input.host_token_ids_stale=true;
+    actual=vllm::ModelRegistry::Forward(*registered,merged_input);
+    xpu_test::SameBytes(read(actual.device_tensor),expected_logits);
+    xpu_test::SameBytes(read(tap.tensor),expected_hidden);
+    xpu_test::SameBytes(kv.download(),expected_kv);
+    xpu_test::SameBytes(conv.download(),expected_conv);
+    xpu_test::SameBytes(ssm.download(),expected_ssm);
+    const auto retained=tap;
+    reset();
+    actual=vllm::Qwen3_5DenseForwardEmbeddings(input,w);
+    xpu_test::SameBytes(read(actual.device_tensor),expected_logits);
+    xpu_test::SameBytes(read(retained.tensor),expected_hidden);
+    xpu_test::SameBytes(embeds.download(),input_bytes);
+    xpu_test::SameBytes(axes.download(),position_bytes);
+    // Distinct spatial axes must affect the real language attention, while
+    // ordinary cache addressing still writes the same logical slots.
+    const int32_t spatial[]={0,1,2,3,0,17,51,103,0,23,71,157};
+    axes.upload(spatial); reset();
+    const auto different=vllm::Qwen3_5DenseForwardEmbeddings(input,w);
+    CHECK(read(different.device_tensor) != expected_logits);
+    const auto new_kv=kv.download();
+    CHECK(std::all_of(new_kv.begin(),new_kv.begin()+8*2*128*2,
+                      [](unsigned char v){return v==0;}));
+    xpu_test::SameBytes(read(retained.tensor),expected_hidden);
+    axes.upload(same_axes);
+    // The host-logit carrier still uses the provided embeddings.
+    reset(); input.hidden_tap=nullptr; input.gather_logits=false;
+    const auto host=vllm::Qwen3_5DenseForwardEmbeddings(input,w);
+    REQUIRE(host.host.size()*sizeof(float)==expected_logits.size());
+    CHECK(std::memcmp(host.host.data(),expected_logits.data(),expected_logits.size())==0);
+  }
+  CHECK(vt::GetReferenceTierHits()==0);
+}
+
+TEST_CASE("XPU dense EXL3 MM: invalid inputs fail before persistent state writes") {
+  xpu_test::Queue gpu(vt::DeviceType::kXPU);
+  auto c=Config(); c.raw["quantization_config"]={{"quant_method","exl3"}};
+  c.rope_parameters.mrope_section={11,11,10};
+  const auto w=Weights(c,false);
+  xpu_test::Buffer embeds(gpu.q,DType::kF16,{1,128}), axes(gpu.q,DType::kI32,{3,1}),
+      kv(gpu.q,DType::kF16,{2*8*128}), conv(gpu.q,DType::kF16,{1,384,3}),
+      ssm(gpu.q,DType::kF32,{1,1,128,128});
+  kv.put(std::vector<float>(2*8*128,2)); conv.put(std::vector<float>(384*3,3));
+  ssm.put(std::vector<float>(128*128,4));
+  const auto kv_initial=kv.download(),conv_initial=conv.download(),ssm_initial=ssm.download();
+  const std::vector<int32_t> ids{0},positions{0},gather{};
+  vllm::v1::CommonAttentionMetadata am; am.num_reqs=1;
+  vllm::v1::GDNAttentionMetadata gm;
+  vllm::PagedKvCache cache;
+  cache.data=kv.tensor.data; cache.dtype=DType::kF16; cache.num_blocks=1;
+  cache.block_size=8; cache.num_kv_heads=1; cache.head_size=128;
+  std::vector<vllm::PagedKvCache> caches{cache}; std::vector<vllm::GdnStateCache> states(1);
+  states[0].conv_state=conv.tensor; states[0].ssm_state=ssm.tensor;
+  vllm::ModelForwardInput input{ids,positions,am,gm,caches,states,c,gpu.q,gather};
+  input.num_reqs=1;
+  CHECK_THROWS_WITH_AS(vllm::Qwen3_5DenseForwardEmbeddings(input,w),
+                      doctest::Contains("multimodal inputs required"),std::runtime_error);
+  input.mm=vllm::MultiModalForwardInput{};
+  input.mm->inputs_embeds=embeds.tensor; input.mm->positions3=axes.tensor;
+  auto bad=input; bad.mm->inputs_embeds.dtype=DType::kBF16;
+  CHECK_THROWS_WITH_AS(vllm::Qwen3_5DenseForwardEmbeddings(bad,w),
+                      doctest::Contains("FP16 embeddings"),std::runtime_error);
+  auto bad_axes=input; bad_axes.mm->positions3.rank=1;
+  CHECK_THROWS_WITH_AS(vllm::Qwen3_5DenseForwardEmbeddings(bad_axes,w),
+                      doctest::Contains("positions [3,T]"),std::runtime_error);
+  auto bad_spec=input; bad_spec.num_speculative_tokens=4;
+  CHECK_THROWS_WITH_AS(vllm::Qwen3_5DenseForwardEmbeddings(bad_spec,w),
+                      doctest::Contains("C1-C4 target-only"),std::runtime_error);
+  auto bad_batch=input; bad_batch.num_reqs=2;
+  CHECK_THROWS_WITH_AS(vllm::Qwen3_5DenseForwardEmbeddings(bad_batch,w),
+                      doctest::Contains("C1-C4 target-only"),std::runtime_error);
+  am.num_reqs=5;
+  auto overlimit=input; overlimit.num_reqs=5;
+  CHECK_THROWS_WITH_AS(vllm::Qwen3_5DenseForwardEmbeddings(overlimit,w),
+                      doctest::Contains("C1-C4 target-only"),std::runtime_error);
+  am.num_reqs=1;
+  auto bad_stack=input; bad_stack.mm->deepstack_levels=1;
+  CHECK_THROWS_WITH_AS(vllm::Qwen3_5DenseForwardEmbeddings(bad_stack,w),
+                      doctest::Contains("no DeepStack"),std::runtime_error);
+  c.rope_parameters.mrope_section={11,11,9};
+  CHECK_THROWS_WITH_AS(vllm::Qwen3_5DenseForwardEmbeddings(input,w),
+                      doctest::Contains("sections must cover"),std::runtime_error);
+  c.rope_parameters.mrope_section={128,0,0}; c.rotary_dim=256;
+  CHECK_THROWS_WITH_AS(vllm::Qwen3_5DenseForwardEmbeddings(input,w),
+                      doctest::Contains("sections must cover"),std::runtime_error);
+  c.rope_parameters.mrope_section={11,11,10}; c.rotary_dim=64;
+  c.rope_theta=std::numeric_limits<double>::infinity();
+  CHECK_THROWS_WITH_AS(vllm::Qwen3_5DenseForwardEmbeddings(input,w),
+                      doctest::Contains("finite positive"),std::runtime_error);
+  c.rope_theta=10000;
+  c.architectures={"Qwen3_5ForCausalLM"};
+  auto text_model=vllm::MakeQwen3_5DenseLoadedModel(Weights(c,false),c);
+  REQUIRE(text_model->registration().architecture=="Qwen3_5ForCausalLM");
+  CHECK_THROWS_WITH_AS(vllm::ModelRegistry::Forward(*text_model,input),
+                      doctest::Contains("conditional-generation registration required"),std::runtime_error);
+  xpu_test::SameBytes(kv.download(),kv_initial);
+  xpu_test::SameBytes(conv.download(),conv_initial);
+  xpu_test::SameBytes(ssm.download(),ssm_initial);
+  CHECK(vt::GetReferenceTierHits()==0);
+}
+
 TEST_CASE("XPU dense EXL3 FP16: paged hybrid prefill and decode preserve model/head precision") {
   vt::EnableOpProviderCallStats(true);
   const auto grouped_before = vt::GetOpProviderStats(vt::OpId::kExl3GroupedLinear, vt::DeviceType::kXPU).selections;
@@ -3151,4 +3438,275 @@ TEST_CASE("XPU dense EXL3 FP16: unpaged model entries preserve hidden and head r
   CHECK(w.layers[0].gdn.in_proj_qkvz_exl3.trellis.host_released);
   CHECK(w.layers[1].attn.qkv_proj_exl3.trellis.host_released);
   CHECK(vt::GetReferenceTierHits() == 0);
+}
+
+
+TEST_CASE("XPU dense EXL3 MM: MTP3 verification preserves native forced acceptance histories") {
+  xpu_test::Queue gpu(vt::DeviceType::kXPU);
+  auto c=Config(); c.raw["quantization_config"]={{"quant_method","exl3"}};
+  c.rope_parameters.mrope_section={11,11,10}; c.rope_parameters.mrope_interleaved=true;
+  c.max_position_embeddings=64;
+  const auto w=Weights(c,false);
+  auto registered=vllm::BorrowQwen3_5DenseLoadedModel(w);
+  // A permuted state row and a nonidentity physical KV page prevent an identity
+  // selector/slot mapping from passing. Spec conv history has (K-1)+3 taps.
+  xpu_test::Buffer plain_kv(gpu.q,DType::kF16,{2*2*16*128}),
+      image_kv(gpu.q,DType::kF16,{2*2*16*128}),
+      plain_conv(gpu.q,DType::kF16,{4,384,6}), image_conv(gpu.q,DType::kF16,{4,384,6}),
+      plain_ssm(gpu.q,DType::kF32,{4,1,128,128}), image_ssm(gpu.q,DType::kF32,{4,1,128,128}),
+      embeds(gpu.q,DType::kF16,{4,128}), axes(gpu.q,DType::kI32,{3,4});
+  auto cache=[&](xpu_test::Buffer& kv) {
+    vllm::PagedKvCache k; k.data=kv.tensor.data; k.dtype=DType::kF16;
+    k.num_blocks=2; k.block_size=16; k.num_kv_heads=1; k.head_size=128;
+    return std::vector<vllm::PagedKvCache>{k};
+  };
+  auto plain_caches=cache(plain_kv),image_caches=cache(image_kv);
+  std::vector<vllm::GdnStateCache> plain_states(1),image_states(1);
+  plain_states[0].conv_state=plain_conv.tensor; plain_states[0].ssm_state=plain_ssm.tensor;
+  image_states[0].conv_state=image_conv.tensor; image_states[0].ssm_state=image_ssm.tensor;
+  auto read=[&](const vt::Tensor& tensor) {
+    std::vector<unsigned char> bytes(tensor.Bytes()); auto& backend=vt::GetBackend(gpu.q.device.type);
+    backend.Copy(gpu.q,bytes.data(),tensor.data,bytes.size()); backend.Synchronize(gpu.q); return bytes;
+  };
+  std::vector<unsigned char> previous_accepted_logits;
+  for (int accepted : {1,2,3,4}) {
+    CAPTURE(accepted); // reject at draft 0/1/2, or all three drafts accepted.
+    plain_kv.put(std::vector<float>(2*2*16*128,0)); image_kv.put(std::vector<float>(2*2*16*128,0));
+    plain_conv.put(std::vector<float>(4*384*6,0)); image_conv.put(std::vector<float>(4*384*6,0));
+    plain_ssm.put(std::vector<float>(4*128*128,0)); image_ssm.put(std::vector<float>(4*128*128,0));
+    for (int step=0;step<3;++step) {
+      const std::vector<int32_t> ids=step==0 ? std::vector<int32_t>{3,7,2,5} :
+          step==1 ? std::vector<int32_t>{9,13,22,17} : std::vector<int32_t>{11,19,23,29};
+      const int start=step==0 ? 0 : step==1 ? 4 : 4+accepted;
+      const std::vector<int32_t> positions{start,start+1,start+2,start+3},gather{},placeholders(4,0);
+      vllm::v1::CommonAttentionMetadata am;
+      am.num_reqs=1; am.num_actual_tokens=4; am.max_query_len=4; am.max_seq_len=start+4;
+      am.query_start_loc=am.query_start_loc_cpu={0,4}; am.seq_lens=am.seq_lens_cpu={start+4};
+      am.num_computed_tokens_cpu={start}; am.block_table_num_cols=1; am.block_table_tensor={1};
+      am.slot_mapping={16+start,17+start,18+start,19+start}; am.causal=true;
+      vllm::v1::GDNAttentionMetadata gm; gm.num_actual_tokens=4;
+      if (step==0) {
+        gm.num_prefill_tokens=4; gm.num_prefills=1;
+        gm.non_spec_state_indices_tensor=gm.prefill_state_indices=std::vector<int32_t>{3};
+        gm.non_spec_query_start_loc=gm.prefill_query_start_loc=std::vector<int32_t>{0,4};
+        gm.has_initial_state=gm.prefill_has_initial_state=std::vector<uint8_t>{0};
+        const auto chunks=vllm::v1::ComputeCausalConv1dMetadata(*gm.non_spec_query_start_loc);
+        gm.batch_ptr=chunks.batch_ptr; gm.token_chunk_offset_ptr=chunks.token_chunk_offset_ptr;
+      } else {
+        gm.num_spec_decodes=1; gm.num_spec_decode_tokens=4; gm.spec_state_indices_num_cols=4;
+        gm.spec_state_indices_tensor=std::vector<int32_t>{3,2,1,0};
+        gm.spec_query_start_loc=std::vector<int32_t>{0,4}; gm.spec_sequence_masks=std::vector<uint8_t>{1};
+        gm.spec_token_indx=std::vector<int32_t>{0,1,2,3}; gm.num_accepted_tokens=std::vector<int32_t>{step==1 ? 1 : accepted};
+      }
+      std::vector<uint16_t> merged(4*128); std::vector<int32_t> rotary;
+      for (size_t row=0;row<ids.size();++row)
+        std::memcpy(merged.data()+128*row,w.embed_tokens.bytes.data()+256*ids[row],256);
+      for (int axis=0;axis<3;++axis) rotary.insert(rotary.end(),positions.begin(),positions.end());
+      embeds.upload(merged.data()); axes.upload(rotary.data());
+      vllm::Qwen3_5MTPHiddenStates plain_tap,image_tap;
+      const auto expected=vllm::Qwen3_5DenseModel::ForwardDeviceTap(
+          ids,positions,am,gm,plain_caches,plain_states,w,c,gpu.q,&plain_tap,gather);
+      vllm::ModelForwardInput input{placeholders,positions,am,gm,image_caches,image_states,c,gpu.q,gather};
+      input.num_reqs=1; input.num_speculative_tokens=3; input.hidden_tap=&image_tap;
+      input.mm=vllm::MultiModalForwardInput{}; input.mm->inputs_embeds=embeds.tensor; input.mm->positions3=axes.tensor;
+      const auto actual=vllm::ModelRegistry::Forward(*registered,input);
+      xpu_test::SameBytes(read(actual.device_tensor),read(expected.device_tensor));
+      xpu_test::SameBytes(read(image_tap.tensor),read(plain_tap.tensor));
+      xpu_test::SameBytes(image_kv.download(),plain_kv.download());
+      xpu_test::SameBytes(image_conv.download(),plain_conv.download());
+      xpu_test::SameBytes(image_ssm.download(),plain_ssm.download());
+      if (step==2) {
+        const auto logits=read(actual.device_tensor);
+        if (!previous_accepted_logits.empty()) CHECK(logits!=previous_accepted_logits);
+        previous_accepted_logits=logits;
+      }
+    }
+  }
+  CHECK(vt::GetReferenceTierHits()==0);
+}
+
+TEST_CASE("XPU dense EXL3 MM: MTP3 graph owns embeddings and axes across replay and fresh prefixes") {
+  // A global fast-verifier request must still allow this unsupported small
+  // F16 geometry to replay through generic attention at growing contexts.
+  struct RestoreVerify {
+    std::string old; bool had;
+    ~RestoreVerify() {
+      if (had) setenv("VT_XPU_XE2_VERIFY", old.c_str(), 1);
+      else unsetenv("VT_XPU_XE2_VERIFY");
+    }
+  } restore{std::getenv("VT_XPU_XE2_VERIFY") ? std::getenv("VT_XPU_XE2_VERIFY") : "",
+            std::getenv("VT_XPU_XE2_VERIFY") != nullptr};
+  REQUIRE(setenv("VT_XPU_XE2_VERIFY", "1", 1) == 0);
+  xpu_test::Queue gpu(vt::DeviceType::kXPU);
+  auto c=Config(); c.raw["quantization_config"]={{"quant_method","exl3"}};
+  c.rope_parameters.mrope_section={11,11,10}; c.rope_parameters.mrope_interleaved=true;
+  c.max_position_embeddings=128; c.architectures={"Qwen3_5ForConditionalGeneration"};
+  const auto w=Weights(c,false);
+  const int max_concurrency=4;
+  const int max_tokens=16;
+  vllm::Qwen3_5DenseDecodeGraph graph(w,c,gpu.q,4);
+  auto registered=vllm::BorrowQwen3_5DenseLoadedModel(w);
+  // A permuted state row and a nonidentity physical KV page prevent an identity
+  // selector/slot mapping from passing. Spec conv history has (K-1)+3 taps.
+  xpu_test::Buffer plain_kv(gpu.q,DType::kF16,{2*2*max_concurrency*64*128}),
+      image_kv(gpu.q,DType::kF16,{2*2*max_concurrency*64*128}),
+      plain_conv(gpu.q,DType::kF16,{4*max_concurrency,384,6}), image_conv(gpu.q,DType::kF16,{4*max_concurrency,384,6}),
+      plain_ssm(gpu.q,DType::kF32,{4*max_concurrency,1,128,128}), image_ssm(gpu.q,DType::kF32,{4*max_concurrency,1,128,128}),
+      embeds(gpu.q,DType::kF16,{max_tokens,128}), axes(gpu.q,DType::kI32,{3,max_tokens});
+  auto cache=[&](xpu_test::Buffer& kv) {
+    vllm::PagedKvCache k; k.data=kv.tensor.data; k.dtype=DType::kF16;
+    k.num_blocks=2*max_concurrency; k.block_size=64; k.num_kv_heads=1; k.head_size=128;
+    return std::vector<vllm::PagedKvCache>{k};
+  };
+  auto plain_caches=cache(plain_kv),image_caches=cache(image_kv);
+  std::vector<vllm::GdnStateCache> plain_states(1),image_states(1);
+  plain_states[0].conv_state=plain_conv.tensor; plain_states[0].ssm_state=plain_ssm.tensor;
+  image_states[0].conv_state=image_conv.tensor; image_states[0].ssm_state=image_ssm.tensor;
+  auto read=[&](const vt::Tensor& tensor) {
+    std::vector<unsigned char> bytes(tensor.Bytes()); auto& backend=vt::GetBackend(gpu.q.device.type);
+    backend.Copy(gpu.q,bytes.data(),tensor.data,bytes.size()); backend.Synchronize(gpu.q); return bytes;
+  };
+  std::optional<vllm::ForwardLogits> across_shape_logits;
+  std::optional<vllm::Qwen3_5MTPHiddenStates> across_shape_tap;
+  std::vector<unsigned char> across_shape_logit_bytes, across_shape_tap_bytes;
+  const std::vector<std::pair<int,bool>> shapes{{1,true},{2,true},{4,true},
+      {3,true},{1,false},{4,false},{2,true},{1,true}};
+  for (const auto& [concurrency,use_mm] : shapes) {
+    CAPTURE(concurrency);
+    CAPTURE(use_mm);
+    const auto prior_replays = graph.replay_count();
+    const int tokens=4*concurrency;
+    embeds.tensor.shape[0]=tokens;
+    axes.tensor.shape[1]=tokens; axes.tensor.stride[0]=tokens;
+    std::vector<unsigned char> previous_accepted_logits;
+    for (int accepted : {1,2,3,4}) {
+      CAPTURE(accepted); // reject at draft 0/1/2, or all three drafts accepted.
+      plain_kv.put(std::vector<float>(2*2*max_concurrency*64*128,0)); image_kv.put(std::vector<float>(2*2*max_concurrency*64*128,0));
+      plain_conv.put(std::vector<float>(4*max_concurrency*384*6,0)); image_conv.put(std::vector<float>(4*max_concurrency*384*6,0));
+      plain_ssm.put(std::vector<float>(4*max_concurrency*128*128,0)); image_ssm.put(std::vector<float>(4*max_concurrency*128*128,0));
+      std::optional<vllm::ForwardLogits> retained_logits;
+      std::optional<vllm::Qwen3_5MTPHiddenStates> retained_tap;
+      std::vector<unsigned char> retained_logit_bytes, retained_tap_bytes;
+      for (int step=0;step<7;++step) {
+        std::vector<int32_t> ids,positions,gather{},placeholders(tokens,0),accepted_by_request;
+        const std::vector<int32_t> base_ids=step==0 ? std::vector<int32_t>{3,7,2,5} :
+            step==1 ? std::vector<int32_t>{9,13,22,17} : std::vector<int32_t>{11,19,23,29};
+        vllm::v1::CommonAttentionMetadata am;
+        am.num_reqs=concurrency; am.num_actual_tokens=tokens; am.max_query_len=4;
+        am.block_table_num_cols=1; am.causal=true; am.query_start_loc={0};
+        std::vector<int32_t> prefill_slots,spec_slots,spec_indices;
+        for (int request=0;request<concurrency;++request) {
+          const int accepted_here=1+(accepted-1+request)%4;
+          const int start=step==0 ? 0 : step==1 ? 4 : 4+accepted_here+4*(step-2);
+          am.max_seq_len=std::max(am.max_seq_len,start+4);
+          am.query_start_loc.push_back(4*(request+1));
+          am.seq_lens.push_back(start+4); am.num_computed_tokens_cpu.push_back(start);
+          const int page=2*request+1;
+          am.block_table_tensor.push_back(page);
+          prefill_slots.push_back(4*request+3);
+          accepted_by_request.push_back(step==1 ? 1 : step==2 ? accepted_here : 4);
+          for (int row=0;row<4;++row) {
+            ids.push_back(base_ids[row]+request*3);
+            positions.push_back(start+row);
+            am.slot_mapping.push_back(page*64+start+row);
+            spec_slots.push_back(4*request+3-row);
+            spec_indices.push_back(4*request+row);
+          }
+        }
+        am.query_start_loc_cpu=am.query_start_loc; am.seq_lens_cpu=am.seq_lens;
+        vllm::v1::GDNAttentionMetadata gm; gm.num_actual_tokens=tokens;
+        if (step==0) {
+          gm.num_prefill_tokens=tokens; gm.num_prefills=concurrency;
+          gm.non_spec_state_indices_tensor=gm.prefill_state_indices=prefill_slots;
+          gm.non_spec_query_start_loc=gm.prefill_query_start_loc=am.query_start_loc;
+          gm.has_initial_state=gm.prefill_has_initial_state=std::vector<uint8_t>(concurrency,0);
+          const auto chunks=vllm::v1::ComputeCausalConv1dMetadata(*gm.non_spec_query_start_loc);
+          gm.batch_ptr=chunks.batch_ptr; gm.token_chunk_offset_ptr=chunks.token_chunk_offset_ptr;
+        } else {
+          gm.num_spec_decodes=concurrency; gm.num_spec_decode_tokens=tokens; gm.spec_state_indices_num_cols=4;
+          gm.spec_state_indices_tensor=spec_slots; gm.spec_query_start_loc=am.query_start_loc;
+          gm.spec_sequence_masks=std::vector<uint8_t>(concurrency,1);
+          gm.spec_token_indx=spec_indices; gm.num_accepted_tokens=accepted_by_request;
+        }
+        std::vector<uint16_t> merged(max_tokens*128); std::vector<int32_t> rotary;
+        for (size_t row=0;row<ids.size();++row)
+          std::memcpy(merged.data()+128*row,w.embed_tokens.bytes.data()+256*ids[row],256);
+        for (int axis=0;axis<3;++axis) for (size_t row=0;row<positions.size();++row)
+          rotary.push_back(use_mm ? positions[row] + 17*axis + accepted +
+              5*static_cast<int>(row/4) : positions[row]);
+        rotary.resize(3*max_tokens);
+        embeds.upload(merged.data()); axes.upload(rotary.data());
+        vllm::Qwen3_5MTPHiddenStates plain_tap,image_tap;
+        // Eager MM is the qualified reference. Change all axes and the visual
+        // prefix between histories; physical KV positions remain independent.
+        vllm::ModelForwardInput reference{placeholders,positions,am,gm,plain_caches,plain_states,c,gpu.q,gather};
+        reference.num_reqs=concurrency; reference.num_speculative_tokens=3; reference.hidden_tap=&plain_tap;
+        reference.mm=vllm::MultiModalForwardInput{};
+        reference.mm->inputs_embeds=embeds.tensor; reference.mm->positions3=axes.tensor;
+        const auto expected=use_mm ? vllm::Qwen3_5DenseForwardEmbeddings(reference,w) :
+          vllm::Qwen3_5DenseModel::ForwardDeviceTap(ids,positions,am,gm,plain_caches,
+              plain_states,w,c,gpu.q,&plain_tap,gather);
+        const auto& graph_ids=use_mm ? placeholders : ids;
+        vllm::ModelForwardInput input{graph_ids,positions,am,gm,image_caches,image_states,c,gpu.q,gather};
+        input.num_reqs=concurrency; input.num_speculative_tokens=3; input.hidden_tap=&image_tap;
+        input.mm=vllm::MultiModalForwardInput{}; input.mm->inputs_embeds=embeds.tensor; input.mm->positions3=axes.tensor;
+        if (step==1) {
+          const auto kv_before=image_kv.download(),conv_before=image_conv.download(),ssm_before=image_ssm.download();
+          auto invalid=input; invalid.mm->positions3.shape[1]--;
+          CHECK_THROWS_WITH_AS(graph.Step(graph_ids,positions,am,gm,image_caches,image_states,nullptr,&image_tap,&invalid),
+                               doctest::Contains("positions [3,T]"),std::runtime_error);
+          auto missing=input; missing.mm.reset();
+          CHECK_THROWS_WITH_AS(graph.Step(graph_ids,positions,am,gm,image_caches,image_states,nullptr,&image_tap,&missing),
+                               doctest::Contains("multimodal inputs required"),std::runtime_error);
+          xpu_test::SameBytes(image_kv.download(),kv_before);
+          xpu_test::SameBytes(image_conv.download(),conv_before);
+          xpu_test::SameBytes(image_ssm.download(),ssm_before);
+        }
+        const auto actual=step==0 ?
+            (use_mm ? vllm::ModelRegistry::Forward(*registered,input) :
+             vllm::Qwen3_5DenseModel::ForwardDeviceTap(ids,positions,am,gm,image_caches,
+                 image_states,w,c,gpu.q,&image_tap,gather)) :
+            graph.Step(graph_ids,positions,am,gm,image_caches,image_states,nullptr,
+                       &image_tap,use_mm ? &input : nullptr);
+        if (step>0) {
+          // Poison caller-owned inputs after submission. A later replay must use
+          // newly staged graph inputs, not a captured pointer into these bytes.
+          embeds.put(std::vector<float>(max_tokens*128,9));
+          axes.upload(std::vector<int32_t>(3*max_tokens,777).data());
+        }
+        xpu_test::SameBytes(read(actual.device_tensor),read(expected.device_tensor));
+        xpu_test::SameBytes(read(image_tap.tensor),read(plain_tap.tensor));
+        xpu_test::SameBytes(image_kv.download(),plain_kv.download());
+        xpu_test::SameBytes(image_conv.download(),plain_conv.download());
+        xpu_test::SameBytes(image_ssm.download(),plain_ssm.download());
+        CHECK(vt::xpu::GetMemoryInfo(gpu.q.device.index).graph_count<=6);
+        if (across_shape_logits) {
+          xpu_test::SameBytes(read(across_shape_logits->device_tensor),across_shape_logit_bytes);
+          xpu_test::SameBytes(read(across_shape_tap->tensor),across_shape_tap_bytes);
+        }
+        if (!across_shape_logits && step==3) {
+          across_shape_logits=actual; across_shape_tap=image_tap;
+          across_shape_logit_bytes=read(actual.device_tensor);
+          across_shape_tap_bytes=read(image_tap.tensor);
+        }
+        if (step==3) {
+          retained_logits=actual; retained_tap=image_tap;
+          retained_logit_bytes=read(actual.device_tensor); retained_tap_bytes=read(image_tap.tensor);
+        } else if (step>3) {
+          // Holding both paired outputs forces retirement when their slot would
+          // be reused; neither old carrier may be overwritten by the new graph.
+          xpu_test::SameBytes(read(retained_logits->device_tensor),retained_logit_bytes);
+          xpu_test::SameBytes(read(retained_tap->tensor),retained_tap_bytes);
+        }
+        if (step==2) {
+          const auto logits=read(actual.device_tensor);
+          if (!previous_accepted_logits.empty()) CHECK(logits!=previous_accepted_logits);
+          previous_accepted_logits=logits;
+        }
+      }
+    }
+    CHECK(graph.captured());
+    CHECK(graph.replay_count()>prior_replays+2);
+    CHECK(vt::GetReferenceTierHits()==0);
+  }
 }

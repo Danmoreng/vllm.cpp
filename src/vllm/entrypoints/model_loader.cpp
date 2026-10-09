@@ -18,6 +18,7 @@
 #include <iostream>
 #include <iterator>
 #include <memory>
+#include <limits>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -49,6 +50,10 @@
 #include "vllm/model_executor/models/qwen3_5_gguf_weights.h"
 #include "vllm/model_executor/models/qwen3_gguf_weights.h"  // qwen3 (dense) GGUF arm
 #include "vllm/model_executor/models/qwen3_5_mtp.h"  // SPEC-MTP I5d-pre draft load
+#include "vllm/model_executor/models/qwen3_5_weights.h"
+#include "vllm/model_executor/models/qwen3_5_dense_mm.h"
+#include "vllm/model_executor/layers/quantization/exl3_checkpoint.h"
+#include "vllm/multimodal/qwen3vl_processor.h"
 #include "vllm/model_executor/models/qwen3_5_common.h"  // SPEC-MTP I5d KV widening
 #include "vllm/model_executor/models/qwen3_dflash.h"  // SPEC-DFLASH D5 draft load
 #include "vllm/transformers_utils/hf_cache.h"  // ENG-HF-MODEL-DOWNLOAD (#1280)
@@ -1443,9 +1448,64 @@ bool LoadedEngine::EnsureNoneHash() {
   return true;
 }
 
+namespace {
+bool NativeQwen3_5ImagesEnabled(const HfConfig& config,
+                               std::string_view architecture,
+                               const vllm::MultiModalConfig& multimodal) {
+  return architecture == "Qwen3_5ForConditionalGeneration" &&
+         IsExl3Checkpoint(config) && multimodal.GetLimitPerPrompt("image") > 0;
+}
+}  // namespace
+
+int ResolveNativeQwen3_5MaxNumSeqs(
+    int resolved, const HfConfig& config, std::string_view architecture,
+    vt::DeviceType device, const vllm::MultiModalConfig& multimodal) {
+  if (device != vt::DeviceType::kXPU ||
+      !NativeQwen3_5ImagesEnabled(config, architecture, multimodal)) return resolved;
+  if (resolved <= 0)
+    throw std::runtime_error("native Qwen3.5 image concurrency must be positive");
+  if (resolved > kNativeQwen3_5MaxConcurrentRequests) {
+    std::cerr << "INFO native Qwen3.5 image admission: reduced max_num_seqs from "
+              << resolved << " to " << kNativeQwen3_5MaxConcurrentRequests
+              << ". Extra clients queue within the C1-C4 native image envelope.\n";
+    return kNativeQwen3_5MaxConcurrentRequests;
+  }
+  return resolved;
+}
+
+void ConfigureNativeQwen3_5EncoderBudget(
+    vllm::SchedulerConfig& scheduler, const HfConfig& config,
+    std::string_view architecture, vt::DeviceType device,
+    const vllm::MultiModalConfig& multimodal_config) {
+  if (device != vt::DeviceType::kXPU ||
+      !NativeQwen3_5ImagesEnabled(config, architecture, multimodal_config)) return;
+  const auto tower = Qwen3_5DenseVisionConfig(config);
+  if (tower.patch_size <= 0 || tower.patch_size > 64 ||
+      tower.spatial_merge_size <= 0 || tower.spatial_merge_size > 128 ||
+      scheduler.max_num_seqs <= 0) {
+    throw std::runtime_error("native Qwen3.5 encoder budget: unsupported geometry or concurrency");
+  }
+  const int64_t patch_area = int64_t{tower.patch_size} * tower.patch_size;
+  const int64_t merge_area = int64_t{tower.spatial_merge_size} * tower.spatial_merge_size;
+  const int64_t rows = std::min(multimodal::kNativeQwen3_5MaxImagePixels / patch_area,
+                                multimodal::kNativeQwen3_5MaxImagePatches) / merge_area;
+  // Two images is the native serving envelope. Reserve all admitted requests'
+  // outputs independently of decoder chunking, so one item's bidirectional
+  // encoder cannot become permanently unschedulable at a 1600-token budget.
+  const int64_t images = std::min(2, multimodal_config.GetLimitPerPrompt("image"));
+  const int64_t compute = rows * images;
+  const int64_t capacity = compute * scheduler.max_num_seqs;
+  if (rows <= 0 || images <= 0 || capacity > std::numeric_limits<int>::max())
+    throw std::runtime_error("native Qwen3.5 encoder budget exceeds supported capacity");
+  scheduler.max_num_encoder_input_tokens = std::max(
+      scheduler.max_num_encoder_input_tokens, static_cast<int>(compute));
+  scheduler.encoder_cache_size = std::max(
+      scheduler.encoder_cache_size, static_cast<int>(capacity));
+}
+
 vllm::SchedulerConfig LoadedEngine::MakeSchedulerConfig(
     int max_model_len, int max_num_seqs, int max_num_batched_tokens,
-    vllm::SchedulerPolicy policy) {
+    vllm::SchedulerPolicy policy) const {
   vllm::SchedulerConfig cfg;
   cfg.max_num_seqs = max_num_seqs;
   // Bounded per-step budget (chunked prefill). See ResolveMaxNumBatchedTokens.
@@ -1455,6 +1515,9 @@ vllm::SchedulerConfig LoadedEngine::MakeSchedulerConfig(
   cfg.watermark = 0.0;
   // Scheduling policy (fcfs default; kPriority selects the priority queue).
   cfg.policy = policy;
+  ConfigureNativeQwen3_5EncoderBudget(
+      cfg, config_, model_->registration().architecture, runner_.device().type,
+      mm_config_);
   return cfg;
 }
 
@@ -2215,6 +2278,10 @@ static int ResolvePythonXpuHybridBlockSize(
   return resolved;
 }
 
+LoadedEngine::MainQueueOwner::~MainQueueOwner() {
+  if (queue.handle != nullptr) vt::DestroyQueue(queue);
+}
+
 LoadedEngine::LoadedEngine(HfConfig config, Qwen3_5MoeWeights weights,
                            tok::Tokenizer tokenizer, const EngineParams& params,
                            std::optional<Qwen3_5MTPWeights> mtp_weights)
@@ -2293,9 +2360,19 @@ LoadedEngine::LoadedEngine(HfConfig config,
                                         ModelRegistry::IsDenseModel(*model_))),
       // The serving concurrency, clamped to the recurrent-state budget the KV
       // pool affords. See ResolveMaxNumSeqs (issue #1983).
-      max_num_seqs_(ResolveMaxNumSeqs(
-          params, kv_cfg_,
-          model_->registration().factory->serves_one_sequence_per_step)),
+      max_num_seqs_([&] {
+        const int resolved = ResolveMaxNumSeqs(
+            params, kv_cfg_,
+            model_->registration().factory->serves_one_sequence_per_step);
+        const auto architecture = model_->registration().architecture;
+        if (!NativeQwen3_5ImagesEnabled(config_, architecture, mm_config_))
+          return resolved;
+        const auto device = preselected_queue != nullptr
+            ? preselected_queue->device.type
+            : ResolveModelDeviceType(architecture, params.device);
+        return ResolveNativeQwen3_5MaxNumSeqs(
+            resolved, config_, architecture, device, mm_config_);
+      }()),
       max_num_batched_tokens_(ResolveMaxNumBatchedTokens(
           params, max_model_len_, ModelRegistry::IsDenseModel(*model_))),
       prefix_caching_enabled_(ResolveEnablePrefixCaching(
@@ -2325,10 +2402,15 @@ LoadedEngine::LoadedEngine(HfConfig config,
       // is allocated by the runner from kv_cfg_ (empty vector here), so the loop
       // reaches it via runner-owned storage. nullopt/null on the default path.
       runner_(config_, *model_, kv_cfg_,
-              preselected_queue != nullptr
-                  ? *preselected_queue
-                  : SelectQueueForModel(model_->registration().architecture,
-                                        params.device),
+              [&] {
+                main_queue_owner_.queue = preselected_queue != nullptr
+                    ? *preselected_queue
+                    : SelectQueueForModel(model_->registration().architecture, params.device);
+                // Ownership transfers immediately. The loader's exception
+                // guard must not destroy it a second time if runner init fails.
+                if (preselected_queue != nullptr) *preselected_queue = {};
+                return main_queue_owner_.queue;
+              }(),
               /*max_num_reqs=*/max_num_seqs_,
               max_model_len_,
               /*max_num_batched_tokens=*/max_num_batched_tokens_,

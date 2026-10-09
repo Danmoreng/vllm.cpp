@@ -929,6 +929,11 @@ enum class OpId : uint8_t {
   kGdnPrefillRawGate,
   kExl3GroupedW8A8,
   kMappedGreedyArgmax,
+  // Typed learned position-table interpolation, spatial-merge order. Appended
+  // so existing ids stay stable. Initially native XPU FP16 only.
+  kVisionPosEmbedInterpolate,
+  kVisionRopeGrid,
+  kVisionRopeApply,
   kCount
 };
 
@@ -2327,6 +2332,18 @@ using MatmulGptq4W4A16Fn = void (*)(Queue&, Tensor&, const Tensor&, const Tensor
                                     const Tensor&, const Tensor&, int, const Tensor*);
 using MatmulDenseF16Fn =
     void (*)(Queue&, Tensor&, const Tensor&, const Tensor&, const Tensor*);
+struct VisionPosEmbedArgs {
+  int64_t t = 1, h = 0, w = 0;
+  int64_t grid_side = 0, merge_size = 2;
+};
+using VisionPosEmbedInterpolateFn =
+    void (*)(Queue&, Tensor&, const Tensor&, const VisionPosEmbedArgs&);
+struct VisionRopeGridArgs {
+  int64_t t = 1, h = 0, w = 0, merge_size = 2;
+};
+using VisionRopeGridFn =
+    void (*)(Queue&, Tensor&, const Tensor&, const VisionRopeGridArgs&);
+using VisionRopeApplyFn = void (*)(Queue&, Tensor&, Tensor&, const Tensor&);
 using MatmulNvfp4Fn =
     void (*)(Queue&, Tensor&, const Tensor&, const Tensor&, const Tensor&, float);
 using ScaledFp4QuantFn =
@@ -2901,6 +2918,26 @@ void MatmulGptq4W4A16(Queue& q, Tensor& out, const Tensor& a,
 // GPTQ BA and dense lm_head operator boundary.
 void MatmulDenseF16(Queue& q, Tensor& out, const Tensor& a,
                     const Tensor& weight, const Tensor* bias = nullptr);
+
+// Learned table[grid_side^2,H] -> out[t*h*w,H], reordered into spatial merge
+// groups and repeated per frame. The executing reference uses FP32 coordinate
+// math, FP16 coefficients and contracted half FMA. Contiguous FP16 on XPU only;
+// output must not overlap the table. Async, no global scratch or host download.
+void VisionPosEmbedInterpolate(Queue& q, Tensor& out, const Tensor& table,
+                               const VisionPosEmbedArgs& args);
+
+// FP16 base[P,2*F] (cos|sin) -> out[t*h*w,4*F] (h_cos|w_cos|h_sin|w_sin),
+// with spatial merge ordering and frame repetition. P >= max(h,w).
+// Native XPU, contiguous/nonoverlapping operands, asynchronous bit copy;
+// no dynamic position tensor, host readback or scratch allocation.
+void VisionRopeGrid(Queue& q, Tensor& out, const Tensor& base,
+                    const VisionRopeGridArgs& args);
+
+// In-place NeoX vision rotation: FP16 q/k[T,H,D], aligned FP16 cos|sin[T,D].
+// Full even head width, product rounding to FP16 before the add/subtract.
+// Native XPU, contiguous/nonoverlapping operands. Row t always uses cache row t;
+// no dynamic positions, validation readback or scratch allocation.
+void VisionRopeApply(Queue& q, Tensor& queries, Tensor& keys, const Tensor& cache);
 
 // --- Compute-in-quant GEMM (QUANT-GGUF-CIQ-GEMM) ----------------------------
 // out[M,N] = a[M,K] @ b^T where the WEIGHT `b` is [N,K] row-major kept in its
@@ -3808,14 +3845,14 @@ void SoftCap(Queue& q, Tensor& out, const Tensor& x, double cap);
 // `vectorized_layer_norm_kernel`, the kernel `nn.LayerNorm` dispatches to for a
 // CUDA half/bfloat16 input). `weight`/`bias` are optional rank-1 [D] tensors:
 // both null == `elementwise_affine=False`. `var` is the BIASED (1/N) variance,
-// as torch uses. x/out f32 or bf16; the mean/variance accumulation, the
+// as torch uses. x/out f32 or bf16 (XPU also permits f16 output); moments,
 // normalization and the affine are all computed in f32 and rounded once on
 // store — matching torch's `acc_type<bfloat16> == float` contract, so a bf16
 // LayerNorm here rounds exactly where torch's does.
 //
 // This is the mean-subtracting, bias-carrying sibling of vt::RmsNorm. It is
 // what every pre-Llama-era family (OPT, GPT-2, BLOOM, ...) normalizes with;
-// vllm/model_executor/models/opt.py:146-148,164-166,248-251. CPU + CUDA.
+// vllm/model_executor/models/opt.py:146-148,164-166,248-251. CPU + CUDA + XPU.
 void LayerNorm(Queue& q, Tensor& out, const Tensor& x, const Tensor* weight,
                const Tensor* bias, const LayerNormArgs& args);
 
@@ -3826,7 +3863,8 @@ void LayerNorm(Queue& q, Tensor& out, const Tensor& x, const Tensor* weight,
 void Relu(Queue& q, Tensor& out, const Tensor& x);
 
 // Elementwise GELU (NEW, Qwen3-VL vision tower). out[i] = gelu(x[i]); `out` may
-// alias `x`. x/out f32 or bf16, computed in f32. GeluTanh is the tanh-approx
+// alias `x`. x/out f32 or bf16 (XPU also permits f16 output), computed in f32.
+// GeluTanh is the tanh-approx
 // (`gelu_pytorch_tanh`, vision MLP); GeluErf is exact erf (`nn.GELU()`, merger).
 void GeluTanh(Queue& q, Tensor& out, const Tensor& x);
 void GeluErf(Queue& q, Tensor& out, const Tensor& x);

@@ -13,6 +13,8 @@ void TraceXpuOp(OpId op, Queue& q, std::initializer_list<const Tensor*> tensors)
     }
   };
   switch (op) {
+    case OpId::kQkvSplit: mark(0); mark(1); mark(2); break;
+    case OpId::kVisionRopeApply: mark(0); mark(1); break;
     case OpId::kReshapeAndCache: case OpId::kReshapeAndCacheFp8: mark(2); mark(3); break;
     case OpId::kGdnPostConv: for (size_t i = 0; i < 5; ++i) mark(i); break;
     case OpId::kAttnGateSplit: case OpId::kRopeNeox: case OpId::kRopeFromCache: mark(0); mark(1); break;

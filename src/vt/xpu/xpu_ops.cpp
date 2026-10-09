@@ -1,4 +1,7 @@
 #include "xpu_kernels.h"
+#ifdef VLLM_CPP_XPU_ONEDNN
+#include "xpu_vision_attention.h"
+#endif
 namespace vt::xpu {
 namespace {
 struct Registrar {
@@ -18,6 +21,16 @@ struct Registrar {
     XPU_OP(kMatmul, MatmulFn, MatmulKernel);
     XPU_OP(kMatmulBT, MatmulFn, MatmulBTKernel);
     XPU_OP(kRmsNorm, RmsNormFn, RmsNormKernel);
+    XPU_OP(kLayerNorm, LayerNormFn, LayerNormKernel);
+    XPU_OP(kGeluTanh, ReluFn, GeluTanhKernel);
+    XPU_OP(kGeluErf, ReluFn, GeluErfKernel);
+    XPU_OP(kVisionPosEmbedInterpolate, VisionPosEmbedInterpolateFn, VisionPosEmbedInterpolateKernel);
+    XPU_OP(kVisionRopeGrid, VisionRopeGridFn, VisionRopeGridKernel);
+    XPU_OP(kVisionRopeApply, VisionRopeApplyFn, VisionRopeApplyKernel);
+#ifdef VLLM_CPP_XPU_ONEDNN
+    XPU_OP(kAttentionDenseFlash, AttentionFn, VisionAttentionDenseFlashKernel);
+#endif
+    XPU_OP(kQkvSplit, QkvSplitFn, QkvSplitKernel);
     XPU_OP(kGreedyArgmax, GreedyArgmaxFn, GreedyArgmaxKernel);
     XPU_OP(kMappedGreedyArgmax, MappedGreedyArgmaxFn, MappedGreedyArgmaxKernel);
     XPU_OP(kGreedyRejectionSample, GreedyRejectionSampleFn,

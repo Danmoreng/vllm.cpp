@@ -16,7 +16,8 @@ void GdnPrefillRawGateKernel(Queue& queue, Tensor& out, const Tensor& qi,
     const Tensor& a_log, const Tensor& dt_bias, Tensor& state, const Tensor& qsl,
     const GdnArgs&) {
   auto& native = NativeQueue(queue);
-  const auto plan = PlanGdnFp16C1(qi.shape[0]);
+  const int sequences = int(state.shape[0]);
+  const auto plan = PlanGdnFp16Batch(qi.shape[0], sequences);
   const int tokens = plan.tokens, capacity = plan.capacity;
   const auto device = native.get_device();
   VT_CHECK(device.has(sycl::aspect::ext_intel_device_id) &&
@@ -32,8 +33,12 @@ void GdnPrefillRawGateKernel(Queue& queue, Tensor& out, const Tensor& qi,
              {&out, &qi, &ki, &vi, &raw_a, &beta, &a_log, &dt_bias, &state, &qsl});
   RecordGraphWrite(queue, state.data, Span(state));
   const auto* offsets = static_cast<const int32_t*>(qsl.data);
-  CheckDeviceMetadata(queue, [=] { return offsets[0] == 0 && offsets[1] == tokens; },
-                      "gdn_prefill_raw_gate: offsets must cover the exact logical C1 length", {&qsl});
+  CheckDeviceMetadata(queue, [=] {
+    if (offsets[0] != 0 || offsets[sequences] != tokens) return false;
+    for (int s = 0; s < sequences; ++s)
+      if (offsets[s + 1] <= offsets[s]) return false;
+    return true;
+  }, "gdn_prefill_raw_gate: offsets must cover nonempty logical sequences", {&qsl});
 
   const bool submitted = WithGdnNativeWorkspace(queue, plan.bytes, [&](void* storage) {
     auto* cursor = static_cast<char*>(storage);
@@ -50,26 +55,63 @@ void GdnPrefillRawGateKernel(Queue& queue, Tensor& out, const Tensor& qi,
     auto* initial = reinterpret_cast<bool*>(cursor + plan.initial_offset);
     // The producer reads its zero-padded physical capacity at tile tails.
     native.memset(storage, 0, plan.bytes);
-    native.memcpy(q, qi.data, size_t(tokens) * Hk * D * sizeof(T));
-    native.memcpy(k, ki.data, size_t(tokens) * Hk * D * sizeof(T));
-    native.memcpy(v, vi.data, size_t(tokens) * Hv * D * sizeof(T));
+    if (sequences == 1) {
+      native.memcpy(q, qi.data, size_t(tokens) * Hk * D * sizeof(T));
+      native.memcpy(k, ki.data, size_t(tokens) * Hk * D * sizeof(T));
+      native.memcpy(v, vi.data, size_t(tokens) * Hv * D * sizeof(T));
+    } else {
+      const auto* qs = static_cast<const T*>(qi.data);
+      const auto* ks = static_cast<const T*>(ki.data);
+      const auto* vs = static_cast<const T*>(vi.data);
+      // The donor addresses concatenated64-token chunks, not the unpadded
+      // token stream. Pack each sequence independently on device; no request
+      // serialization, host prefix readback or extra workspace reservation.
+      native.parallel_for(sycl::range<1>(size_t(tokens) * (2 * Hk + Hv) * D), [=](sycl::id<1> id) {
+        const int t = id[0] / ((2 * Hk + Hv) * D);
+        const int feature = id[0] % ((2 * Hk + Hv) * D);
+        int start = 0, virtual_start = 0;
+        for (int s = 0; s < sequences; ++s) {
+          const int end = offsets[s + 1];
+          if (t < end) break;
+          virtual_start += (end - start + 63) / 64 * 64;
+          start = end;
+        }
+        const int virtual_t = virtual_start + t - start;
+        if (feature < Hk * D) q[virtual_t * Hk * D + feature] = qs[t * Hk * D + feature];
+        else if (feature < 2 * Hk * D) {
+          const int col = feature - Hk * D;
+          k[virtual_t * Hk * D + col] = ks[t * Hk * D + col];
+        } else {
+          const int col = feature - 2 * Hk * D;
+          v[virtual_t * Hv * D + col] = vs[t * Hv * D + col];
+        }
+      });
+    }
     const View av(raw_a), bv(beta), dv(dt_bias);
-    native.parallel_for(sycl::range<1>(size_t(Hv) * capacity), [=](sycl::id<1> id) {
-      const int h = id[0] / capacity, t = id[0] % capacity;
-      if (t < tokens) {
-        a[id] = Load(av, t * av.stride[0] + h);
-        b[id] = Load(bv, t * bv.stride[0] + h);
+    native.parallel_for(sycl::range<1>(size_t(Hv) * tokens), [=](sycl::id<1> id) {
+      const int h = id[0] / tokens, t = id[0] % tokens;
+      int start = 0, virtual_start = 0;
+      for (int s = 0; s < sequences; ++s) {
+        const int end = offsets[s + 1];
+        if (t < end) break;
+        virtual_start += (end - start + 63) / 64 * 64;
+        start = end;
       }
+      const int virtual_t = virtual_start + t - start;
+      a[h * capacity + virtual_t] = Load(av, t * av.stride[0] + h);
+      b[h * capacity + virtual_t] = Load(bv, t * bv.stride[0] + h);
       if (t == 0) bias[h] = sycl::half(Load(dv, h));
     });
     // The caller has prepared this working state: zero for a fresh request,
     // or gathered persistent FP32 values for continuation. Always consume it.
-    native.single_task([=] { index[0] = 0; initial[0] = true; });
+    native.parallel_for(sycl::range<1>(sequences), [=](sycl::id<1> id) {
+      index[id] = int(id[0]); initial[id] = true;
+    });
     gdn::fp16_producer::kernel_launcher<T, float>(native,
         static_cast<T*>(out.data), q, k, v, A, w, u, b, a,
         static_cast<const float*>(a_log.data), reinterpret_cast<const T*>(bias),
         static_cast<float*>(state.data), Hv * D * D, offsets, index, initial,
-        nullptr, 1, capacity, Hk, D, Hv, D);
+        nullptr, sequences, capacity, Hk, D, Hv, D);
   });
   VT_CHECK(submitted, "gdn_prefill_raw_gate: native workspace unavailable");
 }

@@ -37,6 +37,59 @@ void ConvState(const Buffer& owner, const vllm::StTensor& expected) {
 }
 }
 
+TEST_CASE("XPU GDN FP16 batch: independent tails initialized states and strided raw gates") {
+  xpu_test::Queue gpu(vt::DeviceType::kXPU);
+  const std::vector<int32_t> offsets{0, 1, 64, 128, 193};
+  const int rows = offsets.back();
+  Buffer q(gpu.q, DType::kF16, {rows, 16, 128}), k(gpu.q, DType::kF16, {rows, 16, 128});
+  Buffer v(gpu.q, DType::kF16, {rows, 48, 128});
+  Buffer packed(gpu.q, DType::kF16, {rows + 1, 96}), beta(gpu.q, DType::kF32, {rows, 48});
+  Buffer alog(gpu.q, DType::kF32, {48}), bias(gpu.q, DType::kF32, {48});
+  const auto values = [](size_t count, float scale) {
+    std::vector<float> out(count);
+    for (size_t i = 0; i < count; ++i) out[i] = (int(i % 29) - 14) * scale;
+    return out;
+  };
+  q.put(values(rows * 16 * 128, 0.002f)); k.put(values(rows * 16 * 128, 0.02f));
+  v.put(values(rows * 48 * 128, 0.01f)); packed.put(values((rows + 1) * 96, 0.03f));
+  beta.put(std::vector<float>(rows * 48, 0.25f));
+  alog.put(std::vector<float>(48, -2.0f)); bias.put(std::vector<float>(48, 0.0f));
+  auto gates = packed.tensor.Slice(0, 1, rows + 1).Slice(1, 48, 96);
+  Buffer state(gpu.q, DType::kF32, {4, 48, 128, 128}), out(gpu.q, DType::kF16, {rows, 48, 128});
+  const auto initial = values(4 * 48 * 128 * 128, 0.0001f);
+  state.put(initial);
+  Buffer qsl(gpu.q, DType::kI32, {5}); qsl.upload(offsets.data());
+  vt::GdnPrefillRawGate(gpu.q, out.tensor, q.tensor, k.tensor, v.tensor, gates,
+      beta.tensor, alog.tensor, bias.tensor, state.tensor, qsl.tensor, {1.0f});
+  const auto combined_out = out.download(), combined_state = state.download();
+  constexpr size_t state_bytes = size_t(48) * 128 * 128 * 4;
+  constexpr size_t output_row_bytes = size_t(48) * 128 * 2;
+  for (int row = 0; row < 4; ++row) {
+    const int start = offsets[row], end = offsets[row + 1], length = end - start;
+    CAPTURE(row);
+    CAPTURE(length);
+    Buffer single_state(gpu.q, DType::kF32, {1, 48, 128, 128});
+    single_state.upload(initial.data() + row * 48 * 128 * 128);
+    Buffer single_out(gpu.q, DType::kF16, {length, 48, 128});
+    Buffer single_qsl(gpu.q, DType::kI32, {2});
+    const int32_t bounds[]{0, length}; single_qsl.upload(bounds);
+    auto qi = q.tensor.Slice(0, start, end), ki = k.tensor.Slice(0, start, end),
+         vi = v.tensor.Slice(0, start, end), ai = gates.Slice(0, start, end),
+         bi = beta.tensor.Slice(0, start, end);
+    vt::GdnPrefillRawGate(gpu.q, single_out.tensor, qi, ki, vi, ai, bi,
+        alog.tensor, bias.tensor, single_state.tensor, single_qsl.tensor, {1.0f});
+    xpu_test::SameBytes(single_state.download(), std::vector<unsigned char>(
+        combined_state.begin() + row * state_bytes, combined_state.begin() + (row + 1) * state_bytes));
+    xpu_test::SameBytes(single_out.download(), std::vector<unsigned char>(
+        combined_out.begin() + start * output_row_bytes, combined_out.begin() + end * output_row_bytes));
+  }
+  const int32_t invalid[]{0, 1, 1, 128, 193}; qsl.upload(invalid);
+  CHECK_THROWS(vt::GdnPrefillRawGate(gpu.q, out.tensor, q.tensor, k.tensor, v.tensor,
+      gates, beta.tensor, alog.tensor, bias.tensor, state.tensor, qsl.tensor, {1.0f}));
+  CHECK(vt::GetReferenceTierHits() == 0);
+  CHECK(vt::xpu::GetMemoryInfo().native_gdn_workspace_bytes == vt::kGdnFp16ReservationBytes);
+}
+
 TEST_CASE("XPU GDN FP16 variable C1: exact prefill tails continuation and stable call order") {
   const char* env = std::getenv("VT_B70_EXL3_VARIABLE_GDN_FIXTURE");
   if (!env) { std::cerr << "SKIP: VT_B70_EXL3_VARIABLE_GDN_FIXTURE required\n"; std::exit(77); }

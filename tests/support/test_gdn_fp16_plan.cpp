@@ -30,3 +30,30 @@ TEST_CASE("GDN FP16 C1 layout: exact lengths tail alignment and stable 4K budget
   CHECK_THROWS_AS(vt::PlanGdnFp16C1(0), std::invalid_argument);
   CHECK_THROWS_AS(vt::PlanGdnFp16C1(4097), std::invalid_argument);
 }
+
+TEST_CASE("GDN FP16 batch layout: independent virtual tails fit the unchanged reservation") {
+  // Actual new mixed prefill: two141-token texts and the224-token image.
+  // Other lengths cover minimum batches and independent chunk-boundary tails.
+  for (const auto& lengths : std::vector<std::vector<int>>{
+           {141, 141, 224}, {1, 1, 1, 1}, {63, 64, 65}, {1023, 1024, 1025, 1024}}) {
+    int tokens = 0, virtual_tokens = 0;
+    for (int n : lengths) {
+      tokens += n;
+      virtual_tokens += (n + 63) / 64 * 64;
+    }
+    const auto p = vt::PlanGdnFp16Batch(tokens, lengths.size());
+    CHECK(virtual_tokens <= p.capacity);
+    CHECK(p.capacity == tokens + int(lengths.size()) * 63);
+    CHECK(p.bytes <= vt::kGdnFp16ReservationBytes);
+    CHECK(p.initial_offset >= p.index_offset + lengths.size() * sizeof(int32_t));
+    CHECK(p.bytes >= p.initial_offset + lengths.size());
+    for (size_t offset : {p.q_offset, p.k_offset, p.v_offset, p.a_matrix_offset,
+                         p.w_offset, p.u_offset, p.raw_a_offset, p.beta_offset,
+                         p.bias_offset, p.index_offset, p.initial_offset, p.bytes})
+      CHECK(offset % 64 == 0);
+  }
+  CHECK_THROWS_AS(vt::PlanGdnFp16Batch(4, 0), std::invalid_argument);
+  CHECK_THROWS_AS(vt::PlanGdnFp16Batch(5, 5), std::invalid_argument);
+  CHECK_THROWS_AS(vt::PlanGdnFp16Batch(3, 4), std::invalid_argument);
+  CHECK_THROWS_AS(vt::PlanGdnFp16Batch(4097, 4), std::invalid_argument);
+}

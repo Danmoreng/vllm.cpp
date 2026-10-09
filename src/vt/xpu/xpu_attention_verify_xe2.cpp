@@ -30,7 +30,7 @@ int64_t PagedAttentionXe2VerifyQueryLength(int64_t tokens, int64_t requests,
   return 4;
 }
 
-bool PagedAttentionXe2VerifyKernel(Queue& q, Tensor& out, const Tensor& query,
+bool CanUsePagedAttentionXe2Verify(Queue& q, const Tensor& out, const Tensor& query,
     const Tensor& key_cache, const Tensor& value_cache, const Tensor& block_table,
     const Tensor& seq_lens, const Tensor& query_start_loc,
     const PagedAttentionArgs& args) {
@@ -85,6 +85,17 @@ bool PagedAttentionXe2VerifyKernel(Queue& q, Tensor& out, const Tensor& query,
       key_cache.shape[0] > std::numeric_limits<int>::max() /
           (key_cache.stride[0] / key_cache.stride[1]))
     return false;
+  return true;
+}
+
+bool PagedAttentionXe2VerifyKernel(Queue& q, Tensor& out, const Tensor& query,
+    const Tensor& key_cache, const Tensor& value_cache, const Tensor& block_table,
+    const Tensor& seq_lens, const Tensor& query_start_loc,
+    const PagedAttentionArgs& args) {
+  if (!CanUsePagedAttentionXe2Verify(q, out, query, key_cache, value_cache,
+                                    block_table, seq_lens, query_start_loc, args)) return false;
+  const int64_t tokens = query.shape[0], page = key_cache.shape[1], requests = seq_lens.Numel();
+  const int64_t rows = PagedAttentionXe2VerifyQueryLength(tokens, requests, args.query_start_loc_host);
 
   const int splits = rows == 2 ? 32 : rows == 3 ? 8 : 16;
   const size_t packed_bytes = size_t(tokens) * 24 * 256 * sizeof(uint16_t);

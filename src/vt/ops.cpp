@@ -11,6 +11,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <memory>
+#include <limits>
 #include <vector>
 
 // CheckConvCommon asks the BACKEND whether it can address a compressed
@@ -35,6 +36,14 @@ bool IsOutFloat(DType d) { return d == DType::kF32 || d == DType::kBF16; }
 bool IsXpuF16Out(const Queue& q, DType d) {
   return IsOutFloat(d) ||
          (q.device.type == DeviceType::kXPU && d == DType::kF16);
+}
+// Called only after positive shape/dtype/contiguity validation. Comparing
+// address differences avoids overflowing an end address; shared allocations
+// with adjacent (non-overlapping) live views remain legal.
+bool ContiguousStorageOverlaps(const Tensor& a, const Tensor& b) {
+  const auto ap = reinterpret_cast<uintptr_t>(a.data);
+  const auto bp = reinterpret_cast<uintptr_t>(b.data);
+  return ap <= bp ? bp - ap < a.Bytes() : ap - bp < b.Bytes();
 }
 // Retained model values are scoped to ordinary weights, never activations.
 void ValidateWeightValues(const Tensor& weight, const Tensor& other,
@@ -287,16 +296,104 @@ void MatmulDenseF16(Queue& q, Tensor& out, const Tensor& a,
            "matmul_dense_f16: activation, weight and output must be contiguous");
   VT_CHECK(a.device == q.device && out.device == q.device && weight.device == q.device,
            "matmul_dense_f16: tensor and queue devices must match");
-  VT_CHECK(out.data != a.data && out.data != weight.data,
+  VT_CHECK(!ContiguousStorageOverlaps(out, a) && !ContiguousStorageOverlaps(out, weight),
            "matmul_dense_f16: output must not alias an input");
   if (bias != nullptr) {
     VT_CHECK(bias->dtype == DType::kF16 && bias->rank == 1 && bias->shape[0] == n &&
                  bias->IsContiguous() && bias->device == q.device,
              "matmul_dense_f16: optional bias must be contiguous F16[N] on the queue device");
-    VT_CHECK(out.data != bias->data, "matmul_dense_f16: output must not alias bias");
+    VT_CHECK(!ContiguousStorageOverlaps(out, *bias), "matmul_dense_f16: output must not alias bias");
   }
   GetTypedOp<MatmulDenseF16Fn>(OpId::kMatmulDenseF16, q.device.type)(
       q, out, a, weight, bias);
+}
+
+void VisionPosEmbedInterpolate(Queue& q, Tensor& out, const Tensor& table,
+                               const VisionPosEmbedArgs& args) {
+  VT_CHECK(q.device.type == DeviceType::kXPU,
+           "vision_pos_embed_interpolate: native XPU required");
+  VT_CHECK(out.dtype == DType::kF16 && table.dtype == DType::kF16,
+           "vision_pos_embed_interpolate: FP16 table/output required");
+  VT_CHECK(out.rank == 2 && table.rank == 2 && out.shape[0] > 0 && out.shape[1] > 0 &&
+               table.shape[0] > 0 && table.shape[1] == out.shape[1],
+           "vision_pos_embed_interpolate: positive rank-2 shapes/hidden width required");
+  constexpr auto limit = std::numeric_limits<int64_t>::max();
+  VT_CHECK(out.shape[0] <= limit / out.shape[1] && table.shape[0] <= limit / table.shape[1],
+           "vision_pos_embed_interpolate: tensor element count overflows");
+  VT_CHECK(args.t > 0 && args.h > 0 && args.w > 0 && args.grid_side > 0 &&
+               args.merge_size > 0 && args.h % args.merge_size == 0 &&
+               args.w % args.merge_size == 0,
+           "vision_pos_embed_interpolate: positive merge-aligned grid required");
+  VT_CHECK(args.h <= 32768 && args.w <= 32768 && args.grid_side <= 32768,
+           "vision_pos_embed_interpolate: coordinate axis exceeds the bounded FP32 contract");
+  VT_CHECK(out.shape[0] % args.h == 0 && (out.shape[0] / args.h) % args.w == 0 &&
+               out.shape[0] / args.h / args.w == args.t &&
+               table.shape[0] % args.grid_side == 0 &&
+               table.shape[0] / args.grid_side == args.grid_side,
+           "vision_pos_embed_interpolate: table/output shapes disagree with grid");
+  VT_CHECK(out.IsContiguous() && table.IsContiguous(),
+           "vision_pos_embed_interpolate: contiguous operands required");
+  VT_CHECK(out.device == q.device && table.device == q.device,
+           "vision_pos_embed_interpolate: device mismatch");
+  VT_CHECK(!ContiguousStorageOverlaps(out, table),
+           "vision_pos_embed_interpolate: output must not overlap the table");
+  GetTypedOp<VisionPosEmbedInterpolateFn>(OpId::kVisionPosEmbedInterpolate, q.device.type)(
+      q, out, table, args);
+}
+
+void VisionRopeGrid(Queue& q, Tensor& out, const Tensor& base,
+                    const VisionRopeGridArgs& args) {
+  VT_CHECK(q.device.type == DeviceType::kXPU, "vision_rope_grid: native XPU required");
+  VT_CHECK(out.dtype == DType::kF16 && base.dtype == DType::kF16,
+           "vision_rope_grid: FP16 operands required");
+  VT_CHECK(out.rank == 2 && base.rank == 2 && out.shape[0] > 0 &&
+               out.shape[1] > 0 && base.shape[0] > 0 && base.shape[1] > 0,
+           "vision_rope_grid: positive rank-2 operands required");
+  constexpr auto limit = std::numeric_limits<int64_t>::max();
+  VT_CHECK(base.shape[1] <= limit / 2 && base.shape[1] % 2 == 0 &&
+               out.shape[1] == 2 * base.shape[1] &&
+               out.shape[0] <= limit / out.shape[1] &&
+               base.shape[0] <= limit / base.shape[1],
+           "vision_rope_grid: invalid or overflowing cos/sin widths");
+  VT_CHECK(args.t > 0 && args.h > 0 && args.w > 0 && args.merge_size > 0 &&
+               args.h <= 32768 && args.w <= 32768 &&
+               args.h % args.merge_size == 0 && args.w % args.merge_size == 0,
+           "vision_rope_grid: positive bounded merge-aligned grid required");
+  VT_CHECK(base.shape[0] >= args.h && base.shape[0] >= args.w &&
+               out.shape[0] % args.h == 0 && (out.shape[0] / args.h) % args.w == 0 &&
+               out.shape[0] / args.h / args.w == args.t,
+           "vision_rope_grid: operands disagree with grid or base cache is too short");
+  VT_CHECK(out.IsContiguous() && base.IsContiguous(),
+           "vision_rope_grid: contiguous operands required");
+  VT_CHECK(out.device == q.device && base.device == q.device,
+           "vision_rope_grid: device mismatch");
+  VT_CHECK(!ContiguousStorageOverlaps(out, base),
+           "vision_rope_grid: output must not overlap the base cache");
+  GetTypedOp<VisionRopeGridFn>(OpId::kVisionRopeGrid, q.device.type)(q, out, base, args);
+}
+
+void VisionRopeApply(Queue& q, Tensor& queries, Tensor& keys, const Tensor& cache) {
+  VT_CHECK(q.device.type == DeviceType::kXPU, "vision_rope_apply: native XPU required");
+  VT_CHECK(queries.dtype == DType::kF16 && keys.dtype == DType::kF16 &&
+               cache.dtype == DType::kF16, "vision_rope_apply: FP16 operands required");
+  VT_CHECK(queries.rank == 3 && keys.rank == 3 && cache.rank == 2 &&
+               queries.shape[0] > 0 && queries.shape[1] > 0 && queries.shape[2] > 0 &&
+               keys.shape[0] == queries.shape[0] && keys.shape[1] == queries.shape[1] &&
+               keys.shape[2] == queries.shape[2] && cache.shape[0] == queries.shape[0] &&
+               cache.shape[1] == queries.shape[2] && queries.shape[2] % 2 == 0,
+           "vision_rope_apply: matching positive q/k[T,H,D] and cache[T,D], even D required");
+  constexpr auto limit = std::numeric_limits<int64_t>::max();
+  VT_CHECK(queries.shape[0] <= limit / queries.shape[1] &&
+               queries.shape[0] * queries.shape[1] <= limit / queries.shape[2],
+           "vision_rope_apply: tensor element count overflows");
+  VT_CHECK(queries.IsContiguous() && keys.IsContiguous() && cache.IsContiguous(),
+           "vision_rope_apply: contiguous operands required");
+  VT_CHECK(queries.device == q.device && keys.device == q.device && cache.device == q.device,
+           "vision_rope_apply: device mismatch");
+  VT_CHECK(!ContiguousStorageOverlaps(queries, keys) &&
+               !ContiguousStorageOverlaps(queries, cache) && !ContiguousStorageOverlaps(keys, cache),
+           "vision_rope_apply: operands must not overlap");
+  GetTypedOp<VisionRopeApplyFn>(OpId::kVisionRopeApply, q.device.type)(q, queries, keys, cache);
 }
 
 // vt::MatmulBTQuant — see ops.h. Validation mirrors MatmulBT except for the
@@ -1769,7 +1866,7 @@ void LayerNorm(Queue& q, Tensor& out, const Tensor& x, const Tensor* weight,
     VT_CHECK(out.shape[i] == x.shape[i], "layer_norm: out shape must match x");
   const int64_t d = x.shape[x.rank - 1];
   VT_CHECK(d > 0, "layer_norm: last dim must be non-empty");
-  VT_CHECK(IsFloat(x.dtype) && IsOutFloat(out.dtype), "layer_norm: float in, f32/bf16 out");
+  VT_CHECK(IsFloat(x.dtype) && IsXpuF16Out(q, out.dtype), "layer_norm: float in, f32/bf16 out (XPU also f16)");
   VT_CHECK(x.IsContiguous() && out.IsContiguous(), "layer_norm: contiguous required");
   VT_CHECK(x.device == out.device && x.device == q.device, "layer_norm: device mismatch");
   for (const Tensor* p : {weight, bias}) {
@@ -1799,7 +1896,7 @@ void GeluTanh(Queue& q, Tensor& out, const Tensor& x) {
   VT_CHECK(out.rank == x.rank, "gelu_tanh: out rank must match x");
   for (int i = 0; i < x.rank; ++i)
     VT_CHECK(out.shape[i] == x.shape[i], "gelu_tanh: out shape must match x");
-  VT_CHECK(IsFloat(x.dtype) && IsOutFloat(out.dtype), "gelu_tanh: float in, f32/bf16 out");
+  VT_CHECK(IsFloat(x.dtype) && IsXpuF16Out(q, out.dtype), "gelu_tanh: float in, f32/bf16 out (XPU also f16)");
   VT_CHECK(x.IsContiguous() && out.IsContiguous(), "gelu_tanh: contiguous required");
   VT_CHECK(x.device == out.device && x.device == q.device, "gelu_tanh: device mismatch");
   reinterpret_cast<ReluFn>(GetOp(OpId::kGeluTanh, q.device.type))(q, out, x);
@@ -1809,7 +1906,7 @@ void GeluErf(Queue& q, Tensor& out, const Tensor& x) {
   VT_CHECK(out.rank == x.rank, "gelu_erf: out rank must match x");
   for (int i = 0; i < x.rank; ++i)
     VT_CHECK(out.shape[i] == x.shape[i], "gelu_erf: out shape must match x");
-  VT_CHECK(IsFloat(x.dtype) && IsOutFloat(out.dtype), "gelu_erf: float in, f32/bf16 out");
+  VT_CHECK(IsFloat(x.dtype) && IsXpuF16Out(q, out.dtype), "gelu_erf: float in, f32/bf16 out (XPU also f16)");
   VT_CHECK(x.IsContiguous() && out.IsContiguous(), "gelu_erf: contiguous required");
   VT_CHECK(x.device == out.device && x.device == q.device, "gelu_erf: device mismatch");
   reinterpret_cast<ReluFn>(GetOp(OpId::kGeluErf, q.device.type))(q, out, x);
@@ -2018,8 +2115,12 @@ void FusedNormRope(Queue& q, Tensor& latent_out, Tensor& pe_out, const Tensor& x
 void RopeCosSinCache(Queue& q, Tensor& cos_sin, const Tensor& positions, const RopeArgs& args) {
   VT_CHECK(cos_sin.rank == 2, "rope_cos_sin_cache: cos_sin rank-2 [T, rotary_dim]");
   VT_CHECK(cos_sin.dtype == DType::kF32, "rope_cos_sin_cache: cos_sin must be f32");
-  VT_CHECK(positions.rank == 1 && positions.shape[0] == cos_sin.shape[0],
-           "rope_cos_sin_cache: positions[T] must match cos_sin leading dim");
+  const bool multi_axis = positions.rank == 2;
+  VT_CHECK((positions.rank == 1 && positions.shape[0] == cos_sin.shape[0]) ||
+               (multi_axis && q.device.type == DeviceType::kXPU &&
+                positions.shape[0] == 3 && positions.shape[1] == cos_sin.shape[0] &&
+                cos_sin.shape[0] > 0),
+           "rope_cos_sin_cache: positions[T], or XPU positions[3,T], must match the cache");
   VT_CHECK(positions.dtype == DType::kI32 || positions.dtype == DType::kI64,
            "rope_cos_sin_cache: positions i32/i64");
   VT_CHECK(args.rotary_dim > 0 && args.rotary_dim % 2 == 0 && cos_sin.shape[1] == args.rotary_dim,
@@ -2028,6 +2129,14 @@ void RopeCosSinCache(Queue& q, Tensor& cos_sin, const Tensor& positions, const R
            "rope_cos_sin_cache: contiguous required");
   VT_CHECK(cos_sin.device == q.device && positions.device == q.device,
            "rope_cos_sin_cache: device mismatch (cos_sin/positions/queue)");
+  if (multi_axis) {
+    const auto& sections = args.mrope_section;
+    VT_CHECK(sections[0] >= 0 && sections[1] >= 0 && sections[2] >= 0 &&
+                 int64_t(sections[0]) + sections[1] + sections[2] == args.rotary_dim / 2,
+             "rope_cos_sin_cache: three nonnegative M-RoPE sections must cover rotary_dim/2");
+    VT_CHECK(!ContiguousStorageOverlaps(cos_sin, positions),
+             "rope_cos_sin_cache: multi-axis output must not overlap positions");
+  }
   VT_CHECK(std::isfinite(args.base) && args.base > 0.f,
            "rope_cos_sin_cache: base must be finite and positive");
   VT_CHECK(std::isfinite(args.linear_scaling_factor) && args.linear_scaling_factor >= 0.f,
@@ -2621,9 +2730,9 @@ void GdnPrefillRawGate(Queue& q, Tensor& out, const Tensor& qi, const Tensor& k,
                raw_a.shape[0] == t && raw_a.shape[1] == hv &&
                beta.shape[0] == t && beta.shape[1] == hv &&
                a_log.shape[0] == hv && dt_bias.shape[0] == hv &&
-               state.shape[0] == 1 && state.shape[1] == hv &&
+               state.shape[0] >= 1 && state.shape[0] <= 4 && t >= state.shape[0] && state.shape[1] == hv &&
                state.shape[2] == d && state.shape[3] == d,
-           "gdn_prefill_raw_gate: requires T1-4096/Hk16/Hv48/D128, one sequence");
+           "gdn_prefill_raw_gate: requires T1-4096/Hk16/Hv48/D128, 1-4 nonempty sequences");
   VT_CHECK(args.scale == 1.0f,
            "gdn_prefill_raw_gate: q must already include the normalization scale");
   for (const Tensor* tensor : std::initializer_list<const Tensor*>{&qi, &k, &v, &out, &raw_a}) {
@@ -2642,7 +2751,7 @@ void GdnPrefillRawGate(Queue& q, Tensor& out, const Tensor& qi, const Tensor& k,
   for (const Tensor* tensor : std::initializer_list<const Tensor*>{&qi, &k, &v, &out, &raw_a, &beta, &a_log, &dt_bias, &state}) {
     VT_CHECK(tensor->device == q.device, "gdn_prefill_raw_gate: device mismatch");
   }
-  CheckI32Meta(q, qsl, 2, "gdn_prefill_raw_gate", "query_start_loc");
+  CheckI32Meta(q, qsl, state.shape[0] + 1, "gdn_prefill_raw_gate", "query_start_loc");
   reinterpret_cast<GdnPrefillRawGateFn>(GetOp(OpId::kGdnPrefillRawGate, q.device.type))(
       q, out, qi, k, v, raw_a, beta, a_log, dt_bias, state, qsl, args);
 }
@@ -4107,7 +4216,8 @@ void AttentionDenseFlash(Queue& q, Tensor& out, const Tensor& query, const Tenso
   VT_CHECK(args.scale > 0.0f, "attention-dense-flash: scale must be set (> 0)");
   VT_CHECK(IsFloat(query.dtype) && key.dtype == query.dtype && value.dtype == query.dtype,
            "attention-dense-flash: query/key/value must share one float dtype");
-  VT_CHECK(IsOutFloat(out.dtype), "attention-dense-flash: out must be f32 or bf16");
+  VT_CHECK(IsXpuF16Out(q,out.dtype),
+           "attention-dense-flash: out must be f32 or bf16 (f16 on XPU)");
   VT_CHECK(query.IsContiguous() && key.IsContiguous() && value.IsContiguous() &&
                out.IsContiguous(),
            "attention-dense-flash: contiguous tensors required");
@@ -5883,10 +5993,10 @@ void QkvSplit(Queue& q, Tensor& q_out, Tensor& k_out, Tensor& v_out, const Tenso
   const int64_t q_dim = q_out.Numel() / t, k_dim = k_out.Numel() / t, v_dim = v_out.Numel() / t;
   VT_CHECK(qkv.shape[1] == q_dim + k_dim + v_dim,
            "qkv_split: qkv inner dim must be q_dim + k_dim + v_dim");
-  VT_CHECK((q_out.dtype == DType::kF32 || q_out.dtype == DType::kBF16) &&
+  VT_CHECK(IsXpuF16Out(q, q_out.dtype) &&
                k_out.dtype == q_out.dtype && v_out.dtype == q_out.dtype &&
                qkv.dtype == q_out.dtype,
-           "qkv_split: q/k/v out and qkv must share dtype (f32 or bf16)");
+           "qkv_split: shared f32/bf16 dtype required (XPU also FP16)");
   VT_CHECK(q_out.IsContiguous() && k_out.IsContiguous() && v_out.IsContiguous() &&
                qkv.IsContiguous(),
            "qkv_split: contiguous required");

@@ -13,6 +13,13 @@ void EmbeddingKernel(Queue&, Tensor&, const Tensor&, const Tensor&);
 void MatmulKernel(Queue&, Tensor&, const Tensor&, const Tensor&);
 void MatmulBTKernel(Queue&, Tensor&, const Tensor&, const Tensor&);
 void RmsNormKernel(Queue&, Tensor&, const Tensor&, const Tensor&, const RmsNormArgs&, Tensor*);
+void LayerNormKernel(Queue&, Tensor&, const Tensor&, const Tensor*, const Tensor*, const LayerNormArgs&);
+void GeluTanhKernel(Queue&, Tensor&, const Tensor&);
+void GeluErfKernel(Queue&, Tensor&, const Tensor&);
+void VisionPosEmbedInterpolateKernel(Queue&, Tensor&, const Tensor&, const VisionPosEmbedArgs&);
+void VisionRopeGridKernel(Queue&, Tensor&, const Tensor&, const VisionRopeGridArgs&);
+void VisionRopeApplyKernel(Queue&, Tensor&, Tensor&, const Tensor&);
+void QkvSplitKernel(Queue&, Tensor&, Tensor&, Tensor&, const Tensor&);
 void GreedyArgmaxKernel(Queue&, Tensor&, const Tensor&);
 void MappedGreedyArgmaxKernel(Queue&, Tensor&, const Tensor&, const Tensor&, int64_t);
 void GreedyRejectionSampleKernel(Queue&, Tensor&, Tensor&, Tensor&, const Tensor&,
@@ -103,6 +110,9 @@ bool PagedAttentionXe2DecodeKernel(Queue&, Tensor&, const Tensor&, const Tensor&
 // offsets by PagedAttentionKernel before any output/workspace write.
 int64_t PagedAttentionXe2VerifyQueryLength(int64_t tokens, int64_t requests,
                                          const int32_t* host_offsets);
+// Same admission for the donor and its packed-only device metadata contract.
+bool CanUsePagedAttentionXe2Verify(Queue&, const Tensor&, const Tensor&, const Tensor&, const Tensor&,
+                                   const Tensor&, const Tensor&, const Tensor&, const PagedAttentionArgs&);
 bool PagedAttentionXe2VerifyKernel(Queue&, Tensor&, const Tensor&, const Tensor&, const Tensor&,
                                    const Tensor&, const Tensor&, const Tensor&, const PagedAttentionArgs&);
 #endif

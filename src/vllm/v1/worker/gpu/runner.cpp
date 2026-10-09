@@ -6,16 +6,19 @@
 // See include/vllm/v1/worker/gpu/runner.h for scope, the V1-algorithm / MRV2-
 // contract composition, the four-way ordering contract, and the deferred paths.
 #include "vllm/v1/worker/gpu/runner.h"
+#include "vision_prefix_capture.h"
 
 #include "vllm/multimodal/utils.h"  // GetMmFeaturesInWindow (P2, #2379)
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <functional>
+#include <fstream>
 #include <iostream>
 #include <numeric>
 #include <optional>
@@ -29,6 +32,8 @@
 #include <vector>
 
 #include "vllm/model_executor/models/qwen3_5_internal.h"
+#include "vllm/v1/core/kv_cache_utils.h"
+#include "vllm/model_executor/models/device_pool.h"
 #include "vllm/model_executor/models/qwen3_5_mtp.h"  // SPEC-MTP I5d-pre: Qwen3_5MTPModel complete type for the owned draft member
 #include "vllm/model_executor/models/qwen3_dflash_internal.h"  // W13 (#2112) the draft-lane route counters the readout reports
 #include "vllm/platforms/interface.h"  // GetPlatform(device.type) per-tensor memory-model seam
@@ -42,6 +47,7 @@
 #include "vllm/v1/worker/gpu/async_runner_flag.h"  // VT_ASYNC_RUNNER predicate
 #include "vllm/v1/worker/gpu/cudagraph_dispatch.h"  // W6 (#1374) the graph-eligibility predicate
 #include "vllm/v1/spec_decode/rejection_sampler.h"  // SPEC-REJECTION I3 verify half
+#include "vllm/v1/worker/gpu/spec_decode/autoregressive/prepare_prefill_inputs.h"
 #include "vllm/v1/worker/gpu/spec_decode/mtp/speculator.h"  // SPEC-MTP I5d MtpProposePrefill
 #include "vllm/v1/worker/gpu/spec_decode/dflash/speculator.h"  // SPEC-DFLASH D5 SampleDflashBlockDrafts
 #include "vllm/v1/worker/gpu/spec_decode/dflash2/speculator.h"  // SPEC-DFLASH2 W3/W4: Dflash2SelectCandidates, Dflash2WalkPath
@@ -53,6 +59,7 @@
 #include "vt/sample_common.h"
 #ifdef VLLM_CPP_XPU
 #include "vt/xpu_sampling.h"
+#include "vt/xpu.h"
 #include "vt/xpu_profile_span.h"
 #endif
 #ifdef VLLM_CPP_CUDA
@@ -2180,6 +2187,46 @@ void GPUModelRunner::publish_recurrent_prefixes(const StepInputs& step) {
 // request with no multimodal items, and none of them is CALLED at all unless the
 // registration declares the encode/embed pair — see `supports_mm_inputs()`.
 
+// Opt-in cache ownership observations, not tensor readbacks. Backend live
+// allocations include retained pools/workspaces; embedding bytes describe only
+// the resident encoder outputs and are not a device-memory total.
+static void TraceNativeVisionCache(
+    const std::unordered_map<std::string, MmEncoderOutput>& cache,
+    vt::Queue& queue, const char* event, const std::string& hash) {
+  const char* trace = std::getenv("VT_NATIVE_VISION_TRACE");
+  if (!trace || trace[0] != '2') return;
+  size_t embedding_bytes = 0;
+  for (const auto& [key, output] : cache) {
+    (void)key;
+    embedding_bytes += static_cast<size_t>(output.embeds.Numel()) *
+                       vt::SizeOf(output.embeds.dtype);
+  }
+  nlohmann::json record{{"event", event}, {"hash", hash},
+                        {"entries", cache.size()},
+                        {"embedding_bytes", embedding_bytes}};
+#ifdef VLLM_CPP_XPU
+  if (queue.device.type == vt::DeviceType::kXPU) {
+    const auto info = vt::xpu::GetMemoryInfo(queue.device.index);
+    record["backend_allocated_bytes"] = info.allocated_bytes;
+    record["backend_peak_allocated_bytes"] = info.peak_allocated_bytes;
+    // Distinguish retained free scratch from live owners at the existing
+    // opt-in idle witness. No new synchronization or trace-off work.
+    const auto pool = Pool(vt::GetBackend(queue.device)).stats();
+    record["scratch_pool_retained_bytes"] = pool.retained_bytes;
+    record["scratch_pool_live_blocks"] = pool.live_blocks;
+    record["scratch_pool_misses"] = pool.misses;
+    record["backend_graph_count"] = info.graph_count;
+    record["backend_graph_device_bytes"] = info.graph_device_bytes;
+    record["backend_exl3_workspace_bytes"] = info.exl3_workspace_bytes;
+    record["backend_w8a8_workspace_bytes"] = info.w8a8_workspace_bytes;
+    record["backend_sampling_workspace_bytes"] = info.sampling_workspace_bytes;
+  }
+#else
+  (void)queue;
+#endif
+  std::fprintf(stderr, "NATIVE_VISION_CACHE %s\n", record.dump().c_str());
+}
+
 void GPUModelRunner::free_evicted_encoder_outputs(
     const SchedulerOutput& scheduler_output) {
   // The worker half of the scheduler's eviction. `free_encoder_mm_hashes` names
@@ -2190,6 +2237,7 @@ void GPUModelRunner::free_evicted_encoder_outputs(
   // a request that finished a thousand steps ago.
   for (const std::string& mm_hash : scheduler_output.free_encoder_mm_hashes) {
     encoder_cache_.erase(mm_hash);
+    TraceNativeVisionCache(encoder_cache_, queue_, "evict", mm_hash);
   }
 }
 
@@ -2243,6 +2291,7 @@ void GPUModelRunner::execute_mm_encoder(
       if (encoder_cache_.count(item.mm_hash) != 0) continue;
       encoder_cache_[item.mm_hash] =
           ModelRegistry::EncodeMm(*model_, config_, queue_, item);
+      TraceNativeVisionCache(encoder_cache_, queue_, "insert", item.mm_hash);
     }
   }
 }
@@ -2266,7 +2315,10 @@ bool GPUModelRunner::batch_carries_mm() const {
 }
 
 GPUModelRunner::MmGather GPUModelRunner::gather_mm_embeddings(
-    const SchedulerOutput& scheduler_output, int total_num_scheduled_tokens) {
+    const SchedulerOutput& scheduler_output, int total_num_scheduled_tokens,
+    int draft_lookahead) {
+  VT_CHECK(draft_lookahead == 0 || draft_lookahead == 1,
+           "runner mm gather: only target or one-position draft lookahead supported");
   // `_gather_mm_embeddings` (gpu_model_runner.py:3220). For every request in
   // batch order, take the multimodal items whose placeholder span overlaps the
   // token window this step covers, and slice the ROWS of their cached encoder
@@ -2288,7 +2340,7 @@ GPUModelRunner::MmGather GPUModelRunner::gather_mm_embeddings(
              "runner mm gather: no cached state for scheduled request '" +
                  req_id + "'. ENG-MM-INPUT-PIPELINE P2 (#2379).");
     const CachedRequestState& state = state_it->second;
-    const int num_computed_tokens = state.num_computed_tokens;
+    const int num_computed_tokens = state.num_computed_tokens + draft_lookahead;
 
     const std::pair<int, int> window = multimodal::GetMmFeaturesInWindow(
         state.mm_features, num_computed_tokens,
@@ -2305,12 +2357,12 @@ GPUModelRunner::MmGather GPUModelRunner::gather_mm_embeddings(
       if (end_idx - start_idx <= 0) continue;
 
       const auto cached = encoder_cache_.find(item.mm_hash);
-      // THE MISS THE SCHEDULER MAKES UNREACHABLE. `_try_schedule_encoder_inputs`
-      // truncates `num_new_tokens` to stop before an item whose encoder could
-      // not run, so a decoder chunk can never cover placeholder rows with no
-      // encoder output. Without that clamp this fires, and refusing here is the
-      // only honest answer: splicing whatever the embedding table gave the
-      // placeholder rows produces fluent, confidently WRONG tokens.
+      // Pinned V2 encoder_runner: a feature reached exclusively by the
+      // drafter's extra position may not be encoded yet. Only that boundary
+      // falls back to token lookup; a miss inside the target span still fails.
+      if (cached == encoder_cache_.end() && draft_lookahead != 0 &&
+          start_pos + draft_lookahead >= num_computed_tokens + num_scheduled_tokens)
+        continue;
       VT_CHECK(cached != encoder_cache_.end(),
                "Encoder cache miss for " + item.mm_hash +
                    ". The scheduler admitted decoder tokens across a multimodal "
@@ -2342,6 +2394,7 @@ GPUModelRunner::MmGather GPUModelRunner::gather_mm_embeddings(
       slice.shape[0] = end_idx - start_idx;
       slice.shape[1] = width;
       out.mm_embeds.push_back(slice);
+      out.mm_lifetimes.push_back(cached->second.lifetime);
 
       const int req_start_pos = req_start_idx + start_pos - num_computed_tokens;
       for (int t = req_start_pos + start_idx; t < req_start_pos + end_idx; ++t) {
@@ -2385,8 +2438,12 @@ std::vector<int32_t> GPUModelRunner::calc_mrope_positions(
     }
 
     if (prompt_part_len > 0) {
-      // The prompt part is pre-computed; this is a SLICE, never a recomputation.
-      VT_CHECK(static_cast<int>(state.mrope_positions.size()) >=
+      // Image prompt coordinates must use the whole-prompt precomputation.
+      // Text requests admitted into an image batch have no such array: all
+      // three axes are ordinary physical token positions, including a new
+      // text prefill mixed with image decode after recurrent-slot reuse.
+      const bool text_only = state.mm_features.empty();
+      VT_CHECK(text_only || static_cast<int>(state.mrope_positions.size()) >=
                    3 * (num_computed_tokens + prompt_part_len),
                "runner M-RoPE: request '" + req_id +
                    "' has no pre-computed prompt positions for this window. A "
@@ -2397,6 +2454,7 @@ std::vector<int32_t> GPUModelRunner::calc_mrope_positions(
           out[static_cast<size_t>(axis) *
                   static_cast<size_t>(total_num_scheduled_tokens) +
               static_cast<size_t>(ptr + j)] =
+              text_only ? num_computed_tokens + j :
               state.mrope_positions[static_cast<size_t>(axis) *
                                         static_cast<size_t>(num_prompt_tokens) +
                                     static_cast<size_t>(num_computed_tokens + j)];
@@ -2509,6 +2567,8 @@ std::optional<ModelRunnerOutput> GPUModelRunner::execute_model(
       async_forward_in_flight_ = false;
     }
     if (mirror) exec_state_ = ExecuteModelState{};
+    if (supports_mm_inputs() && !scheduler_output.finished_req_ids.empty())
+      TraceNativeVisionCache(encoder_cache_, queue_, "idle", "");
     return std::nullopt;
   }
 
@@ -3101,6 +3161,7 @@ std::optional<ModelRunnerOutput> GPUModelRunner::execute_model(
     MmEmbedInputs embed_inputs;
     embed_inputs.token_ids = &token_ids;
     embed_inputs.mm_embeds = &gathered.mm_embeds;
+    embed_inputs.mm_lifetimes = &gathered.mm_lifetimes;
     embed_inputs.is_mm_embed = &gathered.is_mm_embed;
     // EMPTY, not null, when the model declares no M-RoPE hook — upstream's
     // `uses_mrope == False`, where the model reads the 1-D positions instead.
@@ -3345,6 +3406,16 @@ std::optional<ModelRunnerOutput> GPUModelRunner::execute_model(
       async_forward_in_flight_ = false;
     }
     exec_state_ = ExecuteModelState{};
+  }
+
+  if (draft_model_ != nullptr && supports_mm_inputs() && batch_carries_mm() &&
+      model_->registration().architecture == "Qwen3_5ForConditionalGeneration") {
+    VT_CHECK(!host_token_ids_stale,
+             "native vision MTP: authoritative host shift/splice IDs required");
+    exec_state_.spec_mm_gather = gather_mm_embeddings(
+        scheduler_output, static_cast<int>(token_ids.size()), /*draft_lookahead=*/1);
+    exec_state_.spec_mm_positions = calc_mrope_positions(
+        scheduler_output, static_cast<int>(token_ids.size()));
   }
 
   // KV-EXTERNAL-CACHE (LMCache): apply any external-prefix loads recorded by the
@@ -3869,6 +3940,9 @@ ModelRunnerOutput GPUModelRunner::sample_tokens_with_rejection(
                                     step.cu_num_logits, chunked_prefilling);
   }
 
+  // Opt-in bounded observation before sampler write-back/propose mutates ownership.
+  dump_step_logits(logits, &rs);
+
   ModelRunnerOutput out;
   out.req_ids.reserve(static_cast<size_t>(num_reqs));
   out.sampled_token_ids.reserve(static_cast<size_t>(num_reqs));
@@ -3956,6 +4030,39 @@ ModelRunnerOutput GPUModelRunner::sample_tokens_with_rejection(
     }
     const std::vector<int32_t>& toks = rs.sampled_token_ids[static_cast<size_t>(i)];
     out.sampled_token_ids.push_back(toks);
+    if (const char* trace = std::getenv("VT_NATIVE_VISION_TRACE");
+        trace && trace[0] == '2' &&
+        model_->registration().architecture == "Qwen3_5ForConditionalGeneration") {
+      // Already committed host sampler output; no tensor readback or wait.
+      nlohmann::json record{{"request_id", req_id}, {"token_ids", toks}};
+      if (const char* consumption = std::getenv("VT_B70_MTP_CONSUMPTION_TRACE");
+          consumption && consumption[0] == '1' && kr > 0) {
+        // Private observation of the actual speculative input/output seam.
+        // Speculation vetoes async input combine, so these are the ids passed
+        // to the target, not stale device-combine host placeholders. No tensor
+        // download, synchronization, token override, or state copy is added.
+        VT_CHECK(!async_input_combine_, "MTP consumption trace requires fresh host target ids");
+        const int begin = step.query_start_loc.at(i), end = step.query_start_loc.at(i + 1);
+        VT_CHECK(kr <= 3 && end - begin == kr + 1 && begin >= 0 &&
+                     end <= static_cast<int>(step.input_token_ids.size()) &&
+                     end <= static_cast<int>(step.positions.size()), "MTP consumption trace geometry");
+        const auto& gm = exec_state_.gdn_meta;
+        VT_CHECK(gm.spec_sequence_masks && gm.spec_sequence_masks->at(i) && gm.num_accepted_tokens,
+                 "MTP consumption trace requires actual speculative GDN metadata");
+        const int spec_row = std::count(gm.spec_sequence_masks->begin(), gm.spec_sequence_masks->begin() + i, uint8_t{1});
+        record["target_consumption"] = {{"row", i}, {"drafts", kr},
+            {"computed_before", input_batch_.num_computed_tokens_cpu.at(i)},
+            {"committed_before", input_batch_.num_tokens_no_spec.at(i)},
+            {"seq_len", step.seq_lens.at(i)},
+            {"input_ids", std::vector<int32_t>(step.input_token_ids.begin() + begin,
+                                               step.input_token_ids.begin() + end)},
+            {"positions", std::vector<int32_t>(step.positions.begin() + begin, step.positions.begin() + end)},
+            {"previous_num_sampled", gm.num_accepted_tokens->at(spec_row)},
+            {"actual_num_sampled", ns}, {"fresh_host_ids", true}};
+      }
+      std::fprintf(stderr, "NATIVE_VISION_SAMPLED %s\n", record.dump().c_str());
+    }
+
     // SPEC-DFLASH2 A2-4 (#3004): `valid_sampled_token_count` for this row —
     // how many tokens the accept walk emitted, which is upstream's
     // `_get_valid_sampled_token_count()` (gpu_model_runner.py:1530 @ pin
@@ -4192,7 +4299,380 @@ ModelRunnerOutput GPUModelRunner::pool_tokens() {
 // function the engine never calls is what "wrong function" looks like. Grepping
 // the SETTER `set_async_input_combine` and finding no caller is what made it
 // look like the sync path; the field is not written through the setter.
-void GPUModelRunner::dump_step_logits(const vt::Tensor& logits) {
+void GPUModelRunner::dump_step_logits(const vt::Tensor& logits,
+                                      const RejectionSamplerOutput* verification) {
+  // Bounded B70 first-divergence diagnostic. The opt-in config selects an
+  // exact known prefix, with packet proposals independently verified. Read
+  // unmasked logits after target completion; the optional verification phase
+  // reads selected valid states before sampler write-back and draft proposal.
+  static const nlohmann::json prefix_dump = [] {
+    const char* path = std::getenv("VT_B70_VISION_PREFIX_DUMP_CONFIG");
+    if (!path || !path[0]) return nlohmann::json();
+    std::ifstream input(path);
+    VT_CHECK(input.good(), "vision prefix dump: cannot open config");
+    auto config = nlohmann::json::parse(input);
+    const auto prefix = config.at("output_prefix").get<std::vector<int32_t>>();
+    VT_CHECK(prefix.size() <= 64 && config.at("prompt_tokens").get<int>() > 0 &&
+                 config.at("prompt_tokens").get<int>() <= 4096 &&
+                 config.at("max_captures").get<int>() > 0 && config.at("max_captures").get<int>() <= 4 &&
+                 !config.at("output_dir").get<std::string>().empty(), "vision prefix dump: invalid bound");
+    VT_CHECK(!prefix.empty() || config.contains("prompt_ids"),
+             "vision prefix dump: prefill capture requires exact prompt IDs");
+    if (config.contains("prompt_ids"))
+      VT_CHECK(config.at("prompt_ids").get<std::vector<int32_t>>().size() ==
+                   size_t(config.at("prompt_tokens").get<int>()), "vision prefix dump: wrong prompt ID count");
+    VT_CHECK(!config.value("include_prefill", false) || config.contains("prompt_ids"),
+             "vision prefix dump: paired prefill requires exact prompt IDs");
+    VT_CHECK(!config.value("include_previous", false) ||
+                 (prefix.size() >= 2 && config.contains("prompt_ids") &&
+                  !config.value("include_prefill", false) && !config.value("capture_mtp", false)),
+             "vision prefix dump: previous-prefix pairing requires exact target-only prompt and prefix");
+    VT_CHECK(!config.value("include_mtp_prefix", false) ||
+                 (!prefix.empty() && config.contains("prompt_ids") && config.value("capture_mtp", false) &&
+                  !config.value("include_previous", false) && !config.value("include_prefill", false)),
+             "vision prefix dump: packet prefix requires exact MTP prompt and prefix without paired modes");
+    VT_CHECK(!config.value("capture_commit_anchor", false) || config.value("include_mtp_prefix", false),
+             "vision prefix dump: commit anchor requires exact packet-prefix mode");
+    VT_CHECK(config.value("skip_matching_requests", 0) >= 0 &&
+                 config.value("skip_matching_requests", 0) <= 2,
+             "vision prefix dump: invalid skipped request count");
+    return config;
+  }();
+  if (!prefix_dump.is_null()) {
+    VT_CHECK((!spec_on() || prefix_dump.value("capture_mtp", false)) &&
+                 queue_.device.type == vt::DeviceType::kXPU &&
+                 model_->registration().architecture == "Qwen3_5ForConditionalGeneration",
+             "vision prefix dump: conditional XPU diagnostic requires explicit MTP opt-in");
+    const auto wanted = prefix_dump.at("output_prefix").get<std::vector<int32_t>>();
+    const auto prompt_ids = prefix_dump.value("prompt_ids", std::vector<int32_t>{});
+    const int prompt = prefix_dump.at("prompt_tokens").get<int>();
+    const bool include_mtp_prefix = prefix_dump.value("include_mtp_prefix", false);
+    static int captures = 0;
+    static std::unordered_map<std::string, int> pending_verifications;
+    static std::unordered_map<std::string, size_t> request_occurrences;
+    for (int i = 0; i < exec_state_.num_reqs; ++i) {
+      if (exec_state_.discard.at(i) || input_batch_.num_prompt_tokens.at(i) != prompt) continue;
+      const auto& gm = exec_state_.gdn_meta;
+      const auto& step = exec_state_.step;
+      const bool spec_row = gm.spec_sequence_masks && gm.spec_sequence_masks->at(i);
+      const int drafts = step.num_draft_tokens_per_req.empty() ? 0 : step.num_draft_tokens_per_req.at(i);
+      const bool prefill = prefix_dump.value("include_prefill", false) &&
+          input_batch_.num_tokens_no_spec.at(i) == prompt;
+      const bool previous = prefix_dump.value("include_previous", false) &&
+          input_batch_.num_tokens_no_spec.at(i) == prompt + static_cast<int>(wanted.size()) - 1;
+      std::vector<int32_t> committed_tokens;
+      int query_column = 0;
+      if (include_mtp_prefix) {
+        if (!spec_row) continue;
+        for (int t = 0; t < input_batch_.num_tokens_no_spec.at(i); ++t)
+          committed_tokens.push_back(input_batch_.token_id(i, t));
+        auto full_wanted = prompt_ids;
+        full_wanted.insert(full_wanted.end(), wanted.begin(), wanted.end());
+        const int begin = step.query_start_loc.at(i), end = step.query_start_loc.at(i + 1);
+        VT_CHECK(begin >= 0 && end >= begin && static_cast<size_t>(end) <= step.input_token_ids.size(),
+                 "vision prefix dump: invalid packet bounds");
+        const std::span<const int32_t> query(step.input_token_ids.data() + begin, end - begin);
+        const auto column = vllm::detail::VisionPrefixQueryColumn(full_wanted, committed_tokens, query,
+            input_batch_.num_computed_tokens_cpu.at(i), drafts, true);
+        if (!column) continue;
+        query_column = *column;
+      } else if (!prefill && !previous &&
+                 input_batch_.num_tokens_no_spec.at(i) != prompt + static_cast<int>(wanted.size())) continue;
+      const auto selected_prefix = prefill ? std::vector<int32_t>{} : previous
+          ? std::vector<int32_t>(wanted.begin(), wanted.end() - 1) : wanted;
+      bool match = true;
+      for (size_t t = 0; t < prompt_ids.size(); ++t)
+        match &= input_batch_.token_id(i, static_cast<int>(t)) == prompt_ids[t];
+      for (size_t t = 0; !include_mtp_prefix && t < selected_prefix.size(); ++t)
+        match &= input_batch_.token_id(i, prompt + static_cast<int>(t)) == selected_prefix[t];
+      if (!match) continue;
+      const auto& id = exec_state_.req_ids.at(i);
+      const auto [occurrence, inserted] = request_occurrences.emplace(id, request_occurrences.size());
+      (void)inserted;
+      VT_CHECK(request_occurrences.size() <= 8, "vision prefix dump: request bound exceeded");
+      if (occurrence->second < size_t(prefix_dump.value("skip_matching_requests", 0))) continue;
+      const std::string pending_key = id + ":" + std::to_string(selected_prefix.size());
+      if (verification && (prefill || !pending_verifications.contains(pending_key))) continue;
+      if (!verification)
+        VT_CHECK(captures < prefix_dump.at("max_captures").get<int>(), "vision prefix dump: capture bound exceeded");
+      VT_CHECK(logits.rank == 2 && logits.dtype == vt::DType::kF32 && logits.stride[1] == 1 &&
+                   logits.shape[0] == step_num_logits() && logits.shape[1] == config_.vocab_size,
+               "vision prefix dump: unexpected target logit rows");
+      const auto& request = req_states_.at(id);
+      const auto& am = exec_state_.attn_meta;
+      int ordinary_row = 0, speculative_row = 0;
+      for (int prior = 0; prior < i; ++prior) {
+        if (gm.spec_sequence_masks && gm.spec_sequence_masks->at(prior)) ++speculative_row;
+        else ++ordinary_row;
+      }
+      const int accepted = verification ? verification->num_sampled.at(i) : 1;
+      VT_CHECK(!verification || (accepted >= 1 && accepted <= drafts + 1 &&
+                   verification->sampled_token_ids.at(i).size() == size_t(accepted)),
+               "vision prefix dump: invalid verification result");
+      VT_CHECK(!spec_row || (gm.spec_state_indices_tensor && gm.spec_state_indices_num_cols == 4 &&
+                   gm.spec_state_indices_tensor->size() == size_t(gm.num_spec_decodes * 4)),
+               "vision prefix dump: invalid MTP snapshot layout");
+      VT_CHECK(spec_row || (gm.non_spec_state_indices_tensor &&
+                   ordinary_row < static_cast<int>(gm.non_spec_state_indices_tensor->size())),
+               "vision prefix dump: missing ordinary state row");
+      const int selected_column = verification && spec_row ? accepted - 1 : query_column;
+      const int owner_slot = spec_row
+          ? gm.spec_state_indices_tensor->at(speculative_row * gm.spec_state_indices_num_cols)
+          : gm.non_spec_state_indices_tensor->at(ordinary_row);
+      const int state_slot = spec_row
+          ? gm.spec_state_indices_tensor->at(speculative_row * gm.spec_state_indices_num_cols + selected_column)
+          : owner_slot;
+      const int context = step.seq_lens.at(i) - (spec_row ? drafts : 0) + selected_column;
+      VT_CHECK(context > 0 && context <= 1600 && (!spec_row || (drafts > 0 && drafts <= 3)),
+               "vision prefix dump: unsupported state geometry");
+      VT_CHECK(owner_slot == gdn_slot_of_req_.at(id), "vision prefix dump: state index/owner mismatch");
+      if (committed_tokens.empty())
+        for (int t = 0; t < input_batch_.num_tokens_no_spec.at(i); ++t)
+          committed_tokens.push_back(input_batch_.token_id(i, t));
+      auto tokens = committed_tokens;
+      if (query_column) {
+        const int begin = step.query_start_loc.at(i);
+        tokens.insert(tokens.end(), step.input_token_ids.begin() + begin + 1,
+                      step.input_token_ids.begin() + begin + 1 + query_column);
+      }
+      nlohmann::json record{{"phase", verification ? "post_verify_before_writeback" : "post_target_before_sampling"}, {"request_id", id}, {"row", i},
+          {"prompt_tokens", prompt}, {"output_prefix", selected_prefix}, {"token_prefix", tokens},
+          {"matching_request_occurrence", occurrence->second},
+          {"num_computed_before_step", input_batch_.num_computed_tokens_cpu.at(i)}, {"seq_len", context},
+          {"mrope_delta", request.mrope_position_delta}, {"own_image_features", request.mm_features.size()},
+          {"request_ids", exec_state_.req_ids}, {"num_reqs", exec_state_.num_reqs},
+          {"input_token_ids", exec_state_.step.input_token_ids}, {"positions", exec_state_.step.positions},
+          {"query_start_loc", exec_state_.step.query_start_loc}, {"seq_lens", exec_state_.step.seq_lens},
+          {"kv_block_table", am.block_table_tensor}, {"kv_block_table_cols", am.block_table_num_cols},
+          {"kv_write_slots", am.slot_mapping}, {"gdn_indices", gm.non_spec_state_indices_tensor.value_or(std::vector<int32_t>{})},
+          {"gdn_slot", state_slot}, {"actual_token_rows", am.num_actual_tokens},
+          {"max_query_len", am.max_query_len}, {"uniform_spec_query_len", am.uniform_spec_query_len},
+          {"blobs", nlohmann::json::array()}, {"image_features", nlohmann::json::array()}};
+      if (spec_on()) {
+        record["mtp"] = {{"spec_row", spec_row}, {"drafts", drafts},
+            {"previous_num_accepted_tokens", gm.num_accepted_tokens.value_or(std::vector<int32_t>{})},
+            {"spec_sequence_masks", gm.spec_sequence_masks.value_or(std::vector<uint8_t>{})},
+            {"spec_state_indices", gm.spec_state_indices_tensor.value_or(std::vector<int32_t>{})},
+            {"spec_state_columns", gm.spec_state_indices_num_cols},
+            {"owner_slot", owner_slot}, {"selected_ssm_slot", state_slot},
+            {"valid_conv_window_offset", selected_column}, {"valid_conv_window_length", 3},
+            {"physical_seq_len", step.seq_lens.at(i)}, {"cu_num_logits", step.cu_num_logits}};
+        const int begin = step.query_start_loc.at(i), end = step.query_start_loc.at(i + 1);
+        record["mtp"]["verification_tokens"] = std::vector<int32_t>(
+            step.input_token_ids.begin() + begin, step.input_token_ids.begin() + end);
+        if (include_mtp_prefix) {
+          record["mtp"]["selected_query_column"] = query_column;
+          record["mtp"]["packet_token_prefix"] = committed_tokens;
+          record["mtp"]["selected_prefix_phase"] = verification ? "after_actual_rejection" : "candidate_before_rejection";
+        }
+        if (verification) {
+          record["mtp"]["num_sampled"] = accepted;
+          record["mtp"]["accepted_drafts"] = accepted - 1;
+          record["mtp"]["emitted_ids"] = verification->sampled_token_ids.at(i);
+          auto state_prefix = committed_tokens;
+          for (int j = 0; j < selected_column; ++j)
+            state_prefix.push_back(step.input_token_ids.at(begin + 1 + j));
+          record["mtp"]["state_token_prefix"] = std::move(state_prefix);
+          if (include_mtp_prefix)
+            record["mtp"]["selected_prefix_committed"] = selected_column >= query_column;
+        }
+      }
+      auto& backend = vt::GetBackend(queue_.device);
+      std::vector<std::vector<unsigned char>> payloads;
+      size_t bytes = 0;
+      const int capture = verification ? pending_verifications.at(pending_key) : captures;
+      const std::string original_base = "prefix-" + std::to_string(capture);
+      std::string base = original_base + (verification ? "-commit" : "");
+      if (verification) {
+        std::ifstream before(prefix_dump.at("output_dir").get<std::string>() + "/" + original_base + ".json");
+        VT_CHECK(before.good(), "vision prefix dump: missing before-verification evidence");
+        const auto original = nlohmann::json::parse(before);
+        VT_CHECK(original.at("request_id") == id && original.at("token_prefix") == tokens,
+                 "vision prefix dump: verification prefix changed");
+        record["unmasked_logits_metadata"] = original_base + ".json";
+        record["top2"] = original.at("top2");
+        record["top2_phase"] = "post_target_before_sampling_first_query";
+        if (include_mtp_prefix) {
+          VT_CHECK(original.at("mtp").at("packet_token_prefix") == committed_tokens &&
+                       original.at("mtp").at("selected_query_column") == query_column,
+                   "vision prefix dump: packet prefix changed before rejection finalization");
+          record["mtp"]["unmasked_target_argmax_ids"] = original.at("mtp").at("unmasked_target_argmax_ids");
+          record["mtp"]["selected_prefix_reachable_greedy"] = original.at("mtp").at("selected_prefix_reachable_greedy");
+          record["top2_phase"] = "post_target_before_sampling_selected_query";
+        }
+      }
+      const std::string metadata_path = prefix_dump.at("output_dir").get<std::string>() + "/" + base + ".json";
+      std::ifstream old_metadata(metadata_path);
+      VT_CHECK(!old_metadata.good(), "vision prefix dump: metadata evidence exists");
+      const auto copy = [&](const std::string& name, const void* data, size_t count, nlohmann::json metadata) {
+        bytes += count;
+        VT_CHECK(data && count > 0 && bytes <= 256 * 1024 * 1024, "vision prefix dump: byte bound exceeded");
+        payloads.emplace_back(count);
+        backend.Copy(queue_, payloads.back().data(), data, count);
+        metadata["name"] = name; metadata["file"] = base + "-" + name + ".bin";
+        metadata["bytes"] = count; record["blobs"].push_back(std::move(metadata));
+      };
+      if (!verification) {
+        const int packet_first_logit = spec_on() ? step.cu_num_logits.at(i) : i;
+        const int first_logit = packet_first_logit + query_column;
+        copy("logits", static_cast<const char*>(logits.data) + first_logit * logits.stride[0] * sizeof(float),
+             config_.vocab_size * sizeof(float), {{"dtype", int(vt::DType::kF32)}, {"shape", {config_.vocab_size}}});
+        if (spec_row) {
+          const int rows = step.cu_num_logits.at(i + 1) - packet_first_logit;
+          VT_CHECK(rows == drafts + 1 && logits.stride[0] == config_.vocab_size,
+                   "vision prefix dump: invalid verification logit geometry");
+          copy("verify-logits", static_cast<const char*>(logits.data) + packet_first_logit * logits.stride[0] * sizeof(float),
+               rows * config_.vocab_size * sizeof(float),
+               {{"dtype", int(vt::DType::kF32)}, {"shape", {rows, config_.vocab_size}}});
+        }
+      }
+      const auto copy_states = [&](int snapshot_slot, int snapshot_context) {
+      for (size_t layer = 0; layer < gdn_state_.size(); ++layer) {
+        const auto& state = gdn_state_[layer];
+        for (const auto& [name, tensor] : std::vector<std::pair<std::string,vt::Tensor>>{
+                 {"conv", state.conv_state}, {"ssm", state.ssm_state}}) {
+          VT_CHECK(tensor.IsContiguous() && tensor.rank >= 2 && snapshot_slot >= 0 && snapshot_slot < tensor.shape[0],
+                   "vision prefix dump: invalid recurrent row");
+          const auto size = tensor.Bytes() / tensor.shape[0];
+          std::vector<int64_t> shape(tensor.shape + 1, tensor.shape + tensor.rank);
+          const int slot = spec_on() && name == "conv" ? owner_slot : snapshot_slot;
+          copy("gdn" + std::to_string(layer) + "-" + name,
+               static_cast<const char*>(tensor.data) + slot * size, size,
+               {{"dtype", int(tensor.dtype)}, {"shape", shape}});
+        }
+      }
+      for (size_t layer = 0; layer < attn_kv_.size(); ++layer) {
+        const auto& kv = attn_kv_[layer];
+        VT_CHECK(kv.block_size == 1600 && (!kv.head_size_v || kv.head_size_v == kv.head_size),
+                 "vision prefix dump: unsupported paged layout");
+        const int block = am.block_table_tensor.at(i * am.block_table_num_cols);
+        VT_CHECK(block >= 0 && block < kv.num_blocks, "vision prefix dump: invalid physical page");
+        const size_t row = kv.num_kv_heads * kv.head_size * vt::SizeOf(kv.dtype);
+        for (int which = 0; which < 2; ++which)
+          copy("attn" + std::to_string(layer) + (which ? "-v" : "-k"),
+               static_cast<const char*>(kv.data) + (2 * block + which) * kv.block_size * row,
+               snapshot_context * row, {{"dtype", int(kv.dtype)}, {"shape", {snapshot_context,kv.num_kv_heads,kv.head_size}},
+                 {"fp8_kind", int(kv.fp8_kind)}, {"k_scale", kv.k_scale}, {"v_scale", kv.v_scale}});
+      }
+      };
+      copy_states(state_slot, context);
+      std::set<std::string> images;
+      for (const auto& rid : exec_state_.req_ids) for (const auto& feature : req_states_.at(rid).mm_features) {
+        record["image_features"].push_back({{"request_id", rid}, {"hash", feature.mm_hash},
+                                           {"offset", feature.offset}, {"length", feature.length}});
+        if (!images.insert(feature.mm_hash).second) continue;
+        const auto& tensor = encoder_cache_.at(feature.mm_hash).embeds;
+        VT_CHECK(tensor.IsContiguous(), "vision prefix dump: noncontiguous encoder output");
+        copy("image" + std::to_string(images.size() - 1), tensor.data, tensor.Bytes(),
+             {{"dtype", int(tensor.dtype)}, {"shape", {tensor.shape[0],tensor.shape[1]}}, {"mm_hash", feature.mm_hash}});
+      }
+      backend.Synchronize(queue_); // Diagnostic only: one drain after all bounded copies.
+      const auto write_payloads = [&] {
+      for (size_t j = 0; j < payloads.size(); ++j) {
+        auto& entry = record["blobs"][j];
+        const auto& raw = payloads[j];
+        const auto hash = sha256_bytes(std::string(reinterpret_cast<const char*>(raw.data()),raw.size()));
+        constexpr char hex[] = "0123456789abcdef";
+        std::string checksum; checksum.reserve(64);
+        for (unsigned char byte : hash) {checksum += hex[byte >> 4]; checksum += hex[byte & 15];}
+        entry["sha256"] = std::move(checksum);
+        const auto path = prefix_dump.at("output_dir").get<std::string>() + "/" + entry["file"].get<std::string>();
+        std::ifstream existing(path); VT_CHECK(!existing.good(), "vision prefix dump: evidence exists");
+        std::ofstream file(path, std::ios::binary);
+        file.write(reinterpret_cast<const char*>(raw.data()),raw.size());
+        VT_CHECK(file.good(), "vision prefix dump: cannot write payload");
+      }
+      };
+      write_payloads();
+      if (!verification) {
+      std::vector<float> row(config_.vocab_size);
+      std::memcpy(row.data(),payloads.front().data(),payloads.front().size());
+      int first = 0, second = 1;
+      if (row[second] > row[first]) std::swap(first,second);
+      for (int v = 0; v < config_.vocab_size; ++v) {
+        VT_CHECK(std::isfinite(row[v]), "vision prefix dump: nonfinite unmasked logit");
+        if (v == first || v == second) continue;
+        if (row[v] > row[first]) {second = first; first = v;}
+        else if (row[v] > row[second]) second = v;
+      }
+      record["top2"] = {{"ids", {first,second}}, {"logits", {row[first],row[second]}},
+                        {"margin", row[first] - row[second]}};
+      if (include_mtp_prefix) {
+        VT_CHECK(spec_row && payloads.size() >= 2 && payloads[1].size() ==
+                     size_t(drafts + 1) * config_.vocab_size * sizeof(float),
+                 "vision prefix dump: missing packet logits for prefix proof");
+        std::vector<float> packet(size_t(drafts + 1) * config_.vocab_size);
+        std::memcpy(packet.data(), payloads[1].data(), payloads[1].size());
+        std::vector<int32_t> argmax_ids(drafts + 1);
+        for (int r = 0; r <= drafts; ++r) {
+          const float* values = packet.data() + r * config_.vocab_size;
+          int best = 0;
+          for (int v = 0; v < config_.vocab_size; ++v) {
+            VT_CHECK(std::isfinite(values[v]), "vision prefix dump: nonfinite packet logit");
+            if (values[v] > values[best]) best = v;
+          }
+          argmax_ids[r] = best;
+        }
+        const auto query = record.at("mtp").at("verification_tokens").get<std::vector<int32_t>>();
+        record["mtp"]["unmasked_target_argmax_ids"] = argmax_ids;
+        record["mtp"]["selected_prefix_reachable_greedy"] =
+            vllm::detail::VisionPrefixReachableGreedy(argmax_ids, query, query_column);
+      }
+      }
+      std::ofstream metadata(metadata_path);
+      metadata << record.dump(2) << '\n'; VT_CHECK(metadata.good(), "vision prefix dump: cannot write metadata");
+      std::fprintf(stderr,"NATIVE_VISION_PREFIX_DUMP %s\n",nlohmann::json{{"capture",capture},
+          {"request_id",id},{"output_step",selected_prefix.size()},{"num_reqs",exec_state_.num_reqs},{"bytes",bytes},
+          {"post_verify", verification != nullptr}}.dump().c_str());
+      if (!verification && prefix_dump.value("capture_commit_anchor", false)) {
+        const auto argmax_ids = record.at("mtp").at("unmasked_target_argmax_ids").get<std::vector<int32_t>>();
+        const auto query = record.at("mtp").at("verification_tokens").get<std::vector<int32_t>>();
+        // This is only a greedy preview. The actual rejection result must
+        // independently match it before these target states can be qualified.
+        const auto predicted = vllm::detail::VisionGreedyAcceptedDrafts(argmax_ids, query);
+        VT_CHECK(predicted.has_value(), "vision prefix dump: invalid greedy preview geometry");
+        if (*predicted != query_column) {
+          metadata.close();
+          const int anchor_slot = gm.spec_state_indices_tensor->at(speculative_row * 4 + *predicted);
+          const int anchor_context = step.seq_lens.at(i) - drafts + *predicted;
+          VT_CHECK(anchor_context > 0 && anchor_context <= 1600, "vision prefix dump: invalid anchor context");
+          record["phase"] = "post_target_greedy_anchor_before_sampling";
+          record["unmasked_logits_metadata"] = original_base + ".json";
+          record["seq_len"] = anchor_context;
+          record["gdn_slot"] = anchor_slot;
+          record["mtp"]["predicted_accepted_drafts"] = *predicted;
+          record["mtp"]["selected_ssm_slot"] = anchor_slot;
+          record["mtp"]["valid_conv_window_offset"] = *predicted;
+          auto state_prefix = committed_tokens;
+          state_prefix.insert(state_prefix.end(), query.begin() + 1, query.begin() + 1 + *predicted);
+          record["mtp"]["state_token_prefix"] = std::move(state_prefix);
+          record["blobs"] = nlohmann::json::array();
+          record["image_features"] = nlohmann::json::array();
+          payloads.clear(); // Keep the 256 MiB host bound per diagnostic frame.
+          bytes = 0;
+          base = original_base + "-target-anchor";
+          const auto anchor_path = prefix_dump.at("output_dir").get<std::string>() + "/" + base + ".json";
+          std::ifstream old_anchor(anchor_path);
+          VT_CHECK(!old_anchor.good(), "vision prefix dump: anchor evidence exists");
+          copy_states(anchor_slot, anchor_context);
+          backend.Synchronize(queue_); // Opt-in diagnostic drain, before actual sampling.
+          write_payloads();
+          std::ofstream anchor_metadata(anchor_path);
+          anchor_metadata << record.dump(2) << '\n';
+          VT_CHECK(anchor_metadata.good(), "vision prefix dump: cannot write target anchor");
+          std::fprintf(stderr,"NATIVE_VISION_TARGET_ANCHOR %s\n",nlohmann::json{{"capture",capture},
+              {"request_id",id},{"predicted_accepted_drafts",*predicted},{"seq_len",anchor_context},
+              {"bytes",bytes}}.dump().c_str());
+        }
+      }
+      if (verification) pending_verifications.erase(pending_key);
+      else {
+        if (spec_row) pending_verifications.emplace(pending_key, captures);
+        ++captures;
+      }
+    }
+  }
+  if (verification) return;  // Never duplicate the generic unmasked-logit dump.
   //
   // `VT_DUMP_LOGITS=<dir>` appends this step's full logit row for every live
   // request to `<dir>/ours_<req_id>.f32`, and its argmax to
@@ -4393,6 +4873,14 @@ ModelRunnerOutput GPUModelRunner::sample_tokens(
     const std::vector<int32_t>& toks = sampler_output.sampled_token_ids[
         static_cast<size_t>(i)];
     out.sampled_token_ids.push_back(toks);
+
+    if (const char* trace = std::getenv("VT_NATIVE_VISION_TRACE");
+        trace && trace[0] == '2' &&
+        model_->registration().architecture == "Qwen3_5ForConditionalGeneration") {
+      // Already committed host sampler output; no tensor readback or wait.
+      const auto record = nlohmann::json{{"request_id", req_id}, {"token_ids", toks}}.dump();
+      std::fprintf(stderr, "NATIVE_VISION_SAMPLED %s\n", record.c_str());
+    }
 
     // Lab debug: VT_DEBUG_SAMPLED=1 prints every greedy token id. Read ONCE at
     // static-init — never a per-token getenv in the sampling hot loop (matches
@@ -4611,6 +5099,27 @@ void GPUModelRunner::propose_drafts(const std::vector<int32_t>& num_sampled_in,
   VT_CHECK(!draft_attn_kv_.empty() && draft_attn_kv_[0].block_size > 0,
            "propose_drafts: the draft KV group has no block geometry");
 
+  // Merge after sampling: the final shifted row may contain last_sampled or
+  // next_prefill. Encoder slices were captured before request progress changed.
+  std::optional<MmForwardBuffers> draft_mm_buffers;
+  if (exec_state_.spec_mm_gather && !exec_state_.spec_mm_gather->mm_embeds.empty()) {
+    const auto shifted = prepare_prefill_inputs(
+        exec_state_.step.input_token_ids, exec_state_.step.positions,
+        exec_state_.attn_meta.query_start_loc, exec_state_.attn_meta.seq_lens,
+        idx_mapping, input_batch_.last_sampled_tokens, next_prefill,
+        num_sampled, num_rejected, num_reqs);
+    const auto& gathered = *exec_state_.spec_mm_gather;
+    MmEmbedInputs inputs;
+    inputs.token_ids = &shifted.input_ids;
+    inputs.mm_embeds = &gathered.mm_embeds;
+    inputs.mm_lifetimes = &gathered.mm_lifetimes;
+    inputs.is_mm_embed = &gathered.is_mm_embed;
+    // The shared merge also stages target axes; MTP consumes only embeddings.
+    // Its actual rotary input remains exec_state_.step.positions (1-D).
+    inputs.mrope_positions = &exec_state_.spec_mm_positions;
+    inputs.draft_prefill = true;
+    draft_mm_buffers = ModelRegistry::EmbedMm(*model_, config_, queue_, inputs);
+  }
   exec_state_.spec_hidden.WaitReady(queue_);
 #ifdef VLLM_CPP_XPU
   auto draft_profile = vt::xpu::BeginProfileSpan(queue_);
@@ -4622,7 +5131,8 @@ void GPUModelRunner::propose_drafts(const std::vector<int32_t>& num_sampled_in,
       input_batch_.last_sampled_tokens, next_prefill, num_sampled, num_rejected,
       /*max_num_reqs=*/num_reqs, /*num_speculative_tokens=*/k,
       /*max_model_len=*/input_batch_.max_model_len,
-      /*block_size=*/static_cast<int>(draft_attn_kv_[0].block_size), queue_);
+      /*block_size=*/static_cast<int>(draft_attn_kv_[0].block_size), queue_,
+      draft_mm_buffers ? &draft_mm_buffers->mm.inputs_embeds : nullptr);
 #ifdef VLLM_CPP_XPU
   vt::xpu::EndProfileSpan(queue_, "runner_mtp_draft", std::move(draft_profile));
 #endif

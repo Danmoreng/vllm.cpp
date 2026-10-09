@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <cstring>
 #include <cstdlib>
 #include <filesystem>
 #include <map>
@@ -1023,4 +1024,107 @@ TEST_CASE("i5d-pre LoadedModel::BuildMtpDraft builds a Qwen3.5 draft, null other
       non_mtp.AttachMtpDraftWeights(
           vllm::LoadQwen3_5MTP(store.Resolver(), store.Exists(), config, Qwen3_5MTPKind::kDense)),
       std::runtime_error);
+}
+
+
+TEST_CASE("paged MTP consumes supplied merged embeddings and preserves lookup defaults") {
+  const auto config = MakeConfig(Qwen3_5MTPKind::kDense);
+  TensorStore store;
+  AddDenseMtp(store, config);
+  const auto weights = vllm::LoadQwen3_5MTP(
+      store.Resolver(), store.Exists(), config, Qwen3_5MTPKind::kDense);
+  const auto target = MakeDenseTarget(config);
+  const Qwen3_5MTPModel model(weights, target, config);
+  auto& backend = vt::GetBackend(vt::DeviceType::kCPU);
+  auto queue = backend.CreateQueue();
+  const int64_t tokens = 4, hidden = config.hidden_size;
+  const std::vector<int32_t> ids{1, 5, 2, 9}, positions{0, 1, 2, 3};
+  auto feedback = MakeOwned({tokens, hidden}, 41);
+  auto merged = MakeOwned({tokens, hidden}, 0);
+  const size_t row_bytes = static_cast<size_t>(hidden) * sizeof(uint16_t);
+  for (size_t row = 0; row < ids.size(); ++row)
+    std::copy_n(target.embed_tokens.bytes.begin() + ids[row] * row_bytes,
+                row_bytes, merged.bytes.begin() + row * row_bytes);
+  const auto initial = merged.bytes;
+  const auto embed_view = merged.View();
+  const auto metadata = MtpMeta(tokens, tokens, 0, 8);
+  DraftKvPool ordinary(config, 1, 8), supplied(config, 1, 8);
+  const auto expected = model.ForwardPaged(ids, positions, feedback.View(), metadata, ordinary.kv, queue);
+  // Out-of-vocabulary placeholders prove the provided rows bypass lookup.
+  const auto actual = model.ForwardPaged({999, 999, 999, 999}, positions,
+      feedback.View(), metadata, supplied.kv, queue, 0, &embed_view);
+  const auto expected_logits = HostLogits(model.ComputeLogits(expected.tensor, queue), backend, queue);
+  const auto actual_logits = HostLogits(model.ComputeLogits(actual.tensor, queue), backend, queue);
+  CHECK(actual_logits == expected_logits);
+  CHECK(merged.bytes == initial);
+  const size_t cache_bytes = 2 * 8 * config.num_key_value_heads * config.head_dim * sizeof(uint16_t);
+  CHECK(std::memcmp(ordinary.kv.data, supplied.kv.data, cache_bytes) == 0);
+  const auto cache_before = std::vector<uint8_t>(static_cast<uint8_t*>(supplied.kv.data),
+                                               static_cast<uint8_t*>(supplied.kv.data) + cache_bytes);
+  auto invalid = embed_view;
+  invalid.shape[0]--;
+  CHECK_THROWS(model.ForwardPaged(ids, positions, feedback.View(), metadata, supplied.kv, queue, 0, &invalid));
+  invalid = embed_view;
+  invalid.dtype = vt::DType::kF16;
+  CHECK_THROWS(model.ForwardPaged(ids, positions, feedback.View(), metadata, supplied.kv, queue, 0, &invalid));
+  invalid = embed_view;
+  invalid.data = nullptr;
+  CHECK_THROWS(model.ForwardPaged(ids, positions, feedback.View(), metadata, supplied.kv, queue, 0, &invalid));
+  CHECK(std::equal(cache_before.begin(), cache_before.end(), static_cast<uint8_t*>(supplied.kv.data)));
+  backend.DestroyQueue(queue);
+}
+
+// The caller merges shifted visual rows before proposal, matching the executed
+// V2 input contract. Only the first forward uses these rows: k>1 must embed
+// its generated tokens normally, rather than reuse a verify-sized image batch.
+TEST_CASE("MTP proposer consumes merged prefill rows only at the first draft step") {
+  const auto config = MakeConfig(Qwen3_5MTPKind::kDense);
+  TensorStore store;
+  AddDenseMtp(store, config);
+  const auto weights = vllm::LoadQwen3_5MTP(
+      store.Resolver(), store.Exists(), config, Qwen3_5MTPKind::kDense);
+  const auto target = MakeDenseTarget(config);
+  const Qwen3_5MTPModel model(weights, target, config);
+  auto& backend = vt::GetBackend(vt::DeviceType::kCPU);
+  auto queue = backend.CreateQueue();
+  auto feedback = MakeOwned({2, config.hidden_size}, 51);
+  auto merged = MakeOwned({2, config.hidden_size}, 0);
+  const size_t row_bytes = config.hidden_size * sizeof(uint16_t);
+  const std::vector<int32_t> shifted_ids{9, 7};
+  for (size_t row = 0; row < shifted_ids.size(); ++row)
+    std::copy_n(target.embed_tokens.bytes.begin() + shifted_ids[row] * row_bytes,
+                row_bytes, merged.bytes.begin() + row * row_bytes);
+  const auto original = merged.bytes;
+  auto embeds = merged.View();
+  const auto metadata = MtpMeta(2, 2, 0, 8);
+  for (int depth : {1, 3}) {
+    CAPTURE(depth);
+    DraftKvPool expected(config, 1, 8), supplied(config, 1, 8);
+    const auto normal = vllm::v1::MtpProposeDrafts(
+        model, metadata, expected.kv, feedback.View(), {5, 9}, {0, 1},
+        {0}, {7}, {0}, {1}, {0}, 1, depth, 8, 8, queue);
+    const auto actual = vllm::v1::MtpProposeDrafts(
+        model, metadata, supplied.kv, feedback.View(), {999, 999}, {0, 1},
+        {0}, {7}, {0}, {1}, {0}, 1, depth, 8, 8, queue, &embeds);
+    CHECK(actual.draft_tokens == normal.draft_tokens);
+    CHECK(actual.num_draft_decode_forwards == depth - 1);
+    CHECK(supplied.buf == expected.buf);
+    CHECK(merged.bytes == original);
+    if (depth == 1) {
+      DraftKvPool direct(config, 1, 8);
+      CHECK(vllm::v1::MtpProposePrefill(
+          model, metadata, direct.kv, feedback.View(), {999, 999}, {0, 1},
+          {0}, {7}, {0}, {1}, {0}, 1, queue, &embeds) == normal.draft_tokens);
+      CHECK(direct.buf == expected.buf);
+    }
+  }
+  DraftKvPool invalid_pool(config, 1, 8);
+  const auto untouched = invalid_pool.buf;
+  auto invalid = embeds;
+  invalid.shape[0] = 1;
+  CHECK_THROWS(vllm::v1::MtpProposeDrafts(
+      model, metadata, invalid_pool.kv, feedback.View(), {5, 9}, {0, 1},
+      {0}, {7}, {0}, {1}, {0}, 1, 3, 8, 8, queue, &invalid));
+  CHECK(invalid_pool.buf == untouched);
+  backend.DestroyQueue(queue);
 }

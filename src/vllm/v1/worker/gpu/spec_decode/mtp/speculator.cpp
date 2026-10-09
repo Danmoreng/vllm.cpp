@@ -38,7 +38,7 @@ PrefillOutcome ProposePrefill(
     const std::vector<int32_t>& next_prefill_tokens,
     const std::vector<int32_t>& num_sampled,
     const std::vector<int32_t>& num_rejected, int max_num_reqs,
-    vt::Queue& queue) {
+    vt::Queue& queue, const vt::Tensor* prefill_inputs_embeds) {
   const int64_t num_reqs = target_attn_meta.num_reqs;
   const int64_t T = static_cast<int64_t>(target_input_ids.size());
   VT_CHECK(num_reqs > 0, "MtpProposePrefill: empty batch");
@@ -66,7 +66,8 @@ PrefillOutcome ProposePrefill(
 
   // ── The one paged draft forward (I5c) + shared lm_head. ──────────────────────
   vllm::Qwen3_5MTPHiddenStates hidden = draft.ForwardPaged(
-      spi.input_ids, positions32, target_hidden, target_attn_meta, draft_kv, queue);
+      spi.input_ids, positions32, target_hidden, target_attn_meta, draft_kv, queue,
+      /*spec_step_idx=*/0, prefill_inputs_embeds);
   PrefillOutcome out;
   // ── Greedy draft pick over each request's last (sampled) row
   // (spec_decode/speculator.py:276-280). ──────────────────────────────────────
@@ -142,11 +143,11 @@ std::vector<int32_t> MtpProposePrefill(
     const std::vector<int32_t>& next_prefill_tokens,
     const std::vector<int32_t>& num_sampled,
     const std::vector<int32_t>& num_rejected, int max_num_reqs,
-    vt::Queue& queue) {
+    vt::Queue& queue, const vt::Tensor* prefill_inputs_embeds) {
   return ProposePrefill(draft, target_attn_meta, draft_kv, target_hidden,
                         target_input_ids, target_positions, idx_mapping,
                         last_sampled, next_prefill_tokens, num_sampled,
-                        num_rejected, max_num_reqs, queue)
+                        num_rejected, max_num_reqs, queue, prefill_inputs_embeds)
       .draft_tokens;
 }
 
@@ -162,7 +163,7 @@ MtpDraftProposal MtpProposeDrafts(
     const std::vector<int32_t>& num_sampled,
     const std::vector<int32_t>& num_rejected, int max_num_reqs,
     int num_speculative_tokens, int max_model_len, int block_size,
-    vt::Queue& queue) {
+    vt::Queue& queue, const vt::Tensor* prefill_inputs_embeds) {
   VT_CHECK(num_speculative_tokens >= 1,
            "MtpProposeDrafts: num_speculative_tokens must be at least 1");
   const int num_reqs = target_attn_meta.num_reqs;
@@ -173,7 +174,7 @@ MtpDraftProposal MtpProposeDrafts(
   PrefillOutcome prefill = ProposePrefill(
       draft, target_attn_meta, draft_kv, target_hidden, target_input_ids,
       target_positions, idx_mapping, last_sampled, next_prefill_tokens,
-      num_sampled, num_rejected, max_num_reqs, queue);
+      num_sampled, num_rejected, max_num_reqs, queue, prefill_inputs_embeds);
 
   // :238-240 — the k=1 EARLY EXIT. Byte-for-byte the pre-depth path: one
   // forward, one argmax, no decode state and no second gather. No decode
