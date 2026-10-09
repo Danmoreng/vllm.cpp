@@ -298,6 +298,38 @@ vllm_cpp_add_test(test_mimov2_w1 vllm/models/test_mimov2_w1.cpp)
 vllm_cpp_add_test(test_kolibri1 vllm/models/test_kolibri1.cpp)
 # kolibri1_weights.h is a MODEL-PRIVATE header under src/, not include/vllm/.
 target_include_directories(test_kolibri1 PRIVATE ${CMAKE_SOURCE_DIR}/src)
+# R7: the tokenizer test asserts our Encode against the HF reference ids in
+# the golden fingerprints (the same file the W3 gate reads).
+target_compile_definitions(test_kolibri1 PRIVATE
+  KOLIBRI1_GOLDENS="${CMAKE_CURRENT_SOURCE_DIR}/vllm/models/kolibri1_goldens.json")
+# MODEL-TEXT-kolibri-1 perf row (Phase 3 NEON): the fp8-block dequant kernel
+# (kolibri1_fp8_dequant.h) is BIT-IDENTICAL to the scalar reference over all
+# 256 e4m3fn values x the scale grid, on chunks, ragged blocks, and pool row
+# partitions.
+vllm_cpp_add_test(test_kolibri1_dequant vllm/models/test_kolibri1_dequant.cpp)
+target_include_directories(test_kolibri1_dequant PRIVATE ${CMAKE_SOURCE_DIR}/src)
+# MODEL-TEXT-kolibri-1 re-land of the dequant cache
+# (ISSUE-LOCAL-01M4BEH8ZH59TF9E0A7YRNTJJ2): byte identity cold/hot, budget
+# invariance in one binary, and entry OWNERSHIP under pool traffic (the v1
+# aliasing shape).
+# Case 5 (default off) runs in a fork/exec'd helper with an empty environment,
+# so the ProcessCache() static budget is read where the env var is PROVABLY
+# unset. The helper is declared FIRST so the parent test target depends on it:
+# a header mutation must relink the helper or the pin silently tests a stale
+# binary (observed: the genex define alone created no rebuild dependency).
+add_executable(test_kolibri1_dequant_cache_default
+               vllm/models/test_kolibri1_dequant_cache_default_helper.cpp)
+target_include_directories(test_kolibri1_dequant_cache_default
+                           PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(test_kolibri1_dequant_cache_default PRIVATE vllm::vllm)
+vllm_cpp_set_warnings(test_kolibri1_dequant_cache_default)
+vllm_cpp_add_test(test_kolibri1_dequant_cache vllm/models/test_kolibri1_dequant_cache.cpp)
+target_include_directories(test_kolibri1_dequant_cache PRIVATE ${CMAKE_SOURCE_DIR}/src)
+add_dependencies(test_kolibri1_dequant_cache test_kolibri1_dequant_cache_default)
+target_compile_definitions(
+  test_kolibri1_dequant_cache
+  PRIVATE
+    KOLIBRI_DEQUANT_CACHE_DEFAULT_HELPER="$<TARGET_FILE:test_kolibri1_dequant_cache_default>")
 # MODEL-TEXT-kolibri-1 W2 gate: the CPU forward against the in-test scalar
 # reference (the kolibri1.py transcription), the ragged batch, the
 # logits_indices gather, and the full-depth 50-layer structural run.
@@ -310,6 +342,53 @@ vllm_cpp_add_test(test_kolibri1_w3 vllm/models/test_kolibri1_w3.cpp)
 target_include_directories(test_kolibri1_w3 PRIVATE ${CMAKE_SOURCE_DIR}/src)
 target_compile_definitions(test_kolibri1_w3 PRIVATE
   KOLIBRI1_GOLDENS="${CMAKE_CURRENT_SOURCE_DIR}/vllm/models/kolibri1_goldens.json")
+vllm_cpp_add_test(test_kolibri1_decode_bench vllm/models/test_kolibri1_decode_bench.cpp)
+target_include_directories(test_kolibri1_decode_bench PRIVATE ${CMAKE_SOURCE_DIR}/src)
+# MODEL-TEXT-kolibri-1 moe_glue lever (ISSUE-LOCAL-01M4D7FYY1WQZV9PNR6GBWS2R5):
+# the expert-output combine (vt::MoeCombine) is BIT-IDENTICAL to the in-test
+# scalar reference over the real expert geometries (2560-wide hidden,
+# 6-of-384 routed slots over the 384-expert domain, the shared-expert path,
+# ragged/tail shapes, ties/overflow/NaN, cross-thread identity) — raw-uint16.
+vllm_cpp_add_test(test_kolibri1_moe_glue vllm/models/test_kolibri1_moe_glue.cpp)
+target_include_directories(test_kolibri1_moe_glue PRIVATE ${CMAKE_SOURCE_DIR}/src)
+# MODEL-TEXT-kolibri-1-tenstorrent wave-A gate (spec
+# .agents/specs/kolibri-tt.md): the TT staging plan over the landed
+# kolibri1 loader — device-FREE policy, so the test compiles like any
+# model test but is registered only in a Tenstorrent build, beside
+# test_tenstorrent_backend.
+if(VLLM_CPP_TENSTORRENT)
+  vllm_cpp_add_test(test_kolibri1_tt vllm/models/test_kolibri1_tt.cpp)
+  target_include_directories(test_kolibri1_tt PRIVATE ${CMAKE_SOURCE_DIR}/src)
+  # B2b-i first slice (spec .agents/specs/kolibri-tt.md ### B2 scope — B2b
+  # addendum): the resident staging plan's host-side gates (run under ctest
+  # with NO card) plus the device bring-up leg (card + VT_KOLIBRI1_TT_B2I_
+  # MODEL; operator-run, evidence in docs/bench-evidence/). The goldens
+  # path feeds the device op's token ids, same as test_kolibri1_w3.
+  vllm_cpp_add_test(test_kolibri1_tt_b2i vllm/models/test_kolibri1_tt_b2i.cpp)
+  target_include_directories(test_kolibri1_tt_b2i PRIVATE ${CMAKE_SOURCE_DIR}/src)
+  target_compile_definitions(test_kolibri1_tt_b2i PRIVATE
+    KOLIBRI1_GOLDENS="${CMAKE_CURRENT_SOURCE_DIR}/vllm/models/kolibri1_goldens.json")
+  # B2b-i dense-resident FORWARD gate (spec .agents/specs/kolibri-tt.md
+  # ### B2 scope — B2b addendum, slice i; issue
+  # ISSUE-LOCAL-01M4E22DM790W0E69M07D5XA9D): the refusal/routing/context
+  # host cases (NO card) plus the device leg (card +
+  # VT_KOLIBRI1_TT_B2BI_MODEL; operator-run, evidence in docs/bench-evidence/).
+  # One greedy decode of a golden prompt on the card is the slice's
+  # completion condition.
+  vllm_cpp_add_test(test_kolibri1_tt_b2bi vllm/models/test_kolibri1_tt_b2bi.cpp)
+  target_include_directories(test_kolibri1_tt_b2bi PRIVATE ${CMAKE_SOURCE_DIR}/src)
+  target_compile_definitions(test_kolibri1_tt_b2bi PRIVATE
+    KOLIBRI1_GOLDENS="${CMAKE_CURRENT_SOURCE_DIR}/vllm/models/kolibri1_goldens.json")
+# test_kolibri1_tt_b2ii is the B2b-ii streaming-MoE HOST gate (issue
+# ISSUE-LOCAL-01M4ER0E9HHM95YZYJB7T5FECN): the fetch executor's host half,
+# the slot pool plan, the slot shadow / readback pivot, the stream-bound
+# refusals, and the reset lane — NO card. The device leg rides the b2bi
+# device TU's gate under the GPU lease.
+  vllm_cpp_add_test(test_kolibri1_tt_b2ii vllm/models/test_kolibri1_tt_b2ii.cpp)
+  target_include_directories(test_kolibri1_tt_b2ii PRIVATE ${CMAKE_SOURCE_DIR}/src)
+  target_compile_definitions(test_kolibri1_tt_b2ii PRIVATE
+    KOLIBRI1_GOLDENS="${CMAKE_CURRENT_SOURCE_DIR}/vllm/models/kolibri1_goldens.json")
+endif()
 # mimo_v2_weights.h is a MODEL-PRIVATE header under src/, not include/vllm/.
 vllm_cpp_add_test(test_mimov2_w2 vllm/models/test_mimov2_w2.cpp)
 target_include_directories(test_mimov2_w2 PRIVATE ${CMAKE_SOURCE_DIR}/src)
@@ -2771,6 +2850,14 @@ vllm_cpp_add_test(test_reasoning_deepseek_v3
   vllm/entrypoints/openai/reasoning_parsers/test_deepseek_v3.cpp)
 vllm_cpp_add_test(test_reasoning_qwen3
   vllm/entrypoints/openai/reasoning_parsers/test_qwen3.cpp)
+vllm_cpp_add_test(test_reasoning_kolibri1
+  vllm/entrypoints/openai/reasoning_parsers/test_kolibri1.cpp)
+vllm_cpp_add_test(test_tool_parser_kolibri1
+  vllm/entrypoints/openai/tool_parsers/test_kolibri1.cpp)
+vllm_cpp_add_test(test_kolibri1_chat_template
+  vllm/entrypoints/test_kolibri1_chat_template.cpp)
+target_compile_definitions(test_kolibri1_chat_template PRIVATE
+  KOLIBRI1_TEMPLATE_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/fixtures")
 vllm_cpp_add_test(test_tool_parser_xlam
   vllm/entrypoints/openai/tool_parsers/test_xlam_tool_parser.cpp)
 vllm_cpp_add_test(test_tool_parser_phi4mini
